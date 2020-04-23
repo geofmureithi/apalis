@@ -58,4 +58,4 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 
 ## Acknowledgments
 
-* Inspiration: This project is heavilly inspired by [Curlyq] (https://github.com/mcmathja/curlyq) which is written in GoLang
+* Inspiration: This project is heavilly inspired by [Curlyq](https://github.com/mcmathja/curlyq) which is written in GoLang
