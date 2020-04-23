@@ -1,3 +1,9 @@
+mod actor;
+mod consumer;
+mod error;
+mod message;
+mod producer;
+
 #[cfg(test)]
 mod tests {
     #[test]
