@@ -21,7 +21,7 @@ docker run --name some-redis -d redis
 ## Usage
 
 ````rust
-let actor = QueueActor::new("redis://127.0.0.1/", Queue::new("fuseapp")).await;
+let actor = QueueActor::new("redis://127.0.0.1/", Queue::new("testqueue")).await;
 let addr = Supervisor::start(move |_| actor);
 Supervisor::start(move |_| Consumer::new(addr));
 let producer = Producer::new(p_addr);
