@@ -1,5 +1,5 @@
 use actix::prelude::*;
-use log::debug;
+use log::info;
 
 use serde::{Deserialize, Serialize};
 
@@ -24,20 +24,21 @@ impl Handler<Jobs<DogoJobo>> for DogoActor {
     type Result = ();
 
     fn handle(&mut self, msg: Jobs<DogoJobo>, _: &mut Self::Context) -> Self::Result {
-        debug!("Got sweet Dogo memes to post: {:?}", msg)
+        info!("Got sweet Dogo memes to post: {:?}", msg)
     }
 }
 
 fn main() {
     let system = actix::System::new("test");
-    std::env::set_var("RUST_LOG", "actix_redis_jobs=info");
+    std::env::set_var("RUST_LOG", "info");
     env_logger::init();
     Arbiter::spawn(async {
         let actor = QueueActor::new("redis://127.0.0.1/", Queue::new("dogoapp")).await;
         let addr = Supervisor::start(move |_| actor);
         let p_addr = addr.clone();
         let dogo_processor = DogoActor.start();
-        Supervisor::start(move |_| Consumer::new(addr, dogo_processor.recipient()));
+        let consumer_id = String::from("doggo_handler_1");
+        Supervisor::start(move |_| Consumer::new(addr, dogo_processor.recipient(), consumer_id));
         let producer = Producer::new(p_addr);
         let task = DogoJobo {
             dogo: String::from("Test Dogo Meme"),
@@ -45,5 +46,5 @@ fn main() {
         };
         producer.push_job(task).await;
     });
-    system.run();
+    let _s = system.run();
 }

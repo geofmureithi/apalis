@@ -427,7 +427,7 @@ impl Handler<RetryJob> for QueueActor {
 
 // To use actor with supervisor actor has to implement `Supervised` trait
 impl actix::Supervised for QueueActor {
-    fn restarting(&mut self, ctx: &mut Context<QueueActor>) {
+    fn restarting(&mut self, _: &mut Context<QueueActor>) {
         debug!("restarting");
     }
 }

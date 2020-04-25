@@ -1,7 +1,7 @@
 mod actor;
 mod consumer;
 mod error;
-mod message;
+mod message; // Add message guard examples
 mod producer;
 // Am I doing this right?
 pub use actor::QueueActor;

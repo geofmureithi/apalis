@@ -1,4 +1,4 @@
-use log::{debug, info};
+use log::debug;
 use redis::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;

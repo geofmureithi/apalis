@@ -17,6 +17,6 @@ impl Producer {
     {
         let queue = self.addr.clone();
         let message = MessageEncodable::encode_message(&job).unwrap();
-        queue.send(PushJob::create(message)).await.unwrap();
+        let _res = queue.send(PushJob::create(message)).await.unwrap();
     }
 }
