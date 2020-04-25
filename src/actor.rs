@@ -1,7 +1,7 @@
 use crate::error::TaskError as Error;
 use actix::prelude::*;
 use chrono::prelude::*;
-use log::debug;
+use log::{debug, info};
 use redis::{aio::MultiplexedConnection, Client, Value};
 
 const ACTIVE_JOBS_LIST: &str = "{queue}:active";
@@ -63,7 +63,7 @@ impl Actor for QueueActor {
     type Context = Context<Self>;
 
     fn started(&mut self, _: &mut Self::Context) {
-        println!("QueueActor started");
+        info!("QueueActor started");
     }
 }
 

@@ -22,7 +22,7 @@ struct Schedule;
 #[rtype(result = "()")]
 struct Fetch;
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct Jobs<T>(pub Vec<T>);
 
@@ -93,7 +93,7 @@ impl<T: MessageDecodable + 'static> StreamHandler<Fetch> for Consumer<T> {
                 .await;
             match res {
                 Ok(Ok(jobs)) => {
-                    println!("Fetched jobs: {:?}", jobs);
+                    debug!("Fetched jobs: {:?}", jobs);
                     let tasks: Vec<Option<Result<_, &str>>> = jobs
                         .into_iter()
                         .map(|j| {
@@ -126,8 +126,9 @@ impl<T: MessageDecodable + 'static> StreamHandler<Fetch> for Consumer<T> {
                             msg
                         })
                         .collect();
-
-                    processor.send(Jobs(tasks)).await.unwrap();
+                    if tasks.len() > 0 {
+                        processor.send(Jobs(tasks)).await.unwrap();
+                    }
                 }
                 Ok(Err(e)) => {
                     debug!("Redis Fetch jobs failed: {:?}", e);
@@ -174,12 +175,13 @@ impl<T: MessageDecodable + 'static> Actor for Consumer<T> {
         let start = Instant::now() + Duration::from_millis(50);
         let heart_beat = interval_at(start, Duration::from_secs(30)).map(|_| HeartBeat);
         Self::add_stream(heart_beat, ctx);
-
+        info!("Added consumer heartbeat");
         let schedule = interval_at(start, Duration::from_secs(10)).map(|_| Schedule);
         Self::add_stream(schedule, ctx);
-
+        info!("Added consumer scheduler");
         let fetch = interval_at(start, Duration::from_secs(10)).map(|_| Fetch);
         Self::add_stream(fetch, ctx);
+        info!("Added consumer fetcher");
     }
 }
 
