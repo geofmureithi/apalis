@@ -1,4 +1,4 @@
-# Actix-jobs
+# Actix-redis-jobs
 Simple and reliable background processing for Rust using Actix and Redis
 
 ## Getting Started
