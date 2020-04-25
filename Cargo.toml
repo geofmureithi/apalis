@@ -1,6 +1,6 @@
 [package]
 name = "actix-redis-jobs"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple and reliable background processing for Rust using Actix and Redis"
 keywords = ["redis", "jobs", "actix", "async", "background"]
