@@ -21,7 +21,7 @@ docker run --name some-redis -d redis
 ## Usage
 
 ````rust
-let actor = QueueActor::new("redis://127.0.0.1/", Queue::new("fuseapp")).await;
+let actor = QueueActor::new("redis://127.0.0.1/", Queue::new("testqueue")).await;
 let addr = Supervisor::start(move |_| actor);
 Supervisor::start(move |_| Consumer::new(addr));
 let producer = Producer::new(p_addr);
@@ -58,4 +58,4 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 
 ## Acknowledgments
 
-* Inspiration: This project is heavilly inspired by [Curlyq] [https://github.com/mcmathja/curlyq] which is written in GoLang
+* Inspiration: This project is heavilly inspired by [Curlyq](https://github.com/mcmathja/curlyq) which is written in GoLang
