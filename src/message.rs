@@ -1,4 +1,4 @@
-use log::debug;
+use log::warn;
 use redis::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -9,7 +9,6 @@ pub enum MessageState {
     Unacked,
     Acked,
     Rejected,
-    Pushed,
 }
 
 /// Message objects that can be reconstructed from the data stored in Redis.
@@ -59,21 +58,15 @@ impl<T: Serialize + Send + Sync> MessageEncodable for T {
 
 pub struct MessageGuard<T: std::marker::Sync + Send> {
     message: T,
-    payload: Vec<u8>,
     state: MessageState,
 }
 
 impl<T: std::marker::Sync + Send + 'static> MessageGuard<T> {
-    pub fn new(message: T, payload: Vec<u8>) -> MessageGuard<T> {
+    pub fn new(message: T) -> MessageGuard<T> {
         MessageGuard {
             message,
-            payload,
             state: MessageState::Unacked,
         }
-    }
-
-    pub fn payload(&self) -> &[u8] {
-        &self.payload
     }
 
     pub fn message(&self) -> &T {
@@ -103,7 +96,7 @@ impl<T: std::marker::Sync + Send> Deref for MessageGuard<T> {
 impl<T: std::marker::Sync + Send> Drop for MessageGuard<T> {
     fn drop(&mut self) {
         if self.state == MessageState::Unacked {
-            debug!("Dropping Unacked Message");
+            warn!("Dropping Unacked Message");
             //let _ = tokio::run(self.reject());
         }
     }

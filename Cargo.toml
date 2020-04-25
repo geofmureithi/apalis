@@ -16,5 +16,4 @@ chrono = { version = "0.4", features = ["serde"] }
 log = "0.4"
 failure = "0.1"
 rmp-serde = "0.14"
-
 env_logger = "0.7"

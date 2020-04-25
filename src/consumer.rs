@@ -59,7 +59,7 @@ impl<T: MessageDecodable + 'static> StreamHandler<Schedule> for Consumer<T> {
     fn handle(&mut self, _: Schedule, _: &mut Context<Consumer<T>>) {
         let queue = self.addr.clone();
         actix::spawn(async move {
-            let res = queue.send(EnqueueJobs(10)).await;
+            let res = queue.send(EnqueueJobs(10)).await; //Todo, make this users option
             match res {
                 Ok(Ok(count)) => {
                     info!("Jobs queued: {:?}", count);

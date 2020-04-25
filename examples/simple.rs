@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 extern crate actix_redis_jobs;
 
-use actix_redis_jobs::{Consumer, Jobs, Producer, Queue, QueueActor};
+use actix_redis_jobs::{Consumer, Jobs, Producer, Queue, QueueActor, MessageGuard};
 
 #[derive(Serialize, Deserialize, Debug, Message)]
 #[rtype(result = "Result<(), ()>")]
@@ -24,7 +24,13 @@ impl Handler<Jobs<DogoJobo>> for DogoActor {
     type Result = ();
 
     fn handle(&mut self, msg: Jobs<DogoJobo>, _: &mut Self::Context) -> Self::Result {
-        info!("Got sweet Dogo memes to post: {:?}", msg)
+        info!("Got sweet Dogo memes to post: {:?}", msg);
+        let _guarded_messages: Vec<MessageGuard<DogoJobo>> = msg.0.into_iter().map(|m| {
+            MessageGuard::new(m)
+        }).collect();
+
+        // It should complain of dropping an unacked message
+        // msg.ack() should do the trick
     }
 }
 

@@ -10,6 +10,7 @@ pub use consumer::Consumer;
 pub use consumer::Jobs;
 pub use error::TaskError;
 pub use producer::Producer;
+pub use message::MessageGuard;
 #[cfg(test)]
 mod tests {
     #[test]
