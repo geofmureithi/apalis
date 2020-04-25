@@ -1,5 +1,5 @@
 # Actix-jobs
-Efficient and reliable background processing for Rust using Actix and Redis
+Simple and reliable background processing for Rust using Actix and Redis
 
 ## Getting Started
 
