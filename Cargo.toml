@@ -1,5 +1,5 @@
 [package]
-name = "actix-jobs"
+name = "actix-redis-jobs"
 version = "0.1.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2018"

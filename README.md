@@ -7,7 +7,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-actix-jobs = { version = "0.1" }
+actix-redis-jobs = { version = "0.1" }
 ```
 
 ### Prerequisites

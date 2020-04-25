@@ -6,8 +6,6 @@ use futures::stream::StreamExt;
 use log::{debug, info};
 use redis::{from_redis_value, Value};
 
-pub type ConsumerItem = MessageGuard<dyn MessageEncodable>;
-
 #[derive(Message)]
 #[rtype(result = "()")]
 struct HeartBeat;
@@ -26,16 +24,19 @@ struct Fetch;
 
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct Jobs(pub Vec<ConsumerItem>);
+pub struct Jobs<T>(pub Vec<T>);
 
-pub struct Consumer {
+pub struct Consumer<T>
+where
+    T: MessageDecodable,
+{
     addr: Addr<QueueActor>,
-    processor: Recipient<Jobs>,
+    processor: Recipient<Jobs<T>>,
     id: String,
 }
 
-impl Consumer {
-    pub fn new(addr: Addr<QueueActor>, processor: Recipient<Jobs>) -> Self {
+impl<T: MessageDecodable + 'static> Consumer<T> {
+    pub fn new(addr: Addr<QueueActor>, processor: Recipient<Jobs<T>>) -> Self {
         Consumer {
             addr,
             processor,
@@ -44,8 +45,8 @@ impl Consumer {
     }
 }
 
-impl StreamHandler<HeartBeat> for Consumer {
-    fn handle(&mut self, _: HeartBeat, ctx: &mut Context<Consumer>) {
+impl<T: MessageDecodable + 'static> StreamHandler<HeartBeat> for Consumer<T> {
+    fn handle(&mut self, _: HeartBeat, ctx: &mut Context<Consumer<T>>) {
         info!("Received heartbeat for consumer: {:?}", self.id);
     }
 
@@ -54,8 +55,8 @@ impl StreamHandler<HeartBeat> for Consumer {
     }
 }
 
-impl StreamHandler<Schedule> for Consumer {
-    fn handle(&mut self, _: Schedule, ctx: &mut Context<Consumer>) {
+impl<T: MessageDecodable + 'static> StreamHandler<Schedule> for Consumer<T> {
+    fn handle(&mut self, _: Schedule, ctx: &mut Context<Consumer<T>>) {
         let queue = self.addr.clone();
         actix::spawn(async move {
             let res = queue.send(EnqueueJobs(10)).await;
@@ -78,8 +79,8 @@ impl StreamHandler<Schedule> for Consumer {
     }
 }
 
-impl StreamHandler<Fetch> for Consumer {
-    fn handle(&mut self, _: Fetch, ctx: &mut Context<Consumer>) {
+impl<T: MessageDecodable + 'static> StreamHandler<Fetch> for Consumer<T> {
+    fn handle(&mut self, _: Fetch, ctx: &mut Context<Consumer<T>>) {
         let queue = self.addr.clone();
         let id = self.id.clone();
         let processor = self.processor.clone();
@@ -93,7 +94,7 @@ impl StreamHandler<Fetch> for Consumer {
             match res {
                 Ok(Ok(jobs)) => {
                     println!("Fetched jobs: {:?}", jobs);
-                    let tasks: Vec<Option<Result<ConsumerItem, &str>>> = jobs
+                    let tasks: Vec<Option<Result<_, &str>>> = jobs
                         .into_iter()
                         .map(|j| {
                             let j = match j {
@@ -102,19 +103,22 @@ impl StreamHandler<Fetch> for Consumer {
                                     return Some(Err("unknown result type for next message"));
                                 }
                             };
-                            match MessageDecodable::decode_message(&j) {
+                            match T::decode_message(&j) {
                                 Err(e) => {
                                     println!("{:?}", e);
                                     Some(Err(e))
                                 }
-                                Ok(message) => Some(Ok(MessageGuard::new(
-                                    message,
-                                    from_redis_value(&j).unwrap(),
-                                ))),
+                                Ok(message) => {
+                                    // let message = MessageGuard::new(
+                                    //     message,
+                                    //     from_redis_value(&j).unwrap(),
+                                    // );
+                                    Some(Ok(message))
+                                }
                             }
                         })
                         .collect();
-                    let tasks: Vec<ConsumerItem> = tasks
+                    let tasks: Vec<T> = tasks
                         .into_iter()
                         .map(|t| {
                             let msg = t.unwrap();
@@ -140,7 +144,7 @@ impl StreamHandler<Fetch> for Consumer {
     }
 }
 
-impl Handler<Stop> for Consumer {
+impl<T: MessageDecodable + 'static> Handler<Stop> for Consumer<T> {
     type Result = ();
 
     fn handle(&mut self, _: Stop, ctx: &mut Self::Context) -> Self::Result {
@@ -148,7 +152,7 @@ impl Handler<Stop> for Consumer {
     }
 }
 
-impl Actor for Consumer {
+impl<T: MessageDecodable + 'static> Actor for Consumer<T> {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Context<Self>) {
@@ -180,8 +184,8 @@ impl Actor for Consumer {
 }
 
 // To use actor with supervisor actor has to implement `Supervised` trait
-impl actix::Supervised for Consumer {
-    fn restarting(&mut self, ctx: &mut Context<Consumer>) {
+impl<T: MessageDecodable + 'static> actix::Supervised for Consumer<T> {
+    fn restarting(&mut self, ctx: &mut Context<Consumer<T>>) {
         debug!("Restarting Consumer");
     }
 }

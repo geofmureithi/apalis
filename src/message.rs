@@ -51,7 +51,7 @@ impl<T: Send + DeserializeOwned + Sync> MessageDecodable for T {
     }
 }
 
-impl<T: Serialize> MessageEncodable for T {
+impl<T: Serialize + Send + Sync> MessageEncodable for T {
     fn encode_message(&self) -> Result<Vec<u8>, &'static str> {
         rmp_serde::encode::to_vec(self).or(Err("failed to encode value"))
     }
