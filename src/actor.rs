@@ -24,7 +24,7 @@ pub struct Queue {
 }
 
 impl Queue {
-    pub fn new(name: &'static str) -> Self {
+    pub fn new(name: &str) -> Self {
         Queue {
             name: name.to_string(),
             active_jobs_list: ACTIVE_JOBS_LIST.replace("{queue}", &name),
@@ -50,7 +50,7 @@ pub struct QueueActor {
 
 impl QueueActor {
     /// Create new Redis queue actor instance.
-    pub async fn new(redis_url: &'static str, queue: Queue) -> Self {
+    pub async fn new(redis_url: &str, queue: Queue) -> Self {
         let client = Client::open(redis_url).unwrap(); // ?
         let (conn, call) = client.get_multiplexed_async_connection().await.unwrap();
         actix::spawn(call);

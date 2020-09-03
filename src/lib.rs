@@ -90,6 +90,31 @@ pub use producer::Producer;
 pub use message::MessageGuard;
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use actix::{Arbiter, System, Actor};
+    use futures::FutureExt;
+
+    async fn actix_redis_actor(url: &str) -> QueueActor {
+        QueueActor::new(url, Queue::new("testapp")).await
+    }
+
+    #[test]
+    fn lua_actor_basic() {
+        let system = System::new("test");
+
+        Arbiter::spawn(async {
+            let queue_addr = actix_redis_actor(r#"redis://127.0.0.1/"#).await.start();
+            let l = queue_addr.send(FetchJobs{
+                count: 1,
+                consumer_id: String::from("testapp1")
+            });
+            l.map(|res| {
+                assert_eq!(res.unwrap().unwrap(), vec!());
+                System::current().stop();
+            }).await;
+        });
+        system.run();
+    }
     #[test]
     fn it_works() {
         assert_eq!(2 + 2, 4);
