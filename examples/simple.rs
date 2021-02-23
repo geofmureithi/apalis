@@ -113,7 +113,7 @@ async fn main() {
     // let producer = Producer::start(&storage, "emails");
 
     // let task1 = Email::Sendgrid(Sendgrid {
-    //     api_key: "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"
+    //     api_key: "uu"
     //         .to_string(),
     //     subject: String::new(),
     //     to: String::new(),
