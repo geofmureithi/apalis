@@ -14,9 +14,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-actix-rt = "1.0.0"
-actix = "0.9"
-redis = "0.15"
+actix-rt = "2.0.0"
+actix = "0.10"
+redis = { version = "0.20.0" , features = ["async-std-comp"] }
 futures = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -24,3 +24,8 @@ log = "0.4"
 failure = "0.1"
 rmp-serde = "0.14"
 env_logger = "0.7"
+fnv = "1.0.3"
+backoff = { version = "0.3", features = ["async-std"] }
+uuid = { version = "0.8", features = ["serde", "v4"] }
+sendgrid = { version = "0.16", features = ["async"] }
+actix-server = "1"

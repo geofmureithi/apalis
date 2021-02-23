@@ -3,7 +3,7 @@
 
 //! ## Getting Started
 
-//! To get started, just add to Cargo.toml 
+//! To get started, just add to Cargo.toml
 
 //! ```toml
 //! [dependencies]
@@ -24,7 +24,7 @@
 //! use actix::prelude::*;
 //! use log::info;
 //! use serde::{Deserialize, Serialize};
-//! use actix_redis_jobs::{Consumer, Jobs, Producer, Queue, QueueActor, MessageGuard};
+//! use actix_redis_jobs::{Consumer, Job, Producer, Queue, QueueActor, MessageGuard};
 
 //! #[derive(Serialize, Deserialize, Debug, Message)]
 //! #[rtype(result = "Result<(), ()>")]
@@ -39,10 +39,10 @@
 //!     type Context = Context<Self>;
 //! }
 
-//! impl Handler<Jobs<DogoJobo>> for DogoActor {
+//! impl Handler<Job<DogoJobo>> for DogoActor {
 //!     type Result = ();
 
-//!     fn handle(&mut self, msg: Jobs<DogoJobo>, _: &mut Self::Context) -> Self::Result {
+//!     fn handle(&mut self, msg: Job<DogoJobo>, _: &mut Self::Context) -> Self::Result {
 //!         info!("Got sweet Dogo memes to post: {:?}", msg);
 //!         let _guarded_messages: Vec<MessageGuard<DogoJobo>> = msg.0.into_iter().map(|m| {
 //!             MessageGuard::new(m)
@@ -75,48 +75,52 @@
 //! }
 
 //! ````
-mod actor;
 mod consumer;
 mod error;
-mod message; // Add message guard examples
+mod message;
+mod worker;
+mod storage;
 mod producer;
-// Am I doing this right?
-pub use actor::QueueActor;
-pub use actor::*;
+mod queue;
+
+pub use producer::{Producer, PushJob, JobStatus, ScheduleJob};
 pub use consumer::Consumer;
-pub use consumer::Jobs;
+pub use consumer::Job;
 pub use error::TaskError;
-pub use producer::Producer;
-pub use message::MessageGuard;
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use actix::{Arbiter, System, Actor};
-    use futures::FutureExt;
+pub use consumer::JobHandler;
+pub use consumer::JobResult;
+pub use consumer::JobContext;
+pub use worker::Worker;
+pub use storage::redis::RedisStorage;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use actix::{Actor, Arbiter, System};
+//     use futures::FutureExt;
 
-    async fn actix_redis_actor(url: &str) -> QueueActor {
-        QueueActor::new(url, Queue::new("testapp")).await
-    }
+//     async fn actix_redis_actor(url: &str) -> QueueActor {
+//         QueueActor::new(url, Queue::new("testapp"))
+//     }
 
-    #[test]
-    fn lua_actor_basic() {
-        let system = System::new("test");
+//     #[test]
+//     fn lua_actor_basic() {
+//         let system = System::new("test");
 
-        Arbiter::spawn(async {
-            let queue_addr = actix_redis_actor(r#"redis://127.0.0.1/"#).await.start();
-            let l = queue_addr.send(FetchJobs{
-                count: 1,
-                consumer_id: String::from("testapp1")
-            });
-            l.map(|res| {
-                assert_eq!(res.unwrap().unwrap(), vec!());
-                System::current().stop();
-            }).await;
-        });
-        system.run();
-    }
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+//         Arbiter::spawn(async {
+//             let queue_addr = actix_redis_actor(r#"redis://127.0.0.1/"#).await.start();
+//             let l = queue_addr.send(FetchJob {
+//                 consumer_id: String::from("testapp1"),
+//             });
+//             l.map(|res| {
+//                 assert_eq!(res.unwrap().unwrap(), vec!());
+//                 System::current().stop();
+//             })
+//             .await;
+//         });
+//         system.run();
+//     }
+//     #[test]
+//     fn it_works() {
+//         assert_eq!(2 + 2, 4);
+//     }
+// }
