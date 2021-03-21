@@ -85,12 +85,17 @@ impl<M: 'static + JobHandler + Serialize> ScheduleJob<M> {
         }
     }
 
+    pub fn in_seconds(mut self, sec: i64) -> Self {
+        self.time = self.time + chrono::Duration::seconds(sec);
+        self
+    }
+
     pub fn in_minutes(mut self, min: i64) -> Self {
         self.time = self.time + chrono::Duration::minutes(min);
         self
     }
-    pub fn in_hours(mut self, min: i64) -> Self {
-        self.time = self.time + chrono::Duration::hours(min);
+    pub fn in_hours(mut self, hrs: i64) -> Self {
+        self.time = self.time + chrono::Duration::hours(hrs);
         self
     }
 }

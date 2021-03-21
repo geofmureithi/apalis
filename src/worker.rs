@@ -8,11 +8,11 @@ pub enum WorkerManagement {
     ShutDown,
 }
 
-pub struct Worker {
+pub struct WorkManager {
     consumers: Vec<Recipient<WorkerManagement>>,
 }
 
-impl Worker {
+impl WorkManager {
     pub fn consumer<
         C: 'static
             + Consumer
@@ -34,16 +34,16 @@ impl Worker {
         self
     }
     pub fn new() -> Self {
-        Worker {
+        WorkManager {
             consumers: Vec::new(),
         }
     }
     /// Start new server with server builder
     pub fn create<F>(mut factory: F) -> Self
     where
-        F: FnMut(Worker) -> Worker + Send + 'static,
+        F: FnMut(WorkManager) -> WorkManager + Send + 'static,
     {
-        factory(Worker::new())
+        factory(WorkManager::new())
     }
 
     pub async fn run(self) {

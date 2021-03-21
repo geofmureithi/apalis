@@ -90,7 +90,7 @@ pub use error::TaskError;
 pub use consumer::JobHandler;
 pub use consumer::JobResult;
 pub use consumer::JobContext;
-pub use worker::Worker;
+pub use worker::WorkManager;
 pub use storage::redis::RedisStorage;
 pub use consumer::RedisConsumer;
 // #[cfg(test)]

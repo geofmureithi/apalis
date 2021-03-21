@@ -232,7 +232,7 @@ impl<M: 'static + std::marker::Unpin + JobHandler + serde::de::DeserializeOwned 
     StreamHandler<HeartBeat> for RedisConsumer<M>
 {
     fn handle(&mut self, _: HeartBeat, _: &mut Context<RedisConsumer<M>>) {
-        info!("Received heartbeat for consumer: {} in {:?}", self.id, std::thread::current().id());
+        debug!("Received heartbeat for consumer: {} in {:?}", self.id, std::thread::current().id());
     }
 
     fn finished(&mut self, _: &mut Self::Context) {
