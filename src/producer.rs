@@ -100,13 +100,14 @@ impl<M: 'static + JobHandler + Serialize> Handler<ScheduleJob<M>> for Producer {
     type Result = ResponseFuture<Result<JobStatus, Error>>;
 
     fn handle(&mut self, msg: ScheduleJob<M>, _: &mut Self::Context) -> Self::Result {
-        let mut con = self.conn.conn.clone();
+        let conn = self.conn.clone();
         let schedule_job = redis::Script::new(include_str!("lua/schedule_job.lua"));
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
         let job_data_hash = self.queue.job_data_hash.to_string();
         let time = &msg.time;
         let timestamp = time.timestamp();
         let fut = async move {
+            let mut conn = conn.get_connection().await;
             let mut job = Job::new(msg.message);
             let id = &job.id;
             let id = id.clone();
@@ -117,7 +118,7 @@ impl<M: 'static + JobHandler + Serialize> Handler<ScheduleJob<M>> for Producer {
                 .arg(id.to_string())
                 .arg(message)
                 .arg(timestamp)
-                .invoke_async(&mut con)
+                .invoke_async(&mut conn)
                 .await
                 .map(|res: i8| {
                     if res > 0 {
@@ -153,19 +154,20 @@ impl Handler<PushJob> for Producer {
     type Result = ResponseFuture<Result<JobStatus, Error>>;
 
     fn handle(&mut self, msg: PushJob, _: &mut Self::Context) -> Self::Result {
-        let mut con = self.conn.conn.clone();
+        let conn = self.conn.clone();
         let push_job = redis::Script::new(include_str!("lua/push_job.lua"));
         let job_data_hash = self.queue.job_data_hash.to_string();
         let active_jobs_list = self.queue.active_jobs_list.to_string();
         let signal_list = self.queue.signal_list.to_string();
         let fut = async move {
+            let mut conn = conn.get_connection().await;
             push_job
                 .key(job_data_hash)
                 .key(active_jobs_list)
                 .key(signal_list)
                 .arg(&msg.id.to_string())
                 .arg(msg.task)
-                .invoke_async(&mut con)
+                .invoke_async(&mut conn)
                 .await
                 .map(|res: i8| {
                     if res > 0 {

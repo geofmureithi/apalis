@@ -7,7 +7,7 @@ extern crate actix_redis_jobs;
 use std::collections::HashMap;
 
 use actix_redis_jobs::{
-    Consumer, JobContext, JobHandler, JobResult, Producer, RedisStorage, ScheduleJob, Worker,
+    JobContext, JobHandler, JobResult, Producer, RedisConsumer, RedisStorage, Worker,
 };
 
 struct EmailActor;
@@ -22,9 +22,10 @@ impl JobHandler for Email {
         let addr = addr.clone();
         let fut = async move {
             match self {
-                Email::Mailchimp(_m) => JobResult::Retry(actix_redis_jobs::TaskError::External(
-                    "No Mailchimp handler".to_string(),
-                )),
+                Email::Mailchimp(_m) => JobResult::Result(Ok(())),
+                // JobResult::Retry(actix_redis_jobs::TaskError::External(
+                //     "No Mailchimp handler".to_string(),
+                // )),
                 Email::Sendgrid(sendgrid) => {
                     addr.send(sendgrid.clone()).await.unwrap();
                     JobResult::Result(Ok(()))
@@ -58,9 +59,9 @@ impl Handler<Sendgrid> for EmailActor {
         cool_header.insert(String::from("x-cool"), String::from("indeed"));
         cool_header.insert(String::from("x-cooler"), String::from("cold"));
 
-        let p = Personalization::new(Email::new("test@fuse.co.ke")).add_headers(cool_header);
+        let p = Personalization::new(Email::new("mureithinjuguna@gmail.com")).add_headers(cool_header);
 
-        let m = Message::new(Email::new("mureithinjuguna@gmail.com"))
+        let m = Message::new(Email::new("test@fuse.co.ke"))
             .set_subject("Subject")
             .add_content(
                 Content::new()
@@ -72,8 +73,8 @@ impl Handler<Sendgrid> for EmailActor {
         let api_key = job.api_key;
         let sender = Sender::new(api_key);
         let fut = async move {
-            let resp = sender.send(&m).await.unwrap();
-            println!("status: {}", resp.status());
+            let resp = sender.send(&m).await;
+            println!("status: {:?}", resp);
         }
         .into_actor(self);
         ctx.spawn(fut);
@@ -107,33 +108,44 @@ enum Email {
 
 #[actix_rt::main]
 async fn main() {
-    // std::env::set_var("RUST_LOG", "info");
-    // env_logger::init();
-    // let storage = RedisStorage::new("redis://127.0.0.1/").await.unwrap();
-    // let producer = Producer::start(&storage, "emails");
+    std::env::set_var("RUST_LOG", "info");
+    env_logger::init();
+    let storage = RedisStorage::new("redis://127.0.0.1/");
+    let producer = Producer::start(&storage, "emails");
 
-    // let task1 = Email::Sendgrid(Sendgrid {
-    //     api_key: "uu"
-    //         .to_string(),
-    //     subject: String::new(),
-    //     to: String::new(),
-    //     message: String::new(),
-    // });
+    let task1 = Email::Mailchimp(Mailchimp {
+        x_api_key: "uu".to_string(),
+        subject: String::new(),
+        to: String::new(),
+        message: String::new(),
+    });
 
-    // // let task2 = Email::Sendgrid(Sendgrid {
-    // //     api_key: "scheduled".to_string(),
-    // //     subject: String::new(),
-    // //     to: String::new(),
-    // //     message: String::new(),
-    // // });
-    // //let scheduled = ScheduleJob::new(task1).in_minutes(1);
-    // producer.send(task1).await.unwrap();
-    // //producer.send(task2).await.unwrap();
+    let task2 = Email::Sendgrid(Sendgrid {
+        api_key: "test".to_string(),
+        subject: String::new(),
+        to: String::new(),
+        message: String::new(),
+    });
+    let task3 = Email::Mailchimp(Mailchimp {
+        x_api_key: "uu".to_string(),
+        subject: String::new(),
+        to: String::new(),
+        message: String::new(),
+    });
+    // let scheduled = ScheduleJob::new(task1).in_minutes(1);
+    producer.do_send(task1);
+    producer.do_send(task2);
+    producer.do_send(task3);
 
-    // let emails: Consumer<Email> = Consumer::new(&storage, "emails").data(EmailActor.start());
-    // let cars: Consumer<Car> = Consumer::new(&storage, "cars");
-    Worker::start(|srv| srv.workers(4))
-        // .add_consumer(emails)
-        // .add_consumer(cars)
-        ;
+    Worker::create(move |worker| {
+        worker
+            .consumer(
+                RedisConsumer::<Email>::new(&storage, "emails")
+                    .workers(4)
+                    .data::<Addr<EmailActor>>(EmailActor.start()),
+            )
+            .consumer(RedisConsumer::<Car>::new(&storage, "cars"))
+    })
+    .run()
+    .await;
 }

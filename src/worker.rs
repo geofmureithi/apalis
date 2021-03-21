@@ -1,79 +1,66 @@
 use crate::Consumer;
-use crate::JobHandler;
 use actix::prelude::*;
-use log::{debug, info};
-use serde::Serialize;
-use std::sync::mpsc;
-use std::{net, thread};
 
-use actix_rt::{net::TcpStream, System};
-use actix_server::{Server, ServerBuilder, ServiceFactory};
+#[derive(Message)]
+#[rtype(result = "Result<(), std::io::Error>")]
+pub enum WorkerManagement {
+    Status,
+    ShutDown,
+}
 
-pub struct WorkerRuntime {
-    system: System,
+pub struct Worker {
+    consumers: Vec<Recipient<WorkerManagement>>,
 }
 
 impl Worker {
-    /// Start new server with server builder
-    pub fn start<F>(mut factory: F) -> WorkerRuntime
-    where
-        F: FnMut(ServerBuilder) -> ServerBuilder + Send + 'static,
-    {
-        let (tx, rx) = mpsc::channel();
-
-        // run server in separate thread
-        thread::spawn(move || {
-            let sys = System::new();
-            factory(Server::build())
-                .workers(1)
-                .disable_signals()
-                .start();
-
-            tx.send(System::current()).unwrap();
-            sys.run()
-        });
-        let system = rx.recv().unwrap();
-
-        WorkerRuntime { system }
-    }
-}
-
-impl WorkerRuntime {
-    pub fn add_consumer<
-        M: 'static
-            + JobHandler
-            + std::marker::Unpin
-            + std::marker::Send
-            + serde::de::DeserializeOwned
-            + Serialize,
+    pub fn consumer<
+        C: 'static
+            + Consumer
+            + Send
+            + Clone
+            + Actor<Context = actix::Context<C>>
+            + Handler<WorkerManagement>
+            + std::marker::Sync,
     >(
-        self,
-        consumer: Consumer<M>,
+        mut self,
+        consumer: C,
     ) -> Self {
-        Actor::start_in_arbiter(&actix::Arbiter::new(), |_| consumer);
+        let workers = consumer.workers();
+        for _worker in 0..workers {
+            let consumer = consumer.clone();
+            let addr = Actor::start_in_arbiter(&Arbiter::new().handle(), move |_| consumer);
+            self.consumers.push(addr.recipient());
+        }
         self
     }
-
-    /// Stop http server
-    fn stop(&mut self) {
-        self.system.stop();
+    pub fn new() -> Self {
+        Worker {
+            consumers: Vec::new(),
+        }
+    }
+    /// Start new server with server builder
+    pub fn create<F>(mut factory: F) -> Self
+    where
+        F: FnMut(Worker) -> Worker + Send + 'static,
+    {
+        factory(Worker::new())
     }
 
     pub async fn run(self) {
-        actix_rt::signal::ctrl_c().await;
-    }
-}
-
-impl Drop for WorkerRuntime {
-    fn drop(&mut self) {
-        self.stop()
-    }
-}
-
-pub struct Worker;
-
-impl Worker {
-    pub fn new() -> Self {
-        Worker
+        actix_rt::signal::ctrl_c()
+            .await
+            .expect("failed to listen for ctrl_c");
+        let mut addrs = self.consumers.into_iter();
+        loop {
+            match addrs.next() {
+                Some(addr) => {
+                    addr.send(WorkerManagement::ShutDown)
+                        .await
+                        .expect("Unable to Call Shutdown")
+                        .unwrap();
+                }
+                None => break,
+            }
+        }
     }
 }

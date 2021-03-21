@@ -92,6 +92,7 @@ pub use consumer::JobResult;
 pub use consumer::JobContext;
 pub use worker::Worker;
 pub use storage::redis::RedisStorage;
+pub use consumer::RedisConsumer;
 // #[cfg(test)]
 // mod tests {
 //     use super::*;
