@@ -1,9 +1,7 @@
 use actix::prelude::*;
 use log::info;
 use serde::{Deserialize, Serialize};
-
 use futures::future::BoxFuture;
-extern crate actix_redis_jobs;
 
 use actix_redis_jobs::{
     JobContext, JobHandler, JobResult, Producer, RedisConsumer, RedisStorage, ScheduleJob,
