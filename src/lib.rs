@@ -45,8 +45,8 @@
 //! }
 
 //! impl JobHandler for Math {
-//!     fn handle(&self, _ctx: &JobContext) -> BoxFuture<JobResult> {
-//!         let counter = _ctx.data_opt::<Arc<Mutex<MyData>>>().unwrap();
+//!     fn handle(&self, ctx: &JobContext) -> BoxFuture<JobResult> {
+//!         let counter = ctx.data_opt::<Arc<Mutex<MyData>>>().unwrap();
 //!         let mut data = counter.lock().unwrap();
 //!         data.counter += 1;
 //!         info!("Done like {} jobs", data.counter);
