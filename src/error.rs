@@ -6,6 +6,7 @@ pub enum TaskError {
     AlreadyInQueue(String),
     InThePast,
     Execution(failure::Error),
+    External(String)
 }
 impl std::fmt::Display for TaskError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

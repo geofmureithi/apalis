@@ -1,23 +1,14 @@
-use log::warn;
 use redis::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::ops::{Deref, Drop};
-
-#[derive(Debug, PartialEq)]
-pub enum MessageState {
-    Unacked,
-    Acked,
-    Rejected,
-}
-
+use crate::consumer::Job;
 /// Message objects that can be reconstructed from the data stored in Redis.
 ///
 /// Implemented for all `Deserialize` objects by default by relying on Msgpack
 /// decoding.
 pub trait MessageDecodable
 where
-    Self: Sized + Send + Sync,
+    Self: Sized,
 {
     /// Decode the given Redis value into a message
     ///
@@ -31,7 +22,7 @@ where
 /// Implemented for all `Serialize` objects by default by encoding with Msgpack.
 pub trait MessageEncodable
 where
-    Self: Sized + Send + Sync,
+    Self: Sized,
 {
     /// Encode the value into a bytes array to be inserted into Redis.
     ///
@@ -39,8 +30,8 @@ where
     fn encode_message(&self) -> Result<Vec<u8>, &'static str>;
 }
 
-impl<T: Send + DeserializeOwned + Sync> MessageDecodable for T {
-    fn decode_message(value: &Value) -> Result<T, &'static str> {
+impl<T: DeserializeOwned> MessageDecodable for Job<T> {
+    fn decode_message(value: &Value) -> Result<Job<T>, &'static str> {
         match *value {
             Value::Data(ref v) => {
                 rmp_serde::decode::from_slice(v).or(Err("failed to decode value with msgpack"))
@@ -50,54 +41,8 @@ impl<T: Send + DeserializeOwned + Sync> MessageDecodable for T {
     }
 }
 
-impl<T: Serialize + Send + Sync> MessageEncodable for T {
+impl<T: Serialize> MessageEncodable for T {
     fn encode_message(&self) -> Result<Vec<u8>, &'static str> {
         rmp_serde::encode::to_vec(self).or(Err("failed to encode value"))
-    }
-}
-
-pub struct MessageGuard<T: std::marker::Sync + Send> {
-    message: T,
-    state: MessageState,
-}
-
-impl<T: std::marker::Sync + Send + 'static> MessageGuard<T> {
-    pub fn new(message: T) -> MessageGuard<T> {
-        MessageGuard {
-            message,
-            state: MessageState::Unacked,
-        }
-    }
-
-    pub fn message(&self) -> &T {
-        &self.message
-    }
-
-    /// Acknowledge the message and remove it from the *processing* queue.
-    pub fn ack(&mut self) {
-        self.state = MessageState::Acked;
-    }
-
-    /// Reject the message and push it from the *processing* queue to the
-    /// *unack* queue.
-    pub fn reject(&mut self) {
-        self.state = MessageState::Rejected;
-    }
-}
-
-impl<T: std::marker::Sync + Send> Deref for MessageGuard<T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        &self.message
-    }
-}
-
-impl<T: std::marker::Sync + Send> Drop for MessageGuard<T> {
-    fn drop(&mut self) {
-        if self.state == MessageState::Unacked {
-            warn!("Dropping Unacked Message");
-            //let _ = tokio::run(self.reject());
-        }
     }
 }
