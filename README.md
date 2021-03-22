@@ -90,8 +90,8 @@ async fn main() {
 
 ## Built With
 
-- [Actix](https://actix.rs) - Actor framework for Rust
-- [Redis-Rs](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
+- [actix](https://actix.rs) - Actor framework for Rust
+- [redis-rs](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
 
 ## Contributing
 

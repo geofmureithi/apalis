@@ -1,7 +1,13 @@
 use actix::prelude::*;
+use futures::future::BoxFuture;
 use log::info;
 use serde::{Deserialize, Serialize};
-use futures::future::BoxFuture;
+use std::sync::Arc;
+use std::sync::Mutex;
+
+struct MyData {
+    counter: usize,
+}
 
 use actix_redis_jobs::{
     JobContext, JobHandler, JobResult, Producer, RedisConsumer, RedisStorage, ScheduleJob,
@@ -17,6 +23,10 @@ enum Math {
 
 impl JobHandler for Math {
     fn handle(&self, _ctx: &JobContext) -> BoxFuture<JobResult> {
+        let counter = _ctx.data_opt::<Arc<Mutex<MyData>>>().unwrap();
+        let mut data = counter.lock().unwrap();
+        data.counter += 1;
+        info!("Done like {} jobs", data.counter);
         let fut = async move {
             match self {
                 Math::Sum(first, second) => {
@@ -49,14 +59,21 @@ async fn main() {
     env_logger::init();
     let storage = RedisStorage::new("redis://127.0.0.1/");
     let producer = Producer::start(&storage, "math");
-    let sum = Math::Sum(1, 2);
-    let multiply = Math::Multiply(9, 8);
-    let scheduled = ScheduleJob::new(sum).in_minutes(1);
-    producer.do_send(scheduled);
-    producer.do_send(multiply);
 
+    let multiply = Math::Multiply(9, 8);
+    producer.do_send(multiply); //Handled instantly
+
+    let sum = Math::Sum(1, 2);
+    let scheduled = ScheduleJob::new(sum).in_minutes(1); //Scheduled into the future
+    producer.do_send(scheduled);
+
+    let counter = Arc::new(Mutex::new(MyData { counter: 0 }));
     WorkManager::create(move |worker| {
-        worker.consumer(RedisConsumer::<Math>::new(&storage, "math").workers(2))
+        worker.consumer(
+            RedisConsumer::<Math>::new(&storage, "math")
+                .data(counter.clone()) //Actix ideas
+                .workers(2),
+        )
     })
     .run()
     .await;
