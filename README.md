@@ -8,7 +8,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-actix-redis-jobs = { version = "0.1" }
+actix-redis-jobs = { version = "0.2.0-beta-0" }
 ```
 
 ### Prerequisites
