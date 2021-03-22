@@ -7,7 +7,7 @@
 
 //! ```toml
 //! [dependencies]
-//! actix-redis-jobs = { version = "0.2.0-beta-0" }
+//! actix-redis-jobs = { version = "0.2.0-beta.1" }
 //! ```
 
 //! ### Prerequisites
