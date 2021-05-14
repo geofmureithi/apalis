@@ -11,7 +11,7 @@ keywords = ["jobs", "background", "task", "actix"]
 edition = "2018"
 
 [dependencies]
-apalis-core = { path = "packages/apalis-core", version = "0.2.0" }
+apalis-core = { path = "./packages/apalis-core", version = "0.2.0" }
 
 [workspace]
 members = [
