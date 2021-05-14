@@ -4,6 +4,9 @@ version = "0.2.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2018"
 
+license = "MIT"
+description = "SQL Storage for Apalis: simple and reliable background processing for Rust using Actix actors"
+
 [features]
 default = [ "sqlite" ]
 postgres = [ "sqlx/postgres"]
