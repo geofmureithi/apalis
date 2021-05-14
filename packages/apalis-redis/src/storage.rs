@@ -1,4 +1,4 @@
-use apalis::Storage;
+use apalis_core::Storage;
 
 use redis::{aio::MultiplexedConnection, Client, RedisError};
 

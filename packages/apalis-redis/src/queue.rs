@@ -1,4 +1,4 @@
-use apalis::{Job, Queue};
+use apalis_core::{Job, Queue};
 use crate::RedisStorage;
 use std::marker::PhantomData;
 

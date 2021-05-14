@@ -4,7 +4,7 @@ use crate::messages::retry::RetryJob;
 use actix::clock::Instant;
 use actix::prelude::*;
 use actix_rt::time::Interval;
-use apalis::{Error, Job, JobHandler, JobState, MessageDecodable, PushJob};
+use apalis_core::{Error, Job, JobHandler, JobState, MessageDecodable, PushJob};
 use log::{*};
 use redis::Value;
 use std::pin::Pin;

@@ -1,7 +1,7 @@
 use crate::consumer::RedisConsumer;
 use actix::prelude::*;
 use actix_rt::time::Interval;
-use apalis::{Error, Job, JobHandler};
+use apalis_core::{Error, Job, JobHandler};
 use chrono::prelude::*;
 use log::*;
 use std::pin::Pin;

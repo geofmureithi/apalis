@@ -10,7 +10,7 @@ use actix::clock::{interval_at, Instant};
 use actix::prelude::*;
 use actix::Actor;
 use actix::Context;
-use apalis::{Consumer, Job, JobContext, JobHandler, Queue};
+use apalis_core::{Consumer, Job, JobContext, JobHandler, Queue};
 use log::*;
 use std::any::Any;
 use std::marker::PhantomData;
@@ -138,7 +138,7 @@ mod tests {
 
     impl JobHandler<RedisConsumer<Self>> for TestJob {
         type Result = ();
-        fn handle(self, _: &mut apalis::JobContext<RedisConsumer<Self>>) {
+        fn handle(self, _: &mut JobContext<RedisConsumer<Self>>) {
             todo!()
         }
     }

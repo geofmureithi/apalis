@@ -1,7 +1,7 @@
 use crate::consumer::RedisConsumer;
 use actix::prelude::*;
 use actix::Context;
-use apalis::{Job, JobHandler};
+use apalis_core::{Job, JobHandler};
 
 use log::{debug, warn};
 

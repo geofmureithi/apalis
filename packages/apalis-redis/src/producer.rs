@@ -1,7 +1,7 @@
 use crate::queue::RedisQueue;
 use crate::storage::RedisStorage;
 use actix::prelude::*;
-use apalis::{Error, Job, JobState, MessageEncodable, Producer, PushJob, Queue};
+use apalis_core::{Error, Job, JobState, MessageEncodable, Producer, PushJob, Queue};
 
 pub struct RedisProducer<J: Job> {
     pub(crate) queue: RedisQueue<J>,

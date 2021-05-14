@@ -1,6 +1,6 @@
 use crate::consumer::RedisConsumer;
 use actix::prelude::*;
-use apalis::{Error, Job, JobHandler, MessageEncodable, PushJob};
+use apalis_core::{Error, Job, JobHandler, MessageEncodable, PushJob};
 use chrono::prelude::*;
 /// Actix message implements request Redis to retry jobs
 #[derive(Message)]

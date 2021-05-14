@@ -12,6 +12,8 @@ edition = "2018"
 
 [dependencies]
 apalis-core = { path = "./packages/apalis-core", version = "0.1.0" }
+apalis-redis = { path = "./packages/apalis-redis", version = "0.1.0" }
+apalis-sql = { path = "./packages/apalis-sql", version = "0.1.0" }
 
 [workspace]
 members = [

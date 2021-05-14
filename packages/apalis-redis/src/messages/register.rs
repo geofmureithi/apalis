@@ -1,6 +1,6 @@
 use crate::consumer::RedisConsumer;
 use actix::prelude::*;
-use apalis::{Job, JobHandler, Error};
+use apalis_core::{Job, JobHandler, Error};
 use chrono::Utc;
 
 /// Actix message implements registering the consumer

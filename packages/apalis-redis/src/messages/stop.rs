@@ -1,4 +1,4 @@
-use apalis::{Job, JobHandler};
+use apalis_core::{Job, JobHandler};
 use crate::consumer::RedisConsumer;
 use actix::prelude::*;
 

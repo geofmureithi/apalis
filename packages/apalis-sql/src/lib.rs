@@ -1,4 +1,4 @@
-use apalis::Storage;
+use apalis_core::Storage;
 
 use sqlx::pool::Pool;
 use sqlx::Sqlite;
