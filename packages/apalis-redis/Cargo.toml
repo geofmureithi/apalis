@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 actix = "0.10"
 actix-rt = "1"
-apalis = { path = "../apalis"}
+apalis = { path = "../../"}
 redis = { version = "0.20.0" , features = ["async-std-comp"] }
 serde = "1"
 log = "0.4"

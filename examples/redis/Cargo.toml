@@ -6,7 +6,7 @@ edition = "2018"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-apalis = { path = "../../packages/apalis" }
+apalis = { path = "../../" }
 apalis-redis = { path = "../../packages/apalis-redis" }
 serde = "1"
 actix = "0.10"

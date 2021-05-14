@@ -1,9 +1,23 @@
+[package]
+name = "apalis"
+version = "0.2.0"
+authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
+description = "Simple and reliable background processing for Rust for Actix"
+repository = "https://github.com/geofmureithi/apalis"
+documentation = "https://docs.rs/apalis"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["jobs", "background", "task", "actix"]
+edition = "2018"
+
+[dependencies]
+apalis-core = { path = "packages/apalis-core", version = "0.2.0" }
+
 [workspace]
 members = [
-  "packages/apalis",
+  "packages/apalis-core",
   "packages/apalis-redis",
   "packages/apalis-sql",
-  
   # Examples
   "examples/redis",
   "examples/actix-web"

@@ -143,7 +143,7 @@ mod tests {
         }
     }
 
-    #[actix::test]
+    #[actix_rt::test]
     async fn test_handles_job() {
         let storage = RedisStorage::new("redis://127.0.0.1/").unwrap();
         let queue = Queue::<TestJob, RedisStorage>::new(&storage);
