@@ -3,6 +3,8 @@ name = "apalis-core"
 version = "0.1.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2018"
+license = "MIT"
+description = "Core for Apalis: simple and reliable background processing for Rust for Actix"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
