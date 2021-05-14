@@ -1,0 +1,20 @@
+[package]
+name = "apalis-sql"
+version = "0.1.0"
+authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
+edition = "2018"
+
+[features]
+default = [ "sqlite" ]
+postgres = [ "sqlx/postgres"]
+sqlite = [ "sqlx/sqlite"]
+mysql = [ "sqlx/mysql"]
+
+[dependencies.sqlx]
+version = "0.4.2"
+default-features = false
+features = [ "runtime-actix-rustls", "macros", "chrono", "decimal", "uuid", "json" ]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+apalis = { path = "../apalis"}

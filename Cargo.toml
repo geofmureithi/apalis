@@ -1,29 +1,10 @@
-[package]
-name = "actix-redis-jobs"
-version = "0.2.0-beta.1"
-authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
-description = "Simple and reliable background processing for Rust using Actix and Redis"
-keywords = ["redis", "jobs", "actix", "async", "background"]
-repository = "https://github.com/geofmureithi/actix-jobs.git"
-documentation = "https://docs.rs/actix-redis-jobs"
-readme = "README.md"
-categories = ["network-programming", "asynchronous"]
-license = "MIT/Apache-2.0"
-edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-actix-rt = "2.1"
-actix = "0.11"
-redis = { version = "0.20.0" , features = ["async-std-comp"] }
-futures = "0.3"
-serde = { version = "1.0", features = ["derive"] }
-chrono = { version = "0.4", features = ["serde"] }
-log = "0.4"
-failure = "0.1"
-rmp-serde = "0.14"
-env_logger = "0.7"
-fnv = "1.0.3"
-backoff = { version = "0.3", features = ["async-std"] }
-uuid = { version = "0.8", features = ["serde", "v4"] }
+[workspace]
+members = [
+  "packages/apalis",
+  "packages/apalis-redis",
+  "packages/apalis-sql",
+  
+  # Examples
+  "examples/redis",
+  "examples/actix-web"
+]
