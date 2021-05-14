@@ -4,6 +4,9 @@ version = "0.2.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2018"
 
+license = "MIT"
+description = "Redis Storage for Apalis: simple and reliable background processing based on Actix Actors"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
