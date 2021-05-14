@@ -1,6 +1,6 @@
-# Actix-redis-jobs
+# Apalis
 
-Simple and reliable background processing for Rust using Actix and Redis
+Simple and reliable background processing for Rust for Actix. Apalis currently supports Redis as a store with SQlite, PostgresSQL and MySQL in the pipeline.
 
 ## Getting Started
 
@@ -8,7 +8,8 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-actix-redis-jobs = { version = "0.2.0-beta.0" }
+apalis = { version = "0.2" }
+apalis-redis = { version = "0.2"}
 ```
 
 ### Prerequisites
@@ -24,74 +25,84 @@ docker run --name some-redis -d redis
 
 ```rust
 use actix::prelude::*;
-use log::info;
+use apalis::{Job, JobContext, JobFuture, JobHandler, Queue, Worker};
+use apalis_redis::{RedisConsumer, RedisProducer, RedisStorage};
 use serde::{Deserialize, Serialize};
-use futures::future::BoxFuture;
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use actix_redis_jobs::{
-    JobContext, JobHandler, JobResult, Producer, RedisConsumer, RedisStorage, ScheduleJob,
-    WorkManager,
-};
-
-#[derive(Serialize, Deserialize, Message, Clone)]
-#[rtype(result = "()")]
-enum Math {
-    Sum(isize, isize),
-    Multiply(isize, isize),
+#[derive(Debug)]
+pub enum MathError {
+    InternalError,
 }
 
-impl JobHandler for Math {
-    fn handle(&self, _ctx: &JobContext) -> BoxFuture<JobResult> {
-        let fut = async move {
-            match self {
-                Math::Sum(first, second) => {
-                    info!(
-                        "Sum result for {} and {} is {}",
-                        first,
-                        second,
-                        first + second
-                    );
-                    JobResult::Result(Ok(()))
-                }
-                Math::Multiply(first, second) => {
-                    info!(
-                        "Multiply result for {} and {} is {}",
-                        first,
-                        second,
-                        first * second
-                    );
-                    JobResult::Result(Ok(()))
-                }
+#[derive(Serialize, Deserialize)]
+pub enum Math {
+    Add(u64, u64),
+    Fibonacci(u64),
+}
+
+impl Job for Math {
+    type Result = Result<u64, MathError>;
+}
+
+impl JobHandler<RedisConsumer<Math>> for Math {
+    type Result = JobFuture<Result<u64, MathError>>;
+    fn handle(
+        self,
+        ctx: &mut JobContext<RedisConsumer<Math>>,
+    ) -> JobFuture<Result<u64, MathError>> {
+        let data = ctx.data_opt::<Arc<Mutex<MathCounter>>>().unwrap();
+        let mut data = data.lock().unwrap();
+        data.counter += 1;
+        match self {
+            Math::Add(first, second) => Box::pin(async move { Ok(first + second) }),
+            Math::Fibonacci(num) => {
+                let addr = ctx.data_opt::<Addr<FibonacciActor>>().unwrap().clone();
+                Box::pin(async move {
+                    addr.send(Fibonacci(num))
+                        .await
+                        .map_err(|_e| MathError::InternalError)?
+                })
             }
-        };
-        Box::pin(fut)
+        }
     }
+}
+
+fn produce_jobs(queue: &Queue<Math, RedisStorage>) {
+    let producer = RedisProducer::start(queue);
+    producer.do_send(Math::Add(1, 2).into());
+    producer.do_send(Math::Fibonacci(9).into());
 }
 
 #[actix_rt::main]
 async fn main() {
     std::env::set_var("RUST_LOG", "info");
     env_logger::init();
-    let storage = RedisStorage::new("redis://127.0.0.1/");
-    let producer = Producer::start(&storage, "math");
-    let sum = Math::Sum(1, 2);
-    let multiply = Math::Multiply(9, 8);
-    let scheduled = ScheduleJob::new(sum).in_minutes(1);
-    producer.do_send(scheduled);
-    producer.do_send(multiply);
+    let storage = RedisStorage::new("redis://127.0.0.1/").unwrap();
+    let queue = Queue::<Math, RedisStorage>::new(&storage);
 
-    WorkManager::create(move |worker| {
-        worker.consumer(RedisConsumer::<Math>::new(&storage, "math").workers(2))
-    })
-    .run()
-    .await;
+    //This can be in another part of the program
+    produce_jobs(&queue);
+
+    let counter = Arc::new(Mutex::new(MathCounter { counter: 0 }));
+    let addr = SyncArbiter::start(2, || FibonacciActor); //Get the address of another actor
+    Worker::new()
+        .register_with_threads(2, move || {
+            RedisConsumer::new(&queue)
+                .data(counter.clone())
+                .data(addr.clone())
+        })
+        .run()
+        .await;
 }
 ```
 
-## Built With
+## Built On
 
 - [actix](https://actix.rs) - Actor framework for Rust
 - [redis-rs](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
+- [sqlx](https://github.com/launchbadge/sqlx) - The Rust SQL Toolkit
 
 ## Contributing
 
@@ -113,4 +124,4 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 
 ## Acknowledgments
 
-- Inspiration: This project is inspired by [Curlyq](https://github.com/mcmathja/curlyq) which is written in GoLang
+- Inspiration: The redis part of this project is heavily inspired by [Curlyq](https://github.com/mcmathja/curlyq) which is written in GoLang
