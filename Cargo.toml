@@ -1,6 +1,6 @@
 [package]
 name = "apalis"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple and reliable background processing for Rust for Actix"
 repository = "https://github.com/geofmureithi/apalis"
@@ -18,9 +18,9 @@ sqlite = [ "apalis-sql/sqlite"]
 mysql = [ "apalis-sql/mysql"]
 
 [dependencies]
-apalis-core = { path = "./packages/apalis-core", version = "0.1.0" }
-apalis-redis = { path = "./packages/apalis-redis", version = "0.1.0" }
-apalis-sql = { path = "./packages/apalis-sql", version = "0.1.0" }
+apalis-core = { path = "./packages/apalis-core", version = "0.2.0" }
+apalis-redis = { path = "./packages/apalis-redis", version = "0.2.0" }
+apalis-sql = { path = "./packages/apalis-sql", version = "0.2.0" }
 
 [workspace]
 members = [
