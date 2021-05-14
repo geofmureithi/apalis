@@ -10,6 +10,13 @@ license = "MIT OR Apache-2.0"
 keywords = ["jobs", "background", "task", "actix"]
 edition = "2018"
 
+[features]
+default = ["redis"]
+redis = []
+postgres = ["apalis-sql/postgres"]
+sqlite = [ "apalis-sql/sqlite"]
+mysql = [ "apalis-sql/mysql"]
+
 [dependencies]
 apalis-core = { path = "./packages/apalis-core", version = "0.1.0" }
 apalis-redis = { path = "./packages/apalis-redis", version = "0.1.0" }

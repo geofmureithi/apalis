@@ -1,12 +1,12 @@
 use actix::{Actor, Addr, Handler, Message, StreamHandler};
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
-use apalis::{Job, JobHandler};
-use apalis_redis::RedisProducer;
-use apalis_redis::{RedisConsumer, RedisJobContext};
+use apalis::{
+    redis::{RedisConsumer, RedisJobContext, RedisProducer},
+    Job, JobHandler,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-
 
 //Define our job
 #[derive(Serialize, Deserialize, Debug, Message, Clone)]
@@ -65,7 +65,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWs {
     }
 }
 
-//Define a websocket 
+//Define a websocket
 
 async fn index(
     req: HttpRequest,
@@ -85,8 +85,6 @@ async fn index(
     Ok(resp)
 }
 
-
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "info");
@@ -96,11 +94,10 @@ async fn main() -> std::io::Result<()> {
 
     let addrs: web::Data<Mutex<Vec<Addr<MyWs>>>> = web::Data::new(Mutex::new(vec![]));
     let consumer = RedisConsumer::<WSJob>::create(conn)
-        .expect("Couldnt start consumer")
+        .expect("Couldnt create consumer")
         .data(addrs.clone());
     let producer = web::Data::new(consumer.build_producer());
     Actor::create(|_ctx| consumer); //Start a standalone consumer
-    
     HttpServer::new(move || {
         App::new()
             .app_data(producer.clone())

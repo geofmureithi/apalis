@@ -1,6 +1,8 @@
 use actix::prelude::*;
-use apalis::{Job, JobContext, JobFuture, JobHandler, Queue, Worker};
-use apalis_redis::{RedisConsumer, RedisProducer, RedisStorage};
+use apalis::{
+    redis::{RedisConsumer, RedisJobContext, RedisProducer, RedisStorage},
+    Job, JobFuture, JobHandler, Queue, Worker,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -62,10 +64,7 @@ impl Job for Math {
 
 impl JobHandler<RedisConsumer<Math>> for Math {
     type Result = JobFuture<Result<u64, MathError>>;
-    fn handle(
-        self,
-        ctx: &mut JobContext<RedisConsumer<Math>>,
-    ) -> JobFuture<Result<u64, MathError>> {
+    fn handle(self, ctx: &mut RedisJobContext<Math>) -> JobFuture<Result<u64, MathError>> {
         let data = ctx.data_opt::<Arc<Mutex<MathCounter>>>().unwrap();
         let mut data = data.lock().unwrap();
         data.counter += 1;
