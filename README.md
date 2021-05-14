@@ -1,5 +1,4 @@
-# Apalis
-
+# Apalis [![Build Status](https://travis-ci.org/geofmureithi/apalis.svg?branch=master)](https://travis-ci.org/geofmureithi/apalis)
 Simple and reliable background processing for Rust for Actix. Apalis currently supports Redis as a store with SQlite, PostgresSQL and MySQL in the pipeline.
 
 
