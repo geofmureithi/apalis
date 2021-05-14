@@ -2,7 +2,6 @@
 
 Simple and reliable background processing for Rust for Actix. Apalis currently supports Redis as a store with SQlite, PostgresSQL and MySQL in the pipeline.
 
-It was formally `actix-redis-jobs` and if you want to use the crate name please contact me.
 
 ## Getting Started
 
@@ -10,8 +9,8 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.2" }
-apalis-redis = { version = "0.2"}
+apalis = { version = "0.1" }
+apalis-redis = { version = "0.1"}
 ```
 
 ### Prerequisites
@@ -119,6 +118,8 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 - **Njuguna Mureithi** - _Initial work_ - [Njuguna Mureithi](https://github.com/geofmureithi)
 
 See also the list of [contributors](https://github.com/geofmureithi/actix-jobs/contributors) who participated in this project.
+
+It was formally `actix-redis-jobs` and if you want to use the crate name please contact me.
 
 ## License
 
