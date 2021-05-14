@@ -17,4 +17,4 @@ features = [ "runtime-actix-rustls", "macros", "chrono", "decimal", "uuid", "jso
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-apalis-core = { path = "../../packages/apalis-core"}
+apalis-core = { path = "../../packages/apalis-core", version = "0.2"}
