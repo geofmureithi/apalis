@@ -1,6 +1,6 @@
 # Apalis [![Build Status](https://travis-ci.org/geofmureithi/apalis.svg?branch=master)](https://travis-ci.org/geofmureithi/apalis)
-Simple and reliable background processing for Rust for Actix. Apalis currently supports Redis as a store with SQlite, PostgresSQL and MySQL in the pipeline.
 
+Simple and reliable background processing for Rust for Actix. Apalis currently supports Redis as a store with SQlite, PostgresSQL and MySQL in the pipeline.
 
 ## Getting Started
 
@@ -8,8 +8,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.1" }
-apalis-redis = { version = "0.1"}
+apalis = { version = "0.2" features = ["redis"] }
 ```
 
 ### Prerequisites
@@ -25,8 +24,10 @@ docker run --name some-redis -d redis
 
 ```rust
 use actix::prelude::*;
-use apalis::{Job, JobContext, JobFuture, JobHandler, Queue, Worker};
-use apalis_redis::{RedisConsumer, RedisProducer, RedisStorage};
+use apalis::{
+    redis::{RedisConsumer, RedisProducer, RedisStorage}
+    Job, JobContext, JobFuture, JobHandler, Queue, Worker
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -110,13 +111,13 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduc
 
 ## Versioning
 
-We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/geofmureithi/actix-jobs/tags).
+We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/geofmureithi/apalis/tags).
 
 ## Authors
 
 - **Njuguna Mureithi** - _Initial work_ - [Njuguna Mureithi](https://github.com/geofmureithi)
 
-See also the list of [contributors](https://github.com/geofmureithi/actix-jobs/contributors) who participated in this project.
+See also the list of [contributors](https://github.com/geofmureithi/apalis/contributors) who participated in this project.
 
 It was formally `actix-redis-jobs` and if you want to use the crate name please contact me.
 
