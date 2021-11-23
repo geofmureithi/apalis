@@ -46,7 +46,7 @@ pub enum JobState {
 #[rtype(result = "Result<JobState, Error>")]
 pub struct PushJob {
     pub id: uuid::Uuid,
-    pub job: String, //Json representation
+    pub job: serde_json::Value, //Json representation
     state: JobState,
     pub retries: i64,
 }
@@ -80,7 +80,7 @@ impl PushJob {
     where
         J: Serialize,
     {
-        let job = serde_json::to_string(&job).unwrap();
+        let job = serde_json::to_value(&job).unwrap();
         PushJob {
             id,
             job,
@@ -89,7 +89,6 @@ impl PushJob {
         }
     }
     pub fn decode(bytes: String) -> Result<Self, &'static str> {
-        println!("bytes: {}", bytes);
         serde_json::from_str::<PushJob>(&bytes).or(Err("Unable to deserialize job"))
     }
 
@@ -103,16 +102,29 @@ impl PushJob {
         J: JobHandler<C>,
     {
         let (tx, rx) = oneshot::channel();
-        let job = serde_json::from_str::<J>(&self.job).unwrap();
-        job.handle(ctx).process(Some(tx));
-        match rx.await {
-            Ok(value) => {
-                self.state = JobState::Acked;
-                debug!("Job [{}] completed with value: {:?}", self.id, value);
+        let id = &self.id.to_string();
+        let job = &self.job;
+        let job = job.clone();
+        let job = serde_json::from_value::<J>(job);
+        match job {
+            Ok(job) => {
+                job.handle(ctx).process(Some(tx));
+                match rx.await {
+                    Ok(value) => {
+                        self.state = JobState::Acked;
+                        debug!("Job [{}] completed with value: {:?}", id, value);
+                    }
+                    Err(err) => {
+                        self.state = JobState::Rejected;
+                        warn!("Job [{}] failed with error: {:?}", id, err);
+                    }
+                }
             }
             Err(err) => {
-                self.state = JobState::Rejected;
-                warn!("Job [{}] failed with error: {:?}", self.id, err);
+                warn!(
+                    "Job [{}] failed with [deserialization] error: {:?}",
+                    id, err
+                );
             }
         }
     }
