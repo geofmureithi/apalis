@@ -4,10 +4,11 @@ use crate::messages::retry::RetryJob;
 use actix::clock::Instant;
 use actix::prelude::*;
 use actix_rt::time::Interval;
-use apalis_core::{Error, Job, JobHandler, JobState, MessageDecodable, PushJob};
-use log::{*};
+use apalis_core::{Error, Job, JobHandler, JobState, PushJob};
+use log::*;
 use redis::Value;
 use std::pin::Pin;
+use std::str::from_utf8;
 use std::task::{Context as StdContext, Poll};
 /// Actix message implements request redis to fetch jobs
 #[derive(Debug)]
@@ -86,7 +87,7 @@ where
                         }
                     };
 
-                    match PushJob::decode_message(&bytes) {
+                    match PushJob::decode(from_utf8(bytes).unwrap().to_string()) {
                         Err(e) => {
                             error!("Decoding Message Failed: {:?}", e);
                         }

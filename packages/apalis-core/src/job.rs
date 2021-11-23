@@ -10,9 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tokio::sync::{oneshot, oneshot::Sender as OneshotSender};
 
-pub trait Job:
-    Serialize + DeserializeOwned + MessageEncodable + MessageDecodable + Send + Unpin
-{
+pub trait Job: Serialize + DeserializeOwned + Send + Unpin {
     type Result: 'static + Debug;
     fn name() -> &'static str {
         std::any::type_name::<Self>()
@@ -32,49 +30,6 @@ where
     fn handle(self, ctx: &mut JobContext<C>) -> <Self as JobHandler<C>>::Result;
 }
 
-/// Message objects that can be reconstructed from the data stored in Storage.
-///
-/// Implemented for all `Deserialize` objects by default by relying on Msgpack
-/// decoding.
-pub trait MessageDecodable
-where
-    Self: Sized,
-{
-    /// Decode the given Redis value into a message
-    ///
-    /// In the default implementation, the string value is decoded by assuming
-    /// it was encoded through the Msgpack encoding.
-    fn decode_message(value: &Vec<u8>) -> Result<Self, &'static str>;
-}
-
-/// Message objects that can be encoded to a string to be stored in Storage.
-///
-/// Implemented for all `Serialize` objects by default by encoding with Msgpack.
-pub trait MessageEncodable
-where
-    Self: Sized,
-{
-    /// Encode the value into a bytes array to be inserted into Storage.
-    ///
-    /// In the default implementation, the object is encoded with Msgpack.
-    fn encode_message(&self) -> Result<Vec<u8>, &'static str>;
-}
-
-impl<T> MessageDecodable for T
-where
-    T: DeserializeOwned,
-{
-    fn decode_message(value: &Vec<u8>) -> Result<T, &'static str> {
-        rmp_serde::decode::from_slice(value).or(Err("failed to decode value with msgpack"))
-    }
-}
-
-impl<T: Serialize> MessageEncodable for T {
-    fn encode_message(&self) -> Result<Vec<u8>, &'static str> {
-        rmp_serde::encode::to_vec(self).or(Err("failed to encode value"))
-    }
-}
-
 #[derive(Debug)]
 pub enum Error {
     Failed,
@@ -91,7 +46,7 @@ pub enum JobState {
 #[rtype(result = "Result<JobState, Error>")]
 pub struct PushJob {
     pub id: uuid::Uuid,
-    pub job: Vec<u8>,
+    pub job: String, //Json representation
     state: JobState,
     pub retries: i64,
 }
@@ -121,14 +76,25 @@ impl<J: Job> From<J> for PushJob {
 }
 
 impl PushJob {
-    pub fn new<J: Job>(id: uuid::Uuid, job: J) -> Self {
-        let job = J::encode_message(&job).unwrap();
+    pub fn new<J: Job>(id: uuid::Uuid, job: J) -> Self
+    where
+        J: Serialize,
+    {
+        let job = serde_json::to_string(&job).unwrap();
         PushJob {
             id,
             job,
             state: JobState::Unacked,
             retries: 0,
         }
+    }
+    pub fn decode(bytes: String) -> Result<Self, &'static str> {
+        println!("bytes: {}", bytes);
+        serde_json::from_str::<PushJob>(&bytes).or(Err("Unable to deserialize job"))
+    }
+
+    pub fn encode(&self) -> Result<String, &'static str> {
+        serde_json::to_string::<PushJob>(&self).or(Err("Unable to serialize job"))
     }
 
     pub async fn handle<C, J>(&mut self, ctx: &mut JobContext<C>)
@@ -137,7 +103,7 @@ impl PushJob {
         J: JobHandler<C>,
     {
         let (tx, rx) = oneshot::channel();
-        let job = J::decode_message(&self.job).unwrap();
+        let job = serde_json::from_str::<J>(&self.job).unwrap();
         job.handle(ctx).process(Some(tx));
         match rx.await {
             Ok(value) => {

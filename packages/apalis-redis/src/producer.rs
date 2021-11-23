@@ -1,7 +1,7 @@
 use crate::queue::RedisQueue;
 use crate::storage::RedisStorage;
 use actix::prelude::*;
-use apalis_core::{Error, Job, JobState, MessageEncodable, Producer, PushJob, Queue};
+use apalis_core::{Error, Job, JobState, Producer, PushJob, Queue};
 
 pub struct RedisProducer<J: Job> {
     pub(crate) queue: RedisQueue<J>,
@@ -50,7 +50,7 @@ impl<J: 'static + Job> Handler<PushJob> for RedisProducer<J> {
                 .key(active_jobs_list)
                 .key(signal_list)
                 .arg(&msg.id.to_string())
-                .arg(PushJob::encode_message(&msg).unwrap())
+                .arg(PushJob::encode(&msg).unwrap())
                 .invoke_async(&mut conn)
                 .await
                 .map(|res: i8| {

@@ -1,6 +1,6 @@
 use crate::consumer::RedisConsumer;
 use actix::prelude::*;
-use apalis_core::{Error, Job, JobHandler, MessageEncodable, PushJob};
+use apalis_core::{Error, Job, JobHandler, PushJob};
 use chrono::prelude::*;
 /// Actix message implements request Redis to retry jobs
 #[derive(Message)]
@@ -14,7 +14,7 @@ impl RetryJob {
     pub fn now(job: PushJob) -> Self {
         RetryJob {
             job,
-            retry_at: DateTime::from(Local::now())
+            retry_at: DateTime::from(Local::now()),
         }
     }
 }
@@ -34,8 +34,8 @@ where
         let job_data_hash = self.queue.job_data_hash.to_string();
         let id = &msg.job.id.clone();
         let id = id.to_string();
-        let message = MessageEncodable::encode_message(&msg.job).unwrap();
         let fut = async move {
+            let message = &msg.job.encode().unwrap();
             let mut conn = conn.get_connection().await.unwrap();
             retry_jobs
                 .key(inflight_set)
