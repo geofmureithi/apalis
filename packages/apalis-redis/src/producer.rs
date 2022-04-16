@@ -5,20 +5,22 @@ use apalis_core::{Error, Job, JobState, Producer, PushJob, Queue};
 
 pub struct RedisProducer<J: Job> {
     pub(crate) queue: RedisQueue<J>,
+    pub(crate) storage: RedisStorage,
 }
 
 impl<J: 'static + Job> RedisProducer<J> {
-    pub fn start(queue: &Queue<J, RedisStorage>) -> Addr<Self> {
+    pub fn start(queue: &Queue<J>, storage: &RedisStorage) -> Addr<Self> {
         RedisProducer::<J> {
             queue: RedisQueue::new(queue),
+            storage: storage.clone(),
         }
         .start()
     }
 
     pub fn create(url: &str) -> Result<Addr<Self>, redis::RedisError> {
         let storage = RedisStorage::new(url)?;
-        let queue = Queue::<J, RedisStorage>::new(&storage);
-        Ok(RedisProducer::start(&queue))
+        let queue = Queue::<J>::new();
+        Ok(RedisProducer::start(&queue, &storage))
     }
 }
 
@@ -38,7 +40,7 @@ impl<J: 'static + Job> Handler<PushJob> for RedisProducer<J> {
     type Result = ResponseFuture<Result<JobState, Error>>;
 
     fn handle(&mut self, mut msg: PushJob, _: &mut Self::Context) -> Self::Result {
-        let conn = self.queue.storage.clone();
+        let conn = self.storage.clone();
         let push_job = redis::Script::new(include_str!("../lua/push_job.lua"));
         let job_data_hash = self.queue.job_data_hash.to_string();
         let active_jobs_list = self.queue.active_jobs_list.to_string();
@@ -68,4 +70,4 @@ impl<J: 'static + Job> Handler<PushJob> for RedisProducer<J> {
     }
 }
 
-impl<J: 'static + Job> Producer<RedisStorage> for RedisProducer<J> {}
+impl<J: 'static + Job> Producer for RedisProducer<J> {}

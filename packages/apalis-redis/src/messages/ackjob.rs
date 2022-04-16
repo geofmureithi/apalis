@@ -1,6 +1,6 @@
-use apalis_core::{Job, JobHandler, Error, PushJob};
 use crate::consumer::RedisConsumer;
 use actix::prelude::*;
+use apalis_core::{Error, Job, JobHandler, PushJob};
 
 /// Actix message implements request Redis to ack job
 #[derive(Message, Debug)]
@@ -24,7 +24,7 @@ where
     type Result = ResponseFuture<Result<Option<bool>, Error>>;
 
     fn handle(&mut self, msg: AckJob, _: &mut Self::Context) -> Self::Result {
-        let conn = self.queue.storage.clone();
+        let conn = self.storage.clone();
         let ack_job = redis::Script::new(include_str!("../../lua/ack_job.lua"));
         let inflight_set = format!("{}:{}", &self.queue.inflight_jobs_prefix, &self.id());
         let data_hash = format!("{}", &self.queue.job_data_hash);

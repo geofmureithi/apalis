@@ -1,28 +1,23 @@
 use crate::job::Job;
-use crate::storage::Storage;
 use core::marker::PhantomData;
 
+/// Represents a queue for a job
+/// One queue carries one job. Create an enum to handle multiple jobs
 #[derive(Clone)]
-pub struct Queue<J: Job, S: Storage> {
+pub struct Queue<J: Job> {
     name: String,
     job_type: PhantomData<J>,
-    pub storage: S,
 }
 
-impl<J: Job, S: Storage + Clone> Queue<J, S> {
-    pub fn new(storage: &S) -> Self {
+impl<J: Job> Queue<J> {
+    pub fn new() -> Self {
         Queue {
             name: J::name().to_string(),
             job_type: PhantomData,
-            storage: storage.clone(),
         }
     }
 
     pub fn get_name(&self) -> &String {
         &self.name
-    }
-
-    pub fn get_storage(&self) -> &S {
-        &self.storage
     }
 }

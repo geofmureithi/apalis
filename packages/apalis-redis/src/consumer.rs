@@ -24,18 +24,20 @@ pub type RedisJobContext<T> = JobContext<RedisConsumer<T>>;
 pub struct RedisConsumer<J: 'static + Job + JobHandler<RedisConsumer<J>>> {
     pub(crate) data: Arc<Mutex<JobContext<Self>>>,
     pub(crate) queue: RedisQueue<J>,
+    pub(crate) storage: RedisStorage,
     id: String,
     typeid: PhantomData<J>,
 }
 
 impl<J: Job + JobHandler<RedisConsumer<J>>> RedisConsumer<J> {
-    pub fn new(queue: &Queue<J, RedisStorage>) -> Self {
+    pub fn new(queue: &Queue<J>, storage: &RedisStorage) -> Self {
         let redis_queue = RedisQueue::new(queue);
         RedisConsumer {
             data: Arc::new(Mutex::new(JobContext::new())),
             queue: redis_queue,
             id: format!("RedisConsumer[{:?}]", uuid::Uuid::new_v4()),
             typeid: PhantomData,
+            storage: storage.clone(),
         }
     }
     pub fn id(&self) -> &String {
@@ -49,14 +51,13 @@ impl<J: Job + JobHandler<RedisConsumer<J>>> RedisConsumer<J> {
 
     pub fn create(url: &str) -> Result<Self, redis::RedisError> {
         let storage = RedisStorage::new(url)?;
-        let queue = Queue::<J, RedisStorage>::new(&storage);
-        Ok(RedisConsumer::new(&queue))
+        let queue = Queue::<J>::new();
+        Ok(RedisConsumer::new(&queue, &storage))
     }
 
     pub fn build_producer(&self) -> Addr<RedisProducer<J>> {
-        let storage = &self.queue.storage;
-        let queue = Queue::new(storage);
-        RedisProducer::start(&queue)
+        let queue = Queue::new();
+        RedisProducer::start(&queue, &self.storage.clone())
     }
 }
 
@@ -126,7 +127,7 @@ where
 mod tests {
 
     use super::*;
-    use apalis::Job;
+    use apalis_core::Job;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize)]
@@ -146,8 +147,8 @@ mod tests {
     #[actix_rt::test]
     async fn test_handles_job() {
         let storage = RedisStorage::new("redis://127.0.0.1/").unwrap();
-        let queue = Queue::<TestJob, RedisStorage>::new(&storage);
-        let addr = Actor::create(|_ctx| RedisConsumer::new(&queue));
+        let queue = Queue::<TestJob>::new();
+        let addr = Actor::create(|_ctx| RedisConsumer::new(&queue, &storage));
         assert!(addr.connected())
     }
 }

@@ -105,6 +105,18 @@ async fn main() {
 - [redis-rs](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
 - [sqlx](https://github.com/launchbadge/sqlx) - The Rust SQL Toolkit
 
+## Roadmap
+
+v 0.3
+
+- [ ] Standardize API (Storage, Worker, Data, Middleware, Context )
+- [ ] Introduce SQL, specifically
+
+v 0.2
+
+- [x] Redis Example
+- [x] Actix Web Example
+
 ## Contributing
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests to us.
@@ -119,7 +131,7 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 
 See also the list of [contributors](https://github.com/geofmureithi/apalis/contributors) who participated in this project.
 
-It was formally `actix-redis-jobs` and if you want to use the crate name please contact me.
+It was formerly `actix-redis-jobs` and if you want to use the crate name please contact me.
 
 ## License
 

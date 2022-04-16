@@ -1,5 +1,3 @@
-use apalis_core::Storage;
-
 use redis::{aio::MultiplexedConnection, Client, RedisError};
 
 #[derive(Clone)]
@@ -17,5 +15,3 @@ impl RedisStorage {
         self.client.get_multiplexed_async_connection().await
     }
 }
-
-impl Storage for RedisStorage {}

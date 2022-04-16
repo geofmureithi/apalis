@@ -1,6 +1,6 @@
 use crate::consumer::RedisConsumer;
 use actix::prelude::*;
-use apalis_core::{Job, JobHandler, Error};
+use apalis_core::{Error, Job, JobHandler};
 use chrono::Utc;
 
 /// Actix message implements registering the consumer
@@ -15,7 +15,7 @@ where
     type Result = ResponseFuture<Result<Option<bool>, Error>>;
 
     fn handle(&mut self, _msg: RegisterConsumer, _: &mut Self::Context) -> Self::Result {
-        let conn = self.queue.storage.clone();
+        let conn = self.storage.clone();
         let register_consumer = redis::Script::new(include_str!("../../lua/register_consumer.lua"));
         let inflight_set = format!("{}:{}", &self.queue.inflight_jobs_prefix, self.id());
         let consumers_set = self.queue.consumers_set.to_string();

@@ -41,7 +41,7 @@ where
     J: Job,
 {
     fn handle(&mut self, _msg: FetchJob, ctx: &mut Self::Context) {
-        let conn = self.queue.storage.clone();
+        let conn = self.storage.clone();
         let fetch_jobs = redis::Script::new(include_str!("../../lua/get_jobs.lua"));
         let consumers_set = self.queue.consumers_set.to_string();
         let active_jobs_list = self.queue.active_jobs_list.to_string();

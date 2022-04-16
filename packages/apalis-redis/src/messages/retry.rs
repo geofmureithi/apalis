@@ -27,7 +27,7 @@ where
     type Result = ResponseFuture<Result<Option<i8>, Error>>;
 
     fn handle(&mut self, msg: RetryJob, _: &mut Self::Context) -> Self::Result {
-        let conn = self.queue.storage.clone();
+        let conn = self.storage.clone();
         let retry_jobs = redis::Script::new(include_str!("../../lua/retry_job.lua"));
         let inflight_set = format!("{}:{}", &self.queue.inflight_jobs_prefix, &self.id());
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();

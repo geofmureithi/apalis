@@ -1,5 +1,5 @@
-use apalis_core::{Job, Queue};
 use crate::RedisStorage;
+use apalis_core::{Job, Queue};
 use std::marker::PhantomData;
 
 const ACTIVE_JOBS_LIST: &str = "{queue}:active";
@@ -21,11 +21,10 @@ pub struct RedisQueue<J: Job> {
     pub(crate) scheduled_jobs_set: String,
     pub(crate) signal_list: String,
     job_type: PhantomData<J>,
-    pub(crate) storage: RedisStorage,
 }
 
 impl<J: Job> RedisQueue<J> {
-    pub fn new(queue: &Queue<J, RedisStorage>) -> Self {
+    pub fn new(queue: &Queue<J>) -> Self {
         let name = queue.get_name();
         RedisQueue {
             name: name.to_string(),
@@ -37,7 +36,6 @@ impl<J: Job> RedisQueue<J> {
             scheduled_jobs_set: SCHEDULED_JOBS_SET.replace("{queue}", &name),
             signal_list: SIGNAL_LIST.replace("{queue}", &name),
             job_type: PhantomData,
-            storage: queue.storage.clone()
         }
     }
 

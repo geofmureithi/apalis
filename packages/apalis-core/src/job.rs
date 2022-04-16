@@ -10,31 +10,45 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tokio::sync::{oneshot, oneshot::Sender as OneshotSender};
 
+/// Represents an job that can be serialized and stored
 pub trait Job: Serialize + DeserializeOwned + Send + Unpin {
+    /// Job must be debuggable
     type Result: 'static + Debug;
+
+    /// represents the name of the job
     fn name() -> &'static str {
         std::any::type_name::<Self>()
     }
 
+    /// represents the number of retries
     fn retries() -> i64 {
         0
     }
 }
 
+/// Represents how jobs will be handled.
 pub trait JobHandler<C>
 where
     C: Consumer + Actor,
     Self: Job,
 {
     type Result: JobResponse<C, Self>;
+    /// Represents the actual handling and returns defined result
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - [apalis_core::JobContext]
+    ///
     fn handle(self, ctx: &mut JobContext<C>) -> <Self as JobHandler<C>>::Result;
 }
 
+/// Represents the kind of errors that are expected when a job fails
 #[derive(Debug)]
 pub enum Error {
     Failed,
 }
 
+/// Represents the state of a job
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum JobState {
     Unacked,
@@ -42,6 +56,7 @@ pub enum JobState {
     Rejected,
 }
 
+/// Wrapper struct to hold the serialized job, and extra details
 #[derive(Message, Debug, Serialize, Deserialize)]
 #[rtype(result = "Result<JobState, Error>")]
 pub struct PushJob {
@@ -62,6 +77,7 @@ impl Drop for PushJob {
     }
 }
 
+/// Represents a job scheduled into the future
 #[derive(Message, Debug, Serialize, Deserialize)]
 #[rtype(result = "Result<JobState, Error>")]
 pub struct ScheduledJob {
@@ -76,6 +92,22 @@ impl<J: Job> From<J> for PushJob {
 }
 
 impl PushJob {
+    /// Returns a job that can be pushed to a [apalis_core::Storage]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use uuid::Uuid;
+    /// use apalis_core::{PushJob, Job};
+    /// use serde::{Deserialize, Serialize};
+    ///
+    /// #[derive(Debug, Serialize, Deserialize)]
+    /// struct MyJob {}
+    /// impl Job for MyJob {
+    ///     type Result = ();
+    /// }
+    /// let job = PushJob::new(Uuid::new_v4(), MyJob {});
+    /// ```
     pub fn new<J: Job>(id: uuid::Uuid, job: J) -> Self
     where
         J: Serialize,
@@ -146,8 +178,8 @@ pub trait JobResponse<C: Consumer + Actor, J: Job + JobHandler<C>> {
     fn process(self, tx: Option<OneshotSender<<J as Job>::Result>>);
 }
 
-// Helper trait for send one shot message from Option<Sender> type.
-// None and error are ignored.
+/// Helper trait for send one shot message from Option<Sender> type.
+/// None and error are ignored.
 trait JobOneshot<M> {
     fn send(self, msg: M);
 }

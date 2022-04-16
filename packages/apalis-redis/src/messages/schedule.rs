@@ -37,7 +37,7 @@ where
     J: Job,
 {
     fn handle(&mut self, _: Schedule, ctx: &mut Context<RedisConsumer<J>>) {
-        let conn = self.queue.storage.clone();
+        let conn = self.storage.clone();
         let enqueue_jobs = redis::Script::new(include_str!("../../lua/enqueue_scheduled_jobs.lua"));
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
         let active_jobs_list = self.queue.active_jobs_list.to_string();

@@ -1,4 +1,4 @@
-use crate::storage::Storage;
 use actix::Actor;
 
-pub trait Producer<S: Storage>: Actor {}
+/// Represents an actor that can push jobs
+pub trait Producer: Actor {}

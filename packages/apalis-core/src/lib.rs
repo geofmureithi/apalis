@@ -1,9 +1,10 @@
+#![crate_name = "apalis_core"]
+
 mod consumer;
 mod context;
 mod job;
 mod producer;
 mod queue;
-mod storage;
 mod worker;
 
 pub use crate::consumer::Consumer;
@@ -13,5 +14,4 @@ pub use crate::job::{
 };
 pub use crate::producer::Producer;
 pub use crate::queue::Queue;
-pub use crate::storage::Storage;
 pub use crate::worker::Worker;

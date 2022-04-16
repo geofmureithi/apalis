@@ -1,6 +1,6 @@
 pub use apalis_core::{
     Consumer, Error, Job, JobContext, JobFuture, JobHandler, JobState, Producer, PushJob, Queue,
-    Storage, Worker,
+    Worker,
 };
 
 pub mod prelude {

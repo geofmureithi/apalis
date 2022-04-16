@@ -1,8 +1,13 @@
+#[macro_use]
+extern crate criterion;
+
 use actix::prelude::*;
 use apalis::{
     redis::{RedisConsumer, RedisJobContext, RedisProducer, RedisStorage},
     Job, JobFuture, JobHandler, Queue, Worker,
 };
+use criterion::async_executor::FuturesExecutor;
+use criterion::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -52,7 +57,7 @@ pub enum MathError {
     InternalError,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub enum Math {
     Add(u64, u64),
     Fibonacci(u64),
@@ -87,25 +92,31 @@ fn produce_jobs(queue: &Queue<Math>, storage: &RedisStorage) {
     producer.do_send(Math::Add(1, 2).into());
     producer.do_send(Math::Fibonacci(9).into());
 }
-
-#[actix_rt::main]
-async fn main() {
-    std::env::set_var("RUST_LOG", "info");
-    env_logger::init();
-    let storage = RedisStorage::new("redis://127.0.0.1/").unwrap();
-    let queue = Queue::<Math>::new();
-
+async fn redis(queue: &Queue<Math>, storage: &RedisStorage) {
     //This can be in another part of the program
     produce_jobs(&queue, &storage);
+}
 
+fn bench(c: &mut Criterion) {
+    let sys = actix::System::new("test");
+    let storage = RedisStorage::new("redis://127.0.0.1/").unwrap();
+    let inner_storage = storage.clone();
+    let queue = Queue::<Math>::new();
+    let inner_queue = queue.clone();
     let counter = Arc::new(Mutex::new(MathCounter { counter: 0 }));
     let addr = SyncArbiter::start(2, || SyncActor);
-    Worker::new()
-        .register_with_threads(2, move || {
-            RedisConsumer::new(&queue, &storage)
-                .data(counter.clone())
-                .data(addr.clone())
-        })
-        .run()
-        .await;
+    let _worker = Worker::new().register_with_threads(2, move || {
+        RedisConsumer::new(&queue, &storage)
+            .data(counter.clone())
+            .data(addr.clone())
+    });
+    c.bench_function("apalis", move |b| {
+        b.to_async(FuturesExecutor)
+            .iter(|| async { redis(&inner_queue, &inner_storage).await })
+    });
+
+    let _ = sys.run();
 }
+
+criterion_group!(benches, bench);
+criterion_main!(benches);
