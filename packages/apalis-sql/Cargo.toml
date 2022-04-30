@@ -5,7 +5,7 @@ authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2018"
 
 license = "MIT"
-description = "SQL Storage for Apalis: simple, extensible multithreaded background processing for Rust"
+description = "SQL Storage for Apalis: simple, extensible multithreaded background job processing for Rust"
 
 [features]
 default = [ "sqlite" ]
