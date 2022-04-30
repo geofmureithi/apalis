@@ -34,11 +34,15 @@ impl Worker {
     }
 }
 
+/// Represents a monitor for multiple instances of [Queue]
+/// Keeps an address of each queue and periodically checks of their status
+/// When combined with the `web` feature, it can be used to manage the queues from a web ui.
 pub struct Worker {
     addrs: Vec<Recipient<WorkerManagement>>,
 }
 
 impl Worker {
+    /// Register a single queue
     pub fn register<T: 'static, S: 'static, H: 'static, F: 'static>(
         mut self,
         queue: Queue<T, S, H>,
@@ -56,6 +60,8 @@ impl Worker {
         self.addrs.push(addr.into());
         self
     }
+
+    /// Register multiple queues that run on a separate thread.
     pub fn register_with_count<F, T, S, H, Fut>(mut self, count: usize, factory: F) -> Self
     where
         F: Fn() -> Addr<Queue<T, S, H>>,

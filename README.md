@@ -69,9 +69,8 @@ async fn main() -> std::io::Result<()> {
 Then
 
 ```rust
-    //This can be in another part of the program or another application
-
-    async fn produce_route_jobs(storage: &RedisStorage<Email>) {
+//This can be in another part of the program or another application
+async fn produce_route_jobs(storage: &RedisStorage<Email>) {
     let mut storage = storage.clone();
     storage
         .push(Email {
@@ -83,9 +82,20 @@ Then
 
 ```
 
+## Storage Comparison
+
+Since we provide a few storage solutions, here is a table comparing them:
+
+| Feature        | Redis | Sqlite | Postgres | Sled | Mysql | Mongo |
+| :------------- | :---: | :----: | :------: | :--: | ----- | ----- |
+| Priorities     |       |        |          |      |       |       |
+| Scheduled jobs |   ✓   |   ✓    |    ✓     |  ✓   | ✓     | -     |
+| Retryable jobs |   ✓   |   ✓    |    ✓     |      | ✓     | -     |
+| Persistence    |   ✓   |   ✓    |    ✓     |  ✓   | ✓     | -     |
+
 ## Built On
 
-- [actix](https://actix.rs) - Actor framework for Rust
+- [`actix`] - Actor framework for Rust
 - [redis-rs](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
 - [sqlx](https://github.com/launchbadge/sqlx) - The Rust SQL Toolkit
 
@@ -95,7 +105,10 @@ v 0.3
 
 - [x] Standardize API (Storage, Worker, Data, Middleware, Context )
 - [x] Introduce SQL, specifically
+- [ ] Improve documentation
+- [ ] Organized modules and features.
 - [ ] Basic Web API Interface
+- [ ] Sql Examples
 
 v 0.2
 

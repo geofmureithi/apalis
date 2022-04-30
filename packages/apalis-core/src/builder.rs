@@ -94,6 +94,32 @@ impl<T, S, M> QueueBuilder<T, S, M> {
     //     self.layer.layer(service)
     // }
 
+    /// Represents a heartbeat to be sent by a [Queue] to the [Storage].
+    pub fn heartbeat(mut self, heartbeat: Heartbeat, duration: Duration) -> Self {
+        self.heartbeats.insert(heartbeat, duration);
+        QueueBuilder {
+            job: self.job,
+            storage: self.storage,
+            layer: self.layer,
+            fetch_interval: duration,
+            heartbeats: self.heartbeats,
+        }
+    }
+
+    /// Represents the fetch interval by a [Queue] from the [Storage].
+    /// Recommended 50ms - 100ms
+    /// Can be lowered to increase a queue's priority
+    pub fn fetch_interval(self, duration: Duration) -> Self {
+        QueueBuilder {
+            job: self.job,
+            storage: self.storage,
+            layer: self.layer,
+            fetch_interval: duration,
+            heartbeats: self.heartbeats,
+        }
+    }
+    /// Builds a [QueueFactory] using the default [JobService] service
+    /// that can be used to generate new [Queue] actors using the `Actor::start` method
     pub fn build(self) -> QueueFactory<T, S, M::Service>
     where
         M: Layer<JobService>,
@@ -107,9 +133,18 @@ impl<T, S, M> QueueBuilder<T, S, M> {
         }
     }
 
+    /// Builds a [QueueFactory] using a [tower::util::ServiceFn] service
+    /// that can be used to generate new [Queue] actors using the `Actor::start` method
+    /// # Arguments
+    ///
+    /// * `f` - A tower functional service
+    ///
+    /// # Examples
+    ///
+
     pub fn build_fn<F>(self, f: F) -> QueueFactory<T, S, M::Service>
     where
-        M: Layer<::tower::util::ServiceFn<F>>,
+        M: Layer<tower::util::ServiceFn<F>>,
     {
         QueueFactory {
             job: PhantomData,
@@ -130,6 +165,7 @@ pub struct QueueFactory<T, S, M> {
 }
 
 impl<T, S, M> QueueFactory<T, S, M> {
+    /// Allows you to start a [Queue] that starts consuming the storage immediately
     pub fn start<Fut>(self) -> Addr<Queue<T, S, M>>
     where
         S: Storage<Output = T> + Unpin + Send + 'static,
@@ -151,6 +187,7 @@ impl<T, S, M> QueueFactory<T, S, M> {
         })
     }
 
+    /// Allows customization before the starting of a [Queue]
     pub fn start_with<Fut, F>(self, f: F) -> Addr<Queue<T, S, M>>
     where
         S: Storage<Output = T> + Unpin + Send + 'static,

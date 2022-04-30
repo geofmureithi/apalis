@@ -33,12 +33,7 @@ pub enum JobError {
     Unknown,
 }
 
-#[derive(Error, Debug)]
-pub enum FakeError {
-    #[error("some fake error")]
-    Faked,
-}
-
+// #[cfg(feature = "sqlite")]
 impl From<sqlx::Error> for StorageError {
     fn from(e: sqlx::Error) -> Self {
         StorageError::Database(Box::from(e))

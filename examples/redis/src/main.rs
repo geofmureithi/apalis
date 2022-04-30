@@ -1,4 +1,8 @@
-use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker};
+use std::time::Duration;
+
+use apalis::{
+    redis::RedisStorage, Heartbeat, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -38,6 +42,8 @@ async fn main() -> std::io::Result<()> {
     Worker::new()
         .register_with_count(2, move || {
             QueueBuilder::new(storage.clone())
+                .fetch_interval(Duration::from_millis(50))
+                .heartbeat(Heartbeat::EnqueueScheduled(10), Duration::from_millis(50))
                 .build_fn(email_service)
                 .start()
         })

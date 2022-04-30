@@ -10,7 +10,8 @@ use crate::{
     error::JobError, request::JobRequest, response::JobResult, storage::Storage, streams::FetchJob,
     worker::WorkerManagement,
 };
-
+/// A queue represents a consumer of a [Storage].
+/// A [tower::Service] must be provided to be called when a new job is detected.
 #[must_use]
 pub struct Queue<T: Serialize, S: Storage<Output = T>, H> {
     storage: S,
@@ -18,7 +19,9 @@ pub struct Queue<T: Serialize, S: Storage<Output = T>, H> {
     handler: Box<H>,
 }
 
-#[derive(Debug, Clone)]
+/// Each [Queue] sends heartbeat messages
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+
 pub enum Heartbeat {
     EnqueueScheduled(i32),
     RenqueueActive,
@@ -27,6 +30,8 @@ pub enum Heartbeat {
     Other(&'static str),
 }
 
+/// Represents the status of a queue.
+/// Mainly consumed by [crate::worker::Worker]
 #[derive(Default, Clone)]
 pub struct QueueStatus {
     load: i64,
@@ -34,6 +39,7 @@ pub struct QueueStatus {
     id: uuid::Uuid,
 }
 
+/// Represents a queue error.
 #[derive(Debug)]
 pub enum QueueError {}
 

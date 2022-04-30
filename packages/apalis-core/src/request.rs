@@ -79,33 +79,11 @@ impl<T> JobRequest<T> {
         &self.job
     }
 
+    /// Get the [uuid::Uuid] for a job
     pub fn id(&self) -> String {
         self.id.clone()
     }
 
-    pub(crate) fn start(&mut self) -> i32 {
-        self.attempts += 1;
-        self.status = JobState::Running;
-        self.lock_at = Some(Utc::now());
-        self.attempts
-    }
-
-    pub(crate) fn retry(&mut self) {
-        self.status = JobState::Retry;
-    }
-
-    pub(crate) fn kill(&mut self) {
-        self.status = JobState::Killed;
-    }
-
-    pub(crate) fn reschedule(&mut self, wait: &Duration) {
-        self.run_at = self.run_at.add(wait.clone());
-    }
-
-    pub(crate) fn ack(&mut self) {
-        self.status = JobState::Done;
-        self.done_at = Some(Utc::now())
-    }
     /// Gets a mutable reference to the job context.
     pub fn context_mut(&mut self) -> &mut JobContext {
         &mut self.context
@@ -122,7 +100,6 @@ where
     J: Job,
 {
     pub(crate) async fn do_handle(&mut self) -> Result<JobResult, JobError> {
-        self.start();
         let id = self.id();
         let ctx = self.context();
         let job = self.inner();
