@@ -1,13 +1,24 @@
 pub use apalis_core::{
-    Consumer, Error, Job, JobContext, JobFuture, JobHandler, JobState, Producer, PushJob, Queue,
-    Worker,
+    builder::QueueBuilder,
+    error::JobError,
+    job::{Job, JobFuture},
+    queue::{Heartbeat, Queue},
+    request::JobRequest,
+    response::JobResult,
+    storage::Storage,
+    worker::Worker,
 };
 
-pub mod prelude {
-    pub use apalis_core::{Job, JobContext, JobFuture, JobHandler, Queue, Worker};
+pub mod heartbeat {
+    pub use apalis_core::streams::*;
 }
 
 #[cfg(feature = "redis")]
 pub mod redis {
-    pub use apalis_redis::{RedisConsumer, RedisJobContext, RedisProducer, RedisStorage};
+    pub use apalis_redis::RedisStorage;
+}
+
+#[cfg(feature = "sqlite")]
+pub mod sqlite {
+    pub use apalis_sql::SqliteStorage;
 }

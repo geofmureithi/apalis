@@ -1,4 +1,6 @@
-use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker};
+use apalis::{
+    sqlite::SqliteStorage, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -14,7 +16,7 @@ async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
     Ok(JobResult::Success)
 }
 
-async fn produce_jobs(storage: &RedisStorage<Email>) {
+async fn produce_jobs(storage: &SqliteStorage<Email>) {
     let mut storage = storage.clone();
     storage
         .push(Email {
@@ -28,16 +30,19 @@ async fn produce_jobs(storage: &RedisStorage<Email>) {
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "debug");
+    std::env::set_var("RUST_LOG", "info");
     env_logger::init();
 
-    let storage = RedisStorage::new("redis://127.0.0.1/").await.unwrap();
-    //This can be in another part of the program
-    produce_jobs(&storage).await;
+    let sqlite = SqliteStorage::new("sqlite::memory:").await.unwrap();
+    // Do migrations: Mainly for "sqlite::memory:"
+    sqlite.setup().await;
+
+    // This can be in another part of the program
+    produce_jobs(&sqlite).await;
 
     Worker::new()
         .register_with_count(2, move || {
-            QueueBuilder::new(storage.clone())
+            QueueBuilder::new(sqlite.clone())
                 .build_fn(email_service)
                 .start()
         })

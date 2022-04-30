@@ -1,63 +1,77 @@
-use crate::Consumer;
+use std::fmt::Debug;
+
 use actix::prelude::*;
+use futures::Future;
+use serde::{de::DeserializeOwned, Serialize};
+use tower::Service;
 
-// #[derive(Message)]
-// #[rtype(result = "()")]
-// pub enum WorkerManagement {
-//     Status,
-//     Stop,
-//     Restart,
-// }
+use crate::{
+    error::JobError,
+    queue::QueueError,
+    queue::{Queue, QueueStatus},
+    request::JobRequest,
+    response::JobResult,
+    storage::Storage,
+};
 
-// pub struct WorkerStatus {
-//     load: u64,
-//     running: bool,
-//     since: chrono::DateTime<chrono::Local>,
-//     state: String,
-// }
-
-// pub enum WorkerResponse {
-//     Status(WorkerStatus)
-//     Action()
-// }
-
-pub struct Worker {
-    //addrs: Vec<Recipient<WorkerManagement>>,
+#[derive(Message)]
+#[rtype(result = "Result<QueueStatus, QueueError>")]
+pub enum WorkerManagement {
+    Status,
+    Stop,
+    Restart,
+    Setup,
+    Ack(String),
+    Kill(String),
 }
 
 impl Worker {
-    pub fn register<F, C>(self, factory: F) -> Self
-    where
-        F: Fn() -> C,
-        C: 'static + Consumer + Send + Actor<Context = actix::Context<C>>, // + Handler<WorkerManagement>,
-    {
-        let workers = 1;
-        self.register_with_threads(workers, factory)
+    pub fn new() -> Self {
+        Self { addrs: Vec::new() }
     }
+    pub async fn run(self) -> std::io::Result<()> {
+        actix_rt::signal::ctrl_c().await
+    }
+}
 
-    pub fn register_with_threads<F, C>(self, count: usize, factory: F) -> Self
+pub struct Worker {
+    addrs: Vec<Recipient<WorkerManagement>>,
+}
+
+impl Worker {
+    pub fn register<T: 'static, S: 'static, H: 'static, F: 'static>(
+        mut self,
+        queue: Queue<T, S, H>,
+    ) -> Self
     where
-        F: Fn() -> C,
-        C: 'static + Consumer + Send + Actor<Context = actix::Context<C>>, // + Handler<WorkerManagement>,
+        S: Storage<Output = T> + Unpin,
+        T: Serialize + Debug + DeserializeOwned + Send,
+        H: Service<JobRequest<T>, Response = JobResult, Error = JobError, Future = F>
+            + Unpin
+            + Send
+            + 'static,
+        F: Future,
     {
-        for _worker in 0..count {
-            let consumer = factory();
-            let _addr = Actor::start_in_arbiter(&Arbiter::new(), move |_| consumer);
-            // self.addrs.push(addr.into());
-        }
+        let addr = queue.start();
+        self.addrs.push(addr.into());
         self
     }
-
-    pub fn new() -> Self {
-        Worker {
-            // addrs: vec![]
+    pub fn register_with_count<F, T, S, H, Fut>(mut self, count: usize, factory: F) -> Self
+    where
+        F: Fn() -> Addr<Queue<T, S, H>>,
+        S: Storage<Output = T> + Unpin + Send + 'static,
+        T: Serialize + Debug + DeserializeOwned + Send + 'static,
+        H: Service<JobRequest<T>, Response = JobResult, Error = JobError, Future = Fut>
+            + Unpin
+            + Send
+            + 'static,
+        Fut: Future + 'static,
+    {
+        for _worker in 0..count {
+            let addr = factory();
+            self.addrs.push(addr.into());
         }
-    }
-
-    pub async fn run(self) {
-        actix_rt::signal::ctrl_c()
-            .await
-            .expect("failed to listen for ctrl_c");
+        self
     }
 }
 
