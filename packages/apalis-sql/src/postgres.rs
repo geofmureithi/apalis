@@ -8,6 +8,7 @@ use std::{fmt::Debug, marker::PhantomData, ops::Add, time::Duration};
 pub struct PostgresStorage<T> {
     pool: Pool<Postgres>,
     job_type: PhantomData<T>,
+    schema: String,
 }
 
 impl<T> Clone for PostgresStorage<T> {
@@ -16,6 +17,7 @@ impl<T> Clone for PostgresStorage<T> {
         PostgresStorage {
             pool,
             job_type: PhantomData,
+            schema: self.schema.clone(),
         }
     }
 }
@@ -26,54 +28,34 @@ impl<T> PostgresStorage<T> {
         Ok(Self {
             pool,
             job_type: PhantomData,
+            schema: "apalis".to_string(),
         })
     }
 
-    pub async fn setup(&self) {
+    pub async fn setup(&self) -> Result<(), sqlx::Error> {
         let query = r#"
-        CREATE TABLE IF NOT EXISTS Jobs
-                ( job TEXT NOT NULL,
-                  id TEXT NOT NULL,
-                  status TEXT NOT NULL DEFAULT 'Pending',
+        CREATE TABLE IF NOT EXISTS apalis.jobs
+                ( id SERIAL PRIMARY KEY,
+                  job JSONB NOT NULL,
+                  queue_name TEXT NOT NULL,
+                  status VARCHAR NOT NULL DEFAULT 'Pending',
                   attempts INTEGER NOT NULL DEFAULT 0,
                   max_attempts INTEGER NOT NULL DEFAULT 25,
-                  run_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                  run_at TIMESTAMP NOT NULL DEFAULT NOW(),
                   last_error TEXT,
                   lock_at INTEGER,
                   lock_by TEXT,
-                  done_at INTEGER )
+                  done_at TIMESTAMP))
         "#;
         let pool = self.pool.clone();
-        sqlx::query(query)
-            .execute(&pool)
-            .await
-            .expect("Failed to BEGIN transaction.");
+        sqlx::query(query).execute(&pool).await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS TIdx ON Jobs(id)")
+        sqlx::query("CREATE INDEX IF NOT EXISTS TIdx ON apalis.jobs(id);")
             .execute(&pool)
-            .await
-            .expect("Failed to BEGIN transaction.");
-        sqlx::query("CREATE INDEX IF NOT EXISTS SIdx ON Jobs(status)")
+            .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS SIdx ON apalis.jobs(status)")
             .execute(&pool)
-            .await
-            .expect("Failed to BEGIN transaction.");
-
-        sqlx::query("PRAGMA journal_mode = 'WAL';")
-            .execute(&pool)
-            .await
-            .expect("Failed to BEGIN transaction.");
-        sqlx::query("PRAGMA temp_store = 2;")
-            .execute(&pool)
-            .await
-            .expect("Failed to BEGIN transaction.");
-        sqlx::query("PRAGMA synchronous = 1;")
-            .execute(&pool)
-            .await
-            .expect("Failed to BEGIN transaction.");
-        // sqlx::query("PRAGMA cache_size = 64_000;")
-        //     .execute(&pool)
-        //     .await
-        //     .expect("Failed to BEGIN transaction.");
+            .await?
     }
 }
 
@@ -84,7 +66,7 @@ where
     type Output = T;
 
     fn push(&mut self, job: Self::Output) -> StorageResult<()> {
-        let query = "INSERT INTO Jobs VALUES (?1, lower(hex(randomblob(16))), 'Pending', 0, 25, strftime('%s','now'), NULL, NULL, NULL, NULL)";
+        let query = "INSERT INTO apalis.jobs VALUES (?1, lower(hex(randomblob(16))), 'Pending', 0, 25, strftime('%s','now'), NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
         let job = serde_json::to_string(&job).unwrap();
         let fut = async move {
@@ -99,8 +81,8 @@ where
         let pool = self.pool.clone();
         let fut = async move {
             let mut tx = pool.begin().await.unwrap();
-            let fetch_query = "SELECT * FROM Jobs
-            WHERE rowid = (SELECT min(rowid) FROM Jobs
+            let fetch_query = "SELECT * FROM apalis.jobs
+            WHERE rowid = (SELECT min(rowid) FROM apalis.jobs
                            WHERE status = 'Pending')";
             let job: Option<JobRequest<T>> =
                 sqlx::query_as(fetch_query).fetch_optional(&mut tx).await?;
@@ -109,7 +91,7 @@ where
             }
             let job = job.unwrap();
             let job_id = job.id();
-            let update_query = "UPDATE Jobs SET status = 'Running', attempts = attempts + 1,  lock_at = strftime('%s','now') WHERE id = ?1 AND status = 'Pending'";
+            let update_query = "UPDATE apalis.jobs SET status = 'Running', attempts = attempts + 1, lock_at = NOW() WHERE id = ?1 AND status = 'Pending'";
             sqlx::query(update_query)
                 .bind(job_id.to_owned())
                 .execute(&mut tx)

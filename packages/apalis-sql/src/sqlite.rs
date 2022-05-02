@@ -2,7 +2,7 @@ use apalis_core::request::JobRequest;
 use apalis_core::storage::{Storage, StorageResult};
 use chrono::Utc;
 use serde::{de::DeserializeOwned, Serialize};
-use sqlx::{Pool, Sqlite, SqlitePool};
+use sqlx::{Pool, Row, Sqlite, SqlitePool};
 use std::{fmt::Debug, marker::PhantomData, ops::Add, time::Duration};
 
 pub struct SqliteStorage<T> {
@@ -145,6 +145,17 @@ where
                 .execute(&mut tx)
                 .await?;
             Ok(tx.commit().await?)
+        };
+        Box::pin(fut)
+    }
+
+    fn len(&self) -> StorageResult<i64> {
+        let pool = self.pool.clone();
+        let fut = async move {
+            let mut tx = pool.acquire().await?;
+            let query = "Select Count(*) as count from Jobs where status='Pending'";
+            let record = sqlx::query(query).fetch_one(&mut tx).await?;
+            Ok(record.try_get("count")?)
         };
         Box::pin(fut)
     }

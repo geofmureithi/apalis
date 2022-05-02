@@ -2,7 +2,11 @@ use chrono::Duration;
 use futures::future::BoxFuture;
 use serde::Serialize;
 
-use crate::{error::StorageError, queue::Heartbeat, request::JobRequest};
+use crate::{
+    error::StorageError,
+    queue::Heartbeat,
+    request::{JobRequest, JobState},
+};
 
 pub type StorageResult<I> = BoxFuture<'static, Result<I, StorageError>>;
 
@@ -17,8 +21,9 @@ pub trait Storage: Clone {
     /// Get the next job in the queue,
     fn consume(&mut self) -> StorageResult<Option<JobRequest<Self::Output>>>;
 
-    fn len(&self) -> i64 {
-        0
+    fn len(&self) -> StorageResult<i64> {
+        let fut = async { Ok(0) };
+        Box::pin(fut)
     }
 
     fn ack(&mut self, job_id: String) -> StorageResult<()> {
@@ -45,4 +50,9 @@ pub trait Storage: Clone {
         let fut = async { Ok(()) };
         Box::pin(fut)
     }
+}
+
+pub trait StorageJobExt<Output>: Storage<Output = Output> {
+    fn find_by_id(&mut self, job_id: String) -> StorageResult<Output>;
+    fn list_by_page(&mut self, status: JobState, page: i32) -> StorageResult<Vec<Output>>;
 }

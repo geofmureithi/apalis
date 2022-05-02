@@ -18,9 +18,60 @@ use crate::{
     response::JobResult,
     service::JobService,
     storage::Storage,
-    streams::FetchJobStream,
+    streams::{FetchJobStream, HeartbeatStream},
 };
 
+/// Configure and build a [Queue] job service.
+///
+/// `QueueBuilder` collects all the components and configuration required to
+/// build a job service. Once the service is defined, it can be built
+/// with `build`.
+///
+/// # Examples
+///
+/// Defining a job service with the default [JobService];
+///
+/// ```rust
+///
+/// use apalis::QueueBuilder;
+/// use apalis::sqlite::SqliteStorage;
+///
+/// let sqlite = SqliteStorage::new("sqlite::memory:").await.unwrap();
+///
+/// async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
+///    Ok(JobResult::Success)
+/// }
+///
+/// let addr = QueueBuilder::new(sqlite)
+///     .build_fn(email_service)
+///     .start();
+///
+/// ```
+///
+///
+/// Defining a middleware stack
+///
+/// ```rust
+/// use apalis::layers::{
+///    extensions::Extension,
+///    retry::{JobRetryPolicy, RetryLayer},
+/// };
+///
+/// use apalis::QueueBuilder;
+/// use apalis::sqlite::SqliteStorage;
+///
+/// let sqlite = SqliteStorage::new("sqlite::memory:").await.unwrap();
+///
+/// #[derive(Clone)]
+/// struct JobState {}
+///
+/// let addr = QueueBuilder::new(sqlite)
+///     .layer(RetryLayer::new(JobRetryPolicy))
+///     .layer(Extension(JobState {}))
+///     .build()
+///     .start();
+///
+/// ```
 pub struct QueueBuilder<T, S, M> {
     job: PhantomData<T>,
     layer: M,
@@ -46,6 +97,11 @@ where
 }
 
 impl<T, S, M> QueueBuilder<T, S, M> {
+    /// Add a new layer `T` into the [QueueBuilder].
+    ///
+    /// This wraps the inner service with the service provided by a user-defined
+    /// [Layer]. The provided layer must implement the [Layer] trait.
+    ///
     pub fn layer<U>(self, layer: U) -> QueueBuilder<T, S, Stack<U, M>>
     where
         M: Layer<U>,
@@ -179,10 +235,13 @@ impl<T, S, M> QueueFactory<T, S, M> {
         let arb = &Arbiter::new();
         Actor::start_in_arbiter(&arb.handle(), |ctx: &mut Context<Queue<T, S, M>>| {
             let start = Instant::now() + Duration::from_millis(5);
-            ctx.add_stream(FetchJobStream::new(interval_at(
-                start,
-                Duration::from_millis(100),
-            )));
+            ctx.add_stream(FetchJobStream::new(interval_at(start, self.fetch_interval)));
+            for (heartbeat, duration) in self.heartbeats.into_iter() {
+                ctx.add_stream(HeartbeatStream::new(
+                    heartbeat,
+                    interval_at(start, duration),
+                ));
+            }
             Queue::new(self.storage, self.service)
         })
     }

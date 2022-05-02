@@ -1,19 +1,34 @@
 use apalis::{
-    sqlite::SqliteStorage, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker,
+    layers::retry::{DefaultRetryPolicy, RetryLayer},
+    sqlite::SqliteStorage,
+    Job, JobContext, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker,
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 struct Email {
     to: String,
     subject: String,
     text: String,
 }
 
-async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
-    // Do something awesome
-    println!("Attempting to send email to {}", job.to);
-    Ok(JobResult::Success)
+#[derive(Clone)]
+struct EmailState;
+
+impl Job for Email {
+    type Result = Result<(), JobError>;
+
+    fn handle(self, ctx: &mut JobContext) -> Self::Result
+    where
+        Self: Sized,
+    {
+        let has_data = ctx.data_opt::<EmailState>();
+        println!("Has data b4:{}", has_data.is_some());
+        ctx.insert(EmailState);
+        let has_data = ctx.data_opt::<EmailState>();
+        println!("Has data afr:{}", has_data.is_some());
+        Err(JobError::Unknown)
+    }
 }
 
 async fn produce_jobs(storage: &SqliteStorage<Email>) {
@@ -30,8 +45,8 @@ async fn produce_jobs(storage: &SqliteStorage<Email>) {
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "info");
-    env_logger::init();
+    // std::env::set_var("RUST_LOG", "debug");
+    // env_logger::init();
 
     let sqlite = SqliteStorage::new("sqlite::memory:").await.unwrap();
     // Do migrations: Mainly for "sqlite::memory:"
@@ -43,7 +58,8 @@ async fn main() -> std::io::Result<()> {
     Worker::new()
         .register_with_count(2, move || {
             QueueBuilder::new(sqlite.clone())
-                .build_fn(email_service)
+                .layer(RetryLayer::new(DefaultRetryPolicy))
+                .build()
                 .start()
         })
         .run()

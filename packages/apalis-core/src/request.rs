@@ -1,10 +1,12 @@
-use chrono::{DateTime, Duration, TimeZone, Utc};
-use http::Extensions;
+use crate::service::JobService;
+use crate::storage::Storage;
+use chrono::{DateTime, TimeZone, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sqlx::{sqlite::SqliteRow, FromRow, Row};
-use std::{fmt::Debug, ops::Add};
+use std::fmt::Debug;
 use strum::EnumString;
 use tokio::sync::oneshot;
+use uuid::Uuid;
 
 use crate::{
     context::JobContext,
@@ -13,6 +15,7 @@ use crate::{
     response::{JobResponse, JobResult},
 };
 
+/// Represents the state of a [JobRequest] in a [Storage]
 #[derive(EnumString, Serialize, Deserialize, Debug, Clone)]
 pub enum JobState {
     Pending,
@@ -23,6 +26,10 @@ pub enum JobState {
     Killed,
 }
 
+/// Represents a job which can be pushed and popped into a [Storage].
+///
+///
+/// Its usually passed to a [JobService] for execution.
 #[derive(Serialize, Debug, Deserialize)]
 pub struct JobRequest<T> {
     job: T,
@@ -40,25 +47,26 @@ pub struct JobRequest<T> {
     context: JobContext,
 }
 
-// impl<T: Clone> Clone for JobRequest<T> {
-//     fn clone(&self) -> Self {
-//         Self {
-//             job: self.job.clone(),
-//             id: self.id.clone(),
-//             status: self.status.clone(),
-//             run_at: self.run_at.clone(),
-//             lock_at: self.lock_at.clone(),
-//             done_at: self.done_at.clone(),
-//             attempts: self.attempts,
-//             max_attempts: self.max_attempts,
-//             last_error: self.last_error.clone(),
-//             lock_by: self.lock_by.clone(),
-//             extensions: self.extensions.
-//         }
-//     }
-// }
+impl<T: Clone> Clone for JobRequest<T> {
+    fn clone(&self) -> Self {
+        Self {
+            job: self.job.clone(),
+            id: self.id.clone(),
+            status: self.status.clone(),
+            run_at: self.run_at.clone(),
+            lock_at: self.lock_at.clone(),
+            done_at: self.done_at.clone(),
+            attempts: self.attempts,
+            max_attempts: self.max_attempts,
+            last_error: self.last_error.clone(),
+            lock_by: self.lock_by.clone(),
+            context: JobContext::new(),
+        }
+    }
+}
 
 impl<T> JobRequest<T> {
+    /// Creates a new [JobRequest] ready to be pushed to a [Storage]
     pub fn new(job: T) -> Self {
         Self {
             job,
@@ -75,11 +83,12 @@ impl<T> JobRequest<T> {
         }
     }
 
+    /// Get the underlying reference of the [Job]
     pub fn inner(&self) -> &T {
         &self.job
     }
 
-    /// Get the [uuid::Uuid] for a job
+    /// Get the [Uuid] for a job
     pub fn id(&self) -> String {
         self.id.clone()
     }
@@ -93,18 +102,32 @@ impl<T> JobRequest<T> {
     pub fn context(&self) -> &JobContext {
         &self.context
     }
+
+    /// Gets the maximum attempts for a job. Default 25
+    pub fn max_attempts(&self) -> i32 {
+        self.max_attempts
+    }
+
+    /// Records a job attempt
+    pub fn record_attempt(&mut self) {
+        self.attempts += 1;
+    }
+
+    /// Gets the current attempts for a job. Default 0
+    pub fn attempts(&self) -> i32 {
+        self.attempts
+    }
 }
 
 impl<J> JobRequest<J>
 where
     J: Job,
 {
-    pub(crate) async fn do_handle(&mut self) -> Result<JobResult, JobError> {
+    /// A helper method to executes a [JobRequest] wrapping a [Job]
+    pub(crate) async fn do_handle(mut self) -> Result<JobResult, JobError> {
         let id = self.id();
-        let ctx = self.context();
-        let job = self.inner();
         let (tx, rx) = oneshot::channel();
-        job.handle(ctx).into_response(Some(tx));
+        self.job.handle(&mut self.context).into_response(Some(tx));
         match rx.await {
             Ok(value) => {
                 log::debug!("JobTX [{}] completed with value: {:?}", id, value);

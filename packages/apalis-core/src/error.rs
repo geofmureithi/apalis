@@ -13,6 +13,7 @@ pub enum StorageError {
 // Do not make this type public.
 pub type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
 
+/// Represents an error that is returned from an job.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum JobError {
@@ -20,12 +21,15 @@ pub enum JobError {
     #[error("attempted to communicate with a crashed background worker")]
     WorkerCrashed,
 
+    /// An error occured during execution.
     #[error("job failed with returned error: {0}")]
     Failed(#[source] BoxDynError),
 
+    /// An error communicating with storage.
     #[error("error communicating with storage: {0}")]
     Storage(StorageError),
 
+    /// A generic IO error
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -39,3 +43,7 @@ impl From<sqlx::Error> for StorageError {
         StorageError::Database(Box::from(e))
     }
 }
+
+/// Represents a queue error.
+#[derive(Debug)]
+pub enum QueueError {}

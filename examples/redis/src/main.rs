@@ -1,11 +1,16 @@
 use std::time::Duration;
 
 use apalis::{
-    redis::RedisStorage, Heartbeat, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker,
+    layers::{
+        extensions::Extension,
+        retry::{DefaultRetryPolicy, RetryLayer},
+    },
+    redis::RedisStorage,
+    Heartbeat, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker,
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 struct Email {
     to: String,
     subject: String,
@@ -13,13 +18,17 @@ struct Email {
 }
 
 async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
-    // Do something awesome
-    println!("Attempting to send email to {}", job.to);
-    Ok(JobResult::Success)
+    let attempts = job.attempts();
+    println!("Attempting #({}) to send email to {}", attempts, job.to);
+
+    // Get your state here
+    let email_state: Option<&EmailState> = job.context().data_opt();
+    assert!(email_state.is_some());
+
+    Err(JobError::Unknown)
 }
 
-async fn produce_jobs(storage: &RedisStorage<Email>) {
-    let mut storage = storage.clone();
+async fn produce_jobs(mut storage: RedisStorage<Email>) {
     storage
         .push(Email {
             to: "test@example.com".to_string(),
@@ -30,6 +39,11 @@ async fn produce_jobs(storage: &RedisStorage<Email>) {
         .unwrap();
 }
 
+#[derive(Clone)]
+struct EmailState {
+    // ommited
+}
+
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
@@ -37,11 +51,13 @@ async fn main() -> std::io::Result<()> {
 
     let storage = RedisStorage::new("redis://127.0.0.1/").await.unwrap();
     //This can be in another part of the program
-    produce_jobs(&storage).await;
+    produce_jobs(storage.clone()).await;
 
     Worker::new()
         .register_with_count(2, move || {
             QueueBuilder::new(storage.clone())
+                .layer(RetryLayer::new(DefaultRetryPolicy))
+                .layer(Extension(EmailState {}))
                 .fetch_interval(Duration::from_millis(50))
                 .heartbeat(Heartbeat::EnqueueScheduled(10), Duration::from_millis(50))
                 .build_fn(email_service)

@@ -1,3 +1,4 @@
+use crate::job::Job;
 use http::Extensions;
 use std::any::Any;
 

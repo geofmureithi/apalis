@@ -10,6 +10,9 @@ use tower::Service;
 
 use crate::{error::JobError, job::Job, request::JobRequest, response::JobResult};
 
+/// Represents the default [JobService].
+/// Used to spawn all jobs that implement [Job]
+#[derive(Clone)]
 pub struct JobService;
 
 impl<Request> Service<JobRequest<Request>> for JobService
@@ -29,7 +32,7 @@ where
         let fut = async move {
             let now = Instant::now();
             log::debug!(
-                target: Request::NAME,
+                target: Request::name(),
                 "JobService: [{}] ready for processing.",
                 id
             );

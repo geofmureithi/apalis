@@ -1,22 +1,29 @@
 use std::fmt::Debug;
 
-use actix::{Actor, ActorContext, AsyncContext, Context, Handler, StreamHandler};
+use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, StreamHandler};
 use anyhow::Context as AnyHowContext;
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
 use tower::{Service, ServiceExt};
 
 use crate::{
-    error::JobError, request::JobRequest, response::JobResult, storage::Storage, streams::FetchJob,
+    error::{JobError, QueueError, StorageError},
+    request::JobRequest,
+    response::JobResult,
+    storage::Storage,
+    streams::FetchJob,
     worker::WorkerManagement,
+    worker::{QueueEvent, Worker},
 };
 /// A queue represents a consumer of a [Storage].
-/// A [tower::Service] must be provided to be called when a new job is detected.
+///
+/// A [Service] must be provided to be called when a new job is detected.
 #[must_use]
 pub struct Queue<T: Serialize, S: Storage<Output = T>, H> {
     storage: S,
     status: QueueStatus,
     handler: Box<H>,
+    monitor: Option<Addr<Worker>>,
 }
 
 /// Each [Queue] sends heartbeat messages
@@ -31,17 +38,14 @@ pub enum Heartbeat {
 }
 
 /// Represents the status of a queue.
-/// Mainly consumed by [crate::worker::Worker]
+///
+/// Mainly consumed by [Worker]
 #[derive(Default, Clone)]
 pub struct QueueStatus {
     load: i64,
     //since: chrono::DateTime<chrono::Local>,
     id: uuid::Uuid,
 }
-
-/// Represents a queue error.
-#[derive(Debug)]
-pub enum QueueError {}
 
 impl<T, S, H> Queue<T, S, H>
 where
@@ -53,6 +57,7 @@ where
             storage,
             handler: Box::from(handler),
             status: Default::default(),
+            monitor: None,
         }
     }
 }
@@ -104,6 +109,7 @@ where
             }
             WorkerManagement::Ack(_) => todo!(),
             WorkerManagement::Kill(_) => todo!(),
+            WorkerManagement::Monitor(addr) => self.monitor = Some(addr),
         };
         Ok(status.clone())
     }
@@ -142,6 +148,7 @@ where
 {
     fn handle(&mut self, _msg: FetchJob, ctx: &mut Self::Context) {
         let mut storage = self.storage.clone();
+        let monitor = self.monitor.clone();
         let fut = {
             let job = storage.consume();
             let service: *mut Box<H> = &mut self.handler;
@@ -171,21 +178,37 @@ where
                     )
                 });
                 let job_id = id.clone();
+                let addr = monitor.clone();
                 let finalize = match res {
-                    Ok(r) => match r {
-                        JobResult::Success => storage.ack(id).await,
-                        JobResult::Retry => storage.retry(id).await,
-                        JobResult::Kill => storage.kill(id).await,
-                        JobResult::Reschedule(wait) => storage.reschedule(id, wait).await,
-                    },
-                    Err(e) => storage.reschedule(id, chrono::Duration::seconds(1)).await,
+                    Ok(r) => {
+                        if let Some(addr) = monitor {
+                            addr.do_send(QueueEvent::Complete(id.clone(), r.clone()))
+                        }
+                        match r {
+                            JobResult::Success => storage.ack(id).await,
+                            JobResult::Retry => storage.retry(id).await,
+                            JobResult::Kill => storage.kill(id).await,
+                            JobResult::Reschedule(wait) => storage.reschedule(id, wait).await,
+                        }
+                    }
+                    Err(e) => {
+                        if let Some(addr) = monitor {
+                            addr.do_send(QueueEvent::Failed(
+                                id.clone(),
+                                JobError::Failed(Box::from(e)),
+                            ))
+                        }
+                        storage.reschedule(id, chrono::Duration::seconds(1)).await
+                    }
                 };
-                log::info!(
-                    target: std::any::type_name::<S>(),
-                    "Job [{}] finalized with res : {:?}",
-                    job_id,
-                    finalize
-                );
+                if let Err(e) = finalize {
+                    if let Some(addr) = addr {
+                        addr.do_send(QueueEvent::Failed(
+                            job_id,
+                            JobError::Storage(StorageError::Database(Box::from(e))),
+                        ));
+                    }
+                }
             }
         };
 

@@ -4,6 +4,7 @@ pub mod builder;
 pub mod context;
 pub mod error;
 pub mod job;
+pub mod layers;
 pub mod queue;
 pub mod request;
 pub mod response;
