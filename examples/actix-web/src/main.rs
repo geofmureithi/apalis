@@ -1,110 +1,57 @@
-use actix::{Actor, Addr, Handler, Message, StreamHandler};
-use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
-use actix_web_actors::ws;
-use apalis::{
-    redis::{RedisConsumer, RedisJobContext, RedisProducer},
-    Job, JobHandler,
-};
+use actix_web::{web, App, Error, HttpResponse, HttpServer, ResponseError};
+use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker};
+use futures::future;
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
 
-//Define our job
-#[derive(Serialize, Deserialize, Debug, Message, Clone)]
-#[rtype(result = "()")]
-enum WSJob {
-    Notify(String),
+#[derive(Debug, Deserialize, Serialize)]
+struct Email {
+    to: String,
+    subject: String,
+    text: String,
 }
 
-impl Job for WSJob {
-    type Result = ();
+async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
+    // Do something awesome
+    println!("Attempting to send email to {}", job.to);
+    Ok(JobResult::Success)
 }
 
-impl JobHandler<RedisConsumer<WSJob>> for WSJob {
-    type Result = ();
-    fn handle(self, ctx: &mut RedisJobContext<Self>) {
-        let addrs = ctx.data_opt::<web::Data<Mutex<Vec<Addr<MyWs>>>>>().unwrap();
-        let addrs = addrs.lock().unwrap();
-        let addrs = addrs.clone();
-        for addr in addrs {
-            addr.do_send(self.clone()); //Send result to all users
-        }
+async fn push_email(
+    email: web::Json<Email>,
+    storage: web::Data<RedisStorage<Email>>,
+) -> HttpResponse {
+    let storage = &*storage.into_inner();
+    let mut storage = storage.clone();
+    let res = storage.push(email.into_inner()).await;
+    match res {
+        Ok(()) => HttpResponse::Ok().body(format!("Email added to queue")),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
     }
 }
 
-/// Define HTTP actor
-struct MyWs {
-    producer: Addr<RedisProducer<WSJob>>, //Allow an actor to send new jobs
-}
-
-impl Actor for MyWs {
-    type Context = ws::WebsocketContext<Self>;
-}
-
-impl Handler<WSJob> for MyWs {
-    type Result = ();
-    fn handle(&mut self, job: WSJob, ctx: &mut Self::Context) {
-        let text = match job {
-            WSJob::Notify(text) => text,
-        };
-        ctx.text(text);
-    }
-}
-
-/// Handler for ws::Message message
-impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWs {
-    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        match msg {
-            Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
-            Ok(ws::Message::Text(text)) => {
-                let producer = self.producer.clone();
-                producer.do_send(WSJob::Notify(text).into()); //Send to redis
-            }
-            Ok(ws::Message::Binary(bin)) => ctx.binary(bin),
-            _ => (),
-        }
-    }
-}
-
-//Define a websocket
-
-async fn index(
-    req: HttpRequest,
-    producer: web::Data<Addr<RedisProducer<WSJob>>>,
-    addrs: web::Data<Mutex<Vec<Addr<MyWs>>>>,
-    stream: web::Payload,
-) -> Result<HttpResponse, Error> {
-    let (addr, resp) = ws::start_with_addr(
-        MyWs {
-            producer: producer.as_ref().clone(),
-        },
-        &req,
-        stream,
-    )?;
-    let mut addrs = addrs.lock().unwrap();
-    addrs.push(addr);
-    Ok(resp)
-}
-
-#[actix_web::main]
+#[actix_rt::main]
 async fn main() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "info");
+    std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
 
-    let conn = "redis://127.0.0.1/";
-
-    let addrs: web::Data<Mutex<Vec<Addr<MyWs>>>> = web::Data::new(Mutex::new(vec![]));
-    let consumer = RedisConsumer::<WSJob>::create(conn)
-        .expect("Couldnt create consumer")
-        .data(addrs.clone());
-    let producer = web::Data::new(consumer.build_producer());
-    Actor::create(|_ctx| consumer); //Start a standalone consumer
-    HttpServer::new(move || {
+    let storage = RedisStorage::new("redis://127.0.0.1/").await.unwrap();
+    let data = web::Data::new(storage.clone());
+    let http = HttpServer::new(move || {
         App::new()
-            .app_data(producer.clone())
-            .app_data(addrs.clone())
-            .route("/", web::get().to(index))
+            .app_data(data.clone())
+            .service(web::scope("/emails").route("/push", web::post().to(push_email)))
     })
-    .bind("127.0.0.1:8080")?
-    .run()
-    .await
+    .bind("127.0.0.1:8000")?
+    .run();
+
+    let worker = Worker::new()
+        .register_with_count(2, move || {
+            QueueBuilder::new(storage.clone())
+                .build_fn(email_service)
+                .start()
+        })
+        .run();
+    future::try_join(http, worker).await?;
+
+    Ok(())
 }

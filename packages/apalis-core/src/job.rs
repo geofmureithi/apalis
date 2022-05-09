@@ -1,227 +1,48 @@
-use crate::context::JobContext;
-use crate::Consumer;
-
-use actix::prelude::*;
-use chrono::prelude::*;
+use crate::service::JobService;
 use futures::future::BoxFuture;
-use log::{debug, warn};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
-use tokio::sync::{oneshot, oneshot::Sender as OneshotSender};
 
-pub trait Job: Serialize + DeserializeOwned + Send + Unpin {
-    type Result: 'static + Debug;
+use crate::{context::JobContext, response::JobResponse};
+
+/// Represents a result for a [Job] executed via [JobService].
+pub type JobFuture<I> = BoxFuture<'static, I>;
+
+/// Trait representing a job to be run via the [JobService] service.
+///
+///
+/// # Example
+/// ```rust
+/// impl Job for Email {
+///     type Result = JobFuture<Result<(), JobError>>;
+///     fn handle(&self, ctx: &JobContext) -> Self::Result {
+///         let pool = ctx.data_opt::<PgPool>()?;
+///         let sendgrid = ctx.data_opt::<SendgridClient>()?;
+///         let to = self.get_email();
+///         let fut = async move {
+///             let user = pool.execute("Select * from users where email = ?1 LIMIT 1")
+///                             .bind(to)
+///                             .execute(pool).await?;
+///             sendgrid.send_email(user, to).await?
+///         };
+///         Box::pin(fut)
+///     }
+/// }
+/// ```
+pub trait Job: Sized {
+    /// The result of a job
+    type Result: JobResponse + 'static;
+
+    /// Represents the name for job.
+    ///
+    /// It defaults to [type_name]
+    /// Note: Its advisable to set a name in production to avoid issues with refactoring.
+    ///
+    /// [type_name]: https://doc.rust-lang.org/std/any/fn.type_name.html
     fn name() -> &'static str {
         std::any::type_name::<Self>()
     }
 
-    fn retries() -> i64 {
-        0
-    }
-}
-
-pub trait JobHandler<C>
-where
-    C: Consumer + Actor,
-    Self: Job,
-{
-    type Result: JobResponse<C, Self>;
-    fn handle(self, ctx: &mut JobContext<C>) -> <Self as JobHandler<C>>::Result;
-}
-
-#[derive(Debug)]
-pub enum Error {
-    Failed,
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum JobState {
-    Unacked,
-    Acked,
-    Rejected,
-}
-
-#[derive(Message, Debug, Serialize, Deserialize)]
-#[rtype(result = "Result<JobState, Error>")]
-pub struct PushJob {
-    pub id: uuid::Uuid,
-    pub job: serde_json::Value, //Json representation
-    state: JobState,
-    pub retries: i64,
-}
-
-impl Drop for PushJob {
-    fn drop(&mut self) {
-        if self.state() == &JobState::Unacked {
-            warn!(
-                "Something went wrong: Dropping unacknowledged job [{:?}]",
-                &self.id
-            );
-        }
-    }
-}
-
-#[derive(Message, Debug, Serialize, Deserialize)]
-#[rtype(result = "Result<JobState, Error>")]
-pub struct ScheduledJob {
-    pub(crate) inner: PushJob,
-    pub(crate) time: DateTime<Utc>,
-}
-
-impl<J: Job> From<J> for PushJob {
-    fn from(job: J) -> Self {
-        PushJob::new(uuid::Uuid::new_v4(), job)
-    }
-}
-
-impl PushJob {
-    pub fn new<J: Job>(id: uuid::Uuid, job: J) -> Self
+    /// Consumes the job returning a result that implements [IntoResponse]
+    fn handle(self, ctx: &JobContext) -> Self::Result
     where
-        J: Serialize,
-    {
-        let job = serde_json::to_value(&job).unwrap();
-        PushJob {
-            id,
-            job,
-            state: JobState::Unacked,
-            retries: 0,
-        }
-    }
-    pub fn decode(bytes: String) -> Result<Self, &'static str> {
-        serde_json::from_str::<PushJob>(&bytes).or(Err("Unable to deserialize job"))
-    }
-
-    pub fn encode(&self) -> Result<String, &'static str> {
-        serde_json::to_string::<PushJob>(&self).or(Err("Unable to serialize job"))
-    }
-
-    pub async fn handle<C, J>(&mut self, ctx: &mut JobContext<C>)
-    where
-        C: Consumer + Actor,
-        J: JobHandler<C>,
-    {
-        let (tx, rx) = oneshot::channel();
-        let id = &self.id.to_string();
-        let job = &self.job;
-        let job = job.clone();
-        let job = serde_json::from_value::<J>(job);
-        match job {
-            Ok(job) => {
-                job.handle(ctx).process(Some(tx));
-                match rx.await {
-                    Ok(value) => {
-                        self.state = JobState::Acked;
-                        debug!("Job [{}] completed with value: {:?}", id, value);
-                    }
-                    Err(err) => {
-                        self.state = JobState::Rejected;
-                        warn!("Job [{}] failed with error: {:?}", id, err);
-                    }
-                }
-            }
-            Err(err) => {
-                warn!(
-                    "Job [{}] failed with [deserialization] error: {:?}",
-                    id, err
-                );
-            }
-        }
-    }
-
-    pub fn state(&self) -> &JobState {
-        &self.state
-    }
-
-    pub fn ack(&mut self) {
-        self.state = JobState::Acked;
-    }
-
-    pub fn reject(&mut self) {
-        self.state = JobState::Rejected;
-    }
+        Self: Sized;
 }
-
-pub trait JobResponse<C: Consumer + Actor, J: Job + JobHandler<C>> {
-    fn process(self, tx: Option<OneshotSender<<J as Job>::Result>>);
-}
-
-// Helper trait for send one shot message from Option<Sender> type.
-// None and error are ignored.
-trait JobOneshot<M> {
-    fn send(self, msg: M);
-}
-
-pub type JobFuture<I> = BoxFuture<'static, I>;
-
-impl<C: Consumer + Actor, J: Job<Result = R> + JobHandler<C>, R: Debug + 'static> JobResponse<C, J>
-    for JobFuture<R>
-{
-    fn process(self, tx: Option<OneshotSender<R>>) {
-        // TODO: Handle Err here?
-        // println!("Type: {}", std::any::type_name::<R>());
-        actix_rt::spawn(async { tx.send(self.await) });
-    }
-}
-
-impl<C, J, R> JobResponse<C, J> for Option<R>
-where
-    C: Consumer + Actor,
-    J: Job<Result = Option<R>> + JobHandler<C>,
-    R: Debug + 'static,
-{
-    fn process(self, tx: Option<OneshotSender<Option<R>>>) {
-        tx.send(self)
-    }
-}
-
-impl<C, J, R, E> JobResponse<C, J> for Result<R, E>
-where
-    C: Consumer + Actor,
-    J: Job<Result = Result<R, E>> + JobHandler<C>,
-    R: Debug + 'static,
-    E: Debug + 'static,
-{
-    fn process(self, tx: Option<OneshotSender<Result<R, E>>>) {
-        println!("Response {:?}", self);
-        tx.send(self)
-    }
-}
-
-impl<M> JobOneshot<M> for Option<OneshotSender<M>> {
-    fn send(self, msg: M) {
-        if let Some(tx) = self {
-            let _ = tx.send(msg);
-        }
-    }
-}
-
-macro_rules! SIMPLE_JOB_RESULT {
-    ($type:ty) => {
-        impl<C, J> JobResponse<C, J> for $type
-        where
-            C: Consumer + Actor,
-            J: Job<Result = $type> + JobHandler<C>,
-        {
-            fn process(self, tx: Option<OneshotSender<$type>>) {
-                tx.send(self)
-            }
-        }
-    };
-}
-
-SIMPLE_JOB_RESULT!(());
-SIMPLE_JOB_RESULT!(u8);
-SIMPLE_JOB_RESULT!(u16);
-SIMPLE_JOB_RESULT!(u32);
-SIMPLE_JOB_RESULT!(u64);
-SIMPLE_JOB_RESULT!(usize);
-SIMPLE_JOB_RESULT!(i8);
-SIMPLE_JOB_RESULT!(i16);
-SIMPLE_JOB_RESULT!(i32);
-SIMPLE_JOB_RESULT!(i64);
-SIMPLE_JOB_RESULT!(isize);
-SIMPLE_JOB_RESULT!(f32);
-SIMPLE_JOB_RESULT!(f64);
-SIMPLE_JOB_RESULT!(String);
-SIMPLE_JOB_RESULT!(bool);

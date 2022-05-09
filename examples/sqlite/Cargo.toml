@@ -1,5 +1,5 @@
 [package]
-name = "redis-example"
+name = "sqlite-example"
 version = "0.1.0"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2018"
@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 actix = "0.13"
-apalis = { path = "../../", features = ["redis"] }
+apalis = { path = "../../", features = ["sqlite"] }
 serde = "1"
 actix-rt = "2"
 env_logger = "0.7"

@@ -1,28 +1,58 @@
-use crate::Consumer;
-use actix::Actor;
-use core::marker::PhantomData;
-use fnv::FnvHashMap;
-use std::any::{Any, TypeId};
+use crate::job::Job;
+use http::Extensions;
+use std::any::Any;
 
-pub struct JobContext<C: Consumer + Actor> {
-    data: FnvHashMap<TypeId, Box<dyn Any + Sync + Send>>,
-    consumer: PhantomData<C>,
+/// The context for a job is represented here
+/// Used to provide a context when a job is defined through the [Job] trait
+#[derive(Debug)]
+pub struct JobContext {
+    data: Extensions,
 }
 
-impl<C: Consumer + Actor> JobContext<C> {
+impl Default for JobContext {
+    fn default() -> Self {
+        JobContext::new()
+    }
+}
+
+impl JobContext {
     pub fn new() -> Self {
         JobContext {
-            data: FnvHashMap::default(),
-            consumer: PhantomData,
+            data: Default::default(),
         }
     }
+
+    /// Get a reference to a type previously inserted on this `JobContext`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use apalis_core::context::JobContext;
+    /// let mut ctx = JobContext::new();
+    /// assert!(ctx.data_opt::<i32>().is_none());
+    /// ctx.insert(5i32);
+    ///
+    /// assert_eq!(ctx.data_opt::<i32>(), Some(&5i32));
+    /// ```
     pub fn data_opt<D: Any + Send + Sync>(&self) -> Option<&D> {
-        self.data
-            .get(&TypeId::of::<D>())
-            .and_then(|d| d.downcast_ref::<D>())
+        self.data.get()
     }
 
-    pub fn insert<D: Any + Send + Sync>(&mut self, data: D) {
-        self.data.insert(TypeId::of::<D>(), Box::new(data));
+    /// Insert a type into this `JobContext`.
+    ///
+    /// Important for embedding data for a job.
+    /// If a extension of this type already existed, it will be returned.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use apalis_core::context::JobContext;
+    /// let mut ctx = JobContext::new();
+    /// assert!(ctx.insert(5i32).is_none());
+    /// assert!(ctx.insert(4u8).is_none());
+    /// assert_eq!(ctx.insert(9i32), Some(5i32));
+    /// ```
+    pub fn insert<D: Any + Send + Sync>(&mut self, data: D) -> Option<D> {
+        self.data.insert(data)
     }
 }
