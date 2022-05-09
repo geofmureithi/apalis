@@ -20,16 +20,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.3", features = ["redis"] }
-```
-
-### Prerequisites
-
-A running redis server is required.
-You can quickly use docker:
-
-```bash
-docker run --name some-redis -d redis
+apalis = { version = "0.3.0-beta.0", features = ["redis"] }
 ```
 
 ## Usage
