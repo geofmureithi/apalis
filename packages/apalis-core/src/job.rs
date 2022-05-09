@@ -42,7 +42,7 @@ pub trait Job: Sized {
     }
 
     /// Consumes the job returning a result that implements [IntoResponse]
-    fn handle(self, ctx: &mut JobContext) -> Self::Result
+    fn handle(self, ctx: &JobContext) -> Self::Result
     where
         Self: Sized;
 }

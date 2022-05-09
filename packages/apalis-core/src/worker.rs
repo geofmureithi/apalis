@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 use actix::prelude::*;
 use futures::Future;
+use log::warn;
 use serde::{de::DeserializeOwned, Serialize};
 use tower::Service;
 
@@ -34,15 +35,19 @@ pub enum WorkerManagement {
 
 impl Worker {
     pub fn new() -> Self {
-        Self { addrs: Vec::new() }
+        Self {
+            addrs: Vec::new(),
+            event_handler: Box::new(|c| warn!("Received an unhandled event from Queue: {:?}", c)),
+        }
     }
     pub async fn run(self) -> std::io::Result<()> {
         let queues = self.addrs.clone();
         let addr = self.start();
         for queue in queues {
-            queue
+            let _res = queue
                 .send(WorkerManagement::Monitor(addr.clone()))
                 .await
+                .unwrap()
                 .unwrap();
         }
         actix_rt::signal::ctrl_c().await
@@ -56,6 +61,7 @@ impl Worker {
 /// When combined with the `web` feature, it can be used to manage the queues from a web ui.
 pub struct Worker {
     addrs: Vec<Recipient<WorkerManagement>>,
+    event_handler: Box<dyn Fn(QueueEvent)>,
 }
 
 impl Worker {
@@ -71,7 +77,7 @@ impl Worker {
             + Unpin
             + Send
             + 'static,
-        F: Future,
+        F: Future<Output = Result<JobResult, JobError>>,
     {
         let addr = queue.start();
         self.addrs.push(addr.into());
@@ -88,7 +94,7 @@ impl Worker {
             + Unpin
             + Send
             + 'static,
-        Fut: Future + 'static,
+        Fut: Future<Output = Result<JobResult, JobError>> + 'static,
     {
         for _worker in 0..count {
             let addr = factory();
@@ -96,11 +102,19 @@ impl Worker {
         }
         self
     }
+
+    pub fn event_handler<H: 'static>(mut self, handle: H) -> Self
+    where
+        H: Fn(QueueEvent),
+    {
+        self.event_handler = Box::new(handle);
+        self
+    }
 }
 
 impl Actor for Worker {
     type Context = Context<Self>;
-    fn started(&mut self, ctx: &mut Self::Context) {
+    fn started(&mut self, _ctx: &mut Self::Context) {
         log::info!(
             "Worker started with {} queues instances running.",
             self.addrs.len()
@@ -121,7 +135,7 @@ pub enum QueueEvent {
 impl Handler<QueueEvent> for Worker {
     type Result = ();
     fn handle(&mut self, msg: QueueEvent, ctx: &mut Self::Context) -> Self::Result {
-        log::debug!("Received an event from Queue: {:?}", msg);
+        (self.event_handler)(msg);
     }
 }
 
@@ -129,16 +143,9 @@ impl Handler<QueueEvent> for Worker {
 mod tests {
     use super::*;
 
-    struct TestConsumer;
-    impl Consumer for TestConsumer {}
-
-    impl Actor for TestConsumer {
-        type Context = Context<Self>;
-    }
-
     #[actix_rt::test]
     async fn test_worker() {
-        let res = Worker::new().register_with_threads(2, move || TestConsumer);
+        let res = Worker::new().register_with_count(2, move || TestConsumer);
         assert!(Some(res).is_some())
     }
 }

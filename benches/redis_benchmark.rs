@@ -60,14 +60,6 @@ fn bench(c: &mut Criterion) {
                     .fetch_interval(Duration::from_millis(10))
                     .build_fn(handle_test_job)
                     .start();
-                let _addr = QueueBuilder::new(sqlite.clone())
-                    .fetch_interval(Duration::from_millis(10))
-                    .build_fn(handle_test_job)
-                    .start();
-                let _addr = QueueBuilder::new(sqlite.clone())
-                    .fetch_interval(Duration::from_millis(10))
-                    .build_fn(handle_test_job)
-                    .start();
 
                 let start = Instant::now();
                 while sqlite.len().await.unwrap_or(-1) != 0 {

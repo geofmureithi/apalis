@@ -124,10 +124,10 @@ where
     J: Job,
 {
     /// A helper method to executes a [JobRequest] wrapping a [Job]
-    pub(crate) async fn do_handle(mut self) -> Result<JobResult, JobError> {
+    pub(crate) async fn do_handle(self) -> Result<JobResult, JobError> {
         let id = self.id();
         let (tx, rx) = oneshot::channel();
-        self.job.handle(&mut self.context).into_response(Some(tx));
+        self.job.handle(&self.context).into_response(Some(tx));
         match rx.await {
             Ok(value) => {
                 log::debug!("JobTX [{}] completed with value: {:?}", id, value);

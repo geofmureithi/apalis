@@ -1,9 +1,12 @@
+use apalis_core::error::StorageError;
 use apalis_core::request::JobRequest;
-use apalis_core::storage::{Storage, StorageResult};
+use apalis_core::storage::{JobStream, Storage, StorageResult};
+use async_stream::try_stream;
 use chrono::Utc;
+use futures::Stream;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{Pool, Row, Sqlite, SqlitePool};
-use std::{fmt::Debug, marker::PhantomData, ops::Add, time::Duration};
+use std::{marker::PhantomData, ops::Add, time::Duration};
 
 pub struct SqliteStorage<T> {
     pool: Pool<Sqlite>,
@@ -66,14 +69,52 @@ impl<T> SqliteStorage<T> {
             .execute(&pool)
             .await
             .expect("Failed to BEGIN transaction.");
-        sqlx::query("PRAGMA synchronous = 1;")
+        sqlx::query("PRAGMA synchronous = NORMAL;")
             .execute(&pool)
             .await
             .expect("Failed to BEGIN transaction.");
-        // sqlx::query("PRAGMA cache_size = 64_000;")
-        //     .execute(&pool)
-        //     .await
-        //     .expect("Failed to BEGIN transaction.");
+        sqlx::query("PRAGMA cache_size = 64000;")
+            .execute(&pool)
+            .await
+            .expect("Failed to BEGIN transaction.");
+    }
+}
+
+async fn fetch_next<T>(pool: Pool<Sqlite>) -> Result<Option<JobRequest<T>>, StorageError>
+where
+    T: Send + Unpin + DeserializeOwned,
+{
+    let mut tx = pool.begin().await?;
+    let fetch_query = "SELECT * FROM Jobs
+                WHERE rowid = (SELECT min(rowid) FROM Jobs
+                               WHERE status = 'Pending')";
+    let job: Option<JobRequest<T>> = sqlx::query_as(fetch_query).fetch_optional(&mut tx).await?;
+
+    match job {
+        None => Ok(None),
+        Some(job) => {
+            let job_id = job.id();
+            let update_query = "UPDATE Jobs SET status = 'Running', attempts = attempts + 1,  lock_at = strftime('%s','now') WHERE id = ?1 AND status = 'Pending'";
+            sqlx::query(update_query)
+                .bind(job_id.to_owned())
+                .execute(&mut tx)
+                .await?;
+            tx.commit().await?;
+            Ok(Some(job))
+        }
+    }
+}
+
+impl<T: DeserializeOwned + Send + Unpin> SqliteStorage<T> {
+    fn stream_jobs(&self) -> impl Stream<Item = Result<Option<JobRequest<T>>, StorageError>> {
+        let pool = self.pool.clone();
+        let mut interval = tokio::time::interval(Duration::from_millis(100));
+        try_stream! {
+            loop {
+                interval.tick().await;
+                yield fetch_next(pool.clone()).await?
+            }
+        }
     }
 }
 
@@ -95,27 +136,16 @@ where
         Box::pin(fut)
     }
 
-    fn consume(&mut self) -> StorageResult<Option<JobRequest<Self::Output>>> {
+    fn consume(&mut self) -> JobStream<T> {
+        Box::pin(self.stream_jobs())
+    }
+    fn len(&self) -> StorageResult<i64> {
         let pool = self.pool.clone();
         let fut = async move {
-            let mut tx = pool.begin().await.unwrap();
-            let fetch_query = "SELECT * FROM Jobs
-            WHERE rowid = (SELECT min(rowid) FROM Jobs
-                           WHERE status = 'Pending')";
-            let job: Option<JobRequest<T>> =
-                sqlx::query_as(fetch_query).fetch_optional(&mut tx).await?;
-            if job.is_none() {
-                return Ok(None);
-            }
-            let job = job.unwrap();
-            let job_id = job.id();
-            let update_query = "UPDATE Jobs SET status = 'Running', attempts = attempts + 1,  lock_at = strftime('%s','now') WHERE id = ?1 AND status = 'Pending'";
-            sqlx::query(update_query)
-                .bind(job_id.to_owned())
-                .execute(&mut tx)
-                .await?;
-            tx.commit().await?;
-            Ok(Some(job))
+            let mut tx = pool.acquire().await?;
+            let query = "Select Count(*) as count from Jobs where status='Pending'";
+            let record = sqlx::query(query).fetch_one(&mut tx).await?;
+            Ok(record.try_get("count")?)
         };
         Box::pin(fut)
     }
@@ -133,6 +163,7 @@ where
         };
         Box::pin(fut)
     }
+
     fn reschedule(&mut self, job_id: String, wait: chrono::Duration) -> StorageResult<()> {
         let pool = self.pool.clone();
         let fut = async move {
@@ -145,17 +176,6 @@ where
                 .execute(&mut tx)
                 .await?;
             Ok(tx.commit().await?)
-        };
-        Box::pin(fut)
-    }
-
-    fn len(&self) -> StorageResult<i64> {
-        let pool = self.pool.clone();
-        let fut = async move {
-            let mut tx = pool.acquire().await?;
-            let query = "Select Count(*) as count from Jobs where status='Pending'";
-            let record = sqlx::query(query).fetch_one(&mut tx).await?;
-            Ok(record.try_get("count")?)
         };
         Box::pin(fut)
     }

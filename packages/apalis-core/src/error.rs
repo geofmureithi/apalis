@@ -45,5 +45,9 @@ impl From<sqlx::Error> for StorageError {
 }
 
 /// Represents a queue error.
-#[derive(Debug)]
-pub enum QueueError {}
+#[derive(Debug, Error)]
+pub enum QueueError {
+    /// An error communicating with storage.
+    #[error("error communicating with storage: {0}")]
+    Storage(StorageError),
+}

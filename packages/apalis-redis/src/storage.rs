@@ -1,13 +1,14 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Duration};
 
 use apalis_core::{
     error::StorageError,
-    job::Job,
     queue::Heartbeat,
     request::JobRequest,
-    storage::{Storage, StorageResult},
+    storage::{JobStream, Storage, StorageResult},
 };
+use async_stream::try_stream;
 use chrono::Utc;
+use futures::Stream;
 use log::*;
 use redis::{aio::MultiplexedConnection, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Serialize};
@@ -21,7 +22,7 @@ const SCHEDULED_JOBS_SET: &str = "{queue}:scheduled";
 const SIGNAL_LIST: &str = "{queue}:signal";
 
 #[derive(Clone)]
-pub struct RedisQueueInfo {
+struct RedisQueueInfo {
     name: String,
     active_jobs_list: String,
     consumers_set: String,
@@ -33,7 +34,7 @@ pub struct RedisQueueInfo {
 }
 
 #[derive(Clone)]
-pub struct RedisScript {
+struct RedisScript {
     ack_job: Script,
     push_job: Script,
     retry_job: Script,
@@ -42,6 +43,7 @@ pub struct RedisScript {
     register_storage: Script,
 }
 
+/// Represents a [Storage] that uses Redis for storage.
 pub struct RedisStorage<T> {
     id: uuid::Uuid,
     conn: MultiplexedConnection,
@@ -95,6 +97,70 @@ impl<T> RedisStorage<T> {
     }
 }
 
+impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
+    fn stream_jobs(&self) -> impl Stream<Item = Result<Option<JobRequest<T>>, StorageError>> {
+        let mut conn = self.conn.clone();
+        let fetch_jobs = self.scripts.get_jobs.clone();
+        let consumers_set = self.queue.consumers_set.to_string();
+        let active_jobs_list = self.queue.active_jobs_list.to_string();
+        let job_data_hash = self.queue.job_data_hash.to_string();
+        let inflight_set = format!("{}:{}", self.queue.inflight_jobs_prefix, self.id);
+        let signal_list = self.queue.signal_list.to_string();
+        let mut interval = tokio::time::interval(Duration::from_millis(50));
+        try_stream! {
+            loop {
+                interval.tick().await;
+                let res: Result<Vec<Value>, RedisError> = fetch_jobs
+                    .key(&consumers_set)
+                    .key(&active_jobs_list)
+                    .key(&inflight_set)
+                    .key(&job_data_hash)
+                    .key(&signal_list)
+                    .arg("1") // Fetch Ten Job at a time
+                    .arg(&inflight_set)
+                    .invoke_async(&mut conn)
+                    .await;
+                let job = deserialize(res)?;
+                yield job
+            }
+        }
+    }
+}
+
+fn deserialize<T>(
+    data: Result<Vec<Value>, RedisError>,
+) -> Result<Option<JobRequest<T>>, StorageError>
+where
+    T: DeserializeOwned,
+{
+    match data {
+        Ok(jobs) => {
+            let job = jobs.get(0);
+            let job = match job {
+                job @ Some(Value::Data(_)) => job,
+                None => None,
+                _ => {
+                    error!(
+                        "Decoding Message Failed: {:?}",
+                        "unknown result type for next message"
+                    );
+                    None
+                }
+            };
+
+            match &job {
+                Some(Value::Data(v)) => Ok(Some(serde_json::from_slice(&v).unwrap())),
+                None => Ok(None),
+                _ => {
+                    error!("Decoding Message Failed: {:?}", "Expected Data(&Vec<u8>)");
+                    Ok(None)
+                }
+            }
+        }
+        Err(e) => Err(StorageError::Database(Box::new(e))),
+    }
+}
+
 impl<T> Storage for RedisStorage<T>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin,
@@ -125,55 +191,8 @@ where
         Box::pin(fut)
     }
 
-    fn consume(&mut self) -> StorageResult<Option<JobRequest<Self::Output>>> {
-        let mut conn = self.conn.clone();
-        let fetch_jobs = self.scripts.get_jobs.clone();
-        let consumers_set = self.queue.consumers_set.to_string();
-        let active_jobs_list = self.queue.active_jobs_list.to_string();
-        let job_data_hash = self.queue.job_data_hash.to_string();
-        let inflight_set = format!("{}:{}", self.queue.inflight_jobs_prefix, self.id);
-        let signal_list = self.queue.signal_list.to_string();
-        let fut = async move {
-            let res: Result<Vec<Value>, RedisError> = fetch_jobs
-                .key(consumers_set)
-                .key(active_jobs_list)
-                .key(&inflight_set)
-                .key(job_data_hash)
-                .key(signal_list)
-                .arg("1") // Fetch one Job at a time
-                .arg(&inflight_set)
-                .invoke_async(&mut conn)
-                .await;
-            match res {
-                Ok(jobs) => {
-                    let job = jobs.get(0);
-                    let job = match job {
-                        job @ Some(Value::Data(_)) => job.unwrap(),
-                        None => {
-                            return Ok(None);
-                        }
-                        _ => {
-                            error!(
-                                "Decoding Message Failed: {:?}",
-                                "unknown result type for next message"
-                            );
-                            return Ok(None);
-                        }
-                    };
-
-                    let bytes = match &job {
-                        Value::Data(v) => v,
-                        _ => {
-                            error!("Decoding Message Failed: {:?}", "Expected Redis String");
-                            return Ok(None);
-                        }
-                    };
-                    Ok(Some(serde_json::from_slice(&bytes).unwrap()))
-                }
-                Err(e) => Err(StorageError::Database(Box::new(e))),
-            }
-        };
-        Box::pin(fut)
+    fn consume(&mut self) -> JobStream<T> {
+        Box::pin(self.stream_jobs())
     }
 
     fn ack(&mut self, job_id: String) -> StorageResult<()> {
@@ -193,7 +212,7 @@ where
         Box::pin(fut)
     }
     fn retry(&mut self, job_id: String) -> StorageResult<()> {
-        let mut conn = self.conn.clone();
+        let conn = self.conn.clone();
         let retry_jobs = self.scripts.retry_job.clone();
         let inflight_set = format!("{}:{}", &self.queue.inflight_jobs_prefix, &self.id);
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();

@@ -44,7 +44,6 @@ struct Email {
 }
 
 async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
-    // Do something awesome
     Ok(JobResult::Success)
 }
 
@@ -52,8 +51,8 @@ async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
 async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
-
-    let storage = RedisStorage::new("redis://127.0.0.1/").await.unwrap();
+    let redis = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
+    let storage = RedisStorage::new(redis).await.unwrap();
     Worker::new()
         .register_with_count(2, move || {
             QueueBuilder::new(storage.clone())
@@ -104,11 +103,12 @@ Since we provide a few storage solutions, here is a table comparing them:
 v 0.3
 
 - [x] Standardize API (Storage, Worker, Data, Middleware, Context )
-- [x] Introduce SQL, specifically
+- [x] Introduce SQL
+- [ ] Implement layers for sentry and tracing.
 - [ ] Improve documentation
 - [ ] Organized modules and features.
 - [ ] Basic Web API Interface
-- [ ] Sql Examples
+- [x] Sql Examples
 
 v 0.2
 

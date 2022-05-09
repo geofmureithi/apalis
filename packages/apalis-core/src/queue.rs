@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, StreamHandler};
 use anyhow::Context as AnyHowContext;
-use futures::Future;
+use futures::{Future, StreamExt};
 use serde::{de::DeserializeOwned, Serialize};
 use tower::{Service, ServiceExt};
 
@@ -10,7 +10,7 @@ use crate::{
     error::{JobError, QueueError, StorageError},
     request::JobRequest,
     response::JobResult,
-    storage::Storage,
+    storage::{self, Storage},
     streams::FetchJob,
     worker::WorkerManagement,
     worker::{QueueEvent, Worker},
@@ -47,6 +47,8 @@ pub struct QueueStatus {
     id: uuid::Uuid,
 }
 
+struct JobRequestWrapper<T>(Result<Option<JobRequest<T>>, StorageError>);
+
 impl<T, S, H> Queue<T, S, H>
 where
     T: 'static + Serialize + Debug + DeserializeOwned,
@@ -70,12 +72,15 @@ where
         + Unpin
         + Send
         + 'static,
-    F: Future,
+    F: Future<Output = Result<JobResult, JobError>>,
 {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
         ctx.notify(WorkerManagement::Setup);
+        let stream = self.storage.consume();
+        let stream = stream.map(|c| JobRequestWrapper(c));
+        ctx.add_stream(stream);
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {}
@@ -89,7 +94,7 @@ where
         + Unpin
         + Send
         + 'static,
-    F: Future,
+    F: Future<Output = Result<JobResult, JobError>>,
 {
     type Result = Result<QueueStatus, QueueError>;
 
@@ -123,7 +128,7 @@ where
         + Unpin
         + Send
         + 'static,
-    F: Future,
+    F: Future<Output = Result<JobResult, JobError>>,
 {
     fn handle(&mut self, beat: Heartbeat, ctx: &mut Self::Context) {
         let queue = &mut self.storage;
@@ -136,7 +141,8 @@ where
     }
 }
 
-impl<T: 'static, S: 'static, H: 'static, F: 'static> StreamHandler<FetchJob> for Queue<T, S, H>
+impl<T: 'static, S: 'static, H: 'static, F: 'static> StreamHandler<JobRequestWrapper<T>>
+    for Queue<T, S, H>
 where
     S: Storage<Output = T> + Unpin,
     T: Serialize + Debug + DeserializeOwned + Send,
@@ -146,73 +152,83 @@ where
         + 'static,
     F: Future<Output = Result<JobResult, JobError>>,
 {
-    fn handle(&mut self, _msg: FetchJob, ctx: &mut Self::Context) {
+    fn handle(&mut self, job: JobRequestWrapper<T>, ctx: &mut Self::Context) {
         let mut storage = self.storage.clone();
         let monitor = self.monitor.clone();
-        let fut = {
-            let job = storage.consume();
-            let service: *mut Box<H> = &mut self.handler;
-            async move {
-                let handle = unsafe {
-                    let handle = (*service).ready().await.unwrap();
-                    handle
-                };
-                let job = match job.await {
-                    Ok(job) => job,
-                    Err(e) => {
-                        return log::debug!("FetchJob failed with error {:?}", e);
+        match job.0 {
+            Ok(Some(job)) => {
+                let fut = {
+                    let service: *mut Box<H> = &mut self.handler;
+                    async move {
+                        let handle = unsafe {
+                            let handle = (*service).ready().await.unwrap();
+                            handle
+                        };
+                        let id = job.id();
+
+                        let res = handle.call(job).await.with_context(|| {
+                            format!(
+                                "Job [{}] Failed to complete job in queue {}",
+                                id,
+                                std::any::type_name::<T>()
+                            )
+                        });
+                        let job_id = id.clone();
+                        let addr = monitor.clone();
+                        let finalize = match res {
+                            Ok(r) => {
+                                if let Some(addr) = monitor {
+                                    addr.do_send(QueueEvent::Complete(id.clone(), r.clone()))
+                                }
+                                match r {
+                                    JobResult::Success => storage.ack(id).await,
+                                    JobResult::Retry => storage.retry(id).await,
+                                    JobResult::Kill => storage.kill(id).await,
+                                    JobResult::Reschedule(wait) => {
+                                        storage.reschedule(id, wait).await
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                if let Some(addr) = monitor {
+                                    addr.do_send(QueueEvent::Failed(
+                                        id.clone(),
+                                        JobError::Failed(Box::from(e)),
+                                    ))
+                                }
+                                storage.reschedule(id, chrono::Duration::seconds(1)).await
+                            }
+                        };
+                        if let Err(e) = finalize {
+                            if let Some(addr) = addr {
+                                addr.do_send(QueueEvent::Failed(
+                                    job_id,
+                                    JobError::Storage(StorageError::Database(Box::from(e))),
+                                ));
+                            }
+                        }
                     }
                 };
 
-                if job.is_none() {
-                    return;
-                }
-                let job = job.unwrap();
-                let id = job.id();
-
-                let res = handle.call(job).await.with_context(|| {
-                    format!(
-                        "Job [{}] Failed to complete job in queue {}",
-                        id,
-                        std::any::type_name::<T>()
-                    )
-                });
-                let job_id = id.clone();
+                let fut = actix::fut::wrap_future::<_, Self>(fut);
+                ctx.spawn(fut);
+            }
+            Ok(None) => {
+                // println!("None")
+            }
+            Err(e) => {
                 let addr = monitor.clone();
-                let finalize = match res {
-                    Ok(r) => {
-                        if let Some(addr) = monitor {
-                            addr.do_send(QueueEvent::Complete(id.clone(), r.clone()))
-                        }
-                        match r {
-                            JobResult::Success => storage.ack(id).await,
-                            JobResult::Retry => storage.retry(id).await,
-                            JobResult::Kill => storage.kill(id).await,
-                            JobResult::Reschedule(wait) => storage.reschedule(id, wait).await,
-                        }
-                    }
-                    Err(e) => {
-                        if let Some(addr) = monitor {
-                            addr.do_send(QueueEvent::Failed(
-                                id.clone(),
-                                JobError::Failed(Box::from(e)),
-                            ))
-                        }
-                        storage.reschedule(id, chrono::Duration::seconds(1)).await
-                    }
-                };
-                if let Err(e) = finalize {
-                    if let Some(addr) = addr {
-                        addr.do_send(QueueEvent::Failed(
-                            job_id,
-                            JobError::Storage(StorageError::Database(Box::from(e))),
-                        ));
-                    }
+                if let Some(addr) = addr {
+                    addr.do_send(QueueEvent::Error(QueueError::Storage(e)));
                 }
             }
-        };
-
-        let fut = actix::fut::wrap_future::<_, Self>(fut);
-        ctx.spawn(fut);
+        }
+    }
+    fn finished(&mut self, ctx: &mut Self::Context) {
+        // Restart streaming if met an error
+        log::debug!("Encountered a storage error, restarting Streaming jobs");
+        let stream = self.storage.consume();
+        let stream = stream.map(|c| JobRequestWrapper(c));
+        ctx.add_stream(stream);
     }
 }

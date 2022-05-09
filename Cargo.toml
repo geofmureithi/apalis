@@ -1,6 +1,6 @@
 [package]
 name = "apalis"
-version = "0.2.0"
+version = "0.3.0-beta.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
@@ -18,9 +18,9 @@ sqlite = [ "apalis-sql/sqlite"]
 mysql = [ "apalis-sql/mysql"]
 
 [dependencies]
-apalis-core = { path = "./packages/apalis-core", version = "0.2.0" }
-apalis-redis = { path = "./packages/apalis-redis", version = "0.2.0" }
-apalis-sql = { path = "./packages/apalis-sql", version = "0.2.0" }
+apalis-core = { path = "./packages/apalis-core", version = "0.3.0-beta.0" }
+apalis-redis = { path = "./packages/apalis-redis", version = "0.3.0-beta.0" }
+apalis-sql = { path = "./packages/apalis-sql", version = "0.3.0-beta.0" }
 
 [dev-dependencies]
 criterion = { version = "0.3", features=["async_tokio"] }

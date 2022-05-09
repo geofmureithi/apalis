@@ -63,6 +63,7 @@ async fn main() -> std::io::Result<()> {
                 .build_fn(email_service)
                 .start()
         })
+        //.event_handler(|e| println!("Event: {:?}", e))
         .run()
         .await
 }

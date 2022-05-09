@@ -5,6 +5,7 @@ use actix::{
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
 use tower::{
+    filter::{AsyncFilterLayer, FilterLayer},
     layer::util::{Identity, Stack},
     Layer, Service,
 };
@@ -84,6 +85,7 @@ impl<T, S> QueueBuilder<(), S, Identity>
 where
     S: Storage<Output = T>,
 {
+    /// Build a new queue
     pub fn new(storage: S) -> QueueBuilder<T, S, Identity> {
         let job: PhantomData<T> = PhantomData;
         QueueBuilder {
@@ -115,33 +117,33 @@ impl<T, S, M> QueueBuilder<T, S, M> {
         }
     }
 
-    // /// Conditionally reject requests based on `predicate`.
-    // ///
-    // /// `predicate` must implement the [`Predicate`] trait.
-    // ///
-    // /// This wraps the inner service with an instance of the [`Filter`]
-    // /// middleware.
-    // ///
-    // /// [`Filter`]: crate::filter
-    // pub fn filter<P>(
-    //     self,
-    //     predicate: P,
-    // ) -> QueueBuilder<T, Stack<::tower::filter::FilterLayer<P>, M>> {
-    //     self.layer(::tower::filter::FilterLayer::new(predicate))
-    // }
+    /// Conditionally reject requests based on `predicate`.
+    ///
+    /// `predicate` must implement the [`Predicate`] trait.
+    ///
+    /// This wraps the inner service with an instance of the [`Filter`]
+    /// middleware.
+    ///
+    /// [`Filter`]: crate::filter
+    pub fn filter<P>(self, predicate: P) -> QueueBuilder<T, S, Stack<FilterLayer<P>, M>>
+    where
+        M: Layer<FilterLayer<P>>,
+    {
+        self.layer(FilterLayer::new(predicate))
+    }
 
-    // /// Conditionally reject requests based on an asynchronous `predicate`.
-    // ///
-    // /// `predicate` must implement the [`AsyncPredicate`] trait.
-    // ///
-    // /// This wraps the inner service with an instance of the [`AsyncFilter`]
-    // /// middleware.
-    // pub fn filter_async<P>(
-    //     self,
-    //     predicate: P,
-    // ) -> QueueBuilder<T, Stack<::tower::filter::AsyncFilterLayer<P>, M>> {
-    //     self.layer(::tower::filter::AsyncFilterLayer::new(predicate))
-    // }
+    /// Conditionally reject requests based on an asynchronous `predicate`.
+    ///
+    /// `predicate` must implement the [`AsyncPredicate`] trait.
+    ///
+    /// This wraps the inner service with an instance of the [`AsyncFilter`]
+    /// middleware.
+    pub fn filter_async<P>(self, predicate: P) -> QueueBuilder<T, S, Stack<AsyncFilterLayer<P>, M>>
+    where
+        M: Layer<AsyncFilterLayer<P>>,
+    {
+        self.layer(AsyncFilterLayer::new(predicate))
+    }
 
     // fn finalize<K>(self, service: K) -> M::Service
     // where
@@ -235,7 +237,7 @@ impl<T, S, M> QueueFactory<T, S, M> {
         let arb = &Arbiter::new();
         Actor::start_in_arbiter(&arb.handle(), |ctx: &mut Context<Queue<T, S, M>>| {
             let start = Instant::now() + Duration::from_millis(5);
-            ctx.add_stream(FetchJobStream::new(interval_at(start, self.fetch_interval)));
+            // ctx.add_stream(FetchJobStream::new(interval_at(start, self.fetch_interval)));
             for (heartbeat, duration) in self.heartbeats.into_iter() {
                 ctx.add_stream(HeartbeatStream::new(
                     heartbeat,

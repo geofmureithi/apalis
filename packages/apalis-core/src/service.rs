@@ -27,7 +27,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, mut job: JobRequest<Request>) -> Self::Future {
+    fn call(&mut self, job: JobRequest<Request>) -> Self::Future {
         let id = job.id();
         let fut = async move {
             let now = Instant::now();
