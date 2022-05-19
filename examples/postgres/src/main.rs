@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use apalis::{
     layers::{tracing::TraceLayer, RateLimitLayer},
-    sqlite::SqliteStorage,
+    postgres::PostgresStorage,
     Job, JobContext, JobFuture, JobHandler, Monitor, Storage, WorkerBuilder,
 };
 use chrono::Utc;
@@ -16,19 +16,21 @@ struct Email {
 }
 
 impl Job for Email {
-    const NAME: &'static str = "sqlite::Email";
+    const NAME: &'static str = "postgres::Email";
 }
 
-impl JobHandler<Self> for Email {
-    type Result = JobFuture<()>;
+async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobError> {
+    actix::clock::sleep(Duration::from_secs(3)).await;
 
-    fn handle(self, ctx: JobContext) -> Self::Result {
-        let fut = async move {
-            actix::clock::sleep(Duration::from_millis(5000)).await;
-            tracing::info!(subject = ?self.to, "Sent email");
-        };
-        Box::pin(fut)
-    }
+    ctx.update_progress(42);
+
+    tracing::debug!(subject = ?email.subject, "sending.email");
+
+    actix::clock::sleep(Duration::from_secs(2)).await;
+
+    tracing::debug!(subject = ?email.subject, "sent.email");
+
+    Ok(JobResult::Success)
 }
 
 async fn produce_jobs(storage: &SqliteStorage<Email>) {
@@ -53,18 +55,16 @@ async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
 
-    let sqlite: SqliteStorage<Email> = SqliteStorage::connect("sqlite://data.db").await.unwrap();
-    // Do migrations: Mainly for "sqlite::memory:"
-    sqlite
-        .setup()
+    let pg: PostgresStorage<Email> = PostgresStorage::connect("sqlite://data.db").await.unwrap();
+    pg.setup()
         .await
-        .expect("unable to run migrations for sqlite");
+        .expect("unable to run migrations for postgres");
 
     // This can be in another part of the program
     // produce_jobs(&sqlite).await;
 
     Monitor::new()
-        .register_with_count(5, move |_| {
+        .register_with_count(1, move |_| {
             WorkerBuilder::new(sqlite.clone())
                 .layer(RateLimitLayer::new(10, Duration::from_millis(10)))
                 .layer(TraceLayer::new())

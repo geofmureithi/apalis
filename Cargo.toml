@@ -41,5 +41,7 @@ members = [
   # Examples
   "examples/redis",
   "examples/actix-web",
-  "examples/sqlite"
+  "examples/sqlite",
+  "examples/sentry",
+  "examples/postgres"
 ]

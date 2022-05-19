@@ -16,6 +16,7 @@ actix = "0.13"
 actix-rt = "2"
 futures = "0.3"
 tower = { version = "0.4", features=["util", "limit", "retry", "timeout", "filter"] }
+pin-project-lite = "0.2.9"
 tokio = "1"
 thiserror = "1"
 log = "0.4"
@@ -25,10 +26,16 @@ anyhow = "1.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 strum = { version = "0.24", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
+tracing-futures = "0.2.5"
+sentry-core = "0.25.0"
 
 
 [dependencies.sqlx]
 version = "0.5"
 default-features = false
 features = [ "runtime-actix-rustls", "macros", "chrono", "decimal", "uuid", "json", "sqlite" ]
+
+[dependencies.tracing]
+default_features = false
+version = "0.1"
 

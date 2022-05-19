@@ -1,13 +1,12 @@
 use crate::{error::JobError, job::Job, job::JobFuture};
-use chrono::Duration;
-use std::{any::Any, error::Error};
+use std::{any::Any, error::Error, fmt::Display, time::Duration};
 use tokio::sync::oneshot::Sender as OneshotSender;
-use tower::util::ServiceFn;
 
-/// Represents a non-error result for a [Job] or [ServiceFn] service.
+/// Represents a non-error result for a [Job] or [JobFn] service.
 ///
 /// Any job should return this as a result to control a jobs outcome.
 #[derive(Debug, Clone)]
+#[must_use = "this `JobResult` should be handled. Did you mean to return?"]
 pub enum JobResult {
     Success,
     Retry,

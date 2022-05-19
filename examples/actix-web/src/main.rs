@@ -1,5 +1,7 @@
 use actix_web::{web, App, Error, HttpResponse, HttpServer, ResponseError};
-use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker};
+use apalis::{
+    redis::RedisStorage, JobError, JobRequest, JobResult, Monitor, Storage, WorkerBuilder,
+};
 use futures::future;
 use serde::{Deserialize, Serialize};
 
@@ -34,7 +36,7 @@ async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
 
-    let storage = RedisStorage::new("redis://127.0.0.1/").await.unwrap();
+    let storage = RedisStorage::connect("redis://127.0.0.1/").await.unwrap();
     let data = web::Data::new(storage.clone());
     let http = HttpServer::new(move || {
         App::new()
@@ -44,9 +46,9 @@ async fn main() -> std::io::Result<()> {
     .bind("127.0.0.1:8000")?
     .run();
 
-    let worker = Worker::new()
+    let worker = Monitor::new()
         .register_with_count(2, move || {
-            QueueBuilder::new(storage.clone())
+            WorkerBuilder::new(storage.clone())
                 .build_fn(email_service)
                 .start()
         })

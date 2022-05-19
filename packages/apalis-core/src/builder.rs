@@ -1,30 +1,32 @@
 use actix::{
     clock::{interval_at, Instant},
-    Actor, Addr, Arbiter, AsyncContext, Context,
+    Actor, Addr, Arbiter, AsyncContext, Context, Supervisor,
 };
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
 use tower::{
     filter::{AsyncFilterLayer, FilterLayer},
     layer::util::{Identity, Stack},
-    Layer, Service,
+    Layer, Service, ServiceExt,
 };
 
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData, time::Duration};
 
 use crate::{
     error::JobError,
-    queue::{Heartbeat, Queue},
+    job::Job,
+    job_fn::{job_fn, JobFn},
     request::JobRequest,
     response::JobResult,
     service::JobService,
     storage::Storage,
     streams::{FetchJobStream, HeartbeatStream},
+    worker::{DefaultController, Worker, WorkerController, WorkerPulse},
 };
 
 /// Configure and build a [Queue] job service.
 ///
-/// `QueueBuilder` collects all the components and configuration required to
+/// `WorkerBuilder` collects all the components and configuration required to
 /// build a job service. Once the service is defined, it can be built
 /// with `build`.
 ///
@@ -34,7 +36,7 @@ use crate::{
 ///
 /// ```rust
 ///
-/// use apalis::QueueBuilder;
+/// use apalis::WorkerBuilder;
 /// use apalis::sqlite::SqliteStorage;
 ///
 /// let sqlite = SqliteStorage::new("sqlite::memory:").await.unwrap();
@@ -43,7 +45,7 @@ use crate::{
 ///    Ok(JobResult::Success)
 /// }
 ///
-/// let addr = QueueBuilder::new(sqlite)
+/// let addr = WorkerBuilder::new(sqlite)
 ///     .build_fn(email_service)
 ///     .start();
 ///
@@ -58,62 +60,59 @@ use crate::{
 ///    retry::{JobRetryPolicy, RetryLayer},
 /// };
 ///
-/// use apalis::QueueBuilder;
+/// use apalis::WorkerBuilder;
 /// use apalis::sqlite::SqliteStorage;
 ///
-/// let sqlite = SqliteStorage::new("sqlite::memory:").await.unwrap();
+/// let sqlite = SqliteStorage::connect("sqlite::memory:").await.unwrap();
 ///
 /// #[derive(Clone)]
 /// struct JobState {}
 ///
-/// let addr = QueueBuilder::new(sqlite)
+/// let addr = WorkerBuilder::new(sqlite)
 ///     .layer(RetryLayer::new(JobRetryPolicy))
 ///     .layer(Extension(JobState {}))
 ///     .build()
 ///     .start();
 ///
 /// ```
-pub struct QueueBuilder<T, S, M> {
+pub struct WorkerBuilder<T, S, M, C> {
     job: PhantomData<T>,
     layer: M,
     storage: S,
-    fetch_interval: Duration,
-    heartbeats: HashMap<Heartbeat, Duration>,
+    controller: C,
 }
 
-impl<T, S> QueueBuilder<(), S, Identity>
+impl<T, S> WorkerBuilder<(), S, Identity, DefaultController>
 where
     S: Storage<Output = T>,
 {
     /// Build a new queue
-    pub fn new(storage: S) -> QueueBuilder<T, S, Identity> {
+    pub fn new(storage: S) -> WorkerBuilder<T, S, Identity, DefaultController> {
         let job: PhantomData<T> = PhantomData;
-        QueueBuilder {
+        WorkerBuilder {
             job,
             layer: Identity::new(),
             storage,
-            fetch_interval: Duration::from_millis(50),
-            heartbeats: HashMap::new(),
+            controller: DefaultController,
         }
     }
 }
 
-impl<T, S, M> QueueBuilder<T, S, M> {
-    /// Add a new layer `T` into the [QueueBuilder].
+impl<T, S, M, C> WorkerBuilder<T, S, M, C> {
+    /// Add a new layer `T` into the [WorkerBuilder].
     ///
     /// This wraps the inner service with the service provided by a user-defined
     /// [Layer]. The provided layer must implement the [Layer] trait.
     ///
-    pub fn layer<U>(self, layer: U) -> QueueBuilder<T, S, Stack<U, M>>
+    pub fn layer<U>(self, layer: U) -> WorkerBuilder<T, S, Stack<U, M>, C>
     where
         M: Layer<U>,
     {
-        QueueBuilder {
+        WorkerBuilder {
             job: self.job,
             storage: self.storage,
             layer: Stack::new(layer, self.layer),
-            fetch_interval: self.fetch_interval,
-            heartbeats: self.heartbeats,
+            controller: self.controller,
         }
     }
 
@@ -124,8 +123,8 @@ impl<T, S, M> QueueBuilder<T, S, M> {
     /// This wraps the inner service with an instance of the [`Filter`]
     /// middleware.
     ///
-    /// [`Filter`]: crate::filter
-    pub fn filter<P>(self, predicate: P) -> QueueBuilder<T, S, Stack<FilterLayer<P>, M>>
+    /// [`Filter`]: tower::filter::Filter
+    pub fn filter<P>(self, predicate: P) -> WorkerBuilder<T, S, Stack<FilterLayer<P>, M>, C>
     where
         M: Layer<FilterLayer<P>>,
     {
@@ -138,56 +137,72 @@ impl<T, S, M> QueueBuilder<T, S, M> {
     ///
     /// This wraps the inner service with an instance of the [`AsyncFilter`]
     /// middleware.
-    pub fn filter_async<P>(self, predicate: P) -> QueueBuilder<T, S, Stack<AsyncFilterLayer<P>, M>>
+    /// [`AsyncFilter`]: tower::filter::AsyncFilter
+    pub fn filter_async<P>(
+        self,
+        predicate: P,
+    ) -> WorkerBuilder<T, S, Stack<AsyncFilterLayer<P>, M>, C>
     where
         M: Layer<AsyncFilterLayer<P>>,
     {
         self.layer(AsyncFilterLayer::new(predicate))
     }
 
-    // fn finalize<K>(self, service: K) -> M::Service
-    // where
-    //     M: Layer<K>,
-    // {
-    //     self.layer.layer(service)
-    // }
-
-    /// Represents a heartbeat to be sent by a [Queue] to the [Storage].
-    pub fn heartbeat(mut self, heartbeat: Heartbeat, duration: Duration) -> Self {
-        self.heartbeats.insert(heartbeat, duration);
-        QueueBuilder {
-            job: self.job,
-            storage: self.storage,
-            layer: self.layer,
-            fetch_interval: duration,
-            heartbeats: self.heartbeats,
-        }
+    /// Map one response type to another.
+    ///
+    /// This wraps the inner service with an instance of the [`MapResponse`]
+    /// middleware.
+    ///
+    /// See the documentation for the [`map_response` combinator] for details.
+    ///
+    /// [`MapResponse`]: tower::util::MapResponse
+    /// [`map_response` combinator]: tower::util::ServiceExt::map_response
+    pub fn map_response<F>(
+        self,
+        f: F,
+    ) -> WorkerBuilder<T, S, Stack<tower::util::MapResponseLayer<F>, M>, C>
+    where
+        M: Layer<tower::util::MapResponseLayer<F>>,
+    {
+        self.layer(tower::util::MapResponseLayer::new(f))
     }
 
-    /// Represents the fetch interval by a [Queue] from the [Storage].
-    /// Recommended 50ms - 100ms
-    /// Can be lowered to increase a queue's priority
-    pub fn fetch_interval(self, duration: Duration) -> Self {
-        QueueBuilder {
+    /// Map one error type to another.
+    ///
+    /// This wraps the inner service with an instance of the [`MapErr`]
+    /// middleware.
+    ///
+    /// See the documentation for the [`map_err` combinator] for details.
+    ///
+    /// [`MapErr`]: tower::util::MapErr
+    /// [`map_err` combinator]: tower::util::ServiceExt::map_err
+    pub fn map_err<F>(self, f: F) -> WorkerBuilder<T, S, Stack<tower::util::MapErrLayer<F>, M>, C>
+    where
+        M: Layer<tower::util::MapErrLayer<F>>,
+    {
+        self.layer(tower::util::MapErrLayer::new(f))
+    }
+
+    /// Represents a controller that dictates how a [Queue] runs
+    pub fn controller<W>(mut self, controller: W) -> WorkerBuilder<T, S, M, W> {
+        WorkerBuilder {
             job: self.job,
             storage: self.storage,
             layer: self.layer,
-            fetch_interval: duration,
-            heartbeats: self.heartbeats,
+            controller,
         }
     }
     /// Builds a [QueueFactory] using the default [JobService] service
     /// that can be used to generate new [Queue] actors using the `Actor::start` method
-    pub fn build(self) -> QueueFactory<T, S, M::Service>
+    pub fn build(self) -> WorkerFactory<T, S, M::Service, C>
     where
         M: Layer<JobService>,
     {
-        QueueFactory {
+        WorkerFactory {
             job: PhantomData,
             service: self.layer.layer(JobService),
             storage: self.storage,
-            fetch_interval: self.fetch_interval,
-            heartbeats: self.heartbeats,
+            controller: self.controller,
         }
     }
 
@@ -200,67 +215,63 @@ impl<T, S, M> QueueBuilder<T, S, M> {
     /// # Examples
     ///
 
-    pub fn build_fn<F>(self, f: F) -> QueueFactory<T, S, M::Service>
+    pub fn build_fn<F>(self, f: F) -> WorkerFactory<T, S, M::Service, C>
     where
-        M: Layer<tower::util::ServiceFn<F>>,
+        M: Layer<JobFn<F>>,
     {
-        QueueFactory {
+        WorkerFactory {
             job: PhantomData,
-            service: self.layer.layer(::tower::util::service_fn(f)),
+            service: self.layer.layer(job_fn(f)),
             storage: self.storage,
-            fetch_interval: self.fetch_interval,
-            heartbeats: self.heartbeats,
+            controller: self.controller,
         }
     }
 }
 
-pub struct QueueFactory<T, S, M> {
+/// Represents a factory for [Queue]
+pub struct WorkerFactory<T, S, M, C> {
     job: PhantomData<T>,
+    /// The [Service] for executing jobs
     pub service: M,
+    /// The [Storage] for producing a stream of jobs
     pub storage: S,
-    fetch_interval: Duration,
-    heartbeats: HashMap<Heartbeat, Duration>,
+
+    pub controller: C,
 }
 
-impl<T, S, M> QueueFactory<T, S, M> {
+impl<T, S, M, C> WorkerFactory<T, S, M, C> {
     /// Allows you to start a [Queue] that starts consuming the storage immediately
-    pub fn start<Fut>(self) -> Addr<Queue<T, S, M>>
+    pub fn start<Fut>(self) -> Addr<Worker<T, S, M, C>>
     where
         S: Storage<Output = T> + Unpin + Send + 'static,
-        T: Serialize + Debug + DeserializeOwned + Send + 'static,
+        T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
         M: Service<JobRequest<T>, Response = JobResult, Error = JobError, Future = Fut>
             + Unpin
             + Send
             + 'static,
         Fut: Future<Output = Result<JobResult, JobError>> + 'static,
+        C: WorkerController + Unpin + Send + 'static,
     {
         let arb = &Arbiter::new();
-        Actor::start_in_arbiter(&arb.handle(), |ctx: &mut Context<Queue<T, S, M>>| {
-            let start = Instant::now() + Duration::from_millis(5);
-            // ctx.add_stream(FetchJobStream::new(interval_at(start, self.fetch_interval)));
-            for (heartbeat, duration) in self.heartbeats.into_iter() {
-                ctx.add_stream(HeartbeatStream::new(
-                    heartbeat,
-                    interval_at(start, duration),
-                ));
-            }
-            Queue::new(self.storage, self.service)
+        Supervisor::start_in_arbiter(&arb.handle(), |ctx: &mut Context<Worker<T, S, M, C>>| {
+            Worker::new(self.storage, self.service).controller(self.controller)
         })
     }
 
     /// Allows customization before the starting of a [Queue]
-    pub fn start_with<Fut, F>(self, f: F) -> Addr<Queue<T, S, M>>
+    pub fn start_with<Fut, F>(self, f: F) -> Addr<Worker<T, S, M, C>>
     where
         S: Storage<Output = T> + Unpin + Send + 'static,
-        T: Serialize + Debug + DeserializeOwned + Send + 'static,
+        T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
         M: Service<JobRequest<T>, Response = JobResult, Error = JobError, Future = Fut>
             + Unpin
             + Send
             + 'static,
         Fut: Future<Output = Result<JobResult, JobError>> + 'static,
-        F: FnOnce(Self, &mut Context<Queue<T, S, M>>) -> Queue<T, S, M> + Send + 'static,
+        F: FnOnce(Self, &mut Context<Worker<T, S, M, C>>) -> Worker<T, S, M, C> + Send + 'static,
+        C: WorkerController + Unpin + Send + 'static,
     {
         let arb = &Arbiter::new();
-        Actor::start_in_arbiter(&arb.handle(), |ctx| f(self, ctx))
+        Supervisor::start_in_arbiter(&arb.handle(), |ctx| f(self, ctx))
     }
 }

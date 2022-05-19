@@ -9,7 +9,7 @@
 
 -- Find expired consumers
 local consumers = redis.call("zrangebyscore", KEYS[1], 0, ARGV[1], "LIMIT", 0, ARGV[2])
-
+redis.replicate_commands()
 -- Pull jobs from the consumer's inflight set and reschedule up to limit
 local limit = tonumber(ARGV[2])
 for _,consumer in ipairs(consumers) do

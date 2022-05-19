@@ -1,14 +1,19 @@
+use futures::Future;
 use std::{
     fmt::Debug,
     pin::Pin,
     task::{Context, Poll},
 };
-
-use actix::clock::Instant;
-use futures::Future;
 use tower::Service;
+use tracing::Span;
+use tracing_futures::Instrument;
 
-use crate::{error::JobError, job::Job, request::JobRequest, response::JobResult};
+use crate::{
+    error::JobError,
+    job::{Job, JobHandler},
+    request::JobRequest,
+    response::JobResult,
+};
 
 /// Represents the default [JobService].
 /// Used to spawn all jobs that implement [Job]
@@ -17,7 +22,7 @@ pub struct JobService;
 
 impl<Request> Service<JobRequest<Request>> for JobService
 where
-    Request: Debug + Job + 'static,
+    Request: Debug + Job + 'static + JobHandler<Request>,
 {
     type Response = JobResult;
     type Error = JobError;
@@ -28,23 +33,12 @@ where
     }
 
     fn call(&mut self, job: JobRequest<Request>) -> Self::Future {
-        let id = job.id();
+        let span = Span::current();
         let fut = async move {
-            let now = Instant::now();
-            log::debug!(
-                target: Request::name(),
-                "JobService: [{}] ready for processing.",
-                id
-            );
             let res = job.do_handle().await;
-            log::debug!(
-                "JobService: [{}] completed in {} μs",
-                id,
-                now.elapsed().as_micros()
-            );
-
             res
-        };
+        }
+        .instrument(span);
         Box::pin(fut)
     }
 }

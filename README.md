@@ -26,7 +26,7 @@ apalis = { version = "0.3.0-beta.0", features = ["redis"] }
 ## Usage
 
 ```rust
-use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, QueueBuilder, Storage, Worker};
+use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, WorkerBuilder, Storage, Worker};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -46,7 +46,7 @@ async fn main() -> std::io::Result<()> {
     let storage = RedisStorage::new(redis).await.unwrap();
     Worker::new()
         .register_with_count(2, move || {
-            QueueBuilder::new(storage.clone())
+            WorkerBuilder::new(storage.clone())
                 .build_fn(email_service)
                 .start()
         })

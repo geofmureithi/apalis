@@ -1,5 +1,5 @@
 [package]
-name = "redis-example"
+name = "sentry-example"
 version = "0.1.0"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2018"
@@ -11,7 +11,10 @@ apalis = { path = "../../", features = ["redis"] }
 serde = "1"
 actix-rt = "2"
 env_logger = "0.7"
-tracing-subscriber = "0.3.11"
+tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
+sentry = "0.25"
+sentry-tower = "0.25.0"
+sentry-tracing = "0.25.0"
 chrono = { version = "0.4" }
 
 

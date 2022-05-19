@@ -1,22 +1,22 @@
-use crate::service::JobService;
-use crate::storage::Storage;
+use actix::Message;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use sqlx::{sqlite::SqliteRow, FromRow, Row};
+use sqlx::{postgres::PgRow, sqlite::SqliteRow, FromRow, Row};
 use std::fmt::Debug;
-use strum::EnumString;
+use strum::{AsRefStr, EnumString};
 use tokio::sync::oneshot;
-use uuid::Uuid;
+use tracing::{Instrument, Span};
 
 use crate::{
     context::JobContext,
     error::JobError,
-    job::Job,
+    error::WorkerError,
+    job::{Job, JobHandler},
     response::{JobResponse, JobResult},
 };
 
 /// Represents the state of a [JobRequest] in a [Storage]
-#[derive(EnumString, Serialize, Deserialize, Debug, Clone)]
+#[derive(EnumString, Serialize, Deserialize, Debug, Clone, AsRefStr)]
 pub enum JobState {
     Pending,
     Running,
@@ -26,13 +26,28 @@ pub enum JobState {
     Killed,
 }
 
+/// A report item for [JobReport]
+#[derive(Debug)]
+pub enum Report {
+    /// This is sent to Queue when a job updates progress
+    Progress(u8),
+}
+
+/// Represents an update of a job
+#[derive(Debug, Message)]
+#[rtype(result = "Result<(), WorkerError>")]
+pub struct JobReport {
+    pub(crate) job_id: String,
+    pub(crate) report: Report,
+}
+
 /// Represents a job which can be pushed and popped into a [Storage].
 ///
 ///
 /// Its usually passed to a [JobService] for execution.
-#[derive(Serialize, Debug, Deserialize)]
+#[derive(Serialize, Debug, Deserialize, Clone)]
 pub struct JobRequest<T> {
-    job: T,
+    pub(crate) job: T,
     id: String,
     status: JobState,
     run_at: DateTime<Utc>,
@@ -44,25 +59,7 @@ pub struct JobRequest<T> {
     done_at: Option<DateTime<Utc>>,
 
     #[serde(skip)]
-    context: JobContext,
-}
-
-impl<T: Clone> Clone for JobRequest<T> {
-    fn clone(&self) -> Self {
-        Self {
-            job: self.job.clone(),
-            id: self.id.clone(),
-            status: self.status.clone(),
-            run_at: self.run_at.clone(),
-            lock_at: self.lock_at.clone(),
-            done_at: self.done_at.clone(),
-            attempts: self.attempts,
-            max_attempts: self.max_attempts,
-            last_error: self.last_error.clone(),
-            lock_by: self.lock_by.clone(),
-            context: JobContext::new(),
-        }
-    }
+    pub(crate) context: JobContext,
 }
 
 impl<T> JobRequest<T> {
@@ -88,7 +85,7 @@ impl<T> JobRequest<T> {
         &self.job
     }
 
-    /// Get the [Uuid] for a job
+    /// Get the id for a job
     pub fn id(&self) -> String {
         self.id.clone()
     }
@@ -117,27 +114,101 @@ impl<T> JobRequest<T> {
     pub fn attempts(&self) -> i32 {
         self.attempts
     }
+
+    /// Set the number of attempts
+    pub(crate) fn set_attempts(&mut self, attempts: i32) {
+        self.attempts = attempts;
+    }
+
+    /// Get the time a job was done
+    pub fn done_at(&self) -> &Option<DateTime<Utc>> {
+        &self.done_at
+    }
+
+    /// Set the time a job was done
+    pub(crate) fn set_done_at(&mut self, done_at: DateTime<Utc>) {
+        self.done_at = Some(done_at);
+    }
+
+    /// Get the time a job was locked
+    pub fn lock_at(&self) -> &Option<DateTime<Utc>> {
+        &self.lock_at
+    }
+
+    pub(crate) fn set_lock_at(&mut self, lock_at: DateTime<Utc>) {
+        self.lock_at = Some(lock_at);
+    }
+
+    /// Get the job status
+    pub fn status(&self) -> &JobState {
+        &self.status
+    }
+
+    pub(crate) fn set_status(&mut self, status: JobState) {
+        self.status = status;
+    }
+
+    /// Get the time a job was locked
+    pub fn lock_by(&self) -> &Option<String> {
+        &self.lock_by
+    }
+
+    pub(crate) fn set_lock_by(&mut self, lock_by: String) {
+        self.lock_by = Some(lock_by);
+    }
+
+    /// Get the time a job was locked
+    pub fn last_error(&self) -> &Option<String> {
+        &self.last_error
+    }
+
+    pub(crate) fn set_last_error(&mut self, error: String) {
+        self.last_error = Some(error);
+    }
 }
 
 impl<J> JobRequest<J>
 where
-    J: Job,
+    J: Job + JobHandler<J>,
 {
     /// A helper method to executes a [JobRequest] wrapping a [Job]
-    pub(crate) async fn do_handle(self) -> Result<JobResult, JobError> {
-        let id = self.id();
+    pub(crate) async fn do_handle(mut self) -> Result<JobResult, JobError> {
         let (tx, rx) = oneshot::channel();
-        self.job.handle(&self.context).into_response(Some(tx));
-        match rx.await {
+
+        let span = Span::current();
+
+        self.job.handle(self.context).into_response(Some(tx));
+
+        let result = match rx.instrument(span).await {
             Ok(value) => {
-                log::debug!("JobTX [{}] completed with value: {:?}", id, value);
+                tracing::trace!("jobservice.completed");
                 value
             }
             Err(err) => {
-                log::warn!("JobTX [{}] panicked with error: {:?}", id, err);
+                tracing::warn!("jobservice.panicked");
                 Err(JobError::Failed(Box::new(err)))
             }
-        }
+        };
+        match &result {
+            Ok(res) => match res {
+                JobResult::Success => {
+                    self.status = JobState::Done;
+                }
+                JobResult::Retry => {
+                    self.status = JobState::Retry;
+                }
+                JobResult::Kill => {
+                    self.status = JobState::Killed;
+                }
+                JobResult::Reschedule(_) => {
+                    self.status = JobState::Retry;
+                }
+            },
+            Err(_) => {
+                self.status = JobState::Failed;
+            }
+        };
+        result
     }
 }
 
@@ -157,8 +228,8 @@ impl<'r, T: DeserializeOwned> FromRow<'r, SqliteRow> for JobRequest<T> {
         let run_at = Utc.timestamp(run_at.into(), 0);
         let attempts = row.try_get("attempts").unwrap_or_else(|_| 0);
         let max_attempts = row.try_get("max_attempts").unwrap_or_else(|_| 25);
-        let done_at: Option<i32> = row.try_get("done_at").unwrap_or_default();
-        let lock_at: Option<i32> = row.try_get("lock_at").unwrap_or_default();
+        let done_at: Option<i64> = row.try_get("done_at").unwrap_or_default();
+        let lock_at: Option<i64> = row.try_get("lock_at").unwrap_or_default();
         let last_error = row.try_get("last_error").unwrap_or_default();
         let status: String = row.try_get("status")?;
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
@@ -175,5 +246,43 @@ impl<'r, T: DeserializeOwned> FromRow<'r, SqliteRow> for JobRequest<T> {
             done_at: done_at.map(|time| Utc.timestamp(time.into(), 0)),
             context: JobContext::new(),
         })
+    }
+}
+
+impl<'r, T: DeserializeOwned> FromRow<'r, PgRow> for JobRequest<T> {
+    fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
+        let job: String = row.try_get("job")?;
+        let id = row.try_get("id")?;
+        let run_at: i32 = row.try_get("run_at")?;
+        let run_at = Utc.timestamp(run_at.into(), 0);
+        let attempts = row.try_get("attempts").unwrap_or_else(|_| 0);
+        let max_attempts = row.try_get("max_attempts").unwrap_or_else(|_| 25);
+        let done_at: Option<i64> = row.try_get("done_at").unwrap_or_default();
+        let lock_at: Option<i64> = row.try_get("lock_at").unwrap_or_default();
+        let last_error = row.try_get("last_error").unwrap_or_default();
+        let status: String = row.try_get("status")?;
+        let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
+        Ok(JobRequest {
+            job: serde_json::from_str(&job).unwrap(),
+            id,
+            run_at,
+            status: status.parse().unwrap(),
+            attempts,
+            max_attempts,
+            last_error,
+            lock_at: lock_at.map(|time| Utc.timestamp(time.into(), 0)),
+            lock_by,
+            done_at: done_at.map(|time| Utc.timestamp(time.into(), 0)),
+            context: JobContext::new(),
+        })
+    }
+}
+
+impl JobReport {
+    pub(crate) fn progress(job_id: String, progress: u8) -> JobReport {
+        JobReport {
+            job_id,
+            report: Report::Progress(progress),
+        }
     }
 }

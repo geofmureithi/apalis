@@ -3,7 +3,7 @@ extern crate criterion;
 use std::time::{Duration, Instant};
 
 use actix::prelude::*;
-use apalis::{sqlite::SqliteStorage, JobError, JobRequest, JobResult, QueueBuilder, Storage};
+use apalis::{sqlite::SqliteStorage, JobError, JobRequest, JobResult, Storage, WorkerBuilder};
 use apalis_redis::RedisStorage;
 use criterion::*;
 use serde::{Deserialize, Serialize};
@@ -51,12 +51,12 @@ fn bench(c: &mut Criterion) {
         b.to_async(Runtime::new().unwrap())
             .iter_custom(|iters| async move {
                 let mut interval = tokio::time::interval(Duration::from_millis(10));
-                let mut sqlite = SqliteStorage::new("sqlite::memory:").await.unwrap();
+                let mut sqlite = SqliteStorage::connect("sqlite::memory:").await.unwrap();
                 sqlite.setup().await;
                 for _i in 0..100 {
                     sqlite.push(TestJob).await;
                 }
-                let _addr = QueueBuilder::new(sqlite.clone())
+                let _addr = WorkerBuilder::new(sqlite.clone())
                     .fetch_interval(Duration::from_millis(10))
                     .build_fn(handle_test_job)
                     .start();

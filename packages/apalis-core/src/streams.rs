@@ -6,20 +6,20 @@ use std::{
 use actix::clock::Interval;
 use futures::Stream;
 
-use crate::queue::Heartbeat;
+use crate::worker::WorkerPulse;
 
 pub struct HeartbeatStream {
     interval: Interval,
-    beat: Heartbeat,
+    beat: WorkerPulse,
 }
 
 impl HeartbeatStream {
-    pub fn new(beat: Heartbeat, interval: Interval) -> Self {
+    pub fn new(beat: WorkerPulse, interval: Interval) -> Self {
         HeartbeatStream { beat, interval }
     }
 }
 impl Stream for HeartbeatStream {
-    type Item = Heartbeat;
+    type Item = WorkerPulse;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let beat = self.beat.clone();

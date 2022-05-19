@@ -7,6 +7,10 @@ pub enum StorageError {
     Connection(#[source] BoxDynError),
     #[error("Storage encountered a database error: {0}")]
     Database(#[source] BoxDynError),
+    #[error("The resource was not found in storage")]
+    NotFound,
+    #[error("Serialization/Deserialization Error")]
+    SerDe(#[source] BoxDynError),
 }
 
 // Convenience type alias for usage within Apalis.
@@ -44,9 +48,15 @@ impl From<sqlx::Error> for StorageError {
     }
 }
 
+impl From<serde_json::Error> for StorageError {
+    fn from(e: serde_json::Error) -> Self {
+        StorageError::SerDe(Box::from(e))
+    }
+}
+
 /// Represents a queue error.
 #[derive(Debug, Error)]
-pub enum QueueError {
+pub enum WorkerError {
     /// An error communicating with storage.
     #[error("error communicating with storage: {0}")]
     Storage(StorageError),

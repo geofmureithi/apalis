@@ -1,8 +1,10 @@
+mod postgres;
 mod sqlite;
-//mod postgres;
 
-///
+pub use postgres::PostgresStorage;
+
+/// Example
 /// ```rust
-/// let storage = RedisStorage::new("redis://127.0.0.1/").await.unwrap();
+/// let storage = SqliteStorage::connect(":memory").await.unwrap();
 /// ```
 pub use sqlite::SqliteStorage;

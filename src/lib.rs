@@ -6,7 +6,7 @@
 //!   middleware, services, and utilities.
 //! - Takes full of the [`actix`] actors with each queue being an [`Actor`].
 //! - Bring your own Storage.
-//! 
+//!
 //! Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] and [`tower-http`] middleware.
 //!
 //!  ## Example
@@ -30,7 +30,7 @@
 //!     let storage = RedisStorage::new().await.unwrap();
 //!     Worker::new()
 //!         .register_with_count(2, move || {
-//!             QueueBuilder::new(storage.clone())
+//!             WorkerBuilder::new(storage.clone())
 //!                 .build_fn(email_service)
 //!                 .start()
 //!         })
@@ -45,15 +45,15 @@
 //! [`actor`]: https://docs.rs/actix/0.13.0/actix/trait.Actor.html
 
 pub use apalis_core::{
-    builder::QueueBuilder,
+    builder::WorkerBuilder,
     context::JobContext,
     error::JobError,
-    job::{Job, JobFuture},
-    queue::{Heartbeat, Queue},
+    job::{Job, JobFuture, JobHandler},
+    monitor::Monitor,
     request::JobRequest,
     response::JobResult,
     storage::Storage,
-    worker::Worker,
+    worker::{Worker, WorkerPulse},
 };
 
 pub mod heartbeat {
@@ -70,17 +70,21 @@ pub mod sqlite {
     pub use apalis_sql::SqliteStorage;
 }
 
+pub mod postgres {
+    pub use apalis_sql::PostgresStorage;
+}
+
 /// Apalis jobs fully support tower middleware via [Layer]
 ///
 /// ## Example
 /// ```rust
 /// use apalis::{
 ///     layers::{Extension, DefaultRetryPolicy, RetryLayer},
-///     QueueBuilder,
+///     WorkerBuilder,
 /// };
 ///
 /// fn main() {
-///     let queue = QueueBuilder::new(storage.clone())
+///     let queue = WorkerBuilder::new(storage.clone())
 ///         .layer(RetryLayer::new(DefaultRetryPolicy))
 ///         .layer(Extension(EmailState {}))
 ///         .build();
