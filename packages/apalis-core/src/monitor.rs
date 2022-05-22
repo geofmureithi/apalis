@@ -28,7 +28,6 @@ use crate::{
 pub enum WorkerManagement {
     Status,
     Restart,
-    Setup,
     Monitor(Addr<Monitor>),
     /// Kill specific job through [SpawnHandle]
     Kill(String),
@@ -38,10 +37,11 @@ impl Monitor {
     pub fn new() -> Self {
         Self {
             addrs: Vec::new(),
-            event_handler: Box::new(
-                |c| trace!(event = ?c, "Received an unhandled event from Queue"),
-            ),
+            event_handlers: Vec::new(),
         }
+    }
+    pub fn with_system(self) -> Self {
+        self
     }
     pub async fn run(self) -> std::io::Result<()> {
         let queues = self.addrs.clone();
@@ -74,7 +74,14 @@ impl Monitor {
 /// When combined with the `web` feature, it can be used to manage the queues from a web ui.
 pub struct Monitor {
     addrs: Vec<Recipient<WorkerManagement>>,
-    event_handler: Box<dyn Fn(QueueEvent)>,
+    event_handlers: Vec<Box<dyn WorkerListener>>,
+}
+
+pub trait WorkerListener {
+    fn on_event(&self, ctx: &mut Context<Monitor>, worker_id: &String, event: &WorkerEvent);
+    fn subscribe(&self, ctx: &mut Context<Monitor>) {
+        //You may want to setup listening to other workers.
+    }
 }
 
 impl Monitor {
@@ -91,7 +98,7 @@ impl Monitor {
             + Send
             + 'static,
         F: Future<Output = Result<JobResult, JobError>>,
-        C: WorkerController + Unpin + Send + 'static,
+        C: WorkerController<T> + Unpin + Send + 'static,
     {
         let addr = Supervisor::start(|_| queue);
         self.addrs.push(addr.into());
@@ -109,7 +116,7 @@ impl Monitor {
             + Send
             + 'static,
         Fut: Future<Output = Result<JobResult, JobError>> + 'static,
-        C: WorkerController + Unpin + Send + 'static,
+        C: WorkerController<T> + Unpin + Send + 'static,
     {
         for index in 0..count {
             let addr = factory(index);
@@ -120,9 +127,9 @@ impl Monitor {
 
     pub fn event_handler<H: 'static>(mut self, handle: H) -> Self
     where
-        H: Fn(QueueEvent),
+        H: WorkerListener,
     {
-        self.event_handler = Box::new(handle);
+        self.event_handlers.push(Box::new(handle));
         self
     }
 }
@@ -135,7 +142,11 @@ impl Actor for Monitor {
             self.addrs.len()
         );
 
-        ctx.run_interval(Duration::from_secs(2), |act, ctx| {
+        for event_handler in &self.event_handlers {
+            event_handler.subscribe(ctx);
+        }
+
+        ctx.run_interval(Duration::from_secs(10), |act, ctx| {
             let queues = act.addrs.clone();
             let fut = async {
                 for queue in queues {
@@ -166,16 +177,18 @@ impl Actor for Monitor {
 ///
 #[derive(Debug, Message)]
 #[rtype(result = "()")]
-pub enum QueueEvent {
+pub enum WorkerEvent {
     Error(WorkerError),
     Complete(String, JobResult),
     Failed(String, JobError),
 }
 
-impl Handler<QueueEvent> for Monitor {
+impl Handler<WorkerEvent> for Monitor {
     type Result = ();
-    fn handle(&mut self, msg: QueueEvent, _: &mut Self::Context) -> Self::Result {
-        (self.event_handler)(msg);
+    fn handle(&mut self, msg: WorkerEvent, ctx: &mut Self::Context) -> Self::Result {
+        for event_handler in &self.event_handlers {
+            (event_handler).on_event(ctx, &String::from("Test"), &msg);
+        }
     }
 }
 

@@ -1,26 +1,20 @@
 use crate::{
-    error::WorkerError,
+    error::{StorageError, WorkerError},
     job::Job,
-    request::{JobReport, JobState},
+    request::{JobReport, JobState, OnProgress, TracingOnProgress},
     response::JobResult,
 };
 use actix::{Message, Recipient};
 use chrono::{DateTime, Utc};
 use http::Extensions;
-use std::any::Any;
+use std::{any::Any, marker::Send};
 
 /// The context for a job is represented here
 /// Used to provide a context when a job is defined through the [Job] trait
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct JobContext {
     data: Extensions,
     job_tracker: Option<JobTracker>,
-}
-
-impl Default for JobContext {
-    fn default() -> Self {
-        JobContext::new()
-    }
 }
 
 impl Clone for JobContext {
@@ -34,7 +28,7 @@ impl Clone for JobContext {
 }
 
 impl JobContext {
-    pub fn new() -> Self {
+    pub fn new(job_id: String) -> Self {
         JobContext {
             data: Default::default(),
             job_tracker: None,
@@ -79,17 +73,8 @@ impl JobContext {
         self.job_tracker = Some(tracker);
     }
 
-    pub fn update_progress(&self, progress: u8) {
-        match &self.job_tracker {
-            Some(tracker) => {
-                tracker.update_progress(progress);
-            }
-            None => {}
-        }
-    }
-
-    pub(crate) fn get_tracker(&self) -> &Option<JobTracker> {
-        &self.job_tracker
+    pub fn get_progress_handle<OP: 'static + OnProgress + Send + Sync>(&self) -> Option<&OP> {
+        self.data_opt::<OP>()
     }
 
     pub fn ack(&mut self) -> JobResult {
@@ -105,20 +90,24 @@ impl JobContext {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct JobTracker {
     job_id: String,
-    addr: Recipient<JobReport>,
+    addr: Option<Recipient<JobReport>>,
 }
 
 impl JobTracker {
     fn update_progress(&self, progress: u8) {
-        tracing::info!(target: "context", progress = progress, "progress.update");
         self.addr
+            .as_ref()
+            .unwrap()
             .do_send(JobReport::progress(self.job_id.clone(), progress));
     }
 
     pub(crate) fn new(job_id: String, addr: Recipient<JobReport>) -> JobTracker {
-        JobTracker { job_id, addr }
+        JobTracker {
+            job_id,
+            addr: Some(addr),
+        }
     }
 }

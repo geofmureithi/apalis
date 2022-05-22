@@ -24,7 +24,7 @@ impl JobHandler<Self> for Email {
 
     fn handle(self, ctx: JobContext) -> Self::Result {
         let fut = async move {
-            actix::clock::sleep(Duration::from_millis(5000)).await;
+            actix::clock::sleep(Duration::from_millis(1000)).await;
             tracing::info!(subject = ?self.to, "Sent email");
         };
         Box::pin(fut)
@@ -33,7 +33,7 @@ impl JobHandler<Self> for Email {
 
 async fn produce_jobs(storage: &SqliteStorage<Email>) {
     let mut storage = storage.clone();
-    for i in 0..100 {
+    for i in 0..2 {
         storage
             .schedule(
                 Email {
@@ -61,12 +61,11 @@ async fn main() -> std::io::Result<()> {
         .expect("unable to run migrations for sqlite");
 
     // This can be in another part of the program
-    // produce_jobs(&sqlite).await;
+    produce_jobs(&sqlite).await;
 
     Monitor::new()
         .register_with_count(5, move |_| {
             WorkerBuilder::new(sqlite.clone())
-                .layer(RateLimitLayer::new(10, Duration::from_millis(10)))
                 .layer(TraceLayer::new())
                 .build()
                 .start()

@@ -1,0 +1,19 @@
+[package]
+name = "mysql-example"
+version = "0.1.0"
+authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+actix = "0.13"
+apalis = { path = "../../", features = ["mysql"] }
+serde = "1"
+actix-rt = "2"
+tracing-subscriber = "0.3.11"
+chrono = { version = "0.4" }
+
+
+[dependencies.tracing]
+default_features = false
+version = "0.1"

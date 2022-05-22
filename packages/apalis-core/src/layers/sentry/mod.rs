@@ -142,7 +142,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: JobRequest<J>) -> Self::Future {
+    fn call(&mut self, mut request: JobRequest<J>) -> Self::Future {
         let op = J::NAME;
         let trx_ctx = sentry_core::TransactionContext::new(op, "apalis.job");
         let job_type = std::any::type_name::<J>().to_string();

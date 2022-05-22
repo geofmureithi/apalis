@@ -1,5 +1,8 @@
+use std::time::Duration;
+
+use actix::clock::sleep;
 use apalis::{
-    layers::tracing::TraceLayer, postgres::PostgresStorage, Job, JobContext, JobError, JobResult,
+    layers::tracing::TraceLayer, mysql::MysqlStorage, Job, JobContext, JobError, JobResult,
     Monitor, Storage, WorkerBuilder,
 };
 use serde::{Deserialize, Serialize};
@@ -12,16 +15,17 @@ struct Email {
 }
 
 impl Job for Email {
-    const NAME: &'static str = "postgres::Email";
+    const NAME: &'static str = "mysql::Email";
 }
 
 async fn email_service(_email: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
+    sleep(Duration::from_millis(1)).await;
     Ok(JobResult::Success)
 }
 
-async fn produce_jobs(storage: &PostgresStorage<Email>) {
+async fn produce_jobs(storage: &MysqlStorage<Email>) {
     let mut storage = storage.clone();
-    for i in 0..1000 {
+    for i in 0..100 {
         storage
             .push(Email {
                 to: format!("test{}@example.com", i),
@@ -39,16 +43,16 @@ async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt::init();
     let database_url = std::env::var("DATABASE_URL").expect("Must specify path to db");
 
-    let pg: PostgresStorage<Email> = PostgresStorage::connect(database_url).await.unwrap();
-    pg.setup()
-        .await
-        .expect("unable to run migrations for postgres");
+    let mysql: MysqlStorage<Email> = MysqlStorage::connect(database_url).await.unwrap();
+    // mysql
+    //     .setup()
+    //     .await
+    //     .expect("unable to run migrations for mysql");
 
-    produce_jobs(&pg).await;
-
+    produce_jobs(&mysql).await;
     Monitor::new()
-        .register_with_count(4, move |_| {
-            WorkerBuilder::new(pg.clone())
+        .register_with_count(2, move |_| {
+            WorkerBuilder::new(mysql.clone())
                 .layer(TraceLayer::new())
                 .build_fn(email_service)
                 .start()

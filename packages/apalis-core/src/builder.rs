@@ -250,7 +250,7 @@ impl<T, S, M, C> WorkerFactory<T, S, M, C> {
             + Send
             + 'static,
         Fut: Future<Output = Result<JobResult, JobError>> + 'static,
-        C: WorkerController + Unpin + Send + 'static,
+        C: WorkerController<T> + Unpin + Send + 'static,
     {
         let arb = &Arbiter::new();
         Supervisor::start_in_arbiter(&arb.handle(), |ctx: &mut Context<Worker<T, S, M, C>>| {
@@ -269,7 +269,7 @@ impl<T, S, M, C> WorkerFactory<T, S, M, C> {
             + 'static,
         Fut: Future<Output = Result<JobResult, JobError>> + 'static,
         F: FnOnce(Self, &mut Context<Worker<T, S, M, C>>) -> Worker<T, S, M, C> + Send + 'static,
-        C: WorkerController + Unpin + Send + 'static,
+        C: WorkerController<T> + Unpin + Send + 'static,
     {
         let arb = &Arbiter::new();
         Supervisor::start_in_arbiter(&arb.handle(), |ctx| f(self, ctx))

@@ -68,11 +68,9 @@ impl<T> Clone for RedisStorage<T> {
 }
 
 impl<T: Job> RedisStorage<T> {
-    pub async fn connect<S: IntoConnectionInfo>(redis: S) -> Result<Self, RedisError> {
-        let client = Client::open(redis.into_connection_info()?)?;
-        let conn = client.get_multiplexed_async_connection().await?;
+    pub fn new(conn: MultiplexedConnection) -> Self {
         let name = T::NAME;
-        Ok(RedisStorage {
+        RedisStorage {
             conn,
             job_type: PhantomData,
             queue: RedisQueueInfo {
@@ -103,7 +101,17 @@ impl<T: Job> RedisStorage<T> {
                 )),
                 schedule_job: redis::Script::new(include_str!("../lua/schedule_job.lua")),
             },
-        })
+        }
+    }
+
+    pub async fn connect<S: IntoConnectionInfo>(redis: S) -> Result<Self, RedisError> {
+        let client = Client::open(redis.into_connection_info()?)?;
+        let conn = client.get_multiplexed_async_connection().await?;
+        Ok(Self::new(conn))
+    }
+
+    pub fn get_connection(&self) -> MultiplexedConnection {
+        self.conn.clone()
     }
 }
 

@@ -1,4 +1,5 @@
 pub mod extensions;
+pub mod prometheus;
 pub mod retry;
 pub mod sentry;
 pub mod tracing;

@@ -1,7 +1,8 @@
 use actix::Message;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use sqlx::{postgres::PgRow, sqlite::SqliteRow, FromRow, Row};
+use serde_json::Value;
+use sqlx::{mysql::MySqlRow, postgres::PgRow, sqlite::SqliteRow, types::Json, FromRow, Row};
 use std::fmt::Debug;
 use strum::{AsRefStr, EnumString};
 use tokio::sync::oneshot;
@@ -39,6 +40,7 @@ pub enum Report {
 pub struct JobReport {
     pub(crate) job_id: String,
     pub(crate) report: Report,
+    pub(crate) span: Span, // For tracing purposes
 }
 
 /// Represents a job which can be pushed and popped into a [Storage].
@@ -65,9 +67,12 @@ pub struct JobRequest<T> {
 impl<T> JobRequest<T> {
     /// Creates a new [JobRequest] ready to be pushed to a [Storage]
     pub fn new(job: T) -> Self {
+        let id = uuid::Uuid::new_v4().to_string();
+        let context = JobContext::new(id.clone());
+
         Self {
             job,
-            id: uuid::Uuid::new_v4().to_string(),
+            id,
             status: JobState::Pending,
             run_at: Utc::now(),
             lock_at: None,
@@ -76,7 +81,7 @@ impl<T> JobRequest<T> {
             max_attempts: 25,
             last_error: None,
             lock_by: None,
-            context: JobContext::new(),
+            context,
         }
     }
 
@@ -223,7 +228,7 @@ impl<T> std::ops::Deref for JobRequest<T> {
 impl<'r, T: DeserializeOwned> FromRow<'r, SqliteRow> for JobRequest<T> {
     fn from_row(row: &'r SqliteRow) -> Result<Self, sqlx::Error> {
         let job: String = row.try_get("job")?;
-        let id = row.try_get("id")?;
+        let id: String = row.try_get("id")?;
         let run_at: i32 = row.try_get("run_at")?;
         let run_at = Utc.timestamp(run_at.into(), 0);
         let attempts = row.try_get("attempts").unwrap_or_else(|_| 0);
@@ -233,6 +238,8 @@ impl<'r, T: DeserializeOwned> FromRow<'r, SqliteRow> for JobRequest<T> {
         let last_error = row.try_get("last_error").unwrap_or_default();
         let status: String = row.try_get("status")?;
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
+        let context = JobContext::new(id.clone());
+
         Ok(JobRequest {
             job: serde_json::from_str(&job).unwrap(),
             id,
@@ -244,36 +251,65 @@ impl<'r, T: DeserializeOwned> FromRow<'r, SqliteRow> for JobRequest<T> {
             lock_at: lock_at.map(|time| Utc.timestamp(time.into(), 0)),
             lock_by,
             done_at: done_at.map(|time| Utc.timestamp(time.into(), 0)),
-            context: JobContext::new(),
+            context,
         })
     }
 }
 
 impl<'r, T: DeserializeOwned> FromRow<'r, PgRow> for JobRequest<T> {
     fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
-        let job: String = row.try_get("job")?;
-        let id = row.try_get("id")?;
-        let run_at: i32 = row.try_get("run_at")?;
-        let run_at = Utc.timestamp(run_at.into(), 0);
+        let job: Value = row.try_get("job")?;
+        let id: String = row.try_get("id")?;
+        let run_at = row.try_get("run_at")?;
         let attempts = row.try_get("attempts").unwrap_or_else(|_| 0);
         let max_attempts = row.try_get("max_attempts").unwrap_or_else(|_| 25);
-        let done_at: Option<i64> = row.try_get("done_at").unwrap_or_default();
-        let lock_at: Option<i64> = row.try_get("lock_at").unwrap_or_default();
+        let done_at: Option<DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();
+        let lock_at: Option<DateTime<Utc>> = row.try_get("lock_at").unwrap_or_default();
         let last_error = row.try_get("last_error").unwrap_or_default();
         let status: String = row.try_get("status")?;
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
+        let context = JobContext::new(id.clone());
         Ok(JobRequest {
-            job: serde_json::from_str(&job).unwrap(),
+            job: serde_json::from_value(job).unwrap(),
             id,
             run_at,
             status: status.parse().unwrap(),
             attempts,
             max_attempts,
             last_error,
-            lock_at: lock_at.map(|time| Utc.timestamp(time.into(), 0)),
+            lock_at,
             lock_by,
-            done_at: done_at.map(|time| Utc.timestamp(time.into(), 0)),
-            context: JobContext::new(),
+            done_at,
+            context,
+        })
+    }
+}
+
+impl<'r, T: DeserializeOwned> FromRow<'r, MySqlRow> for JobRequest<T> {
+    fn from_row(row: &'r MySqlRow) -> Result<Self, sqlx::Error> {
+        let job: Value = row.try_get("job")?;
+        let id: String = row.try_get("id")?;
+        let run_at = row.try_get("run_at")?;
+        let attempts = row.try_get("attempts").unwrap_or_else(|_| 0);
+        let max_attempts = row.try_get("max_attempts").unwrap_or_else(|_| 25);
+        let done_at: Option<DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();
+        let lock_at: Option<DateTime<Utc>> = row.try_get("lock_at").unwrap_or_default();
+        let last_error = row.try_get("last_error").unwrap_or_default();
+        let status: String = row.try_get("status")?;
+        let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
+        let context = JobContext::new(id.clone());
+        Ok(JobRequest {
+            job: serde_json::from_value(job).unwrap(),
+            id,
+            run_at,
+            status: status.parse().unwrap(),
+            attempts,
+            max_attempts,
+            last_error,
+            lock_at,
+            lock_by,
+            done_at,
+            context,
         })
     }
 }
@@ -283,6 +319,19 @@ impl JobReport {
         JobReport {
             job_id,
             report: Report::Progress(progress),
+            span: Span::current(),
         }
+    }
+}
+
+pub trait OnProgress {
+    fn update_progress(&self, progress: u8);
+}
+
+pub struct TracingOnProgress;
+
+impl OnProgress for TracingOnProgress {
+    fn update_progress(&self, progress: u8) {
+        tracing::info!(progress = progress, "job.progress",);
     }
 }

@@ -1,6 +1,10 @@
 mod postgres;
 mod sqlite;
 
+mod mysql;
+
+pub use mysql::MysqlStorage;
+
 pub use postgres::PostgresStorage;
 
 /// Example

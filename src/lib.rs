@@ -28,7 +28,7 @@
 //!     let redis = std::env::var("REDIS_URL")
 //!                     .expect("Missing env variable REDIS_URL");
 //!     let storage = RedisStorage::new().await.unwrap();
-//!     Worker::new()
+//!     Monitor::new()
 //!         .register_with_count(2, move || {
 //!             WorkerBuilder::new(storage.clone())
 //!                 .build_fn(email_service)
@@ -51,6 +51,8 @@ pub use apalis_core::{
     job::{Job, JobFuture, JobHandler},
     monitor::Monitor,
     request::JobRequest,
+    request::OnProgress,
+    request::TracingOnProgress,
     response::JobResult,
     storage::Storage,
     worker::{Worker, WorkerPulse},
@@ -62,6 +64,7 @@ pub mod heartbeat {
 
 #[cfg(feature = "redis")]
 pub mod redis {
+    pub use apalis_redis::RedisPubSubListener;
     pub use apalis_redis::RedisStorage;
 }
 
@@ -72,6 +75,10 @@ pub mod sqlite {
 
 pub mod postgres {
     pub use apalis_sql::PostgresStorage;
+}
+
+pub mod mysql {
+    pub use apalis_sql::MysqlStorage;
 }
 
 /// Apalis jobs fully support tower middleware via [Layer]

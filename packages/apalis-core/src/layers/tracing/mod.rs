@@ -3,7 +3,12 @@ mod on_failure;
 mod on_request;
 mod on_response;
 
-use crate::{error::JobError, job::Job, request::JobRequest, response::JobResult};
+use crate::{
+    error::JobError,
+    job::Job,
+    request::{JobRequest, TracingOnProgress},
+    response::JobResult,
+};
 use std::{
     fmt::{self, Debug},
     pin::Pin,
@@ -327,7 +332,8 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: JobRequest<J>) -> Self::Future {
+    fn call(&mut self, mut req: JobRequest<J>) -> Self::Future {
+        req.context_mut().insert(TracingOnProgress);
         let span = self.make_span.make_span(&req);
         let start = Instant::now();
         let job = {

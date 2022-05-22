@@ -1,0 +1,17 @@
+[package]
+name = "prometheus-example"
+version = "0.1.0"
+edition = "2018"
+publish = false
+
+[dependencies]
+axum = "0.5.6"
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+apalis = { path = "../../", features = ["redis"] }
+futures = "0.3"
+actix-rt = "2"
+metrics = "0.18"
+metrics-exporter-prometheus = "0.8"

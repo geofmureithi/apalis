@@ -43,5 +43,8 @@ members = [
   "examples/actix-web",
   "examples/sqlite",
   "examples/sentry",
-  "examples/postgres"
+  "examples/mysql",
+  "examples/postgres",
+  "examples/axum",
+  "examples/prometheus"
 ]

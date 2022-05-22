@@ -8,7 +8,7 @@ license = "MIT"
 description = "SQL Storage for Apalis: simple, extensible multithreaded background job processing for Rust"
 
 [features]
-default = [ "sqlite", "postgres" ]
+default = [ "sqlite", "postgres", "mysql" ]
 postgres = [ "sqlx/postgres"]
 sqlite = [ "sqlx/sqlite"]
 mysql = [ "sqlx/mysql"]
@@ -26,3 +26,4 @@ chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 async-stream = "0.3"
 tokio = "1"
+futures-lite = "1.12.0"

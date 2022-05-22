@@ -6,12 +6,23 @@ use tokio::sync::oneshot::Sender as OneshotSender;
 ///
 /// Any job should return this as a result to control a jobs outcome.
 #[derive(Debug, Clone)]
-#[must_use = "this `JobResult` should be handled. Did you mean to return?"]
 pub enum JobResult {
     Success,
     Retry,
     Kill,
     Reschedule(Duration),
+}
+
+impl std::fmt::Display for JobResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let text = match self {
+            JobResult::Success => "Success",
+            JobResult::Retry => "Retry",
+            JobResult::Kill => "Kill",
+            JobResult::Reschedule(_) => "Reschedule",
+        };
+        write!(f, "{}", text)
+    }
 }
 
 pub trait JobResponse {

@@ -23,7 +23,7 @@ use crate::{
     error::{JobError, StorageError, WorkerError},
     job::Job,
     monitor::WorkerManagement,
-    monitor::{Monitor, QueueEvent},
+    monitor::{Monitor, WorkerEvent},
     request::{
         JobReport, JobRequest,
         JobState::{self, Pending, Running},
@@ -57,13 +57,71 @@ pub enum WorkerPulse {
     RenqueueOrpharned { count: i32 },
 }
 
+pub trait OnCleanup {
+    fn on_clean_up(
+        &self,
+        // The response from job
+        response: &JobResult,
+        // The result of the cleanup
+        result: &Result<(), StorageError>,
+    );
+}
+
+impl OnCleanup for () {
+    #[inline]
+    fn on_clean_up(&self, _: &JobResult, _: &Result<(), StorageError>) {}
+}
+
+impl<F> OnCleanup for F
+where
+    F: Fn(&JobResult, &Result<(), StorageError>),
+{
+    fn on_clean_up(&self, response: &JobResult, result: &Result<(), StorageError>) {
+        self(response, result)
+    }
+}
+
+#[derive(Clone)]
 pub struct DefaultController;
 
-impl WorkerController for DefaultController {}
+impl<T: Job> WorkerController<T> for DefaultController {}
 
-pub trait WorkerController {
+pub trait WorkerController<J>
+where
+    Self: Clone,
+    J: Job,
+{
+    fn make_job_span(&self, worker_id: String, job: &JobRequest<J>) -> Span {
+        let consumer_id: String = worker_id.to_string().chars().take(8).collect();
+        let worker_span = tracing::span!(
+            Level::INFO,
+            "worker",
+            job_type = format_args!("{}", J::NAME),
+            id = format_args!("{}..", consumer_id),
+        );
+        let job_span = tracing::span!(
+            parent: &worker_span,
+            Level::INFO,
+            "job",
+            job_id = format_args!("{}", job.id()),
+        );
+        job_span
+    }
+
+    fn on_clean_up(&self, result: &Result<(), StorageError>) {
+        tracing::info!("process.cleanup");
+    }
+
+    fn on_storage_error(&self, error: &StorageError) {
+        tracing::info!("storage.error");
+    }
+
+    fn on_service_ready(&self, latency: Duration) {
+        tracing::info!(latency = ?latency, "service.ready");
+    }
+
     fn fetch_interval(&self) -> Duration {
-        Duration::from_millis(100)
+        Duration::from_millis(50)
     }
 
     fn keep_alive(&self) -> Duration {
@@ -146,18 +204,38 @@ where
         + Send
         + 'static,
     F: Future<Output = Result<JobResult, JobError>>,
-    C: WorkerController + Unpin + Send + 'static,
+    C: WorkerController<T> + Unpin + Send + 'static,
 {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.notify(WorkerManagement::Setup);
+        // First lets do the first ping
+        let res = self.storage.keep_alive(self.id.to_string());
+        let fut = async move {
+            let _res = res.await.unwrap();
+        };
+        let fut = wrap_future::<_, Self>(fut);
+        ctx.spawn(fut);
 
+        // Lets setup a ping based on controller keep_alive
+        // To change this just modify the controller then restart.
+        ctx.run_interval(self.controller.keep_alive(), |act, ctx| {
+            let id = act.id.to_string();
+            let storage = &mut act.storage;
+            let res = storage.keep_alive(id);
+            let fut = async move {
+                let _res = res.await;
+            };
+            let fut = wrap_future::<_, Self>(fut);
+            ctx.spawn(fut);
+        });
+        // Sets up reactivate orphaned jobs
+        // Setup scheduling for non_sql storages eg Redis
         for (pulse, duration) in self.controller.heartbeats().into_iter() {
             let start = Instant::now() + Duration::from_millis(5);
             ctx.add_stream(HeartbeatStream::new(pulse, interval_at(start, duration)));
         }
-
+        // Start Listening to incoming Jobs
         let stream = self
             .storage
             .consume(self.id.to_string(), self.controller.fetch_interval());
@@ -180,16 +258,17 @@ where
         + Send
         + 'static,
     F: Future<Output = Result<JobResult, JobError>>,
-    C: WorkerController + Unpin + Send + 'static,
+    C: WorkerController<T> + Unpin + Send + 'static,
 {
     type Result = Result<(), WorkerError>;
 
     fn handle(&mut self, msg: JobReport, _: &mut Self::Context) -> Self::Result {
-        match msg.report {
+        let span = &msg.span;
+        span.in_scope(|| match &msg.report {
             Progress(progress) => {
                 let handle = self.jobs.get_mut(&msg.job_id);
                 match handle {
-                    Some(handle) => handle.progress = progress,
+                    Some(handle) => handle.progress = *progress,
                     None => {
                         tracing::error!(
                             error = "trying to update a dropped job?",
@@ -198,7 +277,8 @@ where
                     }
                 };
             }
-        }
+        });
+
         Ok(())
     }
 }
@@ -213,7 +293,7 @@ where
         + Send
         + 'static,
     F: Future<Output = Result<JobResult, JobError>>,
-    C: WorkerController + Unpin + Send + 'static,
+    C: WorkerController<T> + Unpin + Send + 'static,
 {
     type Result = Result<WorkerStatus, WorkerError>;
 
@@ -221,15 +301,6 @@ where
         match msg {
             WorkerManagement::Status => {}
             WorkerManagement::Restart => ctx.stop(),
-            WorkerManagement::Setup => {
-                let res = self.storage.keep_alive(self.id.to_string());
-                let fut = async move {
-                    res.await.unwrap();
-                }
-                .instrument(self.root_span.clone());
-                let fut = wrap_future::<_, Self>(fut);
-                ctx.spawn(fut);
-            }
             WorkerManagement::Monitor(addr) => self.monitor = Some(addr),
             WorkerManagement::Kill(id) => {
                 let mut storage = self.storage.clone();
@@ -266,13 +337,13 @@ where
         + Send
         + 'static,
     F: Future<Output = Result<JobResult, JobError>>,
-    C: WorkerController + Unpin + Send + 'static,
+    C: WorkerController<T> + Unpin + Send + 'static,
 {
     fn handle(&mut self, beat: WorkerPulse, ctx: &mut Self::Context) {
         let queue = &mut self.storage;
         let heartbeat = queue.heartbeat(beat);
         let fut = async {
-            heartbeat.await.unwrap();
+            heartbeat.await;
         };
         let fut = wrap_future::<_, Self>(fut);
         ctx.spawn(fut);
@@ -289,64 +360,54 @@ where
         + Send
         + 'static,
     F: Future<Output = Result<JobResult, JobError>>,
-    C: WorkerController + Unpin + Send + 'static,
+    C: WorkerController<T> + Unpin + Send + 'static,
 {
     fn handle(&mut self, job: JobRequestWrapper<T>, ctx: &mut Self::Context) {
         let mut storage = self.storage.clone();
         let monitor = self.monitor.clone();
 
-        let span = self.root_span.clone();
-
+        //let span = self.root_span.clone();
         let job_tracker_addr = ctx.address().recipient();
+        let controller = self.controller.clone();
         match job.0 {
             Ok(Some(mut job)) => {
                 let job_id = job.id();
-                let job_span = tracing::span!(
-                    parent: span,
-                    Level::INFO,
-                    "job",
-                    job_id = format_args!("{}", job_id),
-                );
+                let span = controller.make_job_span(self.id.to_string(), &job);
+
+                let worker_id = self.id.to_string();
                 let job_tracker = JobTracker::new(job_id.clone(), job_tracker_addr.clone());
                 job.context_mut().set_tracker(job_tracker);
                 job.set_status(JobState::Running);
-                if job.attempts() == 0 {
-                    job.set_lock_at(Utc::now());
-                }
+                job.set_lock_at(Utc::now());
                 job.record_attempt();
-                let worker_id = self.id.to_string();
                 job.set_lock_by(worker_id.clone());
+
                 let job_id_ = job_id.clone();
 
                 let fut = {
                     let service: *mut Box<H> = &mut self.handler;
                     async move {
-                        if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
-                            if let Some(addr) = monitor.clone() {
-                                tracing::warn!(
-                                    error = ?e,
-                                    message = "unable to update job",
-                                    "storage.error"
-                                );
-                                addr.do_send(QueueEvent::Error(WorkerError::Storage(e)));
-                            }
-                        };
-                        tracing::event!(Level::TRACE, "service.poll");
+                        let instant = Instant::now();
                         let handle = unsafe {
                             let handle = (*service).ready().await.unwrap();
                             handle
                         };
+                        if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
+                            if let Some(addr) = monitor.clone() {
+                                controller.on_storage_error(&e);
+                                addr.do_send(WorkerEvent::Error(WorkerError::Storage(e)));
+                            }
+                        };
 
-                        tracing::event!(Level::TRACE, "service.ready");
+                        controller.on_service_ready(instant.elapsed());
                         let res = handle.call(job).await;
                         let addr = monitor.clone();
                         if let Ok(Some(mut job)) = storage.fetch_by_id(job_id.clone()).await {
-                            tracing::event!(Level::TRACE, "cleanup.start");
                             job.set_done_at(Utc::now());
                             let finalize = match res {
                                 Ok(r) => {
                                     if let Some(addr) = monitor.clone() {
-                                        addr.do_send(QueueEvent::Complete(
+                                        addr.do_send(WorkerEvent::Complete(
                                             job_id.clone(),
                                             r.clone(),
                                         ))
@@ -375,47 +436,35 @@ where
                                     job.set_status(JobState::Failed);
                                     job.set_last_error(format!("{}", e));
                                     if let Some(addr) = monitor.clone() {
-                                        addr.do_send(QueueEvent::Failed(job_id.clone(), e))
+                                        addr.do_send(WorkerEvent::Failed(job_id.clone(), e))
                                     }
                                     storage
                                         .reschedule(job_id.clone(), Duration::from_secs(5))
                                         .await
                                 }
                             };
+                            controller.on_clean_up(&finalize);
+
                             if let Err(e) = finalize {
-                                tracing::event!(
-                                    Level::WARN,
-                                    error = format_args!("{}", e),
-                                    "cleanup.error"
-                                );
                                 if let Some(addr) = addr {
-                                    addr.do_send(QueueEvent::Failed(
+                                    addr.do_send(WorkerEvent::Failed(
                                         job_id.clone(),
                                         JobError::Storage(StorageError::Database(Box::from(e))),
                                     ));
                                 }
                             }
                             if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
+                                controller.on_storage_error(&e);
                                 if let Some(addr) = monitor {
-                                    tracing::warn!(
-                                        error = format_args!("{}", e),
-                                        message = "unable to update job",
-                                        "storage.error"
-                                    );
-                                    addr.do_send(QueueEvent::Error(WorkerError::Storage(e)));
+                                    addr.do_send(WorkerEvent::Error(WorkerError::Storage(e)));
                                 }
                             };
-                            tracing::event!(Level::TRACE, "cleanup.done");
                         } else {
-                            tracing::event!(
-                                Level::WARN,
-                                error = "could not fetch job from storage",
-                                "cleanup.skipped",
-                            );
+                            panic!("Unable to update job");
                         }
                     }
                 }
-                .instrument(job_span);
+                .instrument(span);
 
                 let fut = wrap_future::<_, Self>(fut);
 
@@ -439,7 +488,7 @@ where
                 tracing::warn!(error= ?e, "queue.stopping");
                 let addr = monitor.clone();
                 if let Some(addr) = addr {
-                    addr.do_send(QueueEvent::Error(WorkerError::Storage(e)));
+                    addr.do_send(WorkerEvent::Error(WorkerError::Storage(e)));
                 }
             }
         };
@@ -455,9 +504,9 @@ where
         + Send
         + 'static,
     F: Future<Output = Result<JobResult, JobError>>,
-    C: WorkerController + Unpin + Send + 'static,
+    C: WorkerController<T> + Unpin + Send + 'static,
 {
     fn restarting(&mut self, _: &mut <Self as Actor>::Context) {
-        tracing::warn!("queue.restart");
+        tracing::warn!("worker.restart");
     }
 }
