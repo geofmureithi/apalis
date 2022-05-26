@@ -212,7 +212,7 @@ where
         // First lets do the first ping
         let res = self.storage.keep_alive(self.id.to_string());
         let fut = async move {
-            let _res = res.await.unwrap();
+            let _res = res.await;
         };
         let fut = wrap_future::<_, Self>(fut);
         ctx.spawn(fut);
@@ -365,116 +365,139 @@ where
     fn handle(&mut self, job: JobRequestWrapper<T>, ctx: &mut Self::Context) {
         let mut storage = self.storage.clone();
         let monitor = self.monitor.clone();
-
-        //let span = self.root_span.clone();
         let job_tracker_addr = ctx.address().recipient();
         let controller = self.controller.clone();
         match job.0 {
             Ok(Some(mut job)) => {
                 let job_id = job.id();
-                let span = controller.make_job_span(self.id.to_string(), &job);
-
+                let remove_id = job_id.clone();
                 let worker_id = self.id.to_string();
-                let job_tracker = JobTracker::new(job_id.clone(), job_tracker_addr.clone());
-                job.context_mut().set_tracker(job_tracker);
-                job.set_status(JobState::Running);
-                job.set_lock_at(Utc::now());
-                job.record_attempt();
-                job.set_lock_by(worker_id.clone());
-
-                let job_id_ = job_id.clone();
+                let span = controller.make_job_span(worker_id.clone(), &job);
 
                 let fut = {
                     let service: *mut Box<H> = &mut self.handler;
                     async move {
                         let instant = Instant::now();
                         let handle = unsafe {
-                            let handle = (*service).ready().await.unwrap();
+                            let handle = (*service).ready().await;
                             handle
                         };
-                        if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
-                            if let Some(addr) = monitor.clone() {
-                                controller.on_storage_error(&e);
-                                addr.do_send(WorkerEvent::Error(WorkerError::Storage(e)));
+                        match handle {
+                            Ok(service) => {
+                                job.set_status(JobState::Running);
+                                let job_tracker =
+                                    JobTracker::new(job_id.clone(), job_tracker_addr.clone());
+                                job.context_mut().set_tracker(job_tracker);
+
+                                job.set_lock_at(Utc::now());
+                                job.record_attempt();
+                                job.set_lock_by(worker_id.clone());
+                                if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
+                                    if let Some(addr) = monitor.clone() {
+                                        controller.on_storage_error(&e);
+                                        addr.do_send(WorkerEvent::Error(WorkerError::Storage(e)));
+                                    }
+                                };
+                                controller.on_service_ready(instant.elapsed());
+                                let res = service.call(job).await;
+                                let addr = monitor.clone();
+                                if let Ok(Some(mut job)) = storage.fetch_by_id(job_id.clone()).await
+                                {
+                                    job.set_done_at(Utc::now());
+                                    let finalize = match res {
+                                        Ok(r) => {
+                                            if let Some(addr) = monitor.clone() {
+                                                addr.do_send(WorkerEvent::Complete(
+                                                    job_id.clone(),
+                                                    r.clone(),
+                                                ))
+                                            }
+                                            match r {
+                                                JobResult::Success => {
+                                                    job.set_status(JobState::Done);
+                                                    storage
+                                                        .ack(worker_id.clone(), job_id.clone())
+                                                        .await
+                                                }
+                                                JobResult::Retry => {
+                                                    job.set_status(JobState::Retry);
+                                                    storage
+                                                        .retry(worker_id.clone(), job_id.clone())
+                                                        .await
+                                                }
+                                                JobResult::Kill => {
+                                                    job.set_status(JobState::Killed);
+                                                    storage
+                                                        .kill(worker_id.clone(), job_id.clone())
+                                                        .await
+                                                }
+
+                                                JobResult::Reschedule(wait) => {
+                                                    job.set_status(JobState::Retry);
+                                                    storage.reschedule(&job, wait).await
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            job.set_status(JobState::Failed);
+                                            job.set_last_error(format!("{}", e));
+                                            if let Some(addr) = monitor.clone() {
+                                                addr.do_send(WorkerEvent::Failed(job_id.clone(), e))
+                                            }
+                                            storage.reschedule(&job, Duration::from_secs(1)).await
+                                        }
+                                    };
+                                    controller.on_clean_up(&finalize);
+
+                                    if let Err(e) = finalize {
+                                        if let Some(addr) = addr {
+                                            addr.do_send(WorkerEvent::Failed(
+                                                job_id.clone(),
+                                                JobError::Storage(StorageError::Database(
+                                                    Box::from(e),
+                                                )),
+                                            ));
+                                        }
+                                    }
+                                    if let Err(e) = storage.update_by_id(job_id.clone(), &job).await
+                                    {
+                                        controller.on_storage_error(&e);
+                                        if let Some(addr) = monitor {
+                                            addr.do_send(WorkerEvent::Error(WorkerError::Storage(
+                                                e,
+                                            )));
+                                        }
+                                    };
+                                } else {
+                                    panic!("Unable to update job");
+                                }
                             }
-                        };
-
-                        controller.on_service_ready(instant.elapsed());
-                        let res = handle.call(job).await;
-                        let addr = monitor.clone();
-                        if let Ok(Some(mut job)) = storage.fetch_by_id(job_id.clone()).await {
-                            job.set_done_at(Utc::now());
-                            let finalize = match res {
-                                Ok(r) => {
-                                    if let Some(addr) = monitor.clone() {
-                                        addr.do_send(WorkerEvent::Complete(
-                                            job_id.clone(),
-                                            r.clone(),
-                                        ))
-                                    }
-                                    match r {
-                                        JobResult::Success => {
-                                            job.set_status(JobState::Done);
-                                            storage.ack(worker_id.clone(), job_id.clone()).await
-                                        }
-                                        JobResult::Retry => {
-                                            job.set_status(JobState::Retry);
-                                            storage.retry(worker_id.clone(), job_id.clone()).await
-                                        }
-                                        JobResult::Kill => {
-                                            job.set_status(JobState::Killed);
-                                            storage.kill(worker_id.clone(), job_id.clone()).await
-                                        }
-
-                                        JobResult::Reschedule(wait) => {
-                                            job.set_status(JobState::Retry);
-                                            storage.reschedule(job_id.clone(), wait).await
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    job.set_status(JobState::Failed);
-                                    job.set_last_error(format!("{}", e));
-                                    if let Some(addr) = monitor.clone() {
-                                        addr.do_send(WorkerEvent::Failed(job_id.clone(), e))
-                                    }
-                                    storage
-                                        .reschedule(job_id.clone(), Duration::from_secs(5))
-                                        .await
-                                }
-                            };
-                            controller.on_clean_up(&finalize);
-
-                            if let Err(e) = finalize {
+                            Err(error) => {
+                                let addr = monitor.clone();
                                 if let Some(addr) = addr {
-                                    addr.do_send(WorkerEvent::Failed(
-                                        job_id.clone(),
-                                        JobError::Storage(StorageError::Database(Box::from(e))),
-                                    ));
+                                    addr.do_send(WorkerEvent::Failed(job_id.clone(), error));
                                 }
+                                job.set_status(JobState::Pending);
+                                if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
+                                    controller.on_storage_error(&e);
+                                    if let Some(addr) = monitor {
+                                        addr.do_send(WorkerEvent::Error(WorkerError::Storage(e)));
+                                    }
+                                };
                             }
-                            if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
-                                controller.on_storage_error(&e);
-                                if let Some(addr) = monitor {
-                                    addr.do_send(WorkerEvent::Error(WorkerError::Storage(e)));
-                                }
-                            };
-                        } else {
-                            panic!("Unable to update job");
                         }
                     }
                 }
                 .instrument(span);
 
                 let fut = wrap_future::<_, Self>(fut);
-
-                let remove_id = job_id_.clone();
-                let fut = fut.map(move |res, act, ctx| {
+                let job_id = remove_id.clone();
+                let fut = fut.map(move |_res, act, _ctx| {
                     act.jobs.remove_entry(&remove_id);
                 });
                 let handle = ctx.spawn(fut);
                 self.jobs.insert(
-                    job_id_,
+                    job_id,
                     JobHandle {
                         fut: handle,
                         progress: 0,
@@ -482,10 +505,10 @@ where
                 );
             }
             Ok(None) => {
-                // println!("None")
+                //tracing::warn!("worker.drained");
             }
             Err(e) => {
-                tracing::warn!(error= ?e, "queue.stopping");
+                tracing::warn!(error= ?e, "worker.stopping");
                 let addr = monitor.clone();
                 if let Some(addr) = addr {
                     addr.do_send(WorkerEvent::Error(WorkerError::Storage(e)));

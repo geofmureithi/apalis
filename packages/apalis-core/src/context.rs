@@ -1,7 +1,7 @@
 use crate::{
     error::{StorageError, WorkerError},
     job::Job,
-    request::{JobReport, JobState, OnProgress, TracingOnProgress},
+    request::{JobReport, OnProgress, TracingOnProgress},
     response::JobResult,
 };
 use actix::{Message, Recipient};

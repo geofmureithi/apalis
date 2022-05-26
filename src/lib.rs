@@ -51,10 +51,12 @@ pub use apalis_core::{
     job::{Job, JobFuture, JobHandler},
     monitor::Monitor,
     request::JobRequest,
+    request::JobState,
     request::OnProgress,
     request::TracingOnProgress,
     response::JobResult,
     storage::Storage,
+    storage::StorageJobExt,
     worker::{Worker, WorkerPulse},
 };
 

@@ -40,10 +40,13 @@ impl Monitor {
             event_handlers: Vec::new(),
         }
     }
-    pub fn with_system(self) -> Self {
-        self
-    }
+
     pub async fn run(self) -> std::io::Result<()> {
+        self.run_without_signals().await;
+        actix_rt::signal::ctrl_c().await
+    }
+
+    pub async fn run_without_signals(self) {
         let queues = self.addrs.clone();
         let addr = self.start();
         for queue in queues {
@@ -63,7 +66,6 @@ impl Monitor {
                 ),
             };
         }
-        actix_rt::signal::ctrl_c().await
     }
 }
 

@@ -6,7 +6,7 @@ use sqlx::{mysql::MySqlRow, postgres::PgRow, sqlite::SqliteRow, types::Json, Fro
 use std::fmt::Debug;
 use strum::{AsRefStr, EnumString};
 use tokio::sync::oneshot;
-use tracing::{Instrument, Span};
+use tracing::{Instrument, Level, Span};
 
 use crate::{
     context::JobContext,
@@ -19,12 +19,19 @@ use crate::{
 /// Represents the state of a [JobRequest] in a [Storage]
 #[derive(EnumString, Serialize, Deserialize, Debug, Clone, AsRefStr)]
 pub enum JobState {
+    #[serde(alias = "Latest")]
     Pending,
     Running,
     Done,
     Retry,
     Failed,
     Killed,
+}
+
+impl Default for JobState {
+    fn default() -> Self {
+        JobState::Pending
+    }
 }
 
 /// A report item for [JobReport]
@@ -332,6 +339,6 @@ pub struct TracingOnProgress;
 
 impl OnProgress for TracingOnProgress {
     fn update_progress(&self, progress: u8) {
-        tracing::info!(progress = progress, "job.progress",);
+        tracing::event!(target: "job.progress",Level::INFO, progress = progress);
     }
 }

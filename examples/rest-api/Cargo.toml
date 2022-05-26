@@ -1,0 +1,18 @@
+[package]
+name = "rest-api-example"
+version = "0.1.0"
+authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+apalis = { path = "../../", features = ["redis"] }
+serde = "1"
+actix-rt = "2"
+env_logger = "0.7"
+actix-web = "4"
+futures = "0.3"
+slug = "0.1.4"
+actix-cors = "0.6.1"
+serde_json = "1"
+chrono = "0.4"

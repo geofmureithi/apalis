@@ -1,7 +1,7 @@
 use apalis_core::error::StorageError;
 use apalis_core::job::Job;
-use apalis_core::request::JobRequest;
-use apalis_core::storage::{JobStream, Storage, StorageResult};
+use apalis_core::request::{JobRequest, JobState};
+use apalis_core::storage::{JobStream, Storage, StorageJobExt, StorageResult};
 use apalis_core::worker::WorkerPulse;
 use async_stream::try_stream;
 use chrono::Utc;
@@ -147,7 +147,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
                 let job_type = T::NAME;
                 let fetch_query = "SELECT * FROM Jobs
                     WHERE rowid = (SELECT min(rowid) FROM Jobs
-                    WHERE status = 'Pending' AND run_at < ?1 AND job_type = ?2)";
+                    WHERE status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts) AND run_at < ?1 AND job_type = ?2)";
                 let job: Option<JobRequest<T>> = sqlx::query_as(fetch_query)
                     .bind(Utc::now().timestamp())
                     .bind(job_type)
@@ -225,8 +225,20 @@ where
 
         let fut = async move {
             match pulse {
-                WorkerPulse::EnqueueScheduled { count: _ } => {
-                    // Idealy jobs are queue via run_at. So this is not necessary
+                WorkerPulse::EnqueueScheduled { count } => {
+                    let job_type = T::NAME;
+                    let mut tx = pool.acquire().await?;
+                    let query = r#"Update Jobs 
+                            SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL
+                            WHERE id in 
+                                (SELECT Jobs.id from Jobs 
+                                    WHERE status= "Failed" AND Jobs.attempts < Jobs.max_attempts
+                                     ORDER BY lock_at ASC LIMIT ?2);"#;
+                    sqlx::query(query)
+                        .bind(job_type)
+                        .bind(count)
+                        .execute(&mut tx)
+                        .await?;
                     Ok(true)
                 }
                 // Worker not seen in 5 minutes yet has running jobs
@@ -316,8 +328,9 @@ where
         Box::pin(fut)
     }
 
-    fn reschedule(&mut self, job_id: String, wait: Duration) -> StorageResult<()> {
+    fn reschedule(&mut self, job: &JobRequest<T>, wait: Duration) -> StorageResult<()> {
         let pool = self.pool.clone();
+        let job_id = job.id();
         let fut = async move {
             let wait: i64 = wait
                 .as_secs()
@@ -326,7 +339,7 @@ where
             let wait = chrono::Duration::seconds(wait);
             let mut tx = pool.acquire().await?;
             let query =
-                "UPDATE Jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ?2 WHERE id = ?1";
+                "UPDATE Jobs SET status = 'Failed', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ?2 WHERE id = ?1";
             sqlx::query(query)
                 .bind(job_id.to_owned())
                 .bind(Utc::now().add(wait).timestamp())
@@ -380,6 +393,23 @@ where
                 .execute(&mut tx)
                 .await?;
             Ok(())
+        };
+        Box::pin(fut)
+    }
+}
+
+impl<J: 'static + Job + Serialize + DeserializeOwned> StorageJobExt<J> for SqliteStorage<J> {
+    fn list_jobs(&mut self, status: &JobState, page: i32) -> StorageResult<Vec<JobRequest<J>>> {
+        let pool = self.pool.clone();
+        let status = status.as_ref().to_string();
+        let fut = async move {
+            let mut conn = pool.clone().acquire().await?;
+            let fetch_query = "SELECT * FROM Jobs WHERE status = ? LIMIT 10 OFFSET ?";
+            Ok(sqlx::query_as(fetch_query)
+                .bind(status)
+                .bind(0)
+                .fetch_all(&mut conn)
+                .await?)
         };
         Box::pin(fut)
     }

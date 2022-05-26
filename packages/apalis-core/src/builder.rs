@@ -184,7 +184,7 @@ impl<T, S, M, C> WorkerBuilder<T, S, M, C> {
     }
 
     /// Represents a controller that dictates how a [Queue] runs
-    pub fn controller<W>(mut self, controller: W) -> WorkerBuilder<T, S, M, W> {
+    pub fn controller<W>(self, controller: W) -> WorkerBuilder<T, S, M, W> {
         WorkerBuilder {
             job: self.job,
             storage: self.storage,

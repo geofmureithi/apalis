@@ -46,5 +46,7 @@ members = [
   "examples/mysql",
   "examples/postgres",
   "examples/axum",
-  "examples/prometheus"
+  "examples/prometheus",
+  "examples/tracing",
+  "examples/rest-api",
 ]

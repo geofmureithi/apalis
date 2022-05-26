@@ -30,7 +30,7 @@ async fn email_service(_email: Email, ctx: JobContext) -> Result<JobResult, JobE
 }
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) {
-    for i in 0..10000 {
+    for i in 0..10 {
         storage
             .push(Email {
                 to: "test@example.com".to_string(),

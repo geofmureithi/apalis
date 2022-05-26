@@ -16,7 +16,7 @@ pub type JobFuture<I> = BoxFuture<'static, I>;
 ///     const NAME: &'static str = "apalis::Email";
 /// }
 /// ```
-pub trait Job: Sized {
+pub trait Job: Sized + Send + Unpin {
     /// Represents the name for job.
     const NAME: &'static str;
 }

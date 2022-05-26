@@ -5,7 +5,8 @@
 //! ```
 
 use apalis::{
-    redis::RedisStorage, Job, JobContext, JobError, JobResult, Monitor, Storage, WorkerBuilder,
+    layers::tracing::TraceLayer, redis::RedisStorage, Job, JobContext, JobError, JobResult,
+    Monitor, Storage, WorkerBuilder,
 };
 use axum::{
     extract::Form,
@@ -57,27 +58,28 @@ fn main() {
             .route("/", get(show_form).post(add_new_job::<Email>))
             .layer(Extension(storage.clone()));
 
-        // run it with hyper
         let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
         tracing::debug!("listening on {}", addr);
+        // run it with hyper
         let http = async {
             axum::Server::bind(&addr)
                 .serve(app.into_make_service())
                 .await
-                .map_err(|e| ())
+                .map_err(|_e| ())
         };
         let monitor = async {
-            Monitor::new()
+            let monitor = Monitor::new()
                 .register_with_count(2, move |_| {
                     WorkerBuilder::new(storage.clone())
+                        .layer(TraceLayer::new())
                         .build_fn(email_service)
                         .start()
                 })
-                .run()
-                .await
-                .map_err(|e| ())
+                .run_without_signals()
+                .await;
+            Ok(monitor)
         };
-        futures::future::try_join(http, monitor).await.unwrap();
+        futures::future::try_join(monitor, http).await.unwrap();
     })
 }
 
@@ -139,7 +141,7 @@ async fn add_new_job<T>(
     Extension(mut storage): Extension<RedisStorage<T>>,
 ) -> impl IntoResponse
 where
-    T: 'static + Debug + Job + Serialize + DeserializeOwned + Unpin + Send,
+    T: 'static + Debug + Job + Serialize + DeserializeOwned,
 {
     dbg!(&input);
     let new_job = storage.push(input).await;

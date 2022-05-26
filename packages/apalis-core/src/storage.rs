@@ -44,10 +44,7 @@ pub trait Storage: Clone {
 
     fn heartbeat(&mut self, pulse: WorkerPulse) -> StorageResult<bool>;
 
-    fn reschedule(&mut self, _job_id: String, _wait: Duration) -> StorageResult<()> {
-        let fut = async { Ok(()) };
-        Box::pin(fut)
-    }
+    fn reschedule(&mut self, job: &JobRequest<Self::Output>, wait: Duration) -> StorageResult<()>;
 
     fn reenqueue_active(&mut self, _job_ids: Vec<String>) -> StorageResult<()> {
         let fut = async { Ok(()) };
@@ -55,7 +52,11 @@ pub trait Storage: Clone {
     }
 }
 
-pub trait StorageJobExt<Output>: Storage<Output = Output> {
-    fn list_workers(&mut self, job_id: String) -> StorageResult<Output>;
-    fn list_by_page(&mut self, status: JobState, page: i32) -> StorageResult<Vec<Output>>;
+pub trait StorageJobExt<Output>: Storage<Output = Output>
+where
+    Self: Sized,
+{
+    //fn list_workers(&mut self) -> StorageResult<Output>;
+    fn list_jobs(&mut self, status: &JobState, page: i32)
+        -> StorageResult<Vec<JobRequest<Output>>>;
 }

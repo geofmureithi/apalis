@@ -9,10 +9,5 @@
 
 -- Set job data in hash
 local set = redis.call("hsetnx", KEYS[1], ARGV[1], ARGV[2])
-if set == 1 then
-  -- If it was set, add the job to the scheduled set
-  redis.call("zadd", KEYS[2], ARGV[3], ARGV[1])
-  return 1
-end
-
-return 0
+redis.call("zadd", KEYS[2], ARGV[3], ARGV[1])
+return set

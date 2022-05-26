@@ -341,8 +341,9 @@ where
         Box::pin(fut)
     }
 
-    fn reschedule(&mut self, job_id: String, wait: Duration) -> StorageResult<()> {
+    fn reschedule(&mut self, job: &JobRequest<T>, wait: Duration) -> StorageResult<()> {
         let pool = self.pool.clone();
+        let job_id = job.id();
         let fut = async move {
             let wait: i64 = wait
                 .as_secs()
