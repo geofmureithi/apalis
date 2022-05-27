@@ -3,17 +3,18 @@ use tower::Service;
 
 use crate::request::JobRequest;
 
-/// Extractor and response for extensions.
+/// Extension data for jobs.
 ///
-/// # As extractor
+/// forked from [axum::Extensions]
+/// # In Context
 ///
-/// This is commonly used to share state across handlers.
+/// This is commonly used to share state across jobs.
 ///
 /// ```rust,no_run
-/// use axum::{
-///     Router,
+/// use apalis::{
 ///     Extension,
-///     routing::get,
+///     WorkerBuilder,
+///     JobContext
 /// };
 /// use std::sync::Arc;
 ///
@@ -22,44 +23,17 @@ use crate::request::JobRequest;
 ///     // ...
 /// }
 ///
-/// async fn handler(state: Extension<Arc<State>>) {
-///     // ...
+/// async fn email_service(email: Email, ctx: JobContext) {
+///     let state: &Arc<State> = ctx.data_opt().unwrap()
 /// }
 ///
 /// let state = Arc::new(State { /* ... */ });
 ///
-/// let app = Router::new().route("/", get(handler))
-///     // Add middleware that inserts the state into all incoming request's
-///     // extensions.
-///     .layer(Extension(state));
-/// # async {
-/// # axum::Server::bind(&"".parse().unwrap()).serve(app.into_make_service()).await.unwrap();
-/// # };
+/// let worker = WorkerBuilder::new(storage)
+///     .layer(Extension(state))
+///     .build_fn(email_service);
 /// ```
-///
-/// If the extension is missing it will reject the request with a `500 Internal
-/// Server Error` response.
-///
-/// # As response
-///
-/// Response extensions can be used to share state with middleware.
-///
-/// ```rust
-/// use axum::{
-///     Extension,
-///     response::IntoResponse,
-/// };
-///
-/// async fn handler() -> impl IntoResponse {
-///     (
-///         Extension(Foo("foo")),
-///         "Hello, World!"
-///     )
-/// }
-///
-/// #[derive(Clone)]
-/// struct Foo(&'static str);
-/// ```
+
 #[derive(Debug, Clone, Copy)]
 pub struct Extension<T>(pub T);
 

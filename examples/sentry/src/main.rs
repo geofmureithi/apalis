@@ -9,10 +9,9 @@ use tracing_subscriber::prelude::*;
 
 use actix::clock::sleep;
 use apalis::{
-    layers::{sentry::SentryJobLayer, tracing::TraceLayer},
+    layers::{SentryJobLayer, TraceLayer},
     redis::RedisStorage,
-    Job, JobContext, JobError, JobResult, Monitor, OnProgress, Storage, TracingOnProgress,
-    WorkerBuilder, WorkerPulse,
+    Job, JobContext, JobResult, Monitor, Storage, WorkerBuilder, WorkerPulse,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,18 +34,23 @@ struct InvalidEmailError {
 
 impl fmt::Display for InvalidEmailError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "UnknownEmail: {} is not a valid email", self.email)
+        write!(f, "Invalid Email: {} is not a valid email", self.email)
     }
 }
 
 impl Error for InvalidEmailError {}
 
-async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobError> {
+macro_rules! update_progress {
+    ($bread_crumb:expr, $progress:expr) => {
+        tracing::info!(progress = ?$progress, $bread_crumb);
+    };
+}
+
+async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, InvalidEmailError> {
     let parent_span = sentry::configure_scope(|scope| scope.get_span());
-    let handle = ctx.get_progress_handle::<TracingOnProgress>().unwrap();
 
     let tx_ctx =
-        sentry::TransactionContext::continue_from_span(Email::NAME, "apalis.job", parent_span);
+        sentry::TransactionContext::continue_from_span("email.send", "apalis.job", parent_span);
     let transaction = sentry::start_transaction(tx_ctx);
     sentry::configure_scope(|scope| scope.set_span(Some(transaction.clone().into())));
 
@@ -54,9 +58,9 @@ async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobEr
     {
         let dns_span = transaction.start_child("dns", "Checking if dns configured");
 
-        tracing::info!("Checking if dns configured");
+        update_progress!("Checking if dns configured", 10);
         sleep(Duration::from_millis(1008)).await;
-        handle.update_progress(20);
+        update_progress!("Found dns config", 20);
 
         dns_span.finish();
     }
@@ -68,7 +72,7 @@ async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobEr
 
         tracing::info!("Getting sendgrid details");
         sleep(Duration::from_millis(712)).await;
-        handle.update_progress(40);
+        update_progress!("Found Sendgrid details", 30);
 
         send_grid_span.finish();
     }
@@ -79,7 +83,7 @@ async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobEr
         let user_span = transaction.start_child("user", "Fetching user details");
         tracing::info!("Fetching user details");
         sleep(Duration::from_millis(100)).await;
-        handle.update_progress(65);
+        update_progress!("Found user", 50);
         {
             let user_deeper_span = transaction.start_child("user.deeper", "Fetching from Database");
             tracing::warn!("Digging deeper");
@@ -90,9 +94,8 @@ async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobEr
             let user_by_id_span = transaction.start_child("user.by_id", "Trying to fetch by id");
             sleep(Duration::from_millis(120)).await;
             // Record some error
-            let err = email.to.parse::<usize>().unwrap_err();
-
-            sentry::capture_error(&err);
+            // let err = email.to.parse::<usize>().unwrap_err();
+            // sentry::capture_error(&err);
             user_by_id_span.finish();
         }
         user_span.finish();
@@ -100,15 +103,13 @@ async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobEr
 
     tracing::warn!("Failed. Email is not valid");
     transaction.finish();
-    Err(JobError::Failed(Box::from(InvalidEmailError {
-        email: email.to,
-    })))
+    Err(InvalidEmailError { email: email.to })
 }
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) {
     storage
         .push(Email {
-            to: "test@example".to_string(),
+            to: "apalis@example".to_string(),
             text: "Test backround job from Apalis".to_string(),
             subject: "Welcome Sentry Email".to_string(),
         })

@@ -1,16 +1,16 @@
-use actix::{
-    clock::{interval_at, Instant},
-    Actor, Addr, Arbiter, AsyncContext, Context, Supervisor,
-};
+use actix::prelude::*;
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
 use tower::{
-    filter::{AsyncFilterLayer, FilterLayer},
     layer::util::{Identity, Stack},
-    Layer, Service, ServiceExt,
+    Layer, Service,
 };
 
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData, time::Duration};
+#[cfg(feature = "filter")]
+#[cfg_attr(docsrs, doc(cfg(feature = "filter")))]
+use tower::filter::{AsyncFilterLayer, FilterLayer};
+
+use std::{fmt::Debug, marker::PhantomData};
 
 use crate::{
     error::JobError,
@@ -18,13 +18,11 @@ use crate::{
     job_fn::{job_fn, JobFn},
     request::JobRequest,
     response::JobResult,
-    service::JobService,
     storage::Storage,
-    streams::{FetchJobStream, HeartbeatStream},
-    worker::{DefaultController, Worker, WorkerController, WorkerPulse},
+    worker::{Worker, WorkerConfig},
 };
 
-/// Configure and build a [Queue] job service.
+/// Configure and build a [Worker] job service.
 ///
 /// `WorkerBuilder` collects all the components and configuration required to
 /// build a job service. Once the service is defined, it can be built
@@ -75,36 +73,36 @@ use crate::{
 ///     .start();
 ///
 /// ```
-pub struct WorkerBuilder<T, S, M, C> {
+pub struct WorkerBuilder<T, S, M> {
     job: PhantomData<T>,
     layer: M,
     storage: S,
-    controller: C,
+    config: WorkerConfig,
 }
 
-impl<T, S> WorkerBuilder<(), S, Identity, DefaultController>
+impl<T, S> WorkerBuilder<(), S, Identity>
 where
     S: Storage<Output = T>,
 {
     /// Build a new queue
-    pub fn new(storage: S) -> WorkerBuilder<T, S, Identity, DefaultController> {
+    pub fn new(storage: S) -> WorkerBuilder<T, S, Identity> {
         let job: PhantomData<T> = PhantomData;
         WorkerBuilder {
             job,
             layer: Identity::new(),
             storage,
-            controller: DefaultController,
+            config: Default::default(),
         }
     }
 }
 
-impl<T, S, M, C> WorkerBuilder<T, S, M, C> {
+impl<T, S, M> WorkerBuilder<T, S, M> {
     /// Add a new layer `T` into the [WorkerBuilder].
     ///
     /// This wraps the inner service with the service provided by a user-defined
     /// [Layer]. The provided layer must implement the [Layer] trait.
     ///
-    pub fn layer<U>(self, layer: U) -> WorkerBuilder<T, S, Stack<U, M>, C>
+    pub fn layer<U>(self, layer: U) -> WorkerBuilder<T, S, Stack<U, M>>
     where
         M: Layer<U>,
     {
@@ -112,7 +110,7 @@ impl<T, S, M, C> WorkerBuilder<T, S, M, C> {
             job: self.job,
             storage: self.storage,
             layer: Stack::new(layer, self.layer),
-            controller: self.controller,
+            config: self.config,
         }
     }
 
@@ -124,7 +122,9 @@ impl<T, S, M, C> WorkerBuilder<T, S, M, C> {
     /// middleware.
     ///
     /// [`Filter`]: tower::filter::Filter
-    pub fn filter<P>(self, predicate: P) -> WorkerBuilder<T, S, Stack<FilterLayer<P>, M>, C>
+    #[cfg(feature = "filter")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "filter")))]
+    pub fn filter<P>(self, predicate: P) -> WorkerBuilder<T, S, Stack<FilterLayer<P>, M>>
     where
         M: Layer<FilterLayer<P>>,
     {
@@ -137,11 +137,9 @@ impl<T, S, M, C> WorkerBuilder<T, S, M, C> {
     ///
     /// This wraps the inner service with an instance of the [`AsyncFilter`]
     /// middleware.
-    /// [`AsyncFilter`]: tower::filter::AsyncFilter
-    pub fn filter_async<P>(
-        self,
-        predicate: P,
-    ) -> WorkerBuilder<T, S, Stack<AsyncFilterLayer<P>, M>, C>
+    /// [`AsyncFilter`]: tower::filter::
+    #[cfg(feature = "filter")]
+    pub fn filter_async<P>(self, predicate: P) -> WorkerBuilder<T, S, Stack<AsyncFilterLayer<P>, M>>
     where
         M: Layer<AsyncFilterLayer<P>>,
     {
@@ -160,7 +158,7 @@ impl<T, S, M, C> WorkerBuilder<T, S, M, C> {
     pub fn map_response<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<T, S, Stack<tower::util::MapResponseLayer<F>, M>, C>
+    ) -> WorkerBuilder<T, S, Stack<tower::util::MapResponseLayer<F>, M>>
     where
         M: Layer<tower::util::MapResponseLayer<F>>,
     {
@@ -176,38 +174,38 @@ impl<T, S, M, C> WorkerBuilder<T, S, M, C> {
     ///
     /// [`MapErr`]: tower::util::MapErr
     /// [`map_err` combinator]: tower::util::ServiceExt::map_err
-    pub fn map_err<F>(self, f: F) -> WorkerBuilder<T, S, Stack<tower::util::MapErrLayer<F>, M>, C>
+    pub fn map_err<F>(self, f: F) -> WorkerBuilder<T, S, Stack<tower::util::MapErrLayer<F>, M>>
     where
         M: Layer<tower::util::MapErrLayer<F>>,
     {
         self.layer(tower::util::MapErrLayer::new(f))
     }
 
-    /// Represents a controller that dictates how a [Queue] runs
-    pub fn controller<W>(self, controller: W) -> WorkerBuilder<T, S, M, W> {
+    /// Represents a config that dictates how a [Worker] runs
+    pub fn config(self, config: WorkerConfig) -> WorkerBuilder<T, S, M> {
         WorkerBuilder {
             job: self.job,
             storage: self.storage,
             layer: self.layer,
-            controller,
+            config,
         }
     }
-    /// Builds a [QueueFactory] using the default [JobService] service
-    /// that can be used to generate new [Queue] actors using the `Actor::start` method
-    pub fn build(self) -> WorkerFactory<T, S, M::Service, C>
+    /// Builds a [WorkerBuilder] using a custom service
+    /// that can be used to generate new [Worker] actors using the `Actor::start` method
+    pub fn build<B>(self, service: B) -> WorkerBuilder<T, S, M::Service>
     where
-        M: Layer<JobService>,
+        M: Layer<B>,
     {
-        WorkerFactory {
+        WorkerBuilder {
             job: PhantomData,
-            service: self.layer.layer(JobService),
+            layer: self.layer.layer(service),
             storage: self.storage,
-            controller: self.controller,
+            config: self.config,
         }
     }
 
     /// Builds a [QueueFactory] using a [tower::util::ServiceFn] service
-    /// that can be used to generate new [Queue] actors using the `Actor::start` method
+    /// that can be used to generate new [Worker] actors using the `Actor::start` method
     /// # Arguments
     ///
     /// * `f` - A tower functional service
@@ -215,33 +213,22 @@ impl<T, S, M, C> WorkerBuilder<T, S, M, C> {
     /// # Examples
     ///
 
-    pub fn build_fn<F>(self, f: F) -> WorkerFactory<T, S, M::Service, C>
+    pub fn build_fn<F>(self, f: F) -> WorkerBuilder<T, S, M::Service>
     where
         M: Layer<JobFn<F>>,
     {
-        WorkerFactory {
+        WorkerBuilder {
             job: PhantomData,
-            service: self.layer.layer(job_fn(f)),
+            layer: self.layer.layer(job_fn(f)),
             storage: self.storage,
-            controller: self.controller,
+            config: self.config,
         }
     }
 }
 
-/// Represents a factory for [Queue]
-pub struct WorkerFactory<T, S, M, C> {
-    job: PhantomData<T>,
-    /// The [Service] for executing jobs
-    pub service: M,
-    /// The [Storage] for producing a stream of jobs
-    pub storage: S,
-
-    pub controller: C,
-}
-
-impl<T, S, M, C> WorkerFactory<T, S, M, C> {
-    /// Allows you to start a [Queue] that starts consuming the storage immediately
-    pub fn start<Fut>(self) -> Addr<Worker<T, S, M, C>>
+impl<T, S, M> WorkerBuilder<T, S, M> {
+    /// Allows you to start a [Worker] that starts consuming the storage immediately
+    pub fn start<Fut>(self) -> Addr<Worker<T, S, M>>
     where
         S: Storage<Output = T> + Unpin + Send + 'static,
         T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
@@ -250,16 +237,15 @@ impl<T, S, M, C> WorkerFactory<T, S, M, C> {
             + Send
             + 'static,
         Fut: Future<Output = Result<JobResult, JobError>> + 'static,
-        C: WorkerController<T> + Unpin + Send + 'static,
     {
         let arb = &Arbiter::new();
-        Supervisor::start_in_arbiter(&arb.handle(), |ctx: &mut Context<Worker<T, S, M, C>>| {
-            Worker::new(self.storage, self.service).controller(self.controller)
+        Supervisor::start_in_arbiter(&arb.handle(), |_ctx: &mut Context<Worker<T, S, M>>| {
+            Worker::new(self.storage, self.layer).config(self.config)
         })
     }
 
-    /// Allows customization before the starting of a [Queue]
-    pub fn start_with<Fut, F>(self, f: F) -> Addr<Worker<T, S, M, C>>
+    /// Allows customization before the starting of a [Worker]
+    pub fn start_with<Fut, F>(self, f: F) -> Addr<Worker<T, S, M>>
     where
         S: Storage<Output = T> + Unpin + Send + 'static,
         T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
@@ -268,8 +254,7 @@ impl<T, S, M, C> WorkerFactory<T, S, M, C> {
             + Send
             + 'static,
         Fut: Future<Output = Result<JobResult, JobError>> + 'static,
-        F: FnOnce(Self, &mut Context<Worker<T, S, M, C>>) -> Worker<T, S, M, C> + Send + 'static,
-        C: WorkerController<T> + Unpin + Send + 'static,
+        F: FnOnce(Self, &mut Context<Worker<T, S, M>>) -> Worker<T, S, M> + Send + 'static,
     {
         let arb = &Arbiter::new();
         Supervisor::start_in_arbiter(&arb.handle(), |ctx| f(self, ctx))

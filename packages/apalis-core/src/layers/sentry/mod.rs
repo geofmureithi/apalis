@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::convert::TryInto;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -59,7 +57,7 @@ struct JobDetails {
 }
 
 pin_project_lite::pin_project! {
-    /// The Future returned from [`SentryHttpService`].
+    /// The Future returned from [`SentryJobService`].
     pub struct SentryHttpFuture<F> {
         on_first_poll: Option<(
             JobDetails,
@@ -110,7 +108,7 @@ where
                 if let Some((transaction, parent_span)) = slf.transaction.take() {
                     if transaction.get_status().is_none() {
                         let status = match &res {
-                            Ok(res) => protocol::SpanStatus::Ok,
+                            Ok(_) => protocol::SpanStatus::Ok,
                             Err(err) => {
                                 sentry_core::capture_error(err);
                                 protocol::SpanStatus::InternalError
@@ -142,7 +140,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, mut request: JobRequest<J>) -> Self::Future {
+    fn call(&mut self, request: JobRequest<J>) -> Self::Future {
         let op = J::NAME;
         let trx_ctx = sentry_core::TransactionContext::new(op, "apalis.job");
         let job_type = std::any::type_name::<J>().to_string();

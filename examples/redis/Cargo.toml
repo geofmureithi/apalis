@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 actix = "0.13"
-apalis = { path = "../../", features = ["redis"] }
+apalis = { path = "../../", features = ["redis", "extensions"] }
 serde = "1"
 actix-rt = "2"
 env_logger = "0.7"

@@ -31,7 +31,7 @@ impl Job for Email {
     const NAME: &'static str = "redis::Email";
 }
 
-async fn email_service(job: Email, ctx: JobContext) -> Result<JobResult, JobError> {
+async fn email_service(job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
     // Do something awesome
     println!("Attempting to send email to {}", job.to);
     Ok(JobResult::Success)

@@ -4,8 +4,6 @@ use actix::prelude::*;
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
 use tower::Service;
-use tracing::trace;
-use uuid::Uuid;
 
 use crate::{
     error::JobError,
@@ -14,23 +12,25 @@ use crate::{
     request::JobRequest,
     response::JobResult,
     storage::Storage,
-    worker::{Worker, WorkerController, WorkerStatus},
+    worker::{Worker, WorkerConfig, WorkerStatus},
 };
 
 /// Represents a [Monitor] management message.
 ///
-/// This is mainly sent by [Worker] to [Queue] to:
+/// This is mainly sent by [Worker] to [Worker] to:
 ///     - Check QueueWorker Status via [QueueStatus]
-///     - Restart, stop and manage [Queue]
-///     - Force acknowledge or kill jobs in a [Queue]
-#[derive(Message)]
+///     - Restart, stop and manage [Worker]
+///     - Force acknowledge or kill jobs in a [Worker]
+#[derive(Message, Debug)]
 #[rtype(result = "Result<WorkerStatus, WorkerError>")]
 pub enum WorkerManagement {
     Status,
     Restart,
     Monitor(Addr<Monitor>),
     /// Kill specific job through [SpawnHandle]
-    Kill(String),
+    KillJob(String),
+    Config(WorkerConfig),
+    Terminate,
 }
 
 impl Monitor {
@@ -53,23 +53,23 @@ impl Monitor {
             let res = queue.send(WorkerManagement::Monitor(addr.clone())).await;
             match res {
                 Ok(Ok(status)) => {
-                    tracing::warn!(
+                    tracing::debug!(
                         consumer_id = ?status.id,
                         load = status.load,
-                        "queue.ready"
+                        "worker.ready"
                     );
                 }
                 _ => tracing::warn!(
                     consumer_id = "unknown",
-                    with_error = "queue may be unresponsive",
-                    "queue.ready"
+                    with_error = "worker may be unresponsive",
+                    "worker.disappeared"
                 ),
             };
         }
     }
 }
 
-/// Represents a monitor for multiple instances of [Recipient] to [Queue].
+/// Represents a monitor for multiple instances of [Recipient] to [Worker].
 ///
 ///
 /// Keeps an address of each queue and periodically checks of their status
@@ -81,7 +81,7 @@ pub struct Monitor {
 
 pub trait WorkerListener {
     fn on_event(&self, ctx: &mut Context<Monitor>, worker_id: &String, event: &WorkerEvent);
-    fn subscribe(&self, ctx: &mut Context<Monitor>) {
+    fn subscribe(&self, _ctx: &mut Context<Monitor>) {
         //You may want to setup listening to other workers.
     }
 }
@@ -90,7 +90,7 @@ impl Monitor {
     /// Register a single queue
     pub fn register<T: 'static, S: 'static, H: 'static, F: 'static, C>(
         mut self,
-        queue: Worker<T, S, H, C>,
+        queue: Worker<T, S, H>,
     ) -> Self
     where
         S: Storage<Output = T> + Unpin,
@@ -100,7 +100,6 @@ impl Monitor {
             + Send
             + 'static,
         F: Future<Output = Result<JobResult, JobError>>,
-        C: WorkerController<T> + Unpin + Send + 'static,
     {
         let addr = Supervisor::start(|_| queue);
         self.addrs.push(addr.into());
@@ -108,9 +107,9 @@ impl Monitor {
     }
 
     /// Register multiple queues that run on a separate thread.
-    pub fn register_with_count<F, T, S, H, C, Fut>(mut self, count: usize, factory: F) -> Self
+    pub fn register_with_count<F, T, S, H, Fut>(mut self, count: usize, factory: F) -> Self
     where
-        F: Fn(usize) -> Addr<Worker<T, S, H, C>>,
+        F: Fn(usize) -> Addr<Worker<T, S, H>>,
         S: Storage<Output = T> + Unpin + Send + 'static,
         T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
         H: Service<JobRequest<T>, Response = JobResult, Error = JobError, Future = Fut>
@@ -118,7 +117,6 @@ impl Monitor {
             + Send
             + 'static,
         Fut: Future<Output = Result<JobResult, JobError>> + 'static,
-        C: WorkerController<T> + Unpin + Send + 'static,
     {
         for index in 0..count {
             let addr = factory(index);
@@ -139,8 +137,8 @@ impl Monitor {
 impl Actor for Monitor {
     type Context = Context<Self>;
     fn started(&mut self, ctx: &mut Self::Context) {
-        log::info!(
-            "Monitor started with {} queues instances running.",
+        log::debug!(
+            "Monitor started with {} worker instances running.",
             self.addrs.len()
         );
 
@@ -175,21 +173,36 @@ impl Actor for Monitor {
     }
 }
 
-/// Represents events produced from a [Queue] Instance
+/// Represents events produced from a [Worker] Instance
 ///
-#[derive(Debug, Message)]
-#[rtype(result = "()")]
+#[derive(Debug)]
 pub enum WorkerEvent {
     Error(WorkerError),
     Complete(String, JobResult),
     Failed(String, JobError),
 }
 
-impl Handler<WorkerEvent> for Monitor {
+impl WorkerEvent {
+    pub(crate) fn with_worker(self, worker_id: String) -> WorkerMessage {
+        WorkerMessage {
+            event: self,
+            worker_id,
+        }
+    }
+}
+
+#[derive(Debug, Message)]
+#[rtype(result = "()")]
+pub struct WorkerMessage {
+    event: WorkerEvent,
+    worker_id: String,
+}
+
+impl Handler<WorkerMessage> for Monitor {
     type Result = ();
-    fn handle(&mut self, msg: WorkerEvent, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: WorkerMessage, ctx: &mut Self::Context) -> Self::Result {
         for event_handler in &self.event_handlers {
-            (event_handler).on_event(ctx, &String::from("Test"), &msg);
+            (event_handler).on_event(ctx, &msg.worker_id, &msg.event);
         }
     }
 }

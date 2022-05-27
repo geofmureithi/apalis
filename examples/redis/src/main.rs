@@ -1,11 +1,12 @@
-use std::time::Duration;
+use std::{error::Error, time::Duration};
 
 use chrono::Utc;
 
 use apalis::{
-    layers::{extensions::Extension, tracing::TraceLayer},
+    layers::{Extension, TraceLayer},
     redis::{RedisPubSubListener, RedisStorage},
-    Job, JobContext, JobError, JobResult, Monitor, Storage, WorkerBuilder, WorkerPulse,
+    IntoJobResponse, Job, JobContext, JobError, JobResult, Monitor, Storage, WorkerBuilder,
+    WorkerPulse,
 };
 use serde::{Deserialize, Serialize};
 use tracing::Span;
@@ -22,11 +23,29 @@ impl Job for Email {
     const NAME: &'static str = "redis::Email";
 }
 
-async fn email_service(_email: Email, ctx: JobContext) -> Result<JobResult, JobError> {
-    // Get your storage here
-    let _storage: &RedisStorage<Email> = ctx.data_opt().unwrap();
+#[derive(Debug)]
+enum EmailError {
+    NoStorage,
+    SendgridError(&'static str),
+}
 
-    Ok(JobResult::Success)
+impl std::fmt::Display for EmailError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SendgridClient;
+
+impl Error for EmailError {}
+
+async fn email_service(_email: Email, ctx: JobContext) -> Result<(), EmailError> {
+    let _storage: &RedisStorage<Email> = ctx.data_opt().ok_or(EmailError::NoStorage)?;
+    let _client: &SendgridClient = ctx
+        .data_opt()
+        .ok_or(EmailError::SendgridError("Missing Sendgrid client"))?;
+    Ok(())
 }
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) {

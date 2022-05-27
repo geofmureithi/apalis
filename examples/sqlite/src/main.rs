@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use apalis::{
-    layers::{tracing::TraceLayer, RateLimitLayer},
+    layers::{RateLimitLayer, TraceLayer},
     sqlite::SqliteStorage,
-    Job, JobContext, JobFuture, JobHandler, Monitor, Storage, WorkerBuilder,
+    Job, JobContext, JobFuture, Monitor, Storage, WorkerBuilder,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -19,16 +19,9 @@ impl Job for Email {
     const NAME: &'static str = "sqlite::Email";
 }
 
-impl JobHandler<Self> for Email {
-    type Result = JobFuture<()>;
-
-    fn handle(self, ctx: JobContext) -> Self::Result {
-        let fut = async move {
-            actix::clock::sleep(Duration::from_millis(1000)).await;
-            tracing::info!(subject = ?self.to, "Sent email");
-        };
-        Box::pin(fut)
-    }
+async fn email_service(email: Email, _ctx: JobContext) {
+    actix::clock::sleep(Duration::from_millis(1000)).await;
+    tracing::info!(subject = ?email.to, "Sent email");
 }
 
 async fn produce_jobs(storage: &SqliteStorage<Email>) {
@@ -67,7 +60,7 @@ async fn main() -> std::io::Result<()> {
         .register_with_count(5, move |_| {
             WorkerBuilder::new(sqlite.clone())
                 .layer(TraceLayer::new())
-                .build()
+                .build_fn(email_service)
                 .start()
         })
         .run()

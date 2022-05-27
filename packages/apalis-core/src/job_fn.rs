@@ -8,7 +8,7 @@ use crate::context::JobContext;
 use crate::error::JobError;
 use crate::job::Job;
 use crate::request::JobRequest;
-use crate::response::JobResult;
+use crate::response::{IntoJobResponse, JobResult};
 
 /// Returns a new [`JobFn`] with the given closure.
 ///
@@ -73,12 +73,13 @@ where
     }
 }
 
-impl<T, F, Request> Service<JobRequest<Request>> for JobFn<T>
+impl<T, F, Request, IR> Service<JobRequest<Request>> for JobFn<T>
 where
     Request: Debug + 'static,
     T: Fn(Request, JobContext) -> F,
-    F: Future<Output = Result<JobResult, JobError>> + 'static,
+    F: Future<Output = IR> + 'static,
     Request: Job,
+    IR: IntoJobResponse,
 {
     type Response = JobResult;
     type Error = JobError;
@@ -90,6 +91,10 @@ where
 
     fn call(&mut self, job: JobRequest<Request>) -> Self::Future {
         let fut = (self.f)(job.job, job.context);
+        let fut = async move {
+            let res = fut.await;
+            res.into_response()
+        };
         Box::pin(fut)
     }
 }

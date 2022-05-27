@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 actix = "0.13"
-apalis = { path = "../../", features = ["sqlite"] }
+apalis = { path = "../../", features = ["sqlite", "limit"] }
 serde = "1"
 actix-rt = "2"
 tracing-subscriber = "0.3.11"

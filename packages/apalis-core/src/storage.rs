@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use futures::{future::BoxFuture, stream::BoxStream};
-use serde::Serialize;
 
 use crate::{
     error::StorageError,

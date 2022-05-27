@@ -9,7 +9,7 @@ use apalis_core::{
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
-use futures::{future::join_all, Stream};
+use futures::Stream;
 use log::*;
 use redis::{aio::MultiplexedConnection, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Serialize};
@@ -26,7 +26,6 @@ const SIGNAL_LIST: &str = "{queue}:signal";
 
 #[derive(Clone)]
 struct RedisQueueInfo {
-    name: String,
     active_jobs_list: String,
     consumers_set: String,
     dead_jobs_set: String,
@@ -78,7 +77,6 @@ impl<T: Job> RedisStorage<T> {
             conn,
             job_type: PhantomData,
             queue: RedisQueueInfo {
-                name: name.to_string(),
                 active_jobs_list: ACTIVE_JOBS_LIST.replace("{queue}", &name),
                 consumers_set: CONSUMERS_SET.replace("{queue}", &name),
                 dead_jobs_set: DEAD_JOBS_SET.replace("{queue}", &name),
@@ -225,13 +223,6 @@ where
                 .collect(),
         ),
         None => None,
-        _ => {
-            error!(
-                "Decoding Message Failed: {:?}",
-                "Expected Data(&Value::Bulk(val))"
-            );
-            None
-        }
     }
 }
 
@@ -250,7 +241,7 @@ where
         let job = JobRequest::new(job);
         let job_id = job.id();
         let job = serde_json::to_string(&job).unwrap();
-        log::info!(
+        log::debug!(
             "Received new job with id: {} to list: {}",
             job_id,
             active_jobs_list
@@ -401,17 +392,22 @@ where
         let job_data_hash = self.queue.job_data_hash.to_string();
         let job_fut = self.fetch_by_id(job_id.clone());
         let failed_jobs_set = self.queue.failed_jobs_set.to_string();
+        let mut storage = self.clone();
         let fut = async move {
             let res = job_fut.await?;
             match res {
                 Some(job) => {
                     if job.attempts() >= job.max_attempts() {
                         warn!("too many retries: {:?}", job.attempts());
-                        let res = redis::cmd("ZADD")
+                        let _res = redis::cmd("ZADD")
                             .arg(failed_jobs_set)
                             .arg(Utc::now().timestamp())
                             .arg(job_id.clone())
                             .query_async(&mut conn)
+                            .await
+                            .map_err(|e| StorageError::Database(Box::new(e)))?;
+                        storage
+                            .kill(worker_id.clone(), job_id.clone())
                             .await
                             .map_err(|e| StorageError::Database(Box::new(e)))?;
                         return Ok(());
@@ -510,7 +506,7 @@ where
                     match res {
                         Ok(count) => {
                             if count > 0 {
-                                info!("{} jobs to reenqueue", count);
+                                debug!("{} jobs to reenqueue", count);
                             }
                             Ok(true)
                         }
@@ -540,7 +536,7 @@ where
         };
         Box::pin(fut)
     }
-    fn reschedule(&mut self, job: &JobRequest<T>, wait: Duration) -> StorageResult<()> {
+    fn reschedule(&mut self, job: &JobRequest<T>, _wait: Duration) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let schedule_job = self.scripts.schedule_job.clone();
         let job_id = job.id();
@@ -583,10 +579,9 @@ impl<T> StorageJobExt<T> for RedisStorage<T>
 where
     T: 'static + Job + Serialize + DeserializeOwned,
 {
-    fn list_jobs(&mut self, status: &JobState, page: i32) -> StorageResult<Vec<JobRequest<T>>> {
+    fn list_jobs(&mut self, status: &JobState, _page: i32) -> StorageResult<Vec<JobRequest<T>>> {
         match status {
             JobState::Pending => {
-                use std::convert::identity;
                 let mut conn = self.conn.clone();
                 let active_jobs_list = format!("{}", &self.queue.active_jobs_list);
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);
@@ -614,7 +609,6 @@ where
                 Box::pin(fut)
             }
             JobState::Running => {
-                use std::convert::identity;
                 let mut conn = self.conn.clone();
                 let consumers_set = format!("{}", &self.queue.consumers_set);
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);

@@ -11,16 +11,63 @@ keywords = ["jobs", "background", "task", "actix"]
 edition = "2018"
 
 [features]
-default = ["redis"]
-redis = []
+default = ["redis", "apalis-core/default", "tracing"]
+## Include redis storage
+redis = ["apalis-redis"]
+## Include Postgres storage
 postgres = ["apalis-sql/postgres"]
+## Include SQlite storage
 sqlite = [ "apalis-sql/sqlite"]
+## Include MySql storage
 mysql = [ "apalis-sql/mysql"]
+storage = ["apalis-core/storage"]
+## Support for Sentry exception and performance monitoring
+sentry = ["apalis-core/sentry"]
+## Support Prometheus metrics
+prometheus = ["apalis-core/prometheus"]
+## Support Tracing 👀
+tracing = ["apalis-core/trace"]
+## Support direct retrying jobs
+retry = ["apalis-core/retry"]
+## Support timeouts on jobs
+timeout = ["apalis-core/timeout"]
+## 💪 Limit the amount of jobs 
+limit = ["apalis-core/limit"]
+## Support filtering jobs based on a predicate
+filter = ["apalis-core/filter"]
+## Add a global extensions to jobs
+extensions =["apalis-core/extensions"]
+docsrs = ["document-features"]
 
-[dependencies]
-apalis-core = { path = "./packages/apalis-core", version = "0.3.0-beta.0" }
-apalis-redis = { path = "./packages/apalis-redis", version = "0.3.0-beta.0" }
-apalis-sql = { path = "./packages/apalis-sql", version = "0.3.0-beta.0" }
+
+[dependencies.apalis-redis]
+version = "0.3.0-beta.0"
+optional = true
+default-features = false
+path = "./packages/apalis-redis"
+
+[dependencies.apalis-sql]
+version = "0.3.0-beta.0"
+optional = true
+default-features = false
+path = "./packages/apalis-sql"
+
+[dependencies.apalis-core]
+version = "0.3.0-beta.0"
+optional = true
+default-features = false
+path = "./packages/apalis-core"
+
+[dependencies.document-features]
+version = "0.2"
+optional = true
+
+
+[package.metadata.docs.rs]
+# defines the configuration attribute `docsrs`
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
 
 [dev-dependencies]
 criterion = { version = "0.3", features=["async_tokio"] }

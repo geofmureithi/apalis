@@ -2,7 +2,7 @@ use crate::error::JobError;
 
 use super::{LatencyUnit, DEFAULT_ERROR_LEVEL};
 
-use std::{fmt, time::Duration};
+use std::time::Duration;
 use tracing::{Level, Span};
 
 /// Trait used to tell [`Trace`] what to do when a request fails.
@@ -99,7 +99,7 @@ macro_rules! log_pattern_match {
                         parent: $span,
                         Level::$level,
                         done_in = format_args!("{} s", $latency.as_secs_f64()),
-                        "job.failed : {}",
+                        "{}",
                         format_args!("{}", $error)
                     );
                 }
@@ -108,7 +108,7 @@ macro_rules! log_pattern_match {
                         parent: $span,
                         Level::$level,
                         done_in = format_args!("{} ms", $latency.as_millis()),
-                        "job.failed : {}",
+                        "{}",
                         format_args!("{}", $error)
                     );
                 }
@@ -117,7 +117,7 @@ macro_rules! log_pattern_match {
                         parent: $span,
                         Level::$level,
                         done_in = format_args!("{} μs", $latency.as_micros()),
-                        "job.failed : {}",
+                        "{}",
                         format_args!("{}", $error)
                     );
                 }
@@ -126,7 +126,7 @@ macro_rules! log_pattern_match {
                         parent: $span,
                         Level::$level,
                         done_in = format_args!("{} ns", $latency.as_nanos()),
-                        "job.failed : {}",
+                        "{}",
                         format_args!("{}", $error)
                     );
                 }

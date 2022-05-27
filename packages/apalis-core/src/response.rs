@@ -1,6 +1,5 @@
-use crate::{error::JobError, job::Job, job::JobFuture};
-use std::{any::Any, error::Error, fmt::Display, time::Duration};
-use tokio::sync::oneshot::Sender as OneshotSender;
+use crate::error::JobError;
+use std::{any::Any, error::Error, time::Duration};
 
 /// Represents a non-error result for a [Job] or [JobFn] service.
 ///
@@ -14,7 +13,7 @@ pub enum JobResult {
 }
 
 impl std::fmt::Display for JobResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
             JobResult::Success => "Success",
             JobResult::Retry => "Retry",
@@ -25,121 +24,55 @@ impl std::fmt::Display for JobResult {
     }
 }
 
-pub trait JobResponse {
-    fn into_response(self, tx: Option<OneshotSender<Result<JobResult, JobError>>>);
+pub trait IntoJobResponse {
+    fn into_response(self) -> Result<JobResult, JobError>;
 }
 
-impl JobResponse for () {
-    fn into_response(self, tx: Option<OneshotSender<Result<JobResult, JobError>>>) {
-        tx.send(Ok(JobResult::Success));
+impl IntoJobResponse for bool {
+    fn into_response(self) -> Result<JobResult, JobError> {
+        match self {
+            true => Ok(JobResult::Success),
+            false => Err(JobError::Unknown),
+        }
     }
 }
 
-impl JobResponse for JobFuture<()> {
-    fn into_response(self, tx: Option<OneshotSender<Result<JobResult, JobError>>>) {
-        actix::spawn(async {
-            self.await;
-            tx.send(Ok(JobResult::Success))
-        });
-    }
-}
-
-impl<T: Any, E: 'static + Error + Send + Sync> JobResponse for Result<T, E> {
-    fn into_response(self, tx: Option<OneshotSender<Result<JobResult, JobError>>>) {
+impl<T: Any, E: 'static + Error + Send + Sync> IntoJobResponse for Result<T, E> {
+    fn into_response(self) -> Result<JobResult, JobError> {
         match self {
             Ok(value) => {
                 let value_any = &value as &dyn Any;
                 match value_any.downcast_ref::<JobResult>() {
-                    Some(res) => {
-                        tx.send(Ok(res.clone()));
-                    }
-                    None => {
-                        tx.send(Ok(JobResult::Success));
-                    }
+                    Some(res) => Ok(res.clone()),
+                    None => Ok(JobResult::Success),
                 }
             }
-            Err(e) => tx.send(Err(JobError::Failed(Box::new(e)))),
+            Err(e) => Err(JobError::Failed(Box::new(e))),
         }
     }
 }
 
-/// Helper trait for send one shot message from Option<Sender> type.
-/// None and error are ignored.
-trait JobOneshot<M> {
-    fn send(self, msg: M);
-}
-
-impl<M> JobOneshot<M> for Option<OneshotSender<M>> {
-    fn send(self, msg: M) {
-        if let Some(tx) = self {
-            let _ = tx.send(msg);
+macro_rules! SIMPLE_JOB_RESULT {
+    ($type:ty) => {
+        impl IntoJobResponse for $type {
+            fn into_response(self) -> Result<JobResult, JobError> {
+                Ok(JobResult::Success)
+            }
         }
-    }
+    };
 }
 
-// impl<J: Job<Result = R>, R: Debug + 'static> IntoJobFuture for JobFuture<R> {
-//     fn process(self, tx: Option<OneshotSender<R>>) {
-//         // TODO: Handle Err here?
-//         // println!("Type: {}", std::any::type_name::<R>());
-//         actix_rt::spawn(async { tx.send(self.await) });
-//     }
-// }
-
-// impl<J, R> JobResponse<J> for Option<R>
-// where
-//     J: Job<Result = Option<R>>,
-//     R: Debug + 'static,
-// {
-//     fn process(self, tx: Option<OneshotSender<Option<R>>>) {
-//         tx.send(self)
-//     }
-// }
-
-// impl<J, R, E> JobResponse<J> for Result<R, E>
-// where
-//     J: Job<Result = Result<R, E>>,
-//     R: Debug + 'static,
-//     E: Debug + 'static,
-// {
-//     fn process(self, tx: Option<OneshotSender<Result<R, E>>>) {
-//         println!("Response {:?}", self);
-//         tx.send(self)
-//     }
-// }
-
-// impl<M> JobOneshot<M> for Option<OneshotSender<M>> {
-//     fn send(self, msg: M) {
-//         if let Some(tx) = self {
-//             let _ = tx.send(msg);
-//         }
-//     }
-// }
-
-// macro_rules! SIMPLE_JOB_RESULT {
-//     ($type:ty) => {
-//         impl<J> JobResponse<J> for $type
-//         where
-//             J: Job<Result = $type>,
-//         {
-//             fn process(self, tx: Option<OneshotSender<$type>>) {
-//                 tx.send(self)
-//             }
-//         }
-//     };
-// }
-
-// SIMPLE_JOB_RESULT!(());
-// SIMPLE_JOB_RESULT!(u8);
-// SIMPLE_JOB_RESULT!(u16);
-// SIMPLE_JOB_RESULT!(u32);
-// SIMPLE_JOB_RESULT!(u64);
-// SIMPLE_JOB_RESULT!(usize);
-// SIMPLE_JOB_RESULT!(i8);
-// SIMPLE_JOB_RESULT!(i16);
-// SIMPLE_JOB_RESULT!(i32);
-// SIMPLE_JOB_RESULT!(i64);
-// SIMPLE_JOB_RESULT!(isize);
-// SIMPLE_JOB_RESULT!(f32);
-// SIMPLE_JOB_RESULT!(f64);
-// SIMPLE_JOB_RESULT!(String);
-// SIMPLE_JOB_RESULT!(bool);
+SIMPLE_JOB_RESULT!(());
+SIMPLE_JOB_RESULT!(u8);
+SIMPLE_JOB_RESULT!(u16);
+SIMPLE_JOB_RESULT!(u32);
+SIMPLE_JOB_RESULT!(u64);
+SIMPLE_JOB_RESULT!(usize);
+SIMPLE_JOB_RESULT!(i8);
+SIMPLE_JOB_RESULT!(i16);
+SIMPLE_JOB_RESULT!(i32);
+SIMPLE_JOB_RESULT!(i64);
+SIMPLE_JOB_RESULT!(isize);
+SIMPLE_JOB_RESULT!(f32);
+SIMPLE_JOB_RESULT!(f64);
+SIMPLE_JOB_RESULT!(String);

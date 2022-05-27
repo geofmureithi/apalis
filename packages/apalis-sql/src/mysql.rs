@@ -10,8 +10,9 @@ use serde::{de::DeserializeOwned, Serialize};
 use sqlx::types::Uuid;
 use sqlx::{MySql, MySqlPool, Pool, Row};
 use std::convert::TryInto;
-use std::ops::Sub;
 use std::{marker::PhantomData, ops::Add, time::Duration};
+
+use crate::from_row::{IntoJobRequest, SqlJobRequest};
 
 pub struct MysqlStorage<T> {
     pool: Pool<MySql>,
@@ -110,22 +111,29 @@ where
     match job {
         None => Ok(None),
         Some(job) => {
-            let mut tx = pool.begin().await?;
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(|e| StorageError::Connection(Box::from(e)))?;
             let job_id = job.id();
             let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ? WHERE id = ? AND status = 'Pending' AND lock_by IS NULL;";
             sqlx::query(update_query)
                 .bind(worker_id)
                 .bind(job_id.clone())
                 .execute(&mut tx)
-                .await?;
-            let job: Option<JobRequest<T>> = sqlx::query_as("Select * from jobs where id = ?")
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
+            let job: Option<SqlJobRequest<T>> = sqlx::query_as("Select * from jobs where id = ?")
                 .bind(job_id.clone())
                 .fetch_optional(&mut tx)
-                .await?;
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
 
-            tx.commit().await?;
+            tx.commit()
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
 
-            Ok(job)
+            Ok(job.as_job_request())
         }
     }
 }
@@ -142,15 +150,15 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
             loop {
                 interval.tick().await;
                 let tx = pool.clone();
-                let mut tx = tx.acquire().await?;
+                let mut tx = tx.acquire().await.map_err(|e| StorageError::Connection(Box::from(e)))?;
                 let job_type = T::NAME;
                 let fetch_query = "SELECT * FROM jobs
                     WHERE status = 'Pending' AND run_at < NOW() AND job_type = ? ORDER BY run_at ASC LIMIT 1 FOR UPDATE";
-                let job: Option<JobRequest<T>> = sqlx::query_as(fetch_query)
+                let job: Option<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
                     .bind(job_type)
                     .fetch_optional(&mut tx)
-                    .await?;
-                yield fetch_next(pool.clone(), worker_id.clone(), job).await?
+                    .await.map_err(|e| StorageError::Database(Box::from(e)))?;
+                yield fetch_next(pool.clone(), worker_id.clone(), job.as_job_request()).await.map_err(|e| StorageError::Database(Box::from(e)))?
             }
         }
     }
@@ -170,14 +178,18 @@ where
 
         let fut = async move {
             let job = serde_json::to_string(&job)?;
-            let mut pool = pool.acquire().await?;
+            let mut pool = pool
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Connection(Box::from(e)))?;
             let job_type = T::NAME;
             sqlx::query(query)
                 .bind(job)
                 .bind(id.to_string())
                 .bind(job_type.to_string())
                 .execute(&mut pool)
-                .await?;
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(())
         };
         Box::pin(fut)
@@ -191,7 +203,10 @@ where
 
         let fut = async move {
             let job = serde_json::to_string(&job)?;
-            let mut pool = pool.acquire().await?;
+            let mut pool = pool
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Connection(Box::from(e)))?;
             let job_type = T::NAME;
             sqlx::query(query)
                 .bind(job)
@@ -199,7 +214,8 @@ where
                 .bind(job_type)
                 .bind(on)
                 .execute(&mut pool)
-                .await?;
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(())
         };
         Box::pin(fut)
@@ -208,18 +224,24 @@ where
     fn fetch_by_id(&self, job_id: String) -> StorageResult<Option<JobRequest<Self::Output>>> {
         let pool = self.pool.clone();
         let fut = async move {
-            let mut conn = pool.clone().acquire().await?;
+            let mut conn = pool
+                .clone()
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Connection(Box::from(e)))?;
             let fetch_query = "SELECT * FROM jobs WHERE id = ?";
-            Ok(sqlx::query_as(fetch_query)
+            let res: Option<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
                 .bind(job_id)
                 .fetch_optional(&mut conn)
-                .await?)
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
+            Ok(res.as_job_request())
         };
         Box::pin(fut)
     }
 
     fn heartbeat(&mut self, pulse: WorkerPulse) -> StorageResult<bool> {
-        let pool = self.pool.clone();
+        // let pool = self.pool.clone();
 
         let fut = async move {
             match pulse {
@@ -228,7 +250,7 @@ where
                     Ok(true)
                 }
                 // Worker not seen in 5 minutes yet has running jobs
-                WorkerPulse::RenqueueOrpharned { count } => {
+                WorkerPulse::RenqueueOrpharned { count: _ } => {
                     // let job_type = T::NAME;
                     // let mut tx = pool.acquire().await?;
                     // let query = r#"Update jobs
@@ -254,14 +276,18 @@ where
     fn kill(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
         let pool = self.pool.clone();
         let fut = async move {
-            let mut tx = pool.acquire().await?;
+            let mut tx = pool
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Connection(Box::from(e)))?;
             let query =
                 "UPDATE Jobs SET status = 'Kill', done_at = NOW() WHERE id = ? AND lock_by = ?";
             sqlx::query(query)
                 .bind(job_id.to_owned())
                 .bind(worker_id.to_owned())
                 .execute(&mut tx)
-                .await?;
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(())
         };
         Box::pin(fut)
@@ -272,14 +298,18 @@ where
     fn retry(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
         let pool = self.pool.clone();
         let fut = async move {
-            let mut tx = pool.acquire().await?;
+            let mut tx = pool
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             let query =
                 "UPDATE Jobs SET status = 'Pending', done_at = NULL, lock_by = NULL WHERE id = ? AND lock_by = ?";
             sqlx::query(query)
                 .bind(job_id.to_owned())
                 .bind(worker_id.to_owned())
                 .execute(&mut tx)
-                .await?;
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(())
         };
         Box::pin(fut)
@@ -291,24 +321,36 @@ where
     fn len(&self) -> StorageResult<i64> {
         let pool = self.pool.clone();
         let fut = async move {
-            let mut tx = pool.acquire().await?;
+            let mut tx = pool
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             let query = "Select Count(*) as count from Jobs where status='Pending'";
-            let record = sqlx::query(query).fetch_one(&mut tx).await?;
-            Ok(record.try_get("count")?)
+            let record = sqlx::query(query)
+                .fetch_one(&mut tx)
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
+            Ok(record
+                .try_get("count")
+                .map_err(|e| StorageError::Database(Box::from(e)))?)
         };
         Box::pin(fut)
     }
     fn ack(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
         let pool = self.pool.clone();
         let fut = async move {
-            let mut tx = pool.acquire().await?;
+            let mut tx = pool
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             let query =
                 "UPDATE Jobs SET status = 'Done', done_at = now() WHERE id = ? AND lock_by = ?";
             sqlx::query(query)
                 .bind(job_id.to_owned())
                 .bind(worker_id.to_owned())
                 .execute(&mut tx)
-                .await?;
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(())
         };
         Box::pin(fut)
@@ -323,14 +365,18 @@ where
                 .try_into()
                 .map_err(|e| StorageError::Database(Box::new(e)))?;
             let wait = chrono::Duration::seconds(wait);
-            let mut tx = pool.acquire().await?;
+            let mut tx = pool
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Connection(Box::from(e)))?;
             let query =
                 "UPDATE Jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ? WHERE id = ?";
             sqlx::query(query)
                 .bind(Utc::now().add(wait))
                 .bind(job_id.to_owned())
                 .execute(&mut tx)
-                .await?;
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(())
         };
         Box::pin(fut)
@@ -345,7 +391,10 @@ where
         let lock_at = job.lock_at().clone();
         let last_error = job.last_error().clone();
         let fut = async move {
-            let mut tx = pool.acquire().await?;
+            let mut tx = pool
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Connection(Box::from(e)))?;
             let query =
                 "UPDATE jobs SET status = ?, attempts = ?, done_at = ?, lock_by = ?, lock_at = ?, last_error = ? WHERE id = ?";
             sqlx::query(query)
@@ -357,7 +406,8 @@ where
                 .bind(last_error)
                 .bind(job_id.to_owned())
                 .execute(&mut tx)
-                .await?;
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(())
         };
         Box::pin(fut)
@@ -366,7 +416,10 @@ where
     fn keep_alive(&mut self, worker_id: String) -> StorageResult<()> {
         let pool = self.pool.clone();
         let fut = async move {
-            let mut tx = pool.acquire().await?;
+            let mut tx = pool
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Connection(Box::from(e)))?;
             let worker_type = T::NAME;
             let storage_name = std::any::type_name::<Self>();
             let query =
@@ -377,7 +430,8 @@ where
                 .bind(storage_name)
                 .bind(Utc::now())
                 .execute(&mut tx)
-                .await?;
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(())
         };
         Box::pin(fut)
