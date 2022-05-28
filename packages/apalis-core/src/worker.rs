@@ -98,6 +98,7 @@ where
     T: 'static + Job + Serialize + Debug + DeserializeOwned,
     S: 'static + Storage<Output = T> + Unpin,
 {
+    /// Create a new Worker instance
     pub fn new(storage: S, handler: H) -> Self {
         let id = uuid::Uuid::new_v4();
         Worker {

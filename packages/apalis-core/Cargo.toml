@@ -20,9 +20,7 @@ pin-project-lite = "0.2.9"
 tokio =  { version = "1", optional = true, default-features = false }
 thiserror = "1"
 log = "0.4"
-env_logger = "0.9"
 http = "0.2.7"
-anyhow = "1.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 strum = { version = "0.24", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
