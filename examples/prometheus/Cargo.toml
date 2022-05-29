@@ -10,8 +10,8 @@ tokio = { version = "1.0", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1.0", features = ["derive"] }
-apalis = { path = "../../", features = ["redis"] }
+apalis = { path = "../../", features = ["redis", "prometheus"] }
 futures = "0.3"
-actix-rt = "2"
 metrics = "0.18"
 metrics-exporter-prometheus = "0.8"
+email-service = { path = "../email-service" }

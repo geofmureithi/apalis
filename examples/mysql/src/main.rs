@@ -1,27 +1,12 @@
 use std::time::Duration;
 
-use actix::clock::sleep;
 use apalis::{
-    layers::tracing::TraceLayer, mysql::MysqlStorage, Job, JobContext, JobError, JobResult,
-    Monitor, Storage, WorkerBuilder,
+    layers::TraceLayer, mysql::MysqlStorage, Job, JobContext, JobError, JobResult, Monitor,
+    Storage, WorkerBuilder,
 };
+use email_service::{send_email, Email};
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct Email {
-    to: String,
-    subject: String,
-    text: String,
-}
-
-impl Job for Email {
-    const NAME: &'static str = "mysql::Email";
-}
-
-async fn email_service(_email: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
-    sleep(Duration::from_millis(1)).await;
-    Ok(JobResult::Success)
-}
+use tokio::time::sleep;
 
 async fn produce_jobs(storage: &MysqlStorage<Email>) {
     let mut storage = storage.clone();
@@ -37,7 +22,7 @@ async fn produce_jobs(storage: &MysqlStorage<Email>) {
     }
 }
 
-#[actix_rt::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
@@ -54,8 +39,7 @@ async fn main() -> std::io::Result<()> {
         .register_with_count(2, move |_| {
             WorkerBuilder::new(mysql.clone())
                 .layer(TraceLayer::new())
-                .build_fn(email_service)
-                .start()
+                .build_fn(send_email)
         })
         .run()
         .await

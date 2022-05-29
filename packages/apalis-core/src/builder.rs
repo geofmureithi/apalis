@@ -1,4 +1,3 @@
-use actix::prelude::*;
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
 use tower::{
@@ -19,7 +18,7 @@ use crate::{
     request::JobRequest,
     response::JobResult,
     storage::Storage,
-    worker::{Worker, WorkerConfig},
+    worker::{prelude::Worker, Actor, WorkerConfig},
 };
 
 /// Configure and build a [Worker] job service.
@@ -45,7 +44,7 @@ use crate::{
 ///
 /// let addr = WorkerBuilder::new(sqlite)
 ///     .build_fn(email_service)
-///     .start();
+///     .start().await;
 ///
 /// ```
 ///
@@ -192,16 +191,13 @@ impl<T, S, M> WorkerBuilder<T, S, M> {
     }
     /// Builds a [WorkerBuilder] using a custom service
     /// that can be used to generate new [Worker] actors using the `Actor::start` method
-    pub fn build<B>(self, service: B) -> WorkerBuilder<T, S, M::Service>
+    pub fn build<B>(self, service: B) -> Worker<T, S, B>
     where
         M: Layer<B>,
+        S: Storage<Output = T> + Unpin + Send + 'static,
+        T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
     {
-        WorkerBuilder {
-            job: PhantomData,
-            layer: self.layer.layer(service),
-            storage: self.storage,
-            config: self.config,
-        }
+        Worker::new(self.storage, service).config(self.config)
     }
 
     /// Builds a [QueueFactory] using a [tower::util::ServiceFn] service
@@ -213,50 +209,12 @@ impl<T, S, M> WorkerBuilder<T, S, M> {
     /// # Examples
     ///
 
-    pub fn build_fn<F>(self, f: F) -> WorkerBuilder<T, S, M::Service>
+    pub fn build_fn<F>(self, f: F) -> Worker<T, S, M::Service>
     where
         M: Layer<JobFn<F>>,
-    {
-        WorkerBuilder {
-            job: PhantomData,
-            layer: self.layer.layer(job_fn(f)),
-            storage: self.storage,
-            config: self.config,
-        }
-    }
-}
-
-impl<T, S, M> WorkerBuilder<T, S, M> {
-    /// Allows you to start a [Worker] that starts consuming the storage immediately
-    pub fn start<Fut>(self) -> Addr<Worker<T, S, M>>
-    where
         S: Storage<Output = T> + Unpin + Send + 'static,
         T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
-        M: Service<JobRequest<T>, Response = JobResult, Error = JobError, Future = Fut>
-            + Unpin
-            + Send
-            + 'static,
-        Fut: Future<Output = Result<JobResult, JobError>> + 'static,
     {
-        let arb = &Arbiter::new();
-        Supervisor::start_in_arbiter(&arb.handle(), |_ctx: &mut Context<Worker<T, S, M>>| {
-            Worker::new(self.storage, self.layer).config(self.config)
-        })
-    }
-
-    /// Allows customization before the starting of a [Worker]
-    pub fn start_with<Fut, F>(self, f: F) -> Addr<Worker<T, S, M>>
-    where
-        S: Storage<Output = T> + Unpin + Send + 'static,
-        T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
-        M: Service<JobRequest<T>, Response = JobResult, Error = JobError, Future = Fut>
-            + Unpin
-            + Send
-            + 'static,
-        Fut: Future<Output = Result<JobResult, JobError>> + 'static,
-        F: FnOnce(Self, &mut Context<Worker<T, S, M>>) -> Worker<T, S, M> + Send + 'static,
-    {
-        let arb = &Arbiter::new();
-        Supervisor::start_in_arbiter(&arb.handle(), |ctx| f(self, ctx))
+        Worker::new(self.storage, self.layer.layer(job_fn(f))).config(self.config)
     }
 }

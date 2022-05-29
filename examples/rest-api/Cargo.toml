@@ -16,3 +16,4 @@ slug = "0.1.4"
 actix-cors = "0.6.1"
 serde_json = "1"
 chrono = "0.4"
+email-service = { path = "../email-service" }

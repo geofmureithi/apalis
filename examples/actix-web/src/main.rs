@@ -1,27 +1,12 @@
 use actix_web::{web, App, Error, HttpResponse, HttpServer, ResponseError};
 use apalis::{
-    redis::RedisStorage, Job, JobContext, JobError, JobRequest, JobResult, Monitor, Storage,
-    WorkerBuilder,
+    layers::TraceLayer, redis::RedisStorage, Job, JobContext, JobError, JobRequest, JobResult,
+    Monitor, Storage, WorkerBuilder,
 };
 use futures::future;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
-struct Email {
-    to: String,
-    subject: String,
-    text: String,
-}
-
-impl Job for Email {
-    const NAME: &'static str = "redis::Email";
-}
-
-async fn email_service(job: Email, ctx: JobContext) -> Result<JobResult, JobError> {
-    // Do something awesome
-    println!("Attempting to send email to {}", job.to);
-    Ok(JobResult::Success)
-}
+use email_service::{send_email, Email};
 
 async fn push_email(
     email: web::Json<Email>,
@@ -50,15 +35,14 @@ async fn main() -> std::io::Result<()> {
     })
     .bind("127.0.0.1:8000")?
     .run();
-
     let worker = Monitor::new()
         .register_with_count(2, move |_| {
             WorkerBuilder::new(storage.clone())
-                .build_fn(email_service)
-                .start()
+                .layer(TraceLayer::new())
+                .build_fn(send_email)
         })
         .run();
-    future::try_join(http, worker).await?;
 
+    future::try_join(http, worker).await?;
     Ok(())
 }

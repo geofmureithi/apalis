@@ -321,7 +321,7 @@ where
 {
     type Response = JobResult;
     type Error = JobError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + 'static>>;
+    type Future = ResponseFuture<F, OnResponseT, OnFailureT>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -344,12 +344,12 @@ where
             start,
         };
 
-        Box::pin(future)
+        future
     }
 }
 
 pin_project! {
-    struct ResponseFuture<F, OnResponse, OnFailure> {
+    pub struct ResponseFuture<F, OnResponse, OnFailure> {
         #[pin]
         pub(crate) inner: F,
         pub(crate) span: Span,

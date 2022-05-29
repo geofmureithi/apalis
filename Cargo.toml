@@ -7,7 +7,7 @@ repository = "https://github.com/geofmureithi/apalis"
 documentation = "https://docs.rs/apalis"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-keywords = ["jobs", "background", "task", "actix"]
+keywords = ["jobs", "background", "task", "actors", "workers"]
 edition = "2018"
 
 [features]
@@ -71,9 +71,7 @@ all-features = true
 
 [dev-dependencies]
 criterion = { version = "0.3", features=["async_tokio"] }
-actix = "0.13"
 serde = "1"
-actix-rt = "2"
 tokio = "1"
 
 [[bench]]
@@ -86,6 +84,7 @@ members = [
   "packages/apalis-redis",
   "packages/apalis-sql",
   # Examples
+  "examples/email-service",
   "examples/redis",
   "examples/actix-web",
   "examples/sqlite",

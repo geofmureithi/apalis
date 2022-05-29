@@ -84,13 +84,13 @@ pub use apalis_core::{
     context::JobContext,
     error::JobError,
     job::{Job, JobFuture},
-    monitor::Monitor,
     request::JobRequest,
     request::JobState,
     response::{IntoJobResponse, JobResult},
     storage::Storage,
     storage::StorageJobExt,
-    worker::{Worker, WorkerPulse},
+    worker::prelude::Monitor,
+    worker::{Actor, WorkerPulse},
 };
 
 /// Include the default Redis storage
@@ -180,4 +180,8 @@ pub mod layers {
     #[cfg(feature = "sentry")]
     #[cfg_attr(docsrs, doc(cfg(feature = "sentry")))]
     pub use apalis_core::layers::sentry::SentryJobLayer;
+
+    #[cfg(feature = "prometheus")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "prometheus")))]
+    pub use apalis_core::layers::prometheus::PrometheusLayer;
 }

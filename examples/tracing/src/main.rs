@@ -5,28 +5,17 @@ use std::time::Duration;
 use tracing::{span::Record, Id, Instrument, Span};
 use tracing_subscriber::prelude::*;
 
-use actix::clock::sleep;
 use apalis::{
-    layers::{sentry::SentryJobLayer, tracing::TraceLayer},
+    layers::{SentryJobLayer, TraceLayer},
     redis::RedisStorage,
-    Job, JobContext, JobError, JobResult, Monitor, OnProgress, Storage, TracingOnProgress,
-    WorkerBuilder, WorkerPulse,
+    Job, JobContext, JobError, JobResult, Monitor, Storage, WorkerBuilder, WorkerPulse,
 };
 use serde::{Deserialize, Serialize};
+use tokio::time::sleep;
 use tracing::Subscriber;
 use tracing_subscriber::{registry, Layer};
 
-#[derive(Debug, Deserialize, Serialize)]
-
-struct Email {
-    to: String,
-    subject: String,
-    text: String,
-}
-
-impl Job for Email {
-    const NAME: &'static str = "sentry::Email";
-}
+use email_service::Email;
 
 #[derive(Debug)]
 struct InvalidEmailError {
@@ -42,12 +31,9 @@ impl fmt::Display for InvalidEmailError {
 impl Error for InvalidEmailError {}
 
 async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobError> {
-    let handle = ctx.get_progress_handle::<TracingOnProgress>().unwrap();
     tracing::info!("Checking if dns configured");
     sleep(Duration::from_millis(1008)).await;
-    handle.update_progress(20);
-    tracing::info!("Trace!");
-
+    tracing::info!("Sent in 1 sec");
     Ok(JobResult::Success)
 }
 
@@ -62,7 +48,7 @@ async fn produce_jobs(mut storage: RedisStorage<Email>) {
         .unwrap();
 }
 
-#[actix_rt::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
     use tracing_subscriber::EnvFilter;
     std::env::set_var("RUST_LOG", "debug");
@@ -90,7 +76,6 @@ async fn main() -> std::io::Result<()> {
             WorkerBuilder::new(storage.clone())
                 .layer(TraceLayer::new())
                 .build_fn(email_service)
-                .start()
         })
         .run()
         .await

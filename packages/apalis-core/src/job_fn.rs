@@ -73,17 +73,36 @@ where
     }
 }
 
-impl<T, F, Request, IR> Service<JobRequest<Request>> for JobFn<T>
+pin_project_lite::pin_project! {
+    /// The Future returned from [`JobFn`] service.
+    pub struct JobFnHttpFuture<F> {
+        #[pin]
+        future: F,
+    }
+}
+
+impl<F> Future for JobFnHttpFuture<F>
+where
+    F: Future<Output = Result<JobResult, JobError>> + 'static,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let slf = self.project();
+        slf.future.poll(cx)
+    }
+}
+
+impl<T, F, Request> Service<JobRequest<Request>> for JobFn<T>
 where
     Request: Debug + 'static,
     T: Fn(Request, JobContext) -> F,
-    F: Future<Output = IR> + 'static,
+    F: Future<Output = Result<JobResult, JobError>> + 'static,
     Request: Job,
-    IR: IntoJobResponse,
 {
     type Response = JobResult;
     type Error = JobError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + 'static>>;
+    type Future = JobFnHttpFuture<F>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -91,10 +110,7 @@ where
 
     fn call(&mut self, job: JobRequest<Request>) -> Self::Future {
         let fut = (self.f)(job.job, job.context);
-        let fut = async move {
-            let res = fut.await;
-            res.into_response()
-        };
-        Box::pin(fut)
+
+        JobFnHttpFuture { future: fut }
     }
 }

@@ -12,22 +12,7 @@ use apalis::{
 use futures::future;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
-struct Email {
-    to: String,
-    subject: String,
-    text: String,
-}
-
-impl Job for Email {
-    const NAME: &'static str = "redis::Email";
-}
-
-async fn email_service(job: Email, ctx: JobContext) -> Result<JobResult, JobError> {
-    println!("Attempting to send email to {}", job.to);
-    actix_rt::time::sleep(Duration::from_secs(5)).await;
-    Ok(JobResult::Retry)
-}
+use email_service::{send_email, Email};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Notification {
@@ -298,14 +283,10 @@ async fn main() -> std::io::Result<()> {
 
     let worker = Monitor::new()
         .register_with_count(2, move |_| {
-            WorkerBuilder::new(worker_storage.clone())
-                .build_fn(email_service)
-                .start()
+            WorkerBuilder::new(worker_storage.clone()).build_fn(send_email)
         })
         .register_with_count(1, move |_| {
-            WorkerBuilder::new(sqlite_storage.clone())
-                .build_fn(notification_service)
-                .start()
+            WorkerBuilder::new(sqlite_storage.clone()).build_fn(notification_service)
         })
         .run();
     future::try_join(http, worker).await?;

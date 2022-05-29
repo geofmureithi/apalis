@@ -5,6 +5,7 @@ use std::{
 };
 
 use futures::Future;
+use pin_project_lite::pin_project;
 use tower::{Layer, Service};
 
 use crate::{error::JobError, job::Job, request::JobRequest, response::JobResult};
@@ -32,7 +33,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<JobResult, JobError>>>>;
+    type Future = ResponseFuture<F>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
@@ -40,30 +41,54 @@ where
 
     fn call(&mut self, request: JobRequest<J>) -> Self::Future {
         let start = Instant::now();
-
-        let job_type = std::any::type_name::<J>().to_string();
         let req = self.service.call(request);
-        let fut = async move {
-            let op = J::NAME;
-            let response = req.await;
+        let job_type = std::any::type_name::<J>().to_string();
+        let op = J::NAME;
+        ResponseFuture {
+            inner: req,
+            start,
+            job_type,
+            operation: op.to_string(),
+        }
+    }
+}
 
-            let latency = start.elapsed().as_secs_f64();
-            let status = response
-                .as_ref()
-                .ok()
-                .map(|res| format!("{}", res))
-                .unwrap_or("Error".to_string());
+pin_project! {
+    pub struct ResponseFuture<F> {
+        #[pin]
+        pub(crate) inner: F,
+        pub(crate) start: Instant,
+        pub(crate) job_type: String,
+        pub(crate) operation: String
+    }
+}
 
-            let labels = [
-                ("name", op.to_string()),
-                ("job_type", job_type),
-                ("status", status),
-            ];
+impl<Fut> Future for ResponseFuture<Fut>
+where
+    Fut: Future<Output = Result<JobResult, JobError>>,
+{
+    type Output = Result<JobResult, JobError>;
 
-            metrics::increment_counter!("job_requests_total", &labels);
-            metrics::histogram!("job_requests_duration_seconds", latency, &labels);
-            response
-        };
-        Box::pin(fut)
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+
+        let response = futures::ready!(this.inner.poll(cx));
+
+        let latency = this.start.elapsed().as_secs_f64();
+        let status = response
+            .as_ref()
+            .ok()
+            .map(|res| format!("{}", res))
+            .unwrap_or("Error".to_string());
+
+        let labels = [
+            ("name", this.operation.to_string()),
+            ("job_type", this.job_type.to_string()),
+            ("status", status),
+        ];
+
+        metrics::increment_counter!("job_requests_total", &labels);
+        metrics::histogram!("job_requests_duration_seconds", latency, &labels);
+        Poll::Ready(response)
     }
 }

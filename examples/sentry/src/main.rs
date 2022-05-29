@@ -7,25 +7,14 @@ use std::time::Duration;
 use tracing::{Instrument, Span};
 use tracing_subscriber::prelude::*;
 
-use actix::clock::sleep;
 use apalis::{
     layers::{SentryJobLayer, TraceLayer},
     redis::RedisStorage,
-    Job, JobContext, JobResult, Monitor, Storage, WorkerBuilder, WorkerPulse,
+    Job, JobContext, JobError, JobResult, Monitor, Storage, WorkerBuilder, WorkerPulse,
 };
-use serde::{Deserialize, Serialize};
+use tokio::time::sleep;
 
-#[derive(Debug, Deserialize, Serialize)]
-
-struct Email {
-    to: String,
-    subject: String,
-    text: String,
-}
-
-impl Job for Email {
-    const NAME: &'static str = "sentry::Email";
-}
+use email_service::Email;
 
 #[derive(Debug)]
 struct InvalidEmailError {
@@ -46,7 +35,7 @@ macro_rules! update_progress {
     };
 }
 
-async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, InvalidEmailError> {
+async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobError> {
     let parent_span = sentry::configure_scope(|scope| scope.get_span());
 
     let tx_ctx =
@@ -103,7 +92,9 @@ async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, Inval
 
     tracing::warn!("Failed. Email is not valid");
     transaction.finish();
-    Err(InvalidEmailError { email: email.to })
+    Err(JobError::Failed(Box::new(InvalidEmailError {
+        email: email.to,
+    })))
 }
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) {
@@ -117,7 +108,7 @@ async fn produce_jobs(mut storage: RedisStorage<Email>) {
         .unwrap();
 }
 
-#[actix_rt::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
     use tracing_subscriber::EnvFilter;
     std::env::set_var("RUST_LOG", "debug");
@@ -156,7 +147,6 @@ async fn main() -> std::io::Result<()> {
                 .layer(SentryJobLayer::new())
                 .layer(TraceLayer::new())
                 .build_fn(email_service)
-                .start()
         })
         .run()
         .await

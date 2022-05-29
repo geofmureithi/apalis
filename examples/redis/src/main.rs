@@ -1,4 +1,4 @@
-use std::{error::Error, time::Duration};
+use std::time::Duration;
 
 use chrono::Utc;
 
@@ -9,44 +9,8 @@ use apalis::{
     WorkerPulse,
 };
 use serde::{Deserialize, Serialize};
-use tracing::Span;
 
-#[derive(Debug, Deserialize, Serialize)]
-
-struct Email {
-    to: String,
-    subject: String,
-    text: String,
-}
-
-impl Job for Email {
-    const NAME: &'static str = "redis::Email";
-}
-
-#[derive(Debug)]
-enum EmailError {
-    NoStorage,
-    SendgridError(&'static str),
-}
-
-impl std::fmt::Display for EmailError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct SendgridClient;
-
-impl Error for EmailError {}
-
-async fn email_service(_email: Email, ctx: JobContext) -> Result<(), EmailError> {
-    let _storage: &RedisStorage<Email> = ctx.data_opt().ok_or(EmailError::NoStorage)?;
-    let _client: &SendgridClient = ctx
-        .data_opt()
-        .ok_or(EmailError::SendgridError("Missing Sendgrid client"))?;
-    Ok(())
-}
+use email_service::{send_email, Email};
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) {
     for i in 0..10 {
@@ -61,7 +25,7 @@ async fn produce_jobs(mut storage: RedisStorage<Email>) {
     }
 }
 
-#[actix_rt::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
 
@@ -74,13 +38,12 @@ async fn main() -> std::io::Result<()> {
     let pubsub = RedisPubSubListener::new(storage.get_connection());
 
     Monitor::new()
-        .register_with_count(4, move |_| {
+        .register(
             WorkerBuilder::new(storage.clone())
                 .layer(Extension(storage.clone()))
                 .layer(TraceLayer::new())
-                .build_fn(email_service)
-                .start()
-        })
+                .build_fn(send_email),
+        )
         .event_handler(pubsub)
         .run()
         .await

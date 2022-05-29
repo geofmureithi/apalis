@@ -26,7 +26,7 @@ apalis = { version = "0.3.0-beta.0", features = ["redis"] }
 ## Usage
 
 ```rust
-use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, WorkerBuilder, Storage, Worker};
+use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, WorkerBuilder, Storage, Monitor};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -38,17 +38,16 @@ async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
     Ok(JobResult::Success)
 }
 
-#[actix_rt::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
     let redis = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
     let storage = RedisStorage::new(redis).await.unwrap();
-    Worker::new()
+    Monitor::new()
         .register_with_count(2, move || {
             WorkerBuilder::new(storage.clone())
                 .build_fn(email_service)
-                .start()
         })
         .run()
         .await
