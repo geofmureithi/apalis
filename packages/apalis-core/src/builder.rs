@@ -1,8 +1,6 @@
-use futures::Future;
-use serde::{de::DeserializeOwned, Serialize};
 use tower::{
     layer::util::{Identity, Stack},
-    Layer, Service,
+    Layer,
 };
 
 #[cfg(feature = "filter")]
@@ -12,13 +10,9 @@ use tower::filter::{AsyncFilterLayer, FilterLayer};
 use std::{fmt::Debug, marker::PhantomData};
 
 use crate::{
-    error::JobError,
-    job::Job,
+    job::JobStream,
     job_fn::{job_fn, JobFn},
-    request::JobRequest,
-    response::JobResult,
-    storage::Storage,
-    worker::{prelude::Worker, Actor, WorkerConfig},
+    worker::Worker,
 };
 
 /// Configure and build a [Worker] job service.
@@ -69,28 +63,27 @@ use crate::{
 ///     .layer(RetryLayer::new(JobRetryPolicy))
 ///     .layer(Extension(JobState {}))
 ///     .build()
-///     .start();
+///     .start().await;
 ///
 /// ```
+#[derive(Debug)]
 pub struct WorkerBuilder<T, S, M> {
     job: PhantomData<T>,
-    layer: M,
-    storage: S,
-    config: WorkerConfig,
+    pub(crate) layer: M,
+    pub(crate) source: S,
 }
 
-impl<T, S> WorkerBuilder<(), S, Identity>
-where
-    S: Storage<Output = T>,
-{
-    /// Build a new queue
-    pub fn new(storage: S) -> WorkerBuilder<T, S, Identity> {
-        let job: PhantomData<T> = PhantomData;
+impl<S> WorkerBuilder<(), S, Identity> {
+    /// Build a new [WorkerBuilder] instance
+    pub fn new(source: S) -> WorkerBuilder<S::Job, S, Identity>
+    where
+        S: JobStream,
+    {
+        let job: PhantomData<S::Job> = PhantomData;
         WorkerBuilder {
             job,
             layer: Identity::new(),
-            storage,
-            config: Default::default(),
+            source,
         }
     }
 }
@@ -107,9 +100,8 @@ impl<T, S, M> WorkerBuilder<T, S, M> {
     {
         WorkerBuilder {
             job: self.job,
-            storage: self.storage,
+            source: self.source,
             layer: Stack::new(layer, self.layer),
-            config: self.config,
         }
     }
 
@@ -179,42 +171,46 @@ impl<T, S, M> WorkerBuilder<T, S, M> {
     {
         self.layer(tower::util::MapErrLayer::new(f))
     }
+}
 
-    /// Represents a config that dictates how a [Worker] runs
-    pub fn config(self, config: WorkerConfig) -> WorkerBuilder<T, S, M> {
-        WorkerBuilder {
-            job: self.job,
-            storage: self.storage,
-            layer: self.layer,
-            config,
-        }
-    }
-    /// Builds a [WorkerBuilder] using a custom service
-    /// that can be used to generate new [Worker] actors using the `Actor::start` method
-    pub fn build<B>(self, service: B) -> Worker<T, S, B>
-    where
-        M: Layer<B>,
-        S: Storage<Output = T> + Unpin + Send + 'static,
-        T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
-    {
-        Worker::new(self.storage, service).config(self.config)
-    }
+/// Helper trait for building new Workers from [WorkerBuilder]
+pub trait WorkerFactory<S> {
+    /// The worker to build
+    type Worker: Worker;
+    /// Builds a [WorkerFactory] using a [tower] service
+    /// that can be used to generate new [Worker] actors using the `build` method
+    /// # Arguments
+    ///
+    /// * `service` - A tower service
+    ///
+    /// # Examples
+    ///
+    fn build(self, service: S) -> Self::Worker;
+}
 
-    /// Builds a [QueueFactory] using a [tower::util::ServiceFn] service
-    /// that can be used to generate new [Worker] actors using the `Actor::start` method
+/// Helper trait for building new Workers from [WorkerBuilder]
+
+pub trait WorkerFactoryFn<F> {
+    /// The worker build
+    type Worker: Worker;
+    /// Builds a [WorkerFactoryFn] using a [crate::job_fn::JobFn] service
+    /// that can be used to generate new [Worker] actors using the `build` method
     /// # Arguments
     ///
     /// * `f` - A tower functional service
     ///
     /// # Examples
     ///
+    fn build_fn(self, f: F) -> Self::Worker;
+}
 
-    pub fn build_fn<F>(self, f: F) -> Worker<T, S, M::Service>
-    where
-        M: Layer<JobFn<F>>,
-        S: Storage<Output = T> + Unpin + Send + 'static,
-        T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
-    {
-        Worker::new(self.storage, self.layer.layer(job_fn(f))).config(self.config)
+impl<W, F> WorkerFactoryFn<F> for W
+where
+    W: WorkerFactory<JobFn<F>>,
+{
+    type Worker = W::Worker;
+
+    fn build_fn(self, f: F) -> Self::Worker {
+        self.build(job_fn(f))
     }
 }

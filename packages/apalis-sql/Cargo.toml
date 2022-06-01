@@ -27,6 +27,7 @@ futures = "0.3"
 async-stream = "0.3"
 tokio = "1"
 futures-lite = "1.12.0"
+async-trait = "0.1.53"
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

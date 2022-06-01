@@ -6,7 +6,7 @@
 
 use apalis::{
     layers::PrometheusLayer, redis::RedisStorage, Job, JobContext, JobError, JobResult, Monitor,
-    Storage, WorkerBuilder,
+    Storage, WorkerBuilder, WorkerFactoryFn,
 };
 use axum::{
     extract::Form,

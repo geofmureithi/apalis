@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use apalis::{
     layers::TraceLayer, mysql::MysqlStorage, Job, JobContext, JobError, JobResult, Monitor,
-    Storage, WorkerBuilder,
+    Storage, WorkerBuilder, WorkerFactoryFn,
 };
 use email_service::{send_email, Email};
 use serde::{Deserialize, Serialize};

@@ -8,7 +8,8 @@ use tracing_subscriber::prelude::*;
 use apalis::{
     layers::{SentryJobLayer, TraceLayer},
     redis::RedisStorage,
-    Job, JobContext, JobError, JobResult, Monitor, Storage, WorkerBuilder, WorkerPulse,
+    Job, JobContext, JobError, JobResult, Monitor, Storage, StorageWorkerPulse, WorkerBuilder,
+    WorkerFactoryFn,
 };
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;

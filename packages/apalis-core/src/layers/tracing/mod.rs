@@ -349,6 +349,7 @@ where
 }
 
 pin_project! {
+    /// The Response from Tracing Service
     pub struct ResponseFuture<F, OnResponse, OnFailure> {
         #[pin]
         pub(crate) inner: F,

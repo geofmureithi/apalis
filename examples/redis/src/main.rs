@@ -5,8 +5,8 @@ use chrono::Utc;
 use apalis::{
     layers::{Extension, TraceLayer},
     redis::{RedisPubSubListener, RedisStorage},
-    IntoJobResponse, Job, JobContext, JobError, JobResult, Monitor, Storage, WorkerBuilder,
-    WorkerPulse,
+    IntoJobResponse, Job, JobContext, JobError, JobResult, Monitor, Storage, StorageWorkerPulse,
+    WorkerBuilder, WorkerFactoryFn,
 };
 use serde::{Deserialize, Serialize};
 

@@ -38,6 +38,7 @@ impl Default for JobContext {
 }
 
 impl JobContext {
+    /// Build a new context with defaults given an ID.
     pub fn new(id: String) -> Self {
         JobContext {
             id,
@@ -59,7 +60,7 @@ impl JobContext {
     ///
     /// ```
     /// # use apalis_core::context::JobContext;
-    /// let mut ctx = JobContext::new(id);
+    /// let mut ctx = JobContext::new(1.to_string());
     /// assert!(ctx.data_opt::<i32>().is_none());
     /// ctx.insert(5i32);
     ///
@@ -78,7 +79,7 @@ impl JobContext {
     ///
     /// ```
     /// # use apalis_core::context::JobContext;
-    /// let mut ctx = JobContext::new(id);
+    /// let mut ctx = JobContext::new(1.to_string());
     /// assert!(ctx.insert(5i32).is_none());
     /// assert!(ctx.insert(4u8).is_none());
     /// assert_eq!(ctx.insert(9i32), Some(5i32));
@@ -137,6 +138,7 @@ impl JobContext {
         &self.lock_at
     }
 
+    /// Set the lock_at value
     pub fn set_lock_at(&mut self, lock_at: Option<DateTime<Utc>>) {
         self.lock_at = lock_at;
     }
@@ -146,6 +148,7 @@ impl JobContext {
         &self.status
     }
 
+    /// Set the job status
     pub fn set_status(&mut self, status: JobState) {
         self.status = status;
     }
@@ -155,6 +158,7 @@ impl JobContext {
         &self.lock_by
     }
 
+    /// Set lock_by
     pub fn set_lock_by(&mut self, lock_by: Option<String>) {
         self.lock_by = lock_by;
     }
@@ -164,6 +168,7 @@ impl JobContext {
         &self.last_error
     }
 
+    /// Set the last error
     pub fn set_last_error(&mut self, error: String) {
         self.last_error = Some(error);
     }

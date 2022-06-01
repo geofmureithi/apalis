@@ -8,7 +8,7 @@ use crate::context::JobContext;
 use crate::error::JobError;
 use crate::job::Job;
 use crate::request::JobRequest;
-use crate::response::{IntoJobResponse, JobResult};
+use crate::response::JobResult;
 
 /// Returns a new [`JobFn`] with the given closure.
 ///
@@ -17,18 +17,7 @@ use crate::response::{IntoJobResponse, JobResult};
 /// # Example
 ///
 /// ```
-/// use tower::{job_fn, Job, JobExt, BoxError};
-/// # struct Request;
-/// # impl Request {
-/// #     fn new() -> Self { Self }
-/// # }
-/// # struct Response(&'static str);
-/// # impl Response {
-/// #     fn new(body: &'static str) -> Self {
-/// #         Self(body)
-/// #     }
-/// #     fn into_body(self) -> &'static str { self.0 }
-/// # }
+/// use tower::{job_fn, Job};
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), BoxError> {

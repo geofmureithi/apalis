@@ -1,12 +1,7 @@
-use std::time::Duration;
-
 use apalis::{
-    layers::{RateLimitLayer, TraceLayer},
-    sqlite::SqliteStorage,
-    Job, JobContext, JobFuture, Monitor, Storage, WorkerBuilder,
+    layers::TraceLayer, sqlite::SqliteStorage, Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
 };
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 
 use email_service::{send_email, Email};
 

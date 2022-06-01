@@ -1,11 +1,20 @@
-use std::time::Duration;
+use std::{fmt::Debug, time::Duration};
 
-use crate::{error::StorageError, request::JobRequest};
-use futures::future::BoxFuture;
+use crate::{
+    error::{JobError, JobStreamError, WorkerError},
+    request::JobRequest,
+};
+use futures::{future::BoxFuture, stream::BoxStream};
 use serde::{de::DeserializeOwned, Serialize};
 
-/// Represents a result for a [Job] executed via [JobService].
+/// Represents a result for a [Job].
 pub type JobFuture<I> = BoxFuture<'static, I>;
+/// Represents a stream for [Job].
+pub type JobStreamResult<T> = BoxStream<'static, Result<Option<JobRequest<T>>, JobStreamError>>;
+
+#[derive(Debug)]
+/// Represents a a wrapper for item produced from streams
+pub struct JobRequestWrapper<T>(pub Result<Option<JobRequest<T>>, JobStreamError>);
 
 /// Trait representing a job.
 ///
@@ -16,7 +25,7 @@ pub type JobFuture<I> = BoxFuture<'static, I>;
 ///     const NAME: &'static str = "apalis::Email";
 /// }
 /// ```
-pub trait Job: Sized + Send + Unpin {
+pub trait Job: Sized + Send + Unpin + Serialize + DeserializeOwned + Debug + Sync {
     /// Represents the name for job.
     const NAME: &'static str;
 
@@ -25,14 +34,9 @@ pub trait Job: Sized + Send + Unpin {
         #[cfg(feature = "trace")]
         tracing::debug!(latency = ?latency, "service.ready");
     }
-    /// Get notified when a job is cleaned
-    fn on_clean_up(&self, _req: &JobRequest<Self>, _result: &Result<(), StorageError>) {
-        #[cfg(feature = "trace")]
-        tracing::debug!("process.cleanup");
-    }
 
-    /// Handle storage errors
-    fn on_storage_error(&self, _req: &JobRequest<Self>, error: &StorageError) {
+    /// Handle worker errors related to a job
+    fn on_worker_error(&self, _req: &JobRequest<Self>, error: &WorkerError) {
         #[cfg(feature = "trace")]
         tracing::warn!(error =?error, "storage.error");
     }
@@ -40,7 +44,7 @@ pub trait Job: Sized + Send + Unpin {
 
 /// Job objects that can be reconstructed from the data stored in Storage.
 ///
-/// Implemented for all `Deserialize` objects by default by relying on Msgpack
+/// Implemented for all `Deserialize` objects by default by relying on SerdeJson
 /// decoding.
 trait JobDecodable
 where
@@ -50,7 +54,7 @@ where
     ///
     /// In the default implementation, the string value is decoded by assuming
     /// it was encoded through the Msgpack encoding.
-    fn decode_job(value: &Vec<u8>) -> Result<Self, StorageError>;
+    fn decode_job(value: &Vec<u8>) -> Result<Self, JobError>;
 }
 
 /// Job objects that can be encoded to a string to be stored in Storage.
@@ -63,20 +67,28 @@ where
     /// Encode the value into a bytes array to be inserted into Storage.
     ///
     /// In the default implementation, the object is encoded with Serde.
-    fn encode_job(&self) -> Result<Vec<u8>, StorageError>;
+    fn encode_job(&self) -> Result<Vec<u8>, JobError>;
 }
 
-impl<T> JobDecodable for T
-where
-    T: DeserializeOwned,
-{
-    fn decode_job(value: &Vec<u8>) -> Result<T, StorageError> {
-        Ok(serde_json::from_slice(value)?)
-    }
-}
+// impl<T> JobDecodable for T
+// where
+//     T: DeserializeOwned,
+// {
+//     fn decode_job(value: &Vec<u8>) -> Result<T, JobError> {
+//         Ok(serde_json::from_slice(value)?)
+//     }
+// }
 
-impl<T: Serialize> JobEncodable for T {
-    fn encode_job(&self) -> Result<Vec<u8>, StorageError> {
-        Ok(serde_json::to_vec(self)?)
-    }
+// impl<T: Serialize> JobEncodable for T {
+//     fn encode_job(&self) -> Result<Vec<u8>, JobError> {
+//         Ok(serde_json::to_vec(self)?)
+//     }
+// }
+
+/// Represents a Stream of jobs being consumed by a Worker
+pub trait JobStream {
+    /// The job result
+    type Job: Job;
+    /// Get the stream of jobs
+    fn stream(&mut self, worker_id: String, interval: Duration) -> JobStreamResult<Self::Job>;
 }

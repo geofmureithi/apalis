@@ -2,7 +2,6 @@
 extern crate criterion;
 use std::time::{Duration, Instant};
 
-use actix::prelude::*;
 use apalis::{sqlite::SqliteStorage, JobError, JobRequest, JobResult, Storage, WorkerBuilder};
 use apalis_redis::RedisStorage;
 use criterion::*;

@@ -80,19 +80,19 @@ impl<B> OnRequest<B> for DefaultOnRequest {
     fn on_request(&mut self, _: &JobRequest<B>, _: &Span) {
         match self.level {
             Level::ERROR => {
-                tracing::event!(Level::ERROR, "process.start",);
+                tracing::event!(Level::ERROR, "job.start",);
             }
             Level::WARN => {
-                tracing::event!(Level::WARN, "process.start",);
+                tracing::event!(Level::WARN, "job.start",);
             }
             Level::INFO => {
-                tracing::event!(Level::INFO, "process.start",);
+                tracing::event!(Level::INFO, "job.start",);
             }
             Level::DEBUG => {
-                tracing::event!(Level::DEBUG, "process.start",);
+                tracing::event!(Level::DEBUG, "job.start",);
             }
             Level::TRACE => {
-                tracing::event!(Level::TRACE, "process.start",);
+                tracing::event!(Level::TRACE, "job.start",);
             }
         }
     }

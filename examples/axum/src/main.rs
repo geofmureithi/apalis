@@ -5,8 +5,7 @@
 //! ```
 
 use apalis::{
-    layers::TraceLayer, redis::RedisStorage, Job, JobContext, JobError, JobResult, Monitor,
-    Storage, WorkerBuilder,
+    layers::TraceLayer, redis::RedisStorage, Job, Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
 };
 use axum::{
     extract::Form,
@@ -15,7 +14,7 @@ use axum::{
     routing::get,
     Extension, Router,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt::Debug, io::Error, net::SocketAddr};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -49,7 +48,7 @@ where
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> std::io::Result<()> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "debug".into()),
@@ -83,4 +82,5 @@ async fn main() {
         Ok(monitor)
     };
     futures::future::try_join(http, monitor).await.unwrap();
+    Ok(())
 }

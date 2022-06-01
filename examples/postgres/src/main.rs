@@ -1,13 +1,13 @@
 use apalis::{
-    layers::TraceLayer, postgres::PostgresStorage, Job, JobContext, JobError, JobResult, Monitor,
-    Storage, WorkerBuilder,
+    layers::TraceLayer, postgres::PostgresStorage, Monitor, Storage, WorkerBuilder, WorkerEvent,
+    WorkerFactoryFn, WorkerListener,
 };
 
 use email_service::{send_email, Email};
 
 async fn produce_jobs(storage: &PostgresStorage<Email>) {
     let mut storage = storage.clone();
-    for i in 0..1000 {
+    for i in 0..10 {
         storage
             .push(Email {
                 to: format!("test{}@example.com", i),
@@ -16,6 +16,13 @@ async fn produce_jobs(storage: &PostgresStorage<Email>) {
             })
             .await
             .unwrap();
+    }
+}
+
+struct TracingListener;
+impl WorkerListener for TracingListener {
+    fn on_event(&self, worker_id: &String, event: &WorkerEvent) {
+        tracing::info!(worker_id = ?worker_id, event = ?event, "Received message from worker")
     }
 }
 
@@ -38,6 +45,7 @@ async fn main() -> std::io::Result<()> {
                 .layer(TraceLayer::new())
                 .build_fn(send_email)
         })
+        .event_handler(TracingListener)
         .run()
         .await
 }

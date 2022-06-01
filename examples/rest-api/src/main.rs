@@ -1,13 +1,10 @@
 use std::{collections::HashSet, time::Duration};
 
 use actix_cors::Cors;
-use actix_web::{
-    dev::HttpServiceFactory, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
-    ResponseError, Scope,
-};
+use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder, Scope};
 use apalis::{
     redis::RedisStorage, sqlite::SqliteStorage, Job, JobContext, JobError, JobRequest, JobResult,
-    JobState, Monitor, Storage, StorageJobExt, WorkerBuilder,
+    JobState, Monitor, Storage, StorageJobExt, WorkerBuilder, WorkerFactoryFn,
 };
 use futures::future;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -95,7 +92,7 @@ struct Counts {
 }
 #[derive(Debug, Deserialize, Serialize, Default)]
 struct Pagination {
-    pageCount: i32,
+    page_count: i32,
     range: Range,
 }
 
@@ -263,10 +260,10 @@ async fn main() -> std::io::Result<()> {
 
     let storage = RedisStorage::connect("redis://127.0.0.1/").await.unwrap();
     let sqlite = SqliteStorage::connect("sqlite::memory:").await.unwrap();
-    sqlite.setup().await;
+    let _res = sqlite.setup().await;
     let worker_storage = storage.clone();
     let sqlite_storage = sqlite.clone();
-    // produce_redis_jobs(storage.clone()).await;
+    produce_redis_jobs(storage.clone()).await;
     produce_sqlite_jobs(sqlite.clone()).await;
     let http = HttpServer::new(move || {
         App::new().wrap(Cors::permissive()).service(

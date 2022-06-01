@@ -1,7 +1,7 @@
 use actix_web::{web, App, Error, HttpResponse, HttpServer, ResponseError};
 use apalis::{
     layers::TraceLayer, redis::RedisStorage, Job, JobContext, JobError, JobRequest, JobResult,
-    Monitor, Storage, WorkerBuilder,
+    Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
 };
 use futures::future;
 use serde::{Deserialize, Serialize};

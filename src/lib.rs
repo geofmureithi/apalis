@@ -81,6 +81,8 @@
 
 pub use apalis_core::{
     builder::WorkerBuilder,
+    builder::WorkerFactory,
+    builder::WorkerFactoryFn,
     context::JobContext,
     error::JobError,
     job::{Job, JobFuture},
@@ -89,8 +91,12 @@ pub use apalis_core::{
     response::{IntoJobResponse, JobResult},
     storage::Storage,
     storage::StorageJobExt,
+    storage::StorageWorker,
+    storage::StorageWorkerPulse,
     worker::prelude::Monitor,
-    worker::{Actor, WorkerPulse},
+    worker::prelude::WorkerEvent,
+    worker::prelude::WorkerListener,
+    worker::Actor,
 };
 
 /// Include the default Redis storage

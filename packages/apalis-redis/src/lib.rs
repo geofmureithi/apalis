@@ -1,6 +1,6 @@
 mod storage;
 
-use apalis_core::worker::prelude::{Monitor, WorkerEvent, WorkerListener};
+use apalis_core::worker::prelude::{WorkerEvent, WorkerListener};
 use redis::{aio::MultiplexedConnection, Cmd};
 pub use storage::RedisStorage;
 

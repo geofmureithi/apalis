@@ -5,7 +5,7 @@ use serde_json::Value;
 use sqlx::Row;
 
 /// Wrapper for [JobRequest]
-pub struct SqlJobRequest<T>(JobRequest<T>);
+pub(crate) struct SqlJobRequest<T>(JobRequest<T>);
 
 pub(crate) trait IntoJobRequest<T> {
     fn as_job_request(self) -> Option<JobRequest<T>>;

@@ -8,12 +8,18 @@ use crate::context::JobContext;
 /// Represents the state of a [JobRequest] in a [Storage]
 #[derive(EnumString, Serialize, Deserialize, Debug, Clone, AsRefStr)]
 pub enum JobState {
+    /// Job is pending
     #[serde(alias = "Latest")]
     Pending,
+    /// Job is running
     Running,
+    /// Job was done successfully
     Done,
+    /// Retry Job
     Retry,
+    /// Job has failed. Check `last_error`
     Failed,
+    /// Job has been killed
     Killed,
 }
 
@@ -40,6 +46,7 @@ impl<T> JobRequest<T> {
         Self { job, context }
     }
 
+    /// Creates a Job request with context provided
     pub fn new_with_context(job: T, ctx: JobContext) -> Self {
         Self { job, context: ctx }
     }

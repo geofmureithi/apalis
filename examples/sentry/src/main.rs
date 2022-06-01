@@ -1,16 +1,14 @@
-use chrono::Utc;
-use sentry::{Hub, SentryFutureExt};
 use sentry_tower::NewSentryLayer;
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
-use tracing::{Instrument, Span};
+
 use tracing_subscriber::prelude::*;
 
 use apalis::{
     layers::{SentryJobLayer, TraceLayer},
     redis::RedisStorage,
-    Job, JobContext, JobError, JobResult, Monitor, Storage, WorkerBuilder, WorkerPulse,
+    JobContext, JobError, JobResult, Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
 };
 use tokio::time::sleep;
 
@@ -35,7 +33,7 @@ macro_rules! update_progress {
     };
 }
 
-async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobError> {
+async fn email_service(email: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
     let parent_span = sentry::configure_scope(|scope| scope.get_span());
 
     let tx_ctx =
