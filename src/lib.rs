@@ -11,13 +11,13 @@
 //! - Jobs handlers with a macro free API.
 //! - Take full advantage of the [`tower`] ecosystem of
 //!   middleware, services, and utilities.
-//! - Takes full of the [`actix`] actors with each queue being an [`Actor`].
+//! - Takes full advantage of the actor model with each worker being an [`Actor`].
 //! - Bring your own Storage.
 //!
 //! Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] and [`tower-http`] middleware.
 //!
 //!  ### Example
-//! ```no_run
+//! ```rust,ignore
 //! use apalis::*;
 //! use serde::{Deserialize, Serialize};
 //!
@@ -30,11 +30,11 @@
 //!     Ok(JobResult::Success)
 //! }
 //!
-//! #[actix_rt::main]
+//! #[tokio::main]
 //! async fn main() -> std::io::Result<()> {
 //!     let redis = std::env::var("REDIS_URL")
 //!                     .expect("Missing env variable REDIS_URL");
-//!     let storage = RedisStorage::new().await.unwrap();
+//!     let storage = RedisStorage::connect(redis).await.unwrap();
 //!     Monitor::new()
 //!         .register_with_count(2, move || {
 //!             WorkerBuilder::new(storage.clone())
@@ -49,7 +49,7 @@
 //! Apalis jobs fully support tower middleware via [`Layer`]
 //!
 //! ### Example
-//! ```rust
+//! ```ignore
 //! use apalis::{
 //!     layers::{Extension, DefaultRetryPolicy, RetryLayer},
 //!     WorkerBuilder,
@@ -74,9 +74,7 @@
 //!
 //! [`tower::service`]: https://docs.rs/tower/latest/tower/trait.Service.html
 //! [`tower`]: https://crates.io/crates/tower
-//! [`actix`]: https://crates.io/crates/actix
 //! [`tower-http`]: https://crates.io/crates/tower-http
-//! [`actor`]: https://docs.rs/actix/latest/actix/trait.Actor.html
 //! [`Layer`]: https://docs.rs/tower/latest/tower/trait.Layer.html
 
 pub use apalis_core::{
@@ -85,12 +83,11 @@ pub use apalis_core::{
     builder::WorkerFactoryFn,
     context::JobContext,
     error::JobError,
-    job::{Job, JobFuture},
+    job::{Job, JobFuture, JobStreamExt},
     request::JobRequest,
     request::JobState,
     response::{IntoJobResponse, JobResult},
     storage::Storage,
-    storage::StorageJobExt,
     storage::StorageWorker,
     storage::StorageWorkerPulse,
     worker::prelude::Monitor,
@@ -102,7 +99,7 @@ pub use apalis_core::{
 /// Include the default Redis storage
 ///
 /// ### Example
-/// ```rust
+/// ```ignore
 /// let storage = RedisStorage::connect(REDIS_URL).await
 ///                 .expect("Cannot establish connection");
 ///
@@ -129,27 +126,27 @@ pub mod redis {
 #[cfg(feature = "sqlite")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
 pub mod sqlite {
-    pub use apalis_sql::SqliteStorage;
+    pub use apalis_sql::sqlite::*;
 }
 
 /// Include the default Postgres storage
 #[cfg(feature = "postgres")]
 #[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
 pub mod postgres {
-    pub use apalis_sql::PostgresStorage;
+    pub use apalis_sql::postgres::*;
 }
 
 /// Include the default MySQL storage
 #[cfg(feature = "mysql")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql {
-    pub use apalis_sql::MysqlStorage;
+    pub use apalis_sql::mysql::*;
 }
 
 /// Apalis jobs fully support tower middleware via [`Layer`]
 ///
 /// ## Example
-/// ```rust
+/// ```ignore
 /// use apalis::{
 ///     layers::{Extension, DefaultRetryPolicy, RetryLayer},
 ///     WorkerBuilder,

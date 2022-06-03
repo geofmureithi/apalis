@@ -2,6 +2,8 @@ use super::{Actor, Context, Handler, Message, Recipient, Worker};
 use std::fmt::Debug;
 use tokio::task::JoinHandle;
 
+use std::fmt;
+
 #[cfg(feature = "broker")]
 use crate::worker::broker::Broker;
 
@@ -39,9 +41,19 @@ pub struct Monitor<R> {
     event_handlers: Vec<Box<dyn WorkerListener>>,
 }
 
+impl<R> fmt::Debug for Monitor<R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Monitor")
+            .field("workers", &self.workers.len())
+            .field("listeners", &self.event_handlers.len())
+            .finish()
+    }
+}
+
 #[async_trait::async_trait]
 impl Actor for Monitor<Recipient<WorkerManagement>> {
     async fn on_start(&mut self, ctx: &mut Context<Self>) {
+        #[cfg(feature = "broker")]
         self.broker.subscribe::<WorkerMessage, _>(ctx);
         // loop {
         //     for worker in &self.workers {

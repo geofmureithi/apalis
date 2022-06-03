@@ -25,7 +25,7 @@ use crate::{
 ///
 /// Defining a job service with the default [JobService];
 ///
-/// ```rust
+/// ```rust,ignore
 ///
 /// use apalis::WorkerBuilder;
 /// use apalis::sqlite::SqliteStorage;
@@ -45,7 +45,7 @@ use crate::{
 ///
 /// Defining a middleware stack
 ///
-/// ```rust
+/// ```rust,ignore
 /// use apalis::layers::{
 ///    extensions::Extension,
 ///    retry::{JobRetryPolicy, RetryLayer},

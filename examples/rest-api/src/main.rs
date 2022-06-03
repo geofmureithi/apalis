@@ -3,13 +3,21 @@ use std::{collections::HashSet, time::Duration};
 use actix_cors::Cors;
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder, Scope};
 use apalis::{
-    redis::RedisStorage, sqlite::SqliteStorage, Job, JobContext, JobError, JobRequest, JobResult,
-    JobState, Monitor, Storage, StorageJobExt, WorkerBuilder, WorkerFactoryFn,
+    layers::{SentryJobLayer, TraceLayer},
+    redis::RedisStorage,
+    sqlite::SqliteStorage,
+    Job, JobContext, JobError, JobRequest, JobResult, JobState, JobStreamExt, Monitor, Storage,
+    WorkerBuilder, WorkerFactoryFn,
 };
 use futures::future;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use email_service::{send_email, Email};
+use email_service::Email;
+
+async fn send_email(job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
+    actix_rt::time::sleep(Duration::from_secs(10)).await;
+    Ok(JobResult::Success)
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Notification {
@@ -22,21 +30,58 @@ impl Job for Notification {
 
 async fn notification_service(notif: Notification, ctx: JobContext) -> Result<JobResult, JobError> {
     println!("Attempting to send notification {}", notif.text);
-    actix_rt::time::sleep(Duration::from_secs(5)).await;
+    actix_rt::time::sleep(Duration::from_secs(10)).await;
     Ok(JobResult::Success)
 }
 
-async fn push_job<J>(email: web::Json<J>, storage: web::Data<RedisStorage<J>>) -> HttpResponse
+async fn push_job<J, S>(job: web::Json<J>, storage: web::Data<S>) -> HttpResponse
 where
     J: Job + Serialize + DeserializeOwned + 'static,
+    S: Storage<Output = J>,
 {
     let storage = &*storage.into_inner();
     let mut storage = storage.clone();
-    let res = storage.push(email.into_inner()).await;
+    let res = storage.push(job.into_inner()).await;
     match res {
-        Ok(()) => HttpResponse::Ok().body(format!("Email added to queue")),
+        Ok(()) => HttpResponse::Ok().body(format!("Job added to queue")),
         Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
     }
+}
+
+async fn get_jobs<J, S>(storage: web::Data<S>, filter: web::Query<Filter>) -> HttpResponse
+where
+    J: Job + Serialize + DeserializeOwned + 'static,
+    S: Storage<Output = J> + JobStreamExt<J>,
+{
+    let storage = &*storage.into_inner();
+    let mut storage = storage.clone();
+    let jobs = storage.list_jobs(&filter.status, filter.page).await;
+    match jobs {
+        Ok(jobs) => HttpResponse::Ok().json(serde_json::to_value(jobs).unwrap()),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
+    }
+}
+
+async fn get_workers<J, S>(storage: web::Data<S>) -> HttpResponse
+where
+    J: Job + Serialize + DeserializeOwned + 'static,
+    S: Storage<Output = J> + JobStreamExt<J>,
+{
+    let storage = &*storage.into_inner();
+    let mut storage = storage.clone();
+    let workers = storage.list_workers().await;
+    match workers {
+        Ok(workers) => HttpResponse::Ok().json(serde_json::to_value(workers).unwrap()),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
+    }
+}
+
+#[derive(Deserialize)]
+struct Filter {
+    #[serde(default)]
+    status: JobState,
+    #[serde(default)]
+    page: i32,
 }
 
 #[derive(Deserialize)]
@@ -44,9 +89,10 @@ struct JobId {
     job_id: String,
 }
 
-async fn get_job<J>(job: web::Path<JobId>, storage: web::Data<RedisStorage<J>>) -> HttpResponse
+async fn get_job<J, S>(job: web::Path<JobId>, storage: web::Data<S>) -> HttpResponse
 where
     J: Job + Serialize + DeserializeOwned + 'static,
+    S: Storage<Output = J> + 'static,
 {
     let storage = &*storage.into_inner();
     let storage = storage.clone();
@@ -60,23 +106,15 @@ where
 
 trait StorageRest<J>: Storage<Output = J> {
     fn name(&self) -> String;
-    fn scope(&self) -> Scope;
 }
 
-impl<J, T> StorageRest<J> for T
+impl<J, S> StorageRest<J> for S
 where
-    T: Storage<Output = J> + StorageJobExt<J>,
+    S: Storage<Output = J> + JobStreamExt<J> + 'static,
     J: Job + Serialize + DeserializeOwned + 'static,
 {
     fn name(&self) -> String {
         J::NAME.to_string()
-    }
-
-    fn scope(&self) -> Scope {
-        let name = self.name().to_string();
-        let slug = slug::slugify(&name);
-        let slug = format!("/{}", slug);
-        Scope::new(&slug).route("/job/{job_id}", web::get().to(get_job::<J>))
     }
 }
 
@@ -105,7 +143,6 @@ struct Range {
 #[derive(Debug, Deserialize, Serialize)]
 struct Queue {
     name: String,
-    url: String,
     jobs: serde_json::Value,
     counts: Counts,
     //pagination: Pagination,
@@ -125,74 +162,33 @@ impl StorageApiBuilder {
     fn add_storage<J, S>(mut self, storage: S) -> Self
     where
         J: Job + Serialize + DeserializeOwned + 'static,
-        S: StorageRest<J> + StorageJobExt<J>,
+        S: StorageRest<J> + JobStreamExt<J>,
         S: Storage<Output = J>,
         S: 'static,
     {
         let name = J::NAME.to_string();
         self.list.set.insert(name);
+
         Self {
-            scope: self
-                .scope
-                .app_data(storage.clone())
-                .service(storage.scope()),
+            scope: self.scope.service(
+                Scope::new(J::NAME)
+                    .app_data(web::Data::new(storage.clone()))
+                    .route("", web::get().to(get_jobs::<J, S>)) // Fetch jobs in queue
+                    .route("/workers", web::get().to(get_workers::<J, S>)) // Fetch jobs in queue
+                    .route("/job", web::put().to(push_job::<J, S>)) // Allow add jobs via api
+                    .route("/job/{job_id}", web::get().to(get_job::<J, S>)), // Allow fetch specific job
+            ),
             list: self.list,
         }
     }
 
     fn to_scope(self) -> Scope {
-        #[derive(Deserialize)]
-        struct Filter {
-            #[serde(default)]
-            status: JobState,
-            page: i32,
-            active_queue: Option<String>,
-        }
-
-        fn get_storage<S, T>(req: &HttpRequest) -> S
-        where
-            S: 'static + StorageJobExt<T>,
-        {
-            let storage: &S = req.app_data().unwrap();
-            storage.clone()
-        }
-        async fn get_jobs_from_queue(
-            slug: String,
-            req: &HttpRequest,
-            filter: &Filter,
-        ) -> serde_json::Value {
-            match slug.as_str() {
-                "redis-email" => {
-                    let mut storage: RedisStorage<Email> = get_storage(&req);
-                    let jobs = storage
-                        .list_jobs(&filter.status, filter.page)
-                        .await
-                        .unwrap();
-                    serde_json::to_value(jobs).unwrap()
-                }
-                "sqlite-notification" => {
-                    let mut storage: SqliteStorage<Notification> = get_storage(&req);
-                    let jobs = storage
-                        .list_jobs(&filter.status, filter.page)
-                        .await
-                        .unwrap();
-                    serde_json::to_value(jobs).unwrap()
-                }
-                _ => unimplemented!(),
-            }
-        }
-        async fn fetch_queues(
-            queues: web::Data<QueueList>,
-            req: HttpRequest,
-            filter: web::Query<Filter>,
-        ) -> HttpResponse {
+        async fn fetch_queues(queues: web::Data<QueueList>, req: HttpRequest) -> HttpResponse {
             let mut queue_result = Vec::new();
             for queue in &queues.set {
-                let queue_slug = slug::slugify(queue);
-                let jobs = get_jobs_from_queue(queue_slug.clone(), &req, &filter).await;
+                let jobs = serde_json::to_value(Vec::<String>::new()).unwrap();
 
                 queue_result.push(Queue {
-                    url: queue_slug,
                     name: queue.clone(),
                     jobs,
                     counts: Counts {
@@ -230,14 +226,11 @@ impl StorageApiBuilder {
 async fn produce_redis_jobs(mut storage: RedisStorage<Email>) {
     for i in 0..10 {
         storage
-            .schedule(
-                Email {
-                    to: "test@example.com".to_string(),
-                    text: "Test backround job from Apalis".to_string(),
-                    subject: "Background email job".to_string(),
-                },
-                chrono::Utc::now(),
-            )
+            .push(Email {
+                to: format!("test{}@example.com", i),
+                text: "Test backround job from Apalis".to_string(),
+                subject: "Background email job".to_string(),
+            })
             .await
             .unwrap();
     }
@@ -255,7 +248,7 @@ async fn produce_sqlite_jobs(mut storage: SqliteStorage<Notification>) {
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "warn");
+    std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     env_logger::init();
 
     let storage = RedisStorage::connect("redis://127.0.0.1/").await.unwrap();
@@ -282,8 +275,11 @@ async fn main() -> std::io::Result<()> {
         .register_with_count(2, move |_| {
             WorkerBuilder::new(worker_storage.clone()).build_fn(send_email)
         })
-        .register_with_count(1, move |_| {
-            WorkerBuilder::new(sqlite_storage.clone()).build_fn(notification_service)
+        .register_with_count(3, move |_| {
+            WorkerBuilder::new(sqlite_storage.clone())
+                .layer(SentryJobLayer)
+                .layer(TraceLayer::new())
+                .build_fn(notification_service)
         })
         .run();
     future::try_join(http, worker).await?;

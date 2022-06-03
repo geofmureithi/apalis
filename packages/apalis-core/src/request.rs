@@ -34,7 +34,6 @@ impl Default for JobState {
 #[derive(Serialize, Debug, Deserialize, Clone)]
 pub struct JobRequest<T> {
     pub(crate) job: T,
-    #[serde(skip)]
     pub(crate) context: JobContext,
 }
 

@@ -2,11 +2,12 @@ use crate::request::JobState;
 
 use chrono::{DateTime, Utc};
 use http::Extensions;
+use serde::{Deserialize, Serialize};
 use std::{any::Any, marker::Send};
 
 /// The context for a job is represented here
 /// Used to provide a context when a job is defined through the [Job] trait
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobContext {
     pub(crate) id: String,
     pub(crate) status: JobState,
@@ -17,7 +18,7 @@ pub struct JobContext {
     pub(crate) lock_at: Option<DateTime<Utc>>,
     pub(crate) lock_by: Option<String>,
     pub(crate) done_at: Option<DateTime<Utc>>,
-
+    #[serde(skip)]
     pub(crate) data: Data,
 }
 
@@ -27,13 +28,6 @@ pub(crate) struct Data(Extensions);
 impl Clone for Data {
     fn clone(&self) -> Self {
         Data(Extensions::new())
-    }
-}
-
-impl Default for JobContext {
-    fn default() -> Self {
-        let id = uuid::Uuid::new_v4();
-        JobContext::new(id.to_string())
     }
 }
 

@@ -16,14 +16,13 @@ use crate::response::JobResult;
 ///
 /// # Example
 ///
-/// ```
-/// use tower::{job_fn, Job};
+/// ```rust,ignore
+/// use apalis_core::{job_fn, Job};
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), BoxError> {
-/// async fn handle(request: Request) -> Result<Response, BoxError> {
-///     let response = Response::new("Hello, World!");
-///     Ok(response)
+/// async fn handle(request: JobRequest) -> Result<JobResult, BoxError> {
+///     Ok(JobResult::Ok)
 /// }
 ///
 /// let mut job = job_fn(handle);
@@ -31,10 +30,10 @@ use crate::response::JobResult;
 /// let response = job
 ///     .ready()
 ///     .await?
-///     .call(Request::new())
+///     .call(JobRequest::new())
 ///     .await?;
 ///
-/// assert_eq!("Hello, World!", response.into_body());
+/// assert_eq!(JobResult::Ok, response);
 /// #
 /// # Ok(())
 /// # }

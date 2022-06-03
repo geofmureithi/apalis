@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::error::BoxDynError;
+use crate::error::{BoxDynError, JobError};
 
 /// Represents a storage emitted by a worker
 #[derive(Debug, Error)]
@@ -23,5 +23,11 @@ pub enum StorageError {
 impl From<serde_json::Error> for StorageError {
     fn from(e: serde_json::Error) -> Self {
         StorageError::SerDe(Box::from(e))
+    }
+}
+
+impl From<StorageError> for JobError {
+    fn from(e: StorageError) -> Self {
+        JobError::Storage(e)
     }
 }

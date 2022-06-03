@@ -44,7 +44,7 @@ async fn main() -> std::io::Result<()> {
                 .layer(TraceLayer::new())
                 .build_fn(send_email),
         )
-        .event_handler(pubsub)
+        //.event_handler(pubsub)
         .run()
         .await
 }

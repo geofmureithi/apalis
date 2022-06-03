@@ -3,7 +3,7 @@ use std::{fmt::Debug, time::Duration};
 use chrono::Utc;
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
-use tokio::time::{interval_at, Instant};
+use tokio::time::{interval, interval_at, Instant};
 use tower::{Layer, Service, ServiceExt};
 
 use crate::{
@@ -13,12 +13,11 @@ use crate::{
     request::{JobRequest, JobState},
     response::JobResult,
     storage::{JobStreamResult, Storage},
-    worker::{
-        broker::Broker,
-        prelude::{WorkerEvent, WorkerMessage},
-        Context, Handler, Message, Worker,
-    },
+    worker::{Context, Handler, Message, Worker},
 };
+
+#[cfg(feature = "broker")]
+use crate::worker::Broker;
 
 use super::{
     streams::{HeartbeatStream, KeepAliveStream},
@@ -51,6 +50,7 @@ where
             handler,
             config: Default::default(),
             id,
+            #[cfg(feature = "broker")]
             broker: None,
         }
     }
@@ -61,6 +61,7 @@ where
             handler: self.handler,
             config,
             id: self.id,
+            #[cfg(feature = "broker")]
             broker: None,
         }
     }
@@ -85,11 +86,7 @@ where
 
     async fn on_start(&mut self, ctx: &mut Context<Self>) {
         // To change this just modify the controller then restart.
-        let start = Instant::now();
-        ctx.notify_with(KeepAliveStream::new(interval_at(
-            start,
-            self.config.keep_alive,
-        )));
+        ctx.notify_with(KeepAliveStream::new(interval(self.config.keep_alive)));
         // Sets up reactivate orphaned jobs
         // Setup scheduling for non_sql storages eg Redis
         for (pulse, duration) in self.config.heartbeats.iter() {
@@ -101,6 +98,7 @@ where
         }
     }
 
+    #[cfg(feature = "broker")]
     fn pre_start(&mut self, broker: &Broker) {
         self.broker = Some(broker.clone());
     }
@@ -174,7 +172,7 @@ where
                 Err(ref e) => {
                     job.set_status(JobState::Failed);
                     job.set_last_error(format!("{}", e));
-
+                    #[cfg(feature = "broker")]
                     if let Some(broker) = &self.broker {
                         broker
                             .issue_send(WorkerMessage::new(
@@ -183,29 +181,33 @@ where
                             ))
                             .await;
                     }
-                    storage.reschedule(&job, Duration::from_secs(1)).await
+                    // let base: i32 = 2; // an explicit type is required
+                    // let millis = base.pow(job.attempts());
+                    storage.reschedule(&job, Duration::from_millis(10000)).await
                 }
             };
-            if let Err(e) = finalize {
+            if let Err(_e) = finalize {
+                #[cfg(feature = "broker")]
                 if let Some(broker) = &self.broker {
                     broker
                         .issue_send(WorkerMessage::new(
                             worker_id.clone(),
-                            WorkerEvent::Error(format!("{}", e)),
+                            WorkerEvent::Error(format!("{}", _e)),
                         ))
                         .await;
                 }
             }
-            if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
+            if let Err(_e) = storage.update_by_id(job_id.clone(), &job).await {
+                #[cfg(feature = "broker")]
                 if let Some(broker) = &self.broker {
                     broker
                         .issue_send(WorkerMessage::new(
                             worker_id.clone(),
-                            WorkerEvent::Error(format!("{}", e)),
+                            WorkerEvent::Error(format!("{}", _e)),
                         ))
                         .await;
                 }
-                T::on_worker_error(&job.inner(), &job, &WorkerError::Storage(e));
+                T::on_worker_error(&job.inner(), &job, &WorkerError::Storage(_e));
             };
         }
 
@@ -256,7 +258,7 @@ where
     async fn handle(&mut self, _keep_alive: KeepAlive) -> Self::Result {
         let queue = &mut self.storage;
         let id = self.id.to_string();
-        let _beat = queue.keep_alive(id).await;
+        let beat = queue.keep_alive::<H>(id).await;
     }
 }
 

@@ -32,7 +32,7 @@ once_cell = { version = "1", optional = true, default-features = false }
 petgraph =  { version = "0.6.2", optional = true, default-features = false }
 
 [features]
-default = ["trace", "tower/util", "storage", "extensions", "worker", "broker"]
+default = ["trace", "tower/util", "storage", "extensions", "worker"]
 worker = ["tokio", "async-trait"]
 storage = []
 extensions = []

@@ -425,7 +425,7 @@ where
         Ok(())
     }
 
-    async fn keep_alive(&mut self, worker_id: String) -> StorageResult<()> {
+    async fn keep_alive<Service>(&mut self, worker_id: String) -> StorageResult<()> {
         let pool = self.pool.clone();
 
         let mut tx = pool

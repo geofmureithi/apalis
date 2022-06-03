@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use crate::{
     job::JobStream,
     job::{Job, JobStreamResult},
-    request::{JobRequest, JobState},
+    request::JobRequest,
 };
 
 pub use self::error::StorageError;
@@ -47,7 +47,7 @@ pub trait Storage: Clone {
     async fn retry(&mut self, worker_id: String, job_id: String) -> StorageResult<()>;
 
     /// Called by a Worker to keep the storage alive and prevent jobs from being deemed as orphaned
-    async fn keep_alive(&mut self, worker_id: String) -> StorageResult<()>;
+    async fn keep_alive<Service>(&mut self, worker_id: String) -> StorageResult<()>;
 
     /// Kill a job that returns [JobResult::Kill]
     async fn kill(&mut self, worker_id: String, job_id: String) -> StorageResult<()>;
@@ -118,22 +118,6 @@ impl Default for StorageWorkerConfig {
             heartbeats,
         }
     }
-}
-
-/// Storage extension usually useful for management via cli, web etc
-#[async_trait::async_trait]
-
-pub trait StorageJobExt<Output>: Storage<Output = Output>
-where
-    Self: Sized,
-{
-    //fn list_workers(&mut self) -> StorageResult<Output>;
-    /// Fetch jobs persisted from storage
-    async fn list_jobs(
-        &mut self,
-        status: &JobState,
-        page: i32,
-    ) -> StorageResult<Vec<JobRequest<Output>>>;
 }
 
 impl<S> JobStream for S

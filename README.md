@@ -8,11 +8,20 @@ Apalis is a simple, extensible multithreaded background job processing library f
 - Jobs handlers with a macro free API.
 - Take full advantage of the [`tower`] ecosystem of
   middleware, services, and utilities.
-- Takes full of the [`actix`] actors with each queue being an [`Actor`].
+- Workers take full of the actor model.
+- Fully Tokio compatible.
+- Optional Web interface to help you manage your jobs.
 
 Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] and [`tower-http`] middleware.
 
-Apalis has support for Redis, SQlite, PostgresSQL and MySQL.
+Apalis has support for
+
+- Redis
+- SQlite
+- PostgresSQL
+- MySQL
+- Cron
+- Bring Your Own Job Source
 
 ## Getting Started
 
@@ -26,7 +35,7 @@ apalis = { version = "0.3.0-beta.0", features = ["redis"] }
 ## Usage
 
 ```rust
-use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, WorkerBuilder, Storage, Monitor};
+use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, WorkerBuilder, Storage, Monitor, JobContext};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -34,7 +43,7 @@ struct Email {
     to: String,
 }
 
-async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
+async fn email_service(job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
     Ok(JobResult::Success)
 }
 
@@ -71,34 +80,46 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) {
 
 ```
 
+### Web UI
+
+If you are running Apalis Board, you can easily manage your jobs.
+![UI](./examples/rest-api/assets/apalis_board.png)
+
 ## Storage Comparison
 
 Since we provide a few storage solutions, here is a table comparing them:
 
 | Feature        | Redis | Sqlite | Postgres | Sled | Mysql | Mongo |
 | :------------- | :---: | :----: | :------: | :--: | ----- | ----- |
-| Priorities     |       |        |          |      |       |       |
-| Scheduled jobs |   ✓   |   ✓    |    ✓     |  ✓   | ✓     | -     |
-| Retryable jobs |   ✓   |   ✓    |    ✓     |      | ✓     | -     |
-| Persistence    |   ✓   |   ✓    |    ✓     |  ✓   | ✓     | -     |
+| Scheduled jobs |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
+| Retryable jobs |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
+| Persistence    |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
 
-## Built On
+## Thanks to
 
-- [`actix`] - Actor framework for Rust
+- [`tower`] - Tower is a library of modular and reusable components for building robust networking clients and servers.
 - [redis-rs](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
 - [sqlx](https://github.com/launchbadge/sqlx) - The Rust SQL Toolkit
 
 ## Roadmap
 
+v 0.4
+
+- [ ] Improve monitoring
+- [ ] Improve Apalis Board
+- [ ] Add job progress
+- [ ] Add more sources
+
 v 0.3
 
 - [x] Standardize API (Storage, Worker, Data, Middleware, Context )
 - [x] Introduce SQL
-- [ ] Implement layers for sentry and tracing.
-- [ ] Improve documentation
-- [ ] Organized modules and features.
-- [ ] Basic Web API Interface
+- [x] Implement layers for Sentry and Tracing.
+- [x] Improve documentation
+- [x] Organized modules and features.
+- [x] Basic Web API Interface
 - [x] Sql Examples
+- [ ] Sql migrations
 
 v 0.2
 

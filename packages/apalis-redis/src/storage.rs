@@ -1,10 +1,10 @@
 use std::{convert::identity, marker::PhantomData, time::Duration};
 
 use apalis_core::{
-    error::JobStreamError,
-    job::{Job, JobStreamResult},
+    error::{JobError, JobStreamError},
+    job::{Job, JobStreamExt, JobStreamResult, JobStreamWorker},
     request::{JobRequest, JobState},
-    storage::{Storage, StorageError, StorageJobExt, StorageResult, StorageWorkerPulse},
+    storage::{Storage, StorageError, StorageResult, StorageWorkerPulse},
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -12,6 +12,7 @@ use futures::Stream;
 use log::*;
 use redis::{aio::MultiplexedConnection, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Serialize};
+use tokio::time::Instant;
 
 const ACTIVE_JOBS_LIST: &str = "{queue}:active";
 const CONSUMERS_SET: &str = "{queue}:consumers";
@@ -131,7 +132,8 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
         let job_data_hash = self.queue.job_data_hash.to_string();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let signal_list = self.queue.signal_list.to_string();
-        let mut interval = tokio::time::interval(interval);
+        let start = Instant::now() + Duration::from_millis(5);
+        let mut interval = tokio::time::interval_at(start, interval);
         try_stream! {
             loop {
                 interval.tick().await;
@@ -240,7 +242,7 @@ where
         let signal_list = self.queue.signal_list.to_string();
         let job = JobRequest::new(job);
         let job_id = job.id();
-        let job = serde_json::to_string(&job).unwrap();
+        let job = serde_json::to_string(&job)?;
         log::debug!(
             "Received new job with id: {} to list: {}",
             job_id,
@@ -420,7 +422,7 @@ where
             None => Err(StorageError::NotFound),
         }
     }
-    async fn keep_alive(&mut self, worker_id: String) -> StorageResult<()> {
+    async fn keep_alive<Service>(&mut self, worker_id: String) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let register_consumer = self.scripts.register_consumer.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
@@ -546,7 +548,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<T> StorageJobExt<T> for RedisStorage<T>
+impl<T> JobStreamExt<T> for RedisStorage<T>
 where
     T: 'static + Job + Serialize + DeserializeOwned,
 {
@@ -554,7 +556,7 @@ where
         &mut self,
         status: &JobState,
         _page: i32,
-    ) -> StorageResult<Vec<JobRequest<T>>> {
+    ) -> Result<Vec<JobRequest<T>>, JobError> {
         match status {
             JobState::Pending => {
                 let mut conn = self.conn.clone();
@@ -687,5 +689,26 @@ where
                 Ok(jobs)
             }
         }
+    }
+    async fn list_workers(&mut self) -> Result<Vec<JobStreamWorker>, JobError> {
+        let consumers_set = format!("{}", &self.queue.consumers_set);
+
+        let mut conn = self.conn.clone();
+        let workers: Vec<String> = redis::cmd("ZRANGE")
+            .arg(&consumers_set)
+            .arg("0")
+            .arg("-1")
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::new(e)))?;
+        Ok(workers
+            .into_iter()
+            .map(|w| {
+                JobStreamWorker::new::<Self, _>(
+                    w.replace(&format!("{}:", &self.queue.inflight_jobs_set), ""),
+                    Utc::now(),
+                )
+            })
+            .collect())
     }
 }

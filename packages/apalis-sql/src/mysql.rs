@@ -15,6 +15,7 @@ use std::{marker::PhantomData, ops::Add, time::Duration};
 
 use crate::from_row::{IntoJobRequest, SqlJobRequest};
 
+/// Represents a [Storage] that persists to MySQL
 pub struct MysqlStorage<T> {
     pool: Pool<MySql>,
     job_type: PhantomData<T>,
@@ -398,7 +399,7 @@ where
         Ok(())
     }
 
-    async fn keep_alive(&mut self, worker_id: String) -> StorageResult<()> {
+    async fn keep_alive<Service>(&mut self, worker_id: String) -> StorageResult<()> {
         let pool = self.pool.clone();
 
         let mut tx = pool

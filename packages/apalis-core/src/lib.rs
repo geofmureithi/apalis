@@ -21,6 +21,7 @@
 //!    response::JobResult,
 //!    worker::prelude::*,
 //! };
+//! #[tokio::main]
 //! async fn main() {
 //!     struct SimpleWorker<S>(S);
 //!
@@ -62,7 +63,7 @@
 //!     }
 //!     Monitor::new()
 //!         .register_with_count(1, move |_| SimpleWorker(job_fn(send_email)))
-//!         .run()
+//!         .run_without_signals()
 //!         .await;
 //! }
 

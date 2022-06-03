@@ -6,32 +6,48 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+//! # Apalis Sql Storage
+//! Apalis offeres Sqlite, Mysql and Postgres storages for its workers.
+//!
+//! ## Example
+//!  ```rust,ignore
+//!  #[tokio::main]
+//!  async fn main() -> std::io::Result<()> {
+//!      std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
+//!      let database_url = std::env::var("DATABASE_URL").expect("Must specify url to db");
+//!
+//!      let pg: PostgresStorage<Email> = PostgresStorage::connect(database_url).await.unwrap();
+//!
+//!      async fn send_email(job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
+//!          log::info!("Attempting to send email to {}", job.to);
+//!          Ok(JobResult::Success)
+//!      }
+//!
+//!      Monitor::new()
+//!          .register_with_count(4, move |_| {
+//!              WorkerBuilder::new(pg.clone())
+//!                  .build_fn(send_email)
+//!          })
+//!          .event_handler(TracingListener)
+//!          .run()
+//!          .await
+//!  }
+//! ```
+
 mod from_row;
 
+/// Postgres storage for Apalis. Uses `NOTIFY` and `SKIP LOCKED`
 #[cfg(feature = "postgres")]
 #[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
-mod postgres;
+pub mod postgres;
 
+/// Sqlite Storage for Apalis.
+/// Uses a transaction and min(rowid)
 #[cfg(feature = "sqlite")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
-mod sqlite;
+pub mod sqlite;
 
+/// MySQL storage for Apalis. Uses `SKIP LOCKED`
 #[cfg(feature = "mysql")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;
-
-#[cfg(feature = "mysql")]
-#[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
-pub use mysql::MysqlStorage;
-
-#[cfg(feature = "postgres")]
-#[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
-pub use postgres::PostgresStorage;
-
-/// Example
-/// ```rust
-/// let storage = SqliteStorage::connect(":memory").await.unwrap();
-/// ```
-#[cfg(feature = "sqlite")]
-#[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
-pub use sqlite::SqliteStorage;

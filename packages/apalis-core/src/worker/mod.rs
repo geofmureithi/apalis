@@ -5,7 +5,10 @@ use crate::{
     response::JobResult,
     worker::envelope::{Envelope, EnvelopeProxy, SyncEnvelopeProxy, ToEnvelope},
 };
-use futures::{Future, Stream, StreamExt};
+use futures::{
+    future::{AndThen, BoxFuture},
+    pin_mut, Future, Stream, StreamExt, TryFutureExt, TryStreamExt,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::Debug,
@@ -306,9 +309,17 @@ where
     /// At start hook of actor
     async fn on_start(&mut self, ctx: &mut Context<Self>) {
         <W as Worker>::on_start(self, ctx).await;
-        let jobs = self.consume();
+        let jobs = self
+            .consume()
+            // errors are silenced for now
+            .then(|r| async move {
+                match r {
+                    Ok(Some(job)) => Ok(Some(job)),
+                    _ => Ok(None),
+                }
+            });
         let stream = jobs.map(|c| JobRequestWrapper(c));
-        ctx.notify_with(stream);
+        ctx.notify_with(Box::pin(stream));
     }
 
     /// At stop hook of actor
@@ -614,7 +625,6 @@ mod tests {
     use futures::Future;
     use tower::{service_fn, Service, ServiceExt};
 
-    use crate::error::WorkerError;
     use crate::worker::monitor::{Monitor, WorkerManagement};
     use crate::worker::*;
 
@@ -628,10 +638,9 @@ mod tests {
 
         #[derive(Debug)]
         struct HandlerResult;
-        async fn handler2(msg: Job) -> Result<(), HandlerResult> {
-            println!("Thread {:?} msg {:?}", std::thread::current().id(), msg.0);
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            Err(HandlerResult)
+
+        async fn handler(msg: Job) -> Result<(), HandlerResult> {
+            Ok(())
         }
 
         struct TowerActor<S> {
@@ -647,14 +656,13 @@ mod tests {
         {
             async fn on_start(&mut self, ctx: &mut Context<Self>) {
                 use futures::stream;
-                for i in 1..5 {
-                    let stream = stream::iter(vec![
-                        Job("17".to_string()),
-                        Job("18".to_string()),
-                        Job("19".to_string()),
-                    ]);
-                    ctx.notify_with(stream);
-                }
+
+                let stream = stream::iter(vec![
+                    Job("17".to_string()),
+                    Job("18".to_string()),
+                    Job("19".to_string()),
+                ]);
+                ctx.notify_with(stream);
             }
         }
 
@@ -674,9 +682,11 @@ mod tests {
         }
 
         let addr = TowerActor {
-            service: service_fn(handler2),
+            service: service_fn(handler),
         }
         .start()
         .await;
+        let res = addr.send(Job("0".to_string())).await.unwrap();
+        assert!(res.is_ok())
     }
 }

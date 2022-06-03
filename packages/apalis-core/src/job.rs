@@ -2,10 +2,12 @@ use std::{fmt::Debug, time::Duration};
 
 use crate::{
     error::{JobError, JobStreamError, WorkerError},
-    request::JobRequest,
+    request::{JobRequest, JobState},
 };
+use chrono::{DateTime, Utc};
 use futures::{future::BoxFuture, stream::BoxStream};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Represents a result for a [Job].
 pub type JobFuture<I> = BoxFuture<'static, I>;
@@ -13,14 +15,14 @@ pub type JobFuture<I> = BoxFuture<'static, I>;
 pub type JobStreamResult<T> = BoxStream<'static, Result<Option<JobRequest<T>>, JobStreamError>>;
 
 #[derive(Debug)]
-/// Represents a a wrapper for item produced from streams
+/// Represents a wrapper for a job produced from streams
 pub struct JobRequestWrapper<T>(pub Result<Option<JobRequest<T>>, JobStreamError>);
 
 /// Trait representing a job.
 ///
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// impl Job for Email {
 ///     const NAME: &'static str = "apalis::Email";
 /// }
@@ -91,4 +93,58 @@ pub trait JobStream {
     type Job: Job;
     /// Get the stream of jobs
     fn stream(&mut self, worker_id: String, interval: Duration) -> JobStreamResult<Self::Job>;
+}
+
+/// A serializable vesrion of a worker.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JobStreamWorker {
+    /// The Worker's Id
+    worker_id: String,
+    /// Target for the worker, useful for display and filtering
+    /// uses [std::any::type_name]
+    job_type: String,
+    // TODO: Add a Source type to Worker trait.
+    /// The type of job stream
+    source: String,
+    /// The layers that were loaded for worker. uses [std::any::type_name]
+    layers: String,
+    /// The last time the worker was seen. [Storage] has keep alive.
+    last_seen: DateTime<Utc>,
+}
+
+impl JobStreamWorker {
+    pub fn new<S, T>(worker_id: String, last_seen: DateTime<Utc>) -> Self
+    where
+        S: JobStream<Job = T>,
+    {
+        JobStreamWorker {
+            worker_id,
+            job_type: std::any::type_name::<T>().to_string(),
+            source: std::any::type_name::<S>().to_string(),
+            layers: String::new(),
+            last_seen,
+        }
+    }
+
+    pub fn set_layers(&mut self, layers: String) {
+        self.layers = layers;
+    }
+}
+
+/// JobStream extension usually useful for management via cli, web etc
+#[async_trait::async_trait]
+
+pub trait JobStreamExt<Job>: JobStream<Job = Job>
+where
+    Self: Sized,
+{
+    /// List all Workers that are working on a Job Stream
+    async fn list_workers(&mut self) -> Result<Vec<JobStreamWorker>, JobError>;
+
+    /// Fetch jobs persisted from storage
+    async fn list_jobs(
+        &mut self,
+        status: &JobState,
+        page: i32,
+    ) -> Result<Vec<JobRequest<Job>>, JobError>;
 }

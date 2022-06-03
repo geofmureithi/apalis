@@ -4,11 +4,13 @@ use apalis_core::worker::prelude::{WorkerEvent, WorkerListener};
 use redis::{aio::MultiplexedConnection, Cmd};
 pub use storage::RedisStorage;
 
+/// A Listener that broadcasts event to Redis via pubsub
 pub struct RedisPubSubListener {
     conn: MultiplexedConnection,
 }
 
 impl RedisPubSubListener {
+    /// New listener from connection
     pub fn new(conn: MultiplexedConnection) -> Self {
         Self { conn }
     }
