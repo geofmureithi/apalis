@@ -8,6 +8,7 @@ use async_stream::try_stream;
 use chrono::Utc;
 use futures::Stream;
 use serde::{de::DeserializeOwned, Serialize};
+
 use sqlx::types::Uuid;
 use sqlx::{MySql, MySqlPool, Pool, Row};
 use std::convert::TryInto;
@@ -16,6 +17,7 @@ use std::{marker::PhantomData, ops::Add, time::Duration};
 use crate::from_row::{IntoJobRequest, SqlJobRequest};
 
 /// Represents a [Storage] that persists to MySQL
+#[derive(Debug)]
 pub struct MysqlStorage<T> {
     pool: Pool<MySql>,
     job_type: PhantomData<T>,
@@ -32,72 +34,26 @@ impl<T> Clone for MysqlStorage<T> {
 }
 
 impl<T> MysqlStorage<T> {
+    /// Create a new instance from a pool
     pub fn new(pool: MySqlPool) -> Self {
         Self {
             pool,
             job_type: PhantomData,
         }
     }
-
+    /// Create a Mysql Connection and start a Storage
     pub async fn connect<S: Into<String>>(db: S) -> Result<Self, sqlx::Error> {
         let pool = MySqlPool::connect(&db.into()).await?;
         Ok(Self::new(pool))
     }
 
+    /// Setup
+    #[cfg(feature = "migrate")]
     pub async fn setup(&self) -> Result<(), sqlx::Error> {
-        let jobs_table = r#"
-        CREATE TABLE IF NOT EXISTS jobs
-            (   
-                job JSON NOT NULL,
-                id varchar(36) NOT NULL,
-                job_type varchar(200) NOT NULL,
-                status varchar(20) NOT NULL DEFAULT 'Pending',
-                attempts INTEGER NOT NULL DEFAULT 0,
-                max_attempts INTEGER NOT NULL DEFAULT 25,
-                run_at datetime DEFAULT CURRENT_TIMESTAMP,
-                last_error varchar(1000) DEFAULT NULL,
-                lock_at datetime DEFAULT NULL,
-                lock_by varchar(36) DEFAULT NULL,
-                done_at datetime DEFAULT NULL,
-                PRIMARY KEY (id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-        "#;
-        let workers_table = r#"
-                CREATE TABLE IF NOT EXISTS workers (
-                    id varchar(36) NOT NULL,
-                    worker_type  varchar(200) NOT NULL,
-                    storage_name  varchar(200) NOT NULL,
-                    last_seen datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    PRIMARY KEY (id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-        "#;
         let pool = self.pool.clone();
-        sqlx::query(jobs_table).execute(&pool).await?;
-
-        sqlx::query("CREATE INDEX job_id ON jobs(id)")
-            .execute(&pool)
-            .await?;
-        sqlx::query("CREATE INDEX job_status ON jobs(status)")
-            .execute(&pool)
-            .await?;
-        sqlx::query("CREATE INDEX LIdx ON jobs(lock_by)")
-            .execute(&pool)
-            .await?;
-        sqlx::query("CREATE INDEX JTIdx ON jobs(job_type)")
-            .execute(&pool)
-            .await?;
-
-        sqlx::query(workers_table).execute(&pool).await?;
-
-        sqlx::query("CREATE INDEX Idx ON workers(id)")
-            .execute(&pool)
-            .await?;
-        sqlx::query("CREATE INDEX WTIdx ON workers(worker_type)")
-            .execute(&pool)
-            .await?;
-        sqlx::query("CREATE INDEX LSIdx ON workers(last_seen)")
-            .execute(&pool)
-            .await?;
+        let migrate =
+            sqlx::migrate::Migrator::new(std::path::Path::new("migrations/mysql")).await?;
+        migrate.run(&pool.clone()).await?;
         Ok(())
     }
 }

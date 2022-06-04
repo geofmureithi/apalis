@@ -12,6 +12,9 @@ edition = "2018"
 
 [features]
 default = ["apalis-core/default", "tracing"]
+## Support Tracing 👀
+tracing = ["apalis-core/trace"]
+
 ## Include redis storage
 redis = ["apalis-redis"]
 ## Include Postgres storage
@@ -20,13 +23,13 @@ postgres = ["apalis-sql/postgres"]
 sqlite = [ "apalis-sql/sqlite"]
 ## Include MySql storage
 mysql = [ "apalis-sql/mysql"]
+## Include Storage utils, and build your own
 storage = ["apalis-core/storage"]
+
 ## Support for Sentry exception and performance monitoring
 sentry = ["apalis-core/sentry"]
 ## Support Prometheus metrics
 prometheus = ["apalis-core/prometheus"]
-## Support Tracing 👀
-tracing = ["apalis-core/trace"]
 ## Support direct retrying jobs
 retry = ["apalis-core/retry"]
 ## Support timeouts on jobs
@@ -37,6 +40,13 @@ limit = ["apalis-core/limit"]
 filter = ["apalis-core/filter"]
 ## Add a global extensions to jobs
 extensions =["apalis-core/extensions"]
+
+## Publish and listen worker events via Redis pubsub
+redis-pubsub = ["apalis-redis/pubsub", "broker"]
+
+## Support event collection, communication between workers.
+broker = ["apalis-core/broker"]
+
 docsrs = ["document-features"]
 
 
@@ -73,6 +83,7 @@ all-features = true
 criterion = { version = "0.3", features=["async_tokio"] }
 serde = "1"
 tokio = { version = "1", features =["macros"] }
+apalis-redis = { version = "0.3.0-beta.0", path = "./packages/apalis-redis" }
 
 [[bench]]
 name = "redis_benchmark"
@@ -94,5 +105,5 @@ members = [
   "examples/axum",
   "examples/prometheus",
   "examples/tracing",
-  "examples/rest-api",
+  "examples/rest-api"
 ]

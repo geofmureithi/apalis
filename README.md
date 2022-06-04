@@ -20,8 +20,7 @@ Apalis has support for
 - SQlite
 - PostgresSQL
 - MySQL
-- Cron
-- Bring Your Own Job Source
+- Bring Your Own Job Source eg Cron or Twitter streams
 
 ## Getting Started
 
@@ -83,7 +82,23 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) {
 ### Web UI
 
 If you are running Apalis Board, you can easily manage your jobs.
-![UI](./examples/rest-api/assets/apalis_board.png)
+
+![UI](./examples/rest-api/assets/preview_board.png)
+
+## Feature flags
+
+- _tracing_ (enabled by default) — Support Tracing 👀
+- _redis_ — Include redis storage
+- _postgres_ — Include Postgres storage
+- _sqlite_ — Include SQlite storage
+- _mysql_ — Include MySql storage
+- _sentry_ — Support for Sentry exception and performance monitoring
+- _prometheus_ — Support Prometheus metrics
+- _retry_ — Support direct retrying jobs
+- _timeout_ — Support timeouts on jobs
+- _limit_ — 💪 Limit the amount of jobs
+- _filter_ — Support filtering jobs based on a predicate
+- _extensions_ — Add a global extensions to jobs
 
 ## Storage Comparison
 
@@ -119,7 +134,7 @@ v 0.3
 - [x] Organized modules and features.
 - [x] Basic Web API Interface
 - [x] Sql Examples
-- [ ] Sql migrations
+- [x] Sqlx migrations
 
 v 0.2
 

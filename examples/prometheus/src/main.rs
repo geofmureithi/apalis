@@ -5,8 +5,8 @@
 //! ```
 
 use apalis::{
-    layers::PrometheusLayer, redis::RedisStorage, Job, JobContext, JobError, JobResult, Monitor,
-    Storage, WorkerBuilder, WorkerFactoryFn,
+    layers::PrometheusLayer, redis::RedisStorage, Job, Monitor, Storage, WorkerBuilder,
+    WorkerFactoryFn,
 };
 use axum::{
     extract::Form,
@@ -17,7 +17,7 @@ use axum::{
 };
 use futures::future::ready;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt::Debug, io::Error, net::SocketAddr};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -57,7 +57,9 @@ async fn main() -> std::io::Result<()> {
             .run()
             .await
     };
-    futures::future::try_join(monitor, http).await.unwrap();
+    let _res = futures::future::try_join(monitor, http)
+        .await
+        .expect("Could not start services");
     Ok(())
 }
 

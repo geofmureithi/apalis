@@ -8,26 +8,31 @@ license = "MIT"
 description = "SQL Storage for Apalis: simple, extensible multithreaded background job processing for Rust"
 
 [features]
-default = [ "sqlite" ]
+default = [ "sqlite", "migrate" ]
 postgres = [ "sqlx/postgres", "sqlx/json", "sqlx/chrono"]
 sqlite = [ "sqlx/sqlite", "sqlx/json", "sqlx/chrono"]
 mysql = [ "sqlx/mysql", "sqlx/json", "sqlx/chrono"]
+migrate = ["sqlx/migrate"]
 
 [dependencies.sqlx]
-version = "0.5"
+version = "0.5.5"
 default-features = false
 features = [ "runtime-tokio-rustls", "uuid" ]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-apalis-core = { path = "../../packages/apalis-core", version = "0.3.0-beta.0", default-features = false}
+apalis-core = { path = "../../packages/apalis-core", version = "0.3.0-beta.0", features= ["storage"],  default-features = false}
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 async-stream = "0.3"
 tokio = "1"
 futures-lite = "1.12.0"
 async-trait = "0.1.53"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros"] }
+email-service = { path = "../../examples/email-service"}
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

@@ -1,20 +1,15 @@
-use chrono::Utc;
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
-use tracing::{span::Record, Id, Instrument, Span};
+
 use tracing_subscriber::prelude::*;
 
 use apalis::{
-    layers::{SentryJobLayer, TraceLayer},
-    redis::RedisStorage,
-    Job, JobContext, JobError, JobResult, Monitor, Storage, StorageWorkerPulse, WorkerBuilder,
-    WorkerFactoryFn,
+    layers::TraceLayer, redis::RedisStorage, JobContext, JobError, JobResult, Monitor, Storage,
+    WorkerBuilder, WorkerFactoryFn,
 };
-use serde::{Deserialize, Serialize};
+
 use tokio::time::sleep;
-use tracing::Subscriber;
-use tracing_subscriber::{registry, Layer};
 
 use email_service::Email;
 
@@ -31,7 +26,7 @@ impl fmt::Display for InvalidEmailError {
 
 impl Error for InvalidEmailError {}
 
-async fn email_service(email: Email, ctx: JobContext) -> Result<JobResult, JobError> {
+async fn email_service(_email: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
     tracing::info!("Checking if dns configured");
     sleep(Duration::from_millis(1008)).await;
     tracing::info!("Sent in 1 sec");

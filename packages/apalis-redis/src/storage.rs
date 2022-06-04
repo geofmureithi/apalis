@@ -555,7 +555,7 @@ where
     async fn list_jobs(
         &mut self,
         status: &JobState,
-        _page: i32,
+        page: i32,
     ) -> Result<Vec<JobRequest<T>>, JobError> {
         match status {
             JobState::Pending => {
@@ -564,8 +564,8 @@ where
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);
                 let ids: Vec<String> = redis::cmd("LRANGE")
                     .arg(active_jobs_list)
-                    .arg("0")
-                    .arg("10")
+                    .arg(((page - 1) * 10).to_string())
+                    .arg((page * 10).to_string())
                     .query_async(&mut conn)
                     .await
                     .map_err(|e| StorageError::Database(Box::new(e)))?;
@@ -624,8 +624,8 @@ where
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);
                 let ids: Vec<String> = redis::cmd("ZRANGE")
                     .arg(done_jobs_set)
-                    .arg("0")
-                    .arg("10")
+                    .arg(((page - 1) * 10).to_string())
+                    .arg((page * 10).to_string())
                     .query_async(&mut conn)
                     .await
                     .map_err(|e| StorageError::Database(Box::new(e)))?;
@@ -648,8 +648,8 @@ where
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);
                 let ids: Vec<String> = redis::cmd("ZRANGE")
                     .arg(failed_jobs_set)
-                    .arg("0")
-                    .arg("10")
+                    .arg(((page - 1) * 10).to_string())
+                    .arg((page * 10).to_string())
                     .query_async(&mut conn)
                     .await
                     .map_err(|e| StorageError::Database(Box::new(e)))?;
@@ -671,8 +671,8 @@ where
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);
                 let ids: Vec<String> = redis::cmd("ZRANGE")
                     .arg(dead_jobs_set)
-                    .arg("0")
-                    .arg("10")
+                    .arg(((page - 1) * 10).to_string())
+                    .arg((page * 10).to_string())
                     .query_async(&mut conn)
                     .await
                     .map_err(|e| StorageError::Database(Box::new(e)))?;

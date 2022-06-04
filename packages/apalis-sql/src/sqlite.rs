@@ -1,6 +1,6 @@
 use crate::from_row::IntoJobRequest;
 use apalis_core::error::{JobError, JobStreamError};
-use apalis_core::job::{Job, JobStreamExt, JobStreamResult, JobStreamWorker};
+use apalis_core::job::{Counts, Job, JobStreamExt, JobStreamResult, JobStreamWorker};
 use apalis_core::request::{JobRequest, JobState};
 use apalis_core::storage::StorageError;
 use apalis_core::storage::StorageWorkerPulse;
@@ -9,9 +9,9 @@ use async_stream::try_stream;
 use chrono::{DateTime, Utc};
 use futures::Stream;
 use serde::{de::DeserializeOwned, Serialize};
-use sqlx::sqlite::SqliteRow;
 use sqlx::types::Uuid;
 use sqlx::{Pool, Row, Sqlite, SqlitePool};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ops::Sub;
 use std::{marker::PhantomData, ops::Add, time::Duration};
@@ -19,6 +19,7 @@ use std::{marker::PhantomData, ops::Add, time::Duration};
 use crate::from_row::SqlJobRequest;
 
 /// Represents a [Storage] that persists to Sqlite
+#[derive(Debug)]
 pub struct SqliteStorage<T> {
     pool: Pool<Sqlite>,
     job_type: PhantomData<T>,
@@ -35,6 +36,7 @@ impl<T> Clone for SqliteStorage<T> {
 }
 
 impl<T> SqliteStorage<T> {
+    /// Construct a new Storage from a pool
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
@@ -48,59 +50,9 @@ impl<T> SqliteStorage<T> {
     }
 
     /// Perform migrations for storage
-    /// This should be ideally run once
+    #[cfg(feature = "migrate")]
     pub async fn setup(&self) -> Result<(), sqlx::Error> {
-        let jobs_table = r#"
-        CREATE TABLE IF NOT EXISTS Jobs
-                ( job TEXT NOT NULL,
-                  id TEXT NOT NULL UNIQUE,
-                  job_type TEXT NOT NULL,
-                  status TEXT NOT NULL DEFAULT 'Pending',
-                  attempts INTEGER NOT NULL DEFAULT 0,
-                  max_attempts INTEGER NOT NULL DEFAULT 25,
-                  run_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                  last_error TEXT,
-                  lock_at INTEGER,
-                  lock_by TEXT,
-                  done_at INTEGER )
-        "#;
-        let workers_table = r#"
-                CREATE TABLE IF NOT EXISTS Workers (
-                    id TEXT NOT NULL UNIQUE,
-                    worker_type TEXT NOT NULL,
-                    storage_name TEXT NOT NULL,
-                    layers TEXT,
-                    last_seen INTEGER NOT NULL DEFAULT (strftime('%s','now'))
-                )
-        "#;
         let pool = self.pool.clone();
-        sqlx::query(jobs_table).execute(&pool).await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS TIdx ON Jobs(id)")
-            .execute(&pool)
-            .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS SIdx ON Jobs(status)")
-            .execute(&pool)
-            .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS LIdx ON Jobs(lock_by)")
-            .execute(&pool)
-            .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS JTIdx ON Jobs(job_type)")
-            .execute(&pool)
-            .await?;
-
-        sqlx::query(workers_table).execute(&pool).await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS Idx ON Workers(id)")
-            .execute(&pool)
-            .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS WTIdx ON Workers(worker_type)")
-            .execute(&pool)
-            .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS LSIdx ON Workers(last_seen)")
-            .execute(&pool)
-            .await?;
-
         sqlx::query("PRAGMA journal_mode = 'WAL';")
             .execute(&pool)
             .await?;
@@ -111,6 +63,9 @@ impl<T> SqliteStorage<T> {
         sqlx::query("PRAGMA cache_size = 64000;")
             .execute(&pool)
             .await?;
+        let migrate =
+            sqlx::migrate::Migrator::new(std::path::Path::new("migrations/sqlite")).await?;
+        migrate.run(&pool.clone()).await?;
         Ok(())
     }
 }
@@ -454,10 +409,41 @@ where
 #[async_trait::async_trait]
 
 impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for SqliteStorage<J> {
+    async fn counts(&mut self) -> Result<Counts, JobError> {
+        let mut conn = self
+            .pool
+            .clone()
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+
+        let fetch_query = "SELECT
+                            COUNT(1) FILTER (WHERE status = 'Pending') AS pending, 
+                            COUNT(1) FILTER (WHERE status = 'Running') AS running,
+                            COUNT(1) FILTER (WHERE status = 'Done') AS done,
+                            COUNT(1) FILTER (WHERE status = 'Retry') AS retry, 
+                            COUNT(1) FILTER (WHERE status = 'Failed') AS failed, 
+                            COUNT(1) FILTER (WHERE status = 'Killed') AS killed
+                        FROM Jobs WHERE job_type = ?";
+        let res: (i32, i32, i32, i32, i32, i32) = sqlx::query_as(fetch_query)
+            .bind(J::NAME)
+            .fetch_one(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let mut inner = HashMap::new();
+        inner.insert(JobState::Pending, res.0);
+        inner.insert(JobState::Running, res.1);
+        inner.insert(JobState::Done, res.2);
+        inner.insert(JobState::Retry, res.3);
+        inner.insert(JobState::Failed, res.4);
+        inner.insert(JobState::Killed, res.5);
+        Ok(Counts { inner })
+    }
+
     async fn list_jobs(
         &mut self,
         status: &JobState,
-        _page: i32,
+        page: i32,
     ) -> Result<Vec<JobRequest<J>>, JobError> {
         let status = status.as_ref().to_string();
 
@@ -467,10 +453,11 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for Sqlite
             .acquire()
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
-        let fetch_query = "SELECT * FROM Jobs WHERE status = ? LIMIT 10 OFFSET ?";
+        let fetch_query = "SELECT * FROM Jobs WHERE status = ? AND job_type = ? ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET ?";
         let res: Vec<SqlJobRequest<J>> = sqlx::query_as(fetch_query)
             .bind(status)
-            .bind("0")
+            .bind(J::NAME)
+            .bind(((page - 1) * 10).to_string())
             .fetch_all(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
@@ -500,5 +487,30 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for Sqlite
                 worker
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use email_service::Email;
+
+    #[tokio::test]
+    async fn test_inmemory_sqlite_worker() {
+        let mut sqlite = SqliteStorage::<Email>::connect("sqlite::memory:")
+            .await
+            .expect("Could not start inmemory storage");
+        sqlite.setup().await.expect("Could not run migrations");
+        sqlite
+            .push(Email {
+                subject: "Test Subject".to_string(),
+                to: "example@sqlite".to_string(),
+                text: "Some Text".to_string(),
+            })
+            .await
+            .expect("Unable to push job");
+        let len = sqlite.len().await.expect("Could not fetch the jobs count");
+        assert_eq!(len, 1);
     }
 }

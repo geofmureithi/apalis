@@ -81,6 +81,8 @@ async fn main() -> std::io::Result<()> {
             .await;
         Ok(monitor)
     };
-    futures::future::try_join(http, monitor).await.unwrap();
+    let _res = futures::future::try_join(http, monitor)
+        .await
+        .expect("Could not start services");
     Ok(())
 }

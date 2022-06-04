@@ -1,7 +1,9 @@
 mod error;
+#[cfg(feature = "worker")]
 mod streams;
+#[cfg(feature = "worker")]
 mod worker;
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
@@ -11,13 +13,18 @@ use crate::{
     request::JobRequest,
 };
 
+#[cfg(feature = "storage")]
 pub use self::error::StorageError;
+
+#[cfg(feature = "worker")]
 pub use worker::StorageWorker;
 
 /// Represents a Storage Result
 pub type StorageResult<I> = Result<I, StorageError>;
 
-/// Represents a [Storage] that can be passed to a [crate::builder::WorkerBuilder]
+/// Represents a [Storage] that can be passed to a [Builder]
+///
+/// [Builder]: crate::builder::WorkerBuilder
 #[async_trait::async_trait]
 pub trait Storage: Clone {
     /// The type of job that can be persisted
@@ -63,6 +70,7 @@ pub trait Storage: Clone {
     async fn heartbeat(&mut self, pulse: StorageWorkerPulse) -> StorageResult<bool>;
 
     /// Kill a job that returns [JobResult::Reschedule]
+    /// [`JobResult::Reschedule`]: crate::response::JobResult
     async fn reschedule(
         &mut self,
         job: &JobRequest<Self::Output>,
@@ -90,34 +98,6 @@ pub enum StorageWorkerPulse {
         /// the count of orphaned jobs
         count: i32,
     },
-}
-
-/// Controls how [StorageWorker] interacts with the [Storage]
-#[derive(Debug)]
-pub struct StorageWorkerConfig {
-    keep_alive: Duration,
-    fetch_interval: Duration,
-    heartbeats: HashMap<StorageWorkerPulse, Duration>,
-}
-
-impl Default for StorageWorkerConfig {
-    fn default() -> Self {
-        let mut heartbeats = HashMap::new();
-        heartbeats.insert(
-            StorageWorkerPulse::RenqueueOrpharned { count: 10 },
-            Duration::from_secs(60),
-        );
-        heartbeats.insert(
-            StorageWorkerPulse::EnqueueScheduled { count: 10 },
-            Duration::from_secs(60),
-        );
-
-        StorageWorkerConfig {
-            keep_alive: Duration::from_secs(30),
-            fetch_interval: Duration::from_millis(1),
-            heartbeats,
-        }
-    }
 }
 
 impl<S> JobStream for S

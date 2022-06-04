@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -17,12 +18,11 @@ use crate::response::JobResult;
 /// performance monitoring transaction for each incoming request,
 /// continuing the trace based on incoming distributed tracing headers.
 ///
-/// The created transaction will automatically use the request URI as its name.
-/// This is sometimes not desirable in case the request URI contains unique IDs
-/// or similar. In this case, users should manually override the transaction name
+/// The created transaction will automatically use J::NAME as its name.
+/// This is sometimes not desirable, In which case, users should manually override the transaction name
 /// in the request handler using the [`Scope::set_transaction`](sentry_core::Scope::set_transaction)
 /// method.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct SentryJobLayer;
 
 impl SentryJobLayer {
@@ -35,9 +35,8 @@ impl SentryJobLayer {
 /// Tower Service that logs Job details.
 ///
 /// The Service can also optionally start a new performance monitoring transaction
-/// for each incoming request, continuing the trace based on incoming
-/// distributed tracing headers.
-#[derive(Clone)]
+/// for each incoming request, continuing the trace based on J::NAME
+#[derive(Clone, Debug)]
 pub struct SentryJobService<S> {
     service: S,
 }

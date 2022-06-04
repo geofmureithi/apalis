@@ -1,4 +1,4 @@
-use std::{fmt::Debug, time::Duration};
+use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 use crate::{
     error::{JobError, JobStreamError, WorkerError},
@@ -7,7 +7,6 @@ use crate::{
 use chrono::{DateTime, Utc};
 use futures::{future::BoxFuture, stream::BoxStream};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Represents a result for a [Job].
 pub type JobFuture<I> = BoxFuture<'static, I>;
@@ -32,15 +31,15 @@ pub trait Job: Sized + Send + Unpin + Serialize + DeserializeOwned + Debug + Syn
     const NAME: &'static str;
 
     /// How long it took before service was ready
-    fn on_service_ready(&self, _req: &JobRequest<Self>, latency: Duration) {
+    fn on_service_ready(&self, _req: &JobRequest<Self>, _latency: Duration) {
         #[cfg(feature = "trace")]
-        tracing::debug!(latency = ?latency, "service.ready");
+        tracing::debug!(latency = ?_latency, "service.ready");
     }
 
     /// Handle worker errors related to a job
-    fn on_worker_error(&self, _req: &JobRequest<Self>, error: &WorkerError) {
+    fn on_worker_error(&self, _req: &JobRequest<Self>, _error: &WorkerError) {
         #[cfg(feature = "trace")]
-        tracing::warn!(error =?error, "storage.error");
+        tracing::warn!(error =?_error, "storage.error");
     }
 }
 
@@ -113,6 +112,7 @@ pub struct JobStreamWorker {
 }
 
 impl JobStreamWorker {
+    /// Build a worker representation for serialization
     pub fn new<S, T>(worker_id: String, last_seen: DateTime<Utc>) -> Self
     where
         S: JobStream<Job = T>,
@@ -125,10 +125,18 @@ impl JobStreamWorker {
             last_seen,
         }
     }
-
+    /// Set layers
     pub fn set_layers(&mut self, layers: String) {
         self.layers = layers;
     }
+}
+
+/// Counts of different job states
+#[derive(Debug, Deserialize, Serialize, Default)]
+pub struct Counts {
+    /// Counts are flattened from a Hashmap of [JobState]
+    #[serde(flatten)]
+    pub inner: HashMap<JobState, i32>,
 }
 
 /// JobStream extension usually useful for management via cli, web etc
@@ -140,6 +148,13 @@ where
 {
     /// List all Workers that are working on a Job Stream
     async fn list_workers(&mut self) -> Result<Vec<JobStreamWorker>, JobError>;
+
+    /// Returns the counts of jobs in different states
+    async fn counts(&mut self) -> Result<Counts, JobError> {
+        Ok(Counts {
+            ..Default::default()
+        })
+    }
 
     /// Fetch jobs persisted from storage
     async fn list_jobs(

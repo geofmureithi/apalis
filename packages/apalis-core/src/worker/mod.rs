@@ -5,10 +5,7 @@ use crate::{
     response::JobResult,
     worker::envelope::{Envelope, EnvelopeProxy, SyncEnvelopeProxy, ToEnvelope},
 };
-use futures::{
-    future::{AndThen, BoxFuture},
-    pin_mut, Future, Stream, StreamExt, TryFutureExt, TryStreamExt,
-};
+use futures::{Future, Stream, StreamExt};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::Debug,
@@ -625,7 +622,6 @@ mod tests {
     use futures::Future;
     use tower::{service_fn, Service, ServiceExt};
 
-    use crate::worker::monitor::{Monitor, WorkerManagement};
     use crate::worker::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -639,7 +635,7 @@ mod tests {
         #[derive(Debug)]
         struct HandlerResult;
 
-        async fn handler(msg: Job) -> Result<(), HandlerResult> {
+        async fn handler(_msg: Job) -> Result<(), HandlerResult> {
             Ok(())
         }
 

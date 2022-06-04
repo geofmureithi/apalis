@@ -1,10 +1,8 @@
-use actix_web::{web, App, Error, HttpResponse, HttpServer, ResponseError};
+use actix_web::{web, App, HttpResponse, HttpServer};
 use apalis::{
-    layers::TraceLayer, redis::RedisStorage, Job, JobContext, JobError, JobRequest, JobResult,
-    Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
+    layers::TraceLayer, redis::RedisStorage, Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
 };
 use futures::future;
-use serde::{Deserialize, Serialize};
 
 use email_service::{send_email, Email};
 

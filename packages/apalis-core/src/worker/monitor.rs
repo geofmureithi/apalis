@@ -35,8 +35,6 @@ impl<T> Default for Monitor<T> {
 /// Keeps an address of each queue and periodically checks of their status
 /// When combined with the `web` feature, it can be used to manage the queues from a web ui.
 pub struct Monitor<R> {
-    #[cfg(feature = "broker")]
-    broker: Broker,
     workers: Vec<R>,
     event_handlers: Vec<Box<dyn WorkerListener>>,
 }
@@ -52,9 +50,9 @@ impl<R> fmt::Debug for Monitor<R> {
 
 #[async_trait::async_trait]
 impl Actor for Monitor<Recipient<WorkerManagement>> {
-    async fn on_start(&mut self, ctx: &mut Context<Self>) {
+    async fn on_start(&mut self, _ctx: &mut Context<Self>) {
         #[cfg(feature = "broker")]
-        self.broker.subscribe::<WorkerMessage, _>(ctx);
+        Broker::global().subscribe::<WorkerMessage, _>(_ctx);
         // loop {
         //     for worker in &self.workers {
         //         let _res = worker.send(WorkerManagement::Status).await;
@@ -69,8 +67,6 @@ impl<T> Monitor<T> {
     /// Build  a new [Monitor] instance
     pub fn new() -> Self {
         Self {
-            #[cfg(feature = "broker")]
-            broker: Broker::new(),
             workers: Vec::new(),
             event_handlers: Vec::new(),
         }
@@ -79,13 +75,10 @@ impl<T> Monitor<T> {
 
 impl Monitor<JoinHandle<Recipient<WorkerManagement>>> {
     /// Register single worker instance of [Worker]
-    pub fn register<W>(mut self, mut worker: W) -> Self
+    pub fn register<W>(mut self, worker: W) -> Self
     where
         W: Worker,
     {
-        #[cfg(feature = "broker")]
-        worker.pre_start(&self.broker);
-
         let addr = tokio::spawn(async {
             let addr = worker.start().await;
             addr.recipient()
@@ -113,8 +106,6 @@ impl Monitor<JoinHandle<Recipient<WorkerManagement>>> {
             workers.push(worker.await.unwrap());
         }
         let monitor = Monitor {
-            #[cfg(feature = "broker")]
-            broker: self.broker,
             workers,
             event_handlers: self.event_handlers,
         };
@@ -227,7 +218,7 @@ mod tests {
             const NAME: &'static str = "worker::Email";
         }
 
-        async fn send_email(job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
+        async fn send_email(_job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
             Ok(JobResult::Success)
         }
 

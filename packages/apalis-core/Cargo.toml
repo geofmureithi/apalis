@@ -32,11 +32,13 @@ once_cell = { version = "1", optional = true, default-features = false }
 petgraph =  { version = "0.6.2", optional = true, default-features = false }
 
 [features]
-default = ["trace", "tower/util", "storage", "extensions", "worker"]
+default = [ "tower-util", "storage", "job-service", "worker"]
+job-service = []
+tower-util = ["tower/util"]
 worker = ["tokio", "async-trait"]
-storage = []
-extensions = []
+storage = ["async-trait", "tokio"]
 broker = ["dashmap", "once_cell", "petgraph"]
+layers = ["sentry", "prometheus", "trace", "retry", "timeout", "limit", "filter", "extensions"]
 sentry = ["sentry-core"]
 prometheus = ["metrics", "metrics-exporter-prometheus"]
 trace = ["tracing-futures/std-future", "tracing-futures/tokio"]
@@ -44,6 +46,7 @@ retry = ["tower/retry"]
 timeout = ["tower/timeout"]
 limit = ["tower/limit"]
 filter = ["tower/filter"]
+extensions = []
 
 [dependencies.tracing]
 default_features = false

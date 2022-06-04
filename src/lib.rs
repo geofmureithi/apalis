@@ -17,54 +17,37 @@
 //! Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] and [`tower-http`] middleware.
 //!
 //!  ### Example
-//! ```rust,ignore
+//! ```rust, no_run
 //! use apalis::*;
 //! use serde::{Deserialize, Serialize};
+//! use apalis_redis::RedisStorage;
 //!
 //! #[derive(Debug, Deserialize, Serialize)]
 //! struct Email {
 //!     to: String,
 //! }
 //!
-//! async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
+//! impl Job for Email {
+//!     const NAME: &'static str = "apalis::Email";
+//! }
+//!
+//! async fn send_email(job: Email, ctx: JobContext) -> Result<JobResult, JobError> {
 //!     Ok(JobResult::Success)
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() -> std::io::Result<()> {
-//!     let redis = std::env::var("REDIS_URL")
-//!                     .expect("Missing env variable REDIS_URL");
-//!     let storage = RedisStorage::connect(redis).await.unwrap();
+//!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
+//!     let storage = RedisStorage::connect(redis).await.expect("Storage failed");
 //!     Monitor::new()
-//!         .register_with_count(2, move || {
+//!         .register_with_count(2, move |_| {
 //!             WorkerBuilder::new(storage.clone())
-//!                 .build_fn(email_service)
-//!                 .start()
+//!                 .build_fn(send_email)
 //!         })
 //!         .run()
 //!         .await
 //! }
-//! ```
-//! ## Tower
-//! Apalis jobs fully support tower middleware via [`Layer`]
-//!
-//! ### Example
-//! ```ignore
-//! use apalis::{
-//!     layers::{Extension, DefaultRetryPolicy, RetryLayer},
-//!     WorkerBuilder,
-//! };
-//!
-//! fn main() {
-//!     let queue = WorkerBuilder::new(storage.clone())
-//!         .layer(RetryLayer::new(DefaultRetryPolicy))
-//!         .layer(Extension(EmailState {}))
-//!         .build();
-//!     let addr = queue.start();
-//! }
-
-//! ```
-//!
+//!```
 //!
 //! ## Feature flags
 #![cfg_attr(
@@ -83,7 +66,7 @@ pub use apalis_core::{
     builder::WorkerFactoryFn,
     context::JobContext,
     error::JobError,
-    job::{Job, JobFuture, JobStreamExt},
+    job::{Counts, Job, JobFuture, JobStreamExt},
     request::JobRequest,
     request::JobState,
     response::{IntoJobResponse, JobResult},
@@ -118,7 +101,9 @@ pub use apalis_core::{
 #[cfg(feature = "redis")]
 #[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
 pub mod redis {
-    pub use apalis_redis::RedisPubSubListener;
+    #[cfg(feature = "redis-pubsub")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "redis-pubsub")))]
+    pub use apalis_redis::listener::RedisPubSubListener;
     pub use apalis_redis::RedisStorage;
 }
 

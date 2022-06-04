@@ -5,6 +5,7 @@ use std::sync::Arc;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use futures::future;
+use once_cell::sync::OnceCell;
 
 use super::*;
 
@@ -14,22 +15,24 @@ type BrokerRecipient = Box<dyn Any + Sync + Send + 'static>;
 #[derive(Debug)]
 pub struct Broker(Arc<TypeMap<Vec<(TypeId, BrokerRecipient)>>>);
 
+static INSTANCE: OnceCell<Broker> = OnceCell::new();
+
 impl Clone for Broker {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
     }
 }
 
-impl Default for Broker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+
 
 impl Broker {
     /// Default constructor for broker
-    pub fn new() -> Self {
-        Self(Arc::new(DashMap::new()))
+    pub fn global() -> &'static Broker {
+        INSTANCE.get_or_init(|| {
+
+            Broker(Arc::new(DashMap::new()))
+        
+        })
     }
 
     fn message_entry(&'_ self, id: TypeId) -> Entry<'_, TypeId, Vec<(TypeId, BrokerRecipient)>> {

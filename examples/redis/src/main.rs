@@ -1,19 +1,13 @@
-use std::time::Duration;
-
-use chrono::Utc;
-
 use apalis::{
     layers::{Extension, TraceLayer},
-    redis::{RedisPubSubListener, RedisStorage},
-    IntoJobResponse, Job, JobContext, JobError, JobResult, Monitor, Storage, StorageWorkerPulse,
-    WorkerBuilder, WorkerFactoryFn,
+    redis::RedisStorage,
+    Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
 };
-use serde::{Deserialize, Serialize};
 
 use email_service::{send_email, Email};
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) {
-    for i in 0..10 {
+    for _i in 0..10 {
         storage
             .push(Email {
                 to: "test@example.com".to_string(),
@@ -35,8 +29,6 @@ async fn main() -> std::io::Result<()> {
     //This can be in another part of the program
     produce_jobs(storage.clone()).await;
 
-    let pubsub = RedisPubSubListener::new(storage.get_connection());
-
     Monitor::new()
         .register(
             WorkerBuilder::new(storage.clone())
@@ -44,7 +36,6 @@ async fn main() -> std::io::Result<()> {
                 .layer(TraceLayer::new())
                 .build_fn(send_email),
         )
-        //.event_handler(pubsub)
         .run()
         .await
 }

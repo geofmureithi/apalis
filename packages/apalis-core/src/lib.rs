@@ -68,6 +68,9 @@
 //! }
 
 /// Represent utilities for creating [Worker] instances.
+///
+/// [`Worker`]: crate::worker::Worker
+#[cfg(feature = "worker")]
 pub mod builder;
 /// Represents the [JobContext].
 pub mod context;
@@ -77,6 +80,7 @@ pub mod error;
 pub mod job;
 /// Represents a service that is created from a function.
 /// See more [tower::service_fn]
+#[cfg(feature = "job-service")]
 pub mod job_fn;
 /// Represents middleware offered through [tower::Layer]
 pub mod layers;

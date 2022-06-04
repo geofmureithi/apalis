@@ -10,6 +10,8 @@ use tower::{Layer, Service};
 
 use crate::{error::JobError, job::Job, request::JobRequest, response::JobResult};
 
+/// A layer to support prometheus metrics
+#[derive(Debug)]
 pub struct PrometheusLayer;
 
 impl<S> Layer<S> for PrometheusLayer {
@@ -20,7 +22,8 @@ impl<S> Layer<S> for PrometheusLayer {
     }
 }
 
-// This service implements the Log behavior
+/// This service implements the metric collection behavior
+#[derive(Debug)]
 pub struct PrometheusService<S> {
     service: S,
 }
@@ -54,6 +57,7 @@ where
 }
 
 pin_project! {
+    /// Response for prometheus service
     pub struct ResponseFuture<F> {
         #[pin]
         pub(crate) inner: F,

@@ -1,12 +1,7 @@
-use std::time::Duration;
-
 use apalis::{
-    layers::TraceLayer, mysql::MysqlStorage, Job, JobContext, JobError, JobResult, Monitor,
-    Storage, WorkerBuilder, WorkerFactoryFn,
+    layers::TraceLayer, mysql::MysqlStorage, Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
 };
 use email_service::{send_email, Email};
-use serde::{Deserialize, Serialize};
-use tokio::time::sleep;
 
 async fn produce_jobs(storage: &MysqlStorage<Email>) {
     let mut storage = storage.clone();

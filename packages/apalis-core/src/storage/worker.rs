@@ -1,4 +1,4 @@
-use std::{fmt::Debug, time::Duration};
+use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 use chrono::Utc;
 use futures::Future;
@@ -17,12 +17,43 @@ use crate::{
 };
 
 #[cfg(feature = "broker")]
-use crate::worker::Broker;
+use crate::worker::{
+    broker::Broker,
+    prelude::{WorkerEvent, WorkerMessage},
+};
 
 use super::{
     streams::{HeartbeatStream, KeepAliveStream},
-    StorageWorkerConfig, StorageWorkerPulse,
+    StorageWorkerPulse,
 };
+
+/// Controls how [StorageWorker] interacts with the [Storage]
+#[derive(Debug)]
+pub struct StorageWorkerConfig {
+    keep_alive: Duration,
+    fetch_interval: Duration,
+    heartbeats: HashMap<StorageWorkerPulse, Duration>,
+}
+
+impl Default for StorageWorkerConfig {
+    fn default() -> Self {
+        let mut heartbeats = HashMap::new();
+        heartbeats.insert(
+            StorageWorkerPulse::RenqueueOrpharned { count: 10 },
+            Duration::from_secs(60),
+        );
+        heartbeats.insert(
+            StorageWorkerPulse::EnqueueScheduled { count: 10 },
+            Duration::from_secs(60),
+        );
+
+        StorageWorkerConfig {
+            keep_alive: Duration::from_secs(30),
+            fetch_interval: Duration::from_millis(1),
+            heartbeats,
+        }
+    }
+}
 
 /// A queue represents a consumer of a [Storage].
 ///
@@ -33,8 +64,6 @@ pub struct StorageWorker<T: Serialize, S: Storage<Output = T>, H> {
     handler: H,
     config: StorageWorkerConfig,
     id: uuid::Uuid,
-    #[cfg(feature = "broker")]
-    broker: Option<Broker>,
 }
 
 impl<T, S, H> StorageWorker<T, S, H>
@@ -50,8 +79,6 @@ where
             handler,
             config: Default::default(),
             id,
-            #[cfg(feature = "broker")]
-            broker: None,
         }
     }
     /// Set a [WorkerConfig] for [Worker]
@@ -61,8 +88,6 @@ where
             handler: self.handler,
             config,
             id: self.id,
-            #[cfg(feature = "broker")]
-            broker: None,
         }
     }
 }
@@ -98,11 +123,6 @@ where
         }
     }
 
-    #[cfg(feature = "broker")]
-    fn pre_start(&mut self, broker: &Broker) {
-        self.broker = Some(broker.clone());
-    }
-
     async fn on_stop(&mut self, _ctx: &mut Context<Self>) {
         tracing::warn!("worker.stopped")
     }
@@ -127,12 +147,14 @@ where
         job.record_attempt();
         job.set_lock_by(Some(worker_id.clone()));
         if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
+            #[cfg(feature = "broker")]
+            Broker::global()
+                .issue_send(WorkerMessage::new(
+                    worker_id.clone(),
+                    WorkerEvent::Error(format!("{}", e)),
+                ))
+                .await;
             T::on_worker_error(&job.inner(), &job, &WorkerError::Storage(e));
-            // if let Some(broker) = &self.broker {
-            //     broker
-            //         .issue_send(WorkerMessage::new(worker_id.clone(), WorkerEvent::Error))
-            //         .await;
-            // }
         };
         T::on_service_ready(&job.inner(), &job, instant.elapsed());
         let res = handle.call(job).await;
@@ -140,74 +162,60 @@ where
         if let Ok(Some(mut job)) = storage.fetch_by_id(job_id.clone()).await {
             job.set_done_at(Some(Utc::now()));
             let finalize = match res {
-                Ok(ref r) => {
-                    // if let Some(broker) = &self.broker {
-                    //     broker
-                    //         .issue_send(WorkerMessage::new(
-                    //             worker_id.clone(),
-                    //             WorkerEvent::Error(format!("{}", e)),
-                    //         ))
-                    //         .await;
-                    // }
-                    match r {
-                        JobResult::Success => {
-                            job.set_status(JobState::Done);
-                            storage.ack(worker_id.clone(), job_id.clone()).await
-                        }
-                        JobResult::Retry => {
-                            job.set_status(JobState::Retry);
-                            storage.retry(worker_id.clone(), job_id.clone()).await
-                        }
-                        JobResult::Kill => {
-                            job.set_status(JobState::Killed);
-                            storage.kill(worker_id.clone(), job_id.clone()).await
-                        }
-
-                        JobResult::Reschedule(wait) => {
-                            job.set_status(JobState::Retry);
-                            storage.reschedule(&job, *wait).await
-                        }
+                Ok(ref r) => match r {
+                    JobResult::Success => {
+                        job.set_status(JobState::Done);
+                        storage.ack(worker_id.clone(), job_id.clone()).await
                     }
-                }
+                    JobResult::Retry => {
+                        job.set_status(JobState::Retry);
+                        storage.retry(worker_id.clone(), job_id.clone()).await
+                    }
+                    JobResult::Kill => {
+                        job.set_status(JobState::Killed);
+                        storage.kill(worker_id.clone(), job_id.clone()).await
+                    }
+
+                    JobResult::Reschedule(wait) => {
+                        job.set_status(JobState::Retry);
+                        storage.reschedule(&job, *wait).await
+                    }
+                },
                 Err(ref e) => {
                     job.set_status(JobState::Failed);
                     job.set_last_error(format!("{}", e));
+
                     #[cfg(feature = "broker")]
-                    if let Some(broker) = &self.broker {
-                        broker
-                            .issue_send(WorkerMessage::new(
-                                worker_id.clone(),
-                                WorkerEvent::Error(format!("{}", e)),
-                            ))
-                            .await;
-                    }
+                    Broker::global()
+                        .issue_send(WorkerMessage::new(
+                            worker_id.clone(),
+                            WorkerEvent::Error(format!("{}", e)),
+                        ))
+                        .await;
                     // let base: i32 = 2; // an explicit type is required
                     // let millis = base.pow(job.attempts());
                     storage.reschedule(&job, Duration::from_millis(10000)).await
                 }
             };
-            if let Err(_e) = finalize {
+            if let Err(e) = finalize {
                 #[cfg(feature = "broker")]
-                if let Some(broker) = &self.broker {
-                    broker
-                        .issue_send(WorkerMessage::new(
-                            worker_id.clone(),
-                            WorkerEvent::Error(format!("{}", _e)),
-                        ))
-                        .await;
-                }
+                Broker::global()
+                    .issue_send(WorkerMessage::new(
+                        worker_id.clone(),
+                        WorkerEvent::Error(format!("{}", e)),
+                    ))
+                    .await;
+                T::on_worker_error(&job.inner(), &job, &WorkerError::Storage(e));
             }
-            if let Err(_e) = storage.update_by_id(job_id.clone(), &job).await {
+            if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
                 #[cfg(feature = "broker")]
-                if let Some(broker) = &self.broker {
-                    broker
-                        .issue_send(WorkerMessage::new(
-                            worker_id.clone(),
-                            WorkerEvent::Error(format!("{}", _e)),
-                        ))
-                        .await;
-                }
-                T::on_worker_error(&job.inner(), &job, &WorkerError::Storage(_e));
+                Broker::global()
+                    .issue_send(WorkerMessage::new(
+                        worker_id.clone(),
+                        WorkerEvent::Error(format!("{}", e)),
+                    ))
+                    .await;
+                T::on_worker_error(&job.inner(), &job, &WorkerError::Storage(e));
             };
         }
 
@@ -258,7 +266,7 @@ where
     async fn handle(&mut self, _keep_alive: KeepAlive) -> Self::Result {
         let queue = &mut self.storage;
         let id = self.id.to_string();
-        let beat = queue.keep_alive::<H>(id).await;
+        let _beat = queue.keep_alive::<H>(id).await;
     }
 }
 

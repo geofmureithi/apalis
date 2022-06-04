@@ -42,13 +42,13 @@ pub enum LatencyUnit {
     Nanos,
 }
 
-/// [`Layer`] that adds high level [tracing] to a [`Service`].
+/// [`Layer`] that adds high level [tracing] to a [`Job`].
 ///
 /// See the [module docs](crate::trace) for more details.
 ///
-/// [`Layer`]: tower_layer::Layer
+/// [`Layer`]: tower::Layer
 /// [tracing]: https://crates.io/crates/tracing
-/// [`Service`]: tower_service::Service
+/// [`Job`]: crate::job::Job
 #[derive(Debug, Copy, Clone)]
 pub struct TraceLayer<
     MakeSpan = DefaultMakeSpan,
@@ -170,12 +170,11 @@ where
     }
 }
 
-/// Middleware that adds high level [tracing] to a [`Service`].
+/// Middleware that adds high level [tracing] to an apalis [`Job`].
 ///
-/// See the [module docs](crate::trace) for an example.
 ///
 /// [tracing]: https://crates.io/crates/tracing
-/// [`Service`]: tower_service::Service
+/// [`Job`]: crate::job::Job
 #[derive(Debug, Clone, Copy)]
 pub struct Trace<
     S,
@@ -289,7 +288,7 @@ impl<S, MakeSpan, OnRequest, OnResponse, OnFailure>
     ///
     /// `NewMakeSpan` is expected to implement [`MakeSpan`].
     ///
-    /// [`MakeSpan`]: super::MakeSpan
+    /// [`MakeSpan`]: self::make_span::MakeSpan
     /// [`Span`]: tracing::Span
     pub fn make_span_with<NewMakeSpan>(
         self,
