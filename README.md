@@ -28,7 +28,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.3.0-beta.0", features = ["redis"] }
+apalis = { version = "0.3.0", features = ["redis"] }
 ```
 
 ## Usage
@@ -81,7 +81,7 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) {
 
 ### Web UI
 
-If you are running [Apalis Board](https://github.com/geofmureithi/apalis-board), you can easily manage your jobs. See a working [Rest API here] (https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
+If you are running [Apalis Board](https://github.com/geofmureithi/apalis-board), you can easily manage your jobs. See a working [Rest API here](https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
 
 ![UI](https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png)
 
@@ -104,11 +104,12 @@ If you are running [Apalis Board](https://github.com/geofmureithi/apalis-board),
 
 Since we provide a few storage solutions, here is a table comparing them:
 
-| Feature        | Redis | Sqlite | Postgres | Sled | Mysql | Mongo |
-| :------------- | :---: | :----: | :------: | :--: | ----- | ----- |
-| Scheduled jobs |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
-| Retryable jobs |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
-| Persistence    |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
+| Feature         | Redis | Sqlite | Postgres | Sled | Mysql | Mongo |
+| :-------------- | :---: | :----: | :------: | :--: | ----- | ----- |
+| Scheduled jobs  |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
+| Retryable jobs  |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
+| Persistence     |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
+| Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   | \*    | x     |
 
 ## Thanks to
 
