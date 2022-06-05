@@ -1,17 +1,18 @@
-use apalis_core::error::JobStreamError;
-use apalis_core::job::{Job, JobStreamResult};
-use apalis_core::request::JobRequest;
+use apalis_core::error::{JobError, JobStreamError};
+use apalis_core::job::{Counts, Job, JobStreamExt, JobStreamResult, JobStreamWorker};
+use apalis_core::request::{JobRequest, JobState};
 use apalis_core::storage::StorageError;
 use apalis_core::storage::StorageWorkerPulse;
 use apalis_core::storage::{Storage, StorageResult};
 use async_stream::try_stream;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::{FutureExt, Stream};
 use futures_lite::future;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::postgres::PgListener;
 use sqlx::types::Uuid;
 use sqlx::{PgPool, Row};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
@@ -52,9 +53,7 @@ impl<T> PostgresStorage<T> {
     #[cfg(feature = "migrate")]
     pub async fn setup(&self) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let migrate =
-            sqlx::migrate::Migrator::new(std::path::Path::new("migrations/postgres")).await?;
-        migrate.run(&pool.clone()).await?;
+        sqlx::migrate!("migrations/postgres").run(&pool).await?;
         Ok(())
     }
 }
@@ -335,17 +334,102 @@ where
         let worker_type = T::NAME;
         let storage_name = std::any::type_name::<Self>();
         let query =
-                "INSERT INTO apalis.workers (id, worker_type, storage_name, last_seen) VALUES ($1, $2, $3, $4) ON CONFLICT (id) 
+                "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) 
                 DO 
                    UPDATE SET last_seen = NOW()";
         sqlx::query(query)
             .bind(worker_id.to_owned())
             .bind(worker_type)
             .bind(storage_name)
+            .bind(std::any::type_name::<Service>())
             .bind(Utc::now())
             .execute(&mut tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+
+impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for PostgresStorage<J> {
+    async fn counts(&mut self) -> Result<Counts, JobError> {
+        let mut conn = self
+            .pool
+            .clone()
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+
+        let fetch_query = "SELECT
+                            COUNT(1) FILTER (WHERE status = 'Pending') AS pending, 
+                            COUNT(1) FILTER (WHERE status = 'Running') AS running,
+                            COUNT(1) FILTER (WHERE status = 'Done') AS done,
+                            COUNT(1) FILTER (WHERE status = 'Retry') AS retry, 
+                            COUNT(1) FILTER (WHERE status = 'Failed') AS failed, 
+                            COUNT(1) FILTER (WHERE status = 'Killed') AS killed
+                        FROM apalis.jobs WHERE job_type = $1";
+        let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
+            .bind(J::NAME)
+            .fetch_one(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let mut inner = HashMap::new();
+        inner.insert(JobState::Pending, res.0);
+        inner.insert(JobState::Running, res.1);
+        inner.insert(JobState::Done, res.2);
+        inner.insert(JobState::Retry, res.3);
+        inner.insert(JobState::Failed, res.4);
+        inner.insert(JobState::Killed, res.5);
+        Ok(Counts { inner })
+    }
+
+    async fn list_jobs(
+        &mut self,
+        status: &JobState,
+        page: i32,
+    ) -> Result<Vec<JobRequest<J>>, JobError> {
+        let status = status.as_ref().to_string();
+
+        let mut conn = self
+            .pool
+            .clone()
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let fetch_query = "SELECT * FROM apalis.jobs WHERE status = $1 AND job_type = $2 ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET $3";
+        let res: Vec<SqlJobRequest<J>> = sqlx::query_as(fetch_query)
+            .bind(status)
+            .bind(J::NAME)
+            .bind((page - 1) * 10)
+            .fetch_all(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        Ok(res.into_iter().map(|j| j.into()).collect())
+    }
+
+    async fn list_workers(&mut self) -> Result<Vec<JobStreamWorker>, JobError> {
+        let mut conn = self
+            .pool
+            .clone()
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let fetch_query =
+            "SELECT id, layers, last_seen FROM apalis.workers WHERE worker_type = $1 ORDER BY last_seen DESC LIMIT 20 OFFSET $2";
+        let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
+            .bind(J::NAME)
+            .bind(0_i64)
+            .fetch_all(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        Ok(res
+            .into_iter()
+            .map(|(worker_id, layers, last_seen)| {
+                let mut worker = JobStreamWorker::new::<Self, J>(worker_id, last_seen);
+                worker.set_layers(layers);
+                worker
+            })
+            .collect())
     }
 }

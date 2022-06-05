@@ -63,9 +63,7 @@ impl<T> SqliteStorage<T> {
         sqlx::query("PRAGMA cache_size = 64000;")
             .execute(&pool)
             .await?;
-        let migrate =
-            sqlx::migrate::Migrator::new(std::path::Path::new("migrations/sqlite")).await?;
-        migrate.run(&pool.clone()).await?;
+        sqlx::migrate!("migrations/sqlite").run(&pool).await?;
         Ok(())
     }
 }
@@ -425,7 +423,7 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for Sqlite
                             COUNT(1) FILTER (WHERE status = 'Failed') AS failed, 
                             COUNT(1) FILTER (WHERE status = 'Killed') AS killed
                         FROM Jobs WHERE job_type = ?";
-        let res: (i32, i32, i32, i32, i32, i32) = sqlx::query_as(fetch_query)
+        let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
             .bind(J::NAME)
             .fetch_one(&mut conn)
             .await
@@ -472,7 +470,7 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for Sqlite
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         let fetch_query =
-            "SELECT id, layers, last_seen FROM Workers WHERE worker_type = ? LIMIT 100 OFFSET ?";
+            "SELECT id, layers, last_seen FROM Workers WHERE worker_type = ? ORDER BY last_seen DESC LIMIT 20 OFFSET ?";
         let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
             .bind(J::NAME)
             .bind("0")

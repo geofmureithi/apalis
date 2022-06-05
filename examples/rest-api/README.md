@@ -1,6 +1,6 @@
 # Apalis Rest API Example
 
-![UI](assets/apalis_board.png)
+![UI](https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png)
 
 ## Backend
 
@@ -12,5 +12,6 @@ cd examples && cargo run -p rest-api
 
 ```
 git clone https://github.com/geofmureithi/apalis-board
+cd apalis-board
 yarn && yarn start:dev
 ```

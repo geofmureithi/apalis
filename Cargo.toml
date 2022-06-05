@@ -58,6 +58,7 @@ path = "./packages/apalis-redis"
 
 [dependencies.apalis-sql]
 version = "0.3.0-beta.0"
+features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"

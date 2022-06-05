@@ -516,7 +516,7 @@ where
         let schedule_job = self.scripts.schedule_job.clone();
         let job_id = job.id();
         let worker_id = job.lock_by().clone().unwrap_or_default();
-        let job = serde_json::to_string(job).unwrap();
+        let job = serde_json::to_string(job)?;
         let job_data_hash = self.queue.job_data_hash.to_string();
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
         let on = Utc::now();

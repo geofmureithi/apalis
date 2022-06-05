@@ -11,11 +11,11 @@ description = "SQL Storage for Apalis: simple, extensible multithreaded backgrou
 default = [ "sqlite", "migrate" ]
 postgres = [ "sqlx/postgres", "sqlx/json", "sqlx/chrono"]
 sqlite = [ "sqlx/sqlite", "sqlx/json", "sqlx/chrono"]
-mysql = [ "sqlx/mysql", "sqlx/json", "sqlx/chrono"]
-migrate = ["sqlx/migrate"]
+mysql = [ "sqlx/mysql", "sqlx/json", "sqlx/chrono", "sqlx/bigdecimal"]
+migrate = ["sqlx/migrate", "sqlx/macros"]
 
 [dependencies.sqlx]
-version = "0.5.5"
+version = "0.5.13"
 default-features = false
 features = [ "runtime-tokio-rustls", "uuid" ]
 

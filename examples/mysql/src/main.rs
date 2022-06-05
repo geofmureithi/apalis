@@ -24,10 +24,10 @@ async fn main() -> std::io::Result<()> {
     let database_url = std::env::var("DATABASE_URL").expect("Must specify path to db");
 
     let mysql: MysqlStorage<Email> = MysqlStorage::connect(database_url).await.unwrap();
-    // mysql
-    //     .setup()
-    //     .await
-    //     .expect("unable to run migrations for mysql");
+    mysql
+        .setup()
+        .await
+        .expect("unable to run migrations for mysql");
 
     produce_jobs(&mysql).await;
     Monitor::new()

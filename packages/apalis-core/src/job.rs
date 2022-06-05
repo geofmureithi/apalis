@@ -136,7 +136,7 @@ impl JobStreamWorker {
 pub struct Counts {
     /// Counts are flattened from a Hashmap of [JobState]
     #[serde(flatten)]
-    pub inner: HashMap<JobState, i32>,
+    pub inner: HashMap<JobState, i64>,
 }
 
 /// JobStream extension usually useful for management via cli, web etc

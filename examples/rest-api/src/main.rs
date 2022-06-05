@@ -1,9 +1,12 @@
 use std::collections::HashSet;
+use std::time::Duration;
 
 use actix_cors::Cors;
 use actix_web::{web, App, HttpResponse, HttpServer, Scope};
 use apalis::{
     layers::{SentryJobLayer, TraceLayer},
+    mysql::MysqlStorage,
+    postgres::PostgresStorage,
     redis::RedisStorage,
     sqlite::SqliteStorage,
     Counts, Job, JobContext, JobError, JobRequest, JobResult, JobState, JobStreamExt, Monitor,
@@ -28,7 +31,37 @@ async fn notification_service(
     _ctx: JobContext,
 ) -> Result<JobResult, JobError> {
     println!("Attempting to send notification {}", notif.text);
+    tokio::time::sleep(Duration::from_millis(1)).await;
+    Ok(JobResult::Success)
+}
 
+#[derive(Debug, Deserialize, Serialize)]
+struct Document {
+    text: String,
+}
+
+impl Job for Document {
+    const NAME: &'static str = "postgres::Document";
+}
+
+async fn document_service(doc: Document, _ctx: JobContext) -> Result<JobResult, JobError> {
+    println!("Attempting to convert {} to pdf", doc.text);
+    tokio::time::sleep(Duration::from_millis(1)).await;
+    Ok(JobResult::Success)
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct Upload {
+    url: String,
+}
+
+impl Job for Upload {
+    const NAME: &'static str = "mysql::Upload";
+}
+
+async fn upload_service(upload: Upload, _ctx: JobContext) -> Result<JobResult, JobError> {
+    println!("Attempting to upload {} to cloud", upload.url);
+    tokio::time::sleep(Duration::from_millis(1)).await;
     Ok(JobResult::Success)
 }
 
@@ -208,7 +241,7 @@ async fn produce_redis_jobs(mut storage: RedisStorage<Email>) {
     }
 }
 async fn produce_sqlite_jobs(mut storage: SqliteStorage<Notification>) {
-    for i in 0..10 {
+    for i in 0..100 {
         storage
             .push(Notification {
                 text: format!("Notiification: {}", i),
@@ -218,24 +251,66 @@ async fn produce_sqlite_jobs(mut storage: SqliteStorage<Notification>) {
     }
 }
 
-#[actix_rt::main]
+async fn produce_postgres_jobs(mut storage: PostgresStorage<Document>) {
+    for i in 0..100 {
+        storage
+            .push(Document {
+                text: format!("Document: {}", i),
+            })
+            .await
+            .unwrap();
+    }
+}
+
+async fn produce_mysql_jobs(mut storage: MysqlStorage<Upload>) {
+    for i in 0..100 {
+        storage
+            .push(Upload {
+                url: format!("Upload: {}", i),
+            })
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     env_logger::init();
+    let database_url = std::env::var("DATABASE_URL").expect("Must specify DATABASE_URL");
+    let pg: PostgresStorage<Document> = PostgresStorage::connect(database_url).await.unwrap();
+    let _res = pg.setup().await.expect("Unable to migrate");
+
+    let database_url = std::env::var("MYSQL_URL").expect("Must specify MYSQL_URL");
+
+    let mysql: MysqlStorage<Upload> = MysqlStorage::connect(database_url).await.unwrap();
+    mysql
+        .setup()
+        .await
+        .expect("unable to run migrations for mysql");
 
     let storage = RedisStorage::connect("redis://127.0.0.1/").await.unwrap();
-    let sqlite = SqliteStorage::connect("sqlite::memory:").await.unwrap();
-    let _res = sqlite.setup().await;
+
+    let sqlite = SqliteStorage::connect("sqlite://data.db").await.unwrap();
+    let _res = sqlite.setup().await.expect("Unable to migrate");
+
     let worker_storage = storage.clone();
     let sqlite_storage = sqlite.clone();
+    let pg_storage = pg.clone();
+    let mysql_storage = mysql.clone();
+
     produce_redis_jobs(storage.clone()).await;
     produce_sqlite_jobs(sqlite.clone()).await;
+    produce_postgres_jobs(pg_storage.clone()).await;
+    produce_mysql_jobs(mysql.clone()).await;
     let http = HttpServer::new(move || {
         App::new().wrap(Cors::permissive()).service(
             web::scope("/api").service(
                 StorageApiBuilder::new()
                     .add_storage(storage.clone())
                     .add_storage(sqlite.clone())
+                    .add_storage(pg.clone())
+                    .add_storage(mysql.clone())
                     .to_scope(),
             ),
         )
@@ -244,14 +319,29 @@ async fn main() -> std::io::Result<()> {
     .run();
 
     let worker = Monitor::new()
-        .register_with_count(3, move |_| {
-            WorkerBuilder::new(worker_storage.clone()).build_fn(send_email)
-        })
         .register_with_count(1, move |_| {
+            WorkerBuilder::new(worker_storage.clone())
+                .layer(SentryJobLayer)
+                .layer(TraceLayer::new())
+                .build_fn(send_email)
+        })
+        .register_with_count(4, move |_| {
             WorkerBuilder::new(sqlite_storage.clone())
                 .layer(SentryJobLayer)
                 .layer(TraceLayer::new())
                 .build_fn(notification_service)
+        })
+        .register_with_count(2, move |_| {
+            WorkerBuilder::new(pg_storage.clone())
+                .layer(SentryJobLayer)
+                .layer(TraceLayer::new())
+                .build_fn(document_service)
+        })
+        .register_with_count(2, move |_| {
+            WorkerBuilder::new(mysql_storage.clone())
+                .layer(SentryJobLayer)
+                .layer(TraceLayer::new())
+                .build_fn(upload_service)
         })
         .run();
     future::try_join(http, worker).await?;

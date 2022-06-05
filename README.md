@@ -81,9 +81,9 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) {
 
 ### Web UI
 
-If you are running Apalis Board, you can easily manage your jobs.
+If you are running [Apalis Board](https://github.com/geofmureithi/apalis-board), you can easily manage your jobs. See a working [Rest API here] (https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
 
-![UI](./examples/rest-api/assets/preview_board.png)
+![UI](https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png)
 
 ## Feature flags
 

@@ -73,11 +73,6 @@ pub trait Worker: Send + Sized + 'static {
     /// The future returened by our tower service
     type Future: Future<Output = Result<JobResult, JobError>> + Send;
 
-    #[cfg(feature = "broker")]
-    /// Used to bind broker
-    /// TODO: Update this
-    fn pre_start(&mut self, _broker: &Broker) {}
-
     /// At start hook of worker
     async fn on_start(&mut self, _ctx: &mut Context<Self>) {}
 

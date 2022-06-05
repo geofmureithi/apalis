@@ -49,7 +49,7 @@ impl Default for StorageWorkerConfig {
 
         StorageWorkerConfig {
             keep_alive: Duration::from_secs(30),
-            fetch_interval: Duration::from_millis(1),
+            fetch_interval: Duration::from_millis(50),
             heartbeats,
         }
     }

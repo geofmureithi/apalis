@@ -1,16 +1,17 @@
-use apalis_core::error::JobStreamError;
-use apalis_core::job::{Job, JobStreamResult};
-use apalis_core::request::JobRequest;
+use apalis_core::error::{JobError, JobStreamError};
+use apalis_core::job::{Counts, Job, JobStreamExt, JobStreamResult, JobStreamWorker};
+use apalis_core::request::{JobRequest, JobState};
 use apalis_core::storage::StorageError;
 use apalis_core::storage::StorageWorkerPulse;
 use apalis_core::storage::{Storage, StorageResult};
 use async_stream::try_stream;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::Stream;
 use serde::{de::DeserializeOwned, Serialize};
 
 use sqlx::types::Uuid;
 use sqlx::{MySql, MySqlPool, Pool, Row};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
@@ -51,48 +52,8 @@ impl<T> MysqlStorage<T> {
     #[cfg(feature = "migrate")]
     pub async fn setup(&self) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let migrate =
-            sqlx::migrate::Migrator::new(std::path::Path::new("migrations/mysql")).await?;
-        migrate.run(&pool.clone()).await?;
+        sqlx::migrate!("migrations/mysql").run(&pool).await?;
         Ok(())
-    }
-}
-
-async fn fetch_next<T>(
-    pool: Pool<MySql>,
-    worker_id: String,
-    job: Option<JobRequest<T>>,
-) -> Result<Option<JobRequest<T>>, JobStreamError>
-where
-    T: Send + Unpin + DeserializeOwned,
-{
-    match job {
-        None => Ok(None),
-        Some(job) => {
-            let mut tx = pool
-                .begin()
-                .await
-                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-            let job_id = job.id();
-            let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ? WHERE id = ? AND status = 'Pending' AND lock_by IS NULL;";
-            sqlx::query(update_query)
-                .bind(worker_id)
-                .bind(job_id.clone())
-                .execute(&mut tx)
-                .await
-                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-            let job: Option<SqlJobRequest<T>> = sqlx::query_as("Select * from jobs where id = ?")
-                .bind(job_id.clone())
-                .fetch_optional(&mut tx)
-                .await
-                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-
-            tx.commit()
-                .await
-                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-
-            Ok(job.as_job_request())
-        }
     }
 }
 
@@ -107,8 +68,12 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
         try_stream! {
             loop {
                 interval.tick().await;
-                let tx = pool.clone();
-                let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+                let pool = pool.clone();
+                let mut tx = pool
+                .begin()
+                .await
+                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+
                 let job_type = T::NAME;
                 let fetch_query = "SELECT * FROM jobs
                     WHERE status = 'Pending' AND run_at < NOW() AND job_type = ? ORDER BY run_at ASC LIMIT 1 FOR UPDATE";
@@ -116,7 +81,37 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
                     .bind(job_type)
                     .fetch_optional(&mut tx)
                     .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-                yield fetch_next(pool.clone(), worker_id.clone(), job.as_job_request()).await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?
+                yield match job.as_job_request() {
+                        None => {
+                            tx.commit()
+                                .await
+                                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+                                None
+                        },
+                        Some(job) => {
+
+                            let job_id = job.id();
+                            let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ? WHERE id = ? AND status = 'Pending' AND lock_by IS NULL;";
+                            sqlx::query(update_query)
+                                .bind(worker_id.clone())
+                                .bind(job_id.clone())
+                                .execute(&mut tx)
+                                .await
+                                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+                            let job: Option<SqlJobRequest<T>> = sqlx::query_as("Select * from jobs where id = ?")
+                                .bind(job_id.clone())
+                                .fetch_optional(&mut tx)
+                                .await
+                                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+
+                            tx.commit()
+                                .await
+                                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+
+                            job.as_job_request()
+                        }
+                    }
+                    // yield fetch_next(pool.clone(), worker_id.clone(), job.as_job_request()).await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?
             }
         }
     }
@@ -365,15 +360,100 @@ where
         let worker_type = T::NAME;
         let storage_name = std::any::type_name::<Self>();
         let query =
-            "REPLACE INTO workers (id, worker_type, storage_name, last_seen) VALUES (?, ?, ?, ?);";
+            "REPLACE INTO workers (id, worker_type, storage_name, layers, last_seen) VALUES (?, ?, ?, ?, ?);";
         sqlx::query(query)
             .bind(worker_id.to_owned())
             .bind(worker_type)
             .bind(storage_name)
+            .bind(std::any::type_name::<Service>())
             .bind(Utc::now())
             .execute(&mut tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+
+impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for MysqlStorage<J> {
+    async fn counts(&mut self) -> Result<Counts, JobError> {
+        let mut conn = self
+            .pool
+            .clone()
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+
+        let fetch_query = "SELECT
+            COUNT(CASE WHEN status = 'Pending' THEN 1 END) AS pending,
+            COUNT(CASE WHEN status = 'Running' THEN 1 END) AS running,
+            COUNT(CASE WHEN status = 'Done' THEN 1 END) AS done,
+            COUNT(CASE WHEN status = 'Retry' THEN 1 END) AS retry,
+            COUNT(CASE WHEN status = 'Failed' THEN 1 END) AS failed,
+            COUNT(CASE WHEN status = 'Killed' THEN 1 END) AS killed
+        FROM jobs WHERE job_type = ?";
+        let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
+            .bind(J::NAME)
+            .fetch_one(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let mut inner = HashMap::new();
+        inner.insert(JobState::Pending, res.0);
+        inner.insert(JobState::Running, res.1);
+        inner.insert(JobState::Done, res.2);
+        inner.insert(JobState::Retry, res.3);
+        inner.insert(JobState::Failed, res.4);
+        inner.insert(JobState::Killed, res.5);
+        Ok(Counts { inner })
+    }
+
+    async fn list_jobs(
+        &mut self,
+        status: &JobState,
+        page: i32,
+    ) -> Result<Vec<JobRequest<J>>, JobError> {
+        let status = status.as_ref().to_string();
+
+        let mut conn = self
+            .pool
+            .clone()
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let fetch_query = "SELECT * FROM jobs WHERE status = ? AND job_type = ? ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET ?";
+        let res: Vec<SqlJobRequest<J>> = sqlx::query_as(fetch_query)
+            .bind(status)
+            .bind(J::NAME)
+            .bind((page - 1) * 10)
+            .fetch_all(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        Ok(res.into_iter().map(|j| j.into()).collect())
+    }
+
+    async fn list_workers(&mut self) -> Result<Vec<JobStreamWorker>, JobError> {
+        let mut conn = self
+            .pool
+            .clone()
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let fetch_query =
+            "SELECT id, layers, last_seen FROM workers WHERE worker_type = ? ORDER BY last_seen DESC LIMIT 20 OFFSET ?";
+        let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
+            .bind(J::NAME)
+            .bind(0)
+            .fetch_all(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        Ok(res
+            .into_iter()
+            .map(|(worker_id, layers, last_seen)| {
+                let mut worker = JobStreamWorker::new::<Self, J>(worker_id, last_seen);
+                worker.set_layers(layers);
+                worker
+            })
+            .collect())
     }
 }
