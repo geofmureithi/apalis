@@ -5,15 +5,23 @@ use strum::{AsRefStr, EnumString};
 
 use crate::context::JobContext;
 
-/// Represents the state of a [JobRequest] in a [Storage]
-#[derive(EnumString, Serialize, Deserialize, Debug, Clone, AsRefStr)]
+/// Represents the state of a [JobRequest]
+#[derive(
+    EnumString, Serialize, Deserialize, Debug, Clone, AsRefStr, Hash, PartialEq, std::cmp::Eq,
+)]
 pub enum JobState {
+    /// Job is pending
     #[serde(alias = "Latest")]
     Pending,
+    /// Job is running
     Running,
+    /// Job was done successfully
     Done,
+    /// Retry Job
     Retry,
+    /// Job has failed. Check `last_error`
     Failed,
+    /// Job has been killed
     Killed,
 }
 
@@ -23,23 +31,23 @@ impl Default for JobState {
     }
 }
 
-/// Represents a job which can be pushed and popped into a [Storage].
+/// Represents a job which can be serialized and executed
 
 #[derive(Serialize, Debug, Deserialize, Clone)]
 pub struct JobRequest<T> {
     pub(crate) job: T,
-    #[serde(skip)]
     pub(crate) context: JobContext,
 }
 
 impl<T> JobRequest<T> {
-    /// Creates a new [JobRequest] ready to be pushed to a [Storage]
+    /// Creates a new [JobRequest]
     pub fn new(job: T) -> Self {
         let id = uuid::Uuid::new_v4().to_string();
         let context = JobContext::new(id);
         Self { job, context }
     }
 
+    /// Creates a Job request with context provided
     pub fn new_with_context(job: T, ctx: JobContext) -> Self {
         Self { job, context: ctx }
     }

@@ -1,11 +1,10 @@
 use std::{convert::identity, marker::PhantomData, time::Duration};
 
 use apalis_core::{
-    error::StorageError,
-    job::Job,
+    error::{JobError, JobStreamError},
+    job::{Job, JobStreamExt, JobStreamResult, JobStreamWorker},
     request::{JobRequest, JobState},
-    storage::{JobStream, Storage, StorageJobExt, StorageResult},
-    worker::WorkerPulse,
+    storage::{Storage, StorageError, StorageResult, StorageWorkerPulse},
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -13,6 +12,7 @@ use futures::Stream;
 use log::*;
 use redis::{aio::MultiplexedConnection, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Serialize};
+use tokio::time::Instant;
 
 const ACTIVE_JOBS_LIST: &str = "{queue}:active";
 const CONSUMERS_SET: &str = "{queue}:consumers";
@@ -124,7 +124,7 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
         &self,
         worker_id: String,
         interval: Duration,
-    ) -> impl Stream<Item = Result<Option<JobRequest<T>>, StorageError>> {
+    ) -> impl Stream<Item = Result<Option<JobRequest<T>>, JobStreamError>> {
         let mut conn = self.conn.clone();
         let fetch_jobs = self.scripts.get_jobs.clone();
         let consumers_set = self.queue.consumers_set.to_string();
@@ -132,11 +132,12 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
         let job_data_hash = self.queue.job_data_hash.to_string();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let signal_list = self.queue.signal_list.to_string();
-        let mut interval = tokio::time::interval(interval);
+        let start = Instant::now() + Duration::from_millis(5);
+        let mut interval = tokio::time::interval_at(start, interval);
         try_stream! {
             loop {
                 interval.tick().await;
-                let res: Result<Vec<Value>, RedisError> = fetch_jobs
+                let res: Result<Vec<Value>, JobStreamError> = fetch_jobs
                     .key(&consumers_set)
                     .key(&active_jobs_list)
                     .key(&inflight_set)
@@ -145,7 +146,7 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
                     .arg("1") // fetch one job at a time
                     .arg(&inflight_set)
                     .invoke_async(&mut conn)
-                    .await;
+                    .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)));
                 let job = unwrap_job(res)?;
                 yield job
             }
@@ -154,8 +155,8 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
 }
 
 fn unwrap_job<T>(
-    data: Result<Vec<Value>, RedisError>,
-) -> Result<Option<JobRequest<T>>, StorageError>
+    data: Result<Vec<Value>, JobStreamError>,
+) -> Result<Option<JobRequest<T>>, JobStreamError>
 where
     T: DeserializeOwned,
 {
@@ -164,7 +165,7 @@ where
             let job = jobs.get(0);
             Ok(deserialize_job(job))
         }
-        Err(e) => Err(StorageError::Database(Box::new(e))),
+        Err(e) => Err(e),
     }
 }
 
@@ -226,13 +227,14 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<T> Storage for RedisStorage<T>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Job,
 {
     type Output = T;
 
-    fn push(&mut self, job: Self::Output) -> StorageResult<()> {
+    async fn push(&mut self, job: Self::Output) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let push_job = self.scripts.push_job.clone();
         let job_data_hash = self.queue.job_data_hash.to_string();
@@ -240,151 +242,136 @@ where
         let signal_list = self.queue.signal_list.to_string();
         let job = JobRequest::new(job);
         let job_id = job.id();
-        let job = serde_json::to_string(&job).unwrap();
+        let job = serde_json::to_string(&job)?;
         log::debug!(
             "Received new job with id: {} to list: {}",
             job_id,
             active_jobs_list
         );
-        let fut = async move {
-            push_job
-                .key(job_data_hash)
-                .key(active_jobs_list)
-                .key(signal_list)
-                .arg(job_id)
-                .arg(job)
-                .invoke_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))
-        };
-        Box::pin(fut)
+
+        push_job
+            .key(job_data_hash)
+            .key(active_jobs_list)
+            .key(signal_list)
+            .arg(job_id)
+            .arg(job)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))
     }
 
-    fn schedule(&mut self, job: Self::Output, on: DateTime<Utc>) -> StorageResult<()> {
+    async fn schedule(&mut self, job: Self::Output, on: DateTime<Utc>) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let schedule_job = self.scripts.schedule_job.clone();
         let job_data_hash = self.queue.job_data_hash.to_string();
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
         let job = JobRequest::new(job);
         let job_id = job.id();
-        let job = serde_json::to_string(&job).unwrap();
+        let job = serde_json::to_string(&job)?;
         log::trace!(
             "Scheduled new job with id: {} to list: {}",
             job_id,
             scheduled_jobs_set
         );
-        let fut = async move {
-            schedule_job
-                .key(job_data_hash)
-                .key(scheduled_jobs_set)
-                .arg(job_id)
-                .arg(job)
-                .arg(on.timestamp())
-                .invoke_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))
-        };
-        Box::pin(fut)
+
+        schedule_job
+            .key(job_data_hash)
+            .key(scheduled_jobs_set)
+            .arg(job_id)
+            .arg(job)
+            .arg(on.timestamp())
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))
     }
 
-    fn consume(&mut self, worker_id: String, interval: Duration) -> JobStream<T> {
+    fn consume(&mut self, worker_id: String, interval: Duration) -> JobStreamResult<T> {
         Box::pin(self.stream_jobs(worker_id, interval))
     }
 
-    fn kill(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
+    async fn kill(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let kill_job = self.scripts.kill_job.clone();
         let current_worker_id = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let job_data_hash = self.queue.job_data_hash.to_string();
         let dead_jobs_set = self.queue.dead_jobs_set.to_string();
         let fetch_job = self.fetch_by_id(job_id.clone());
-        let fut = async move {
-            let res = fetch_job.await?;
-            match res {
-                Some(job) => {
-                    let now = Utc::now().timestamp();
-                    let data = serde_json::to_string(&job)?;
-                    kill_job
-                        .key(current_worker_id)
-                        .key(dead_jobs_set)
-                        .key(job_data_hash)
-                        .arg(job_id)
-                        .arg(now)
-                        .arg(data)
-                        .invoke_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::from(e)))
-                }
-                None => Err(StorageError::NotFound),
+
+        let res = fetch_job.await?;
+        match res {
+            Some(job) => {
+                let now = Utc::now().timestamp();
+                let data = serde_json::to_string(&job)?;
+                kill_job
+                    .key(current_worker_id)
+                    .key(dead_jobs_set)
+                    .key(job_data_hash)
+                    .arg(job_id)
+                    .arg(now)
+                    .arg(data)
+                    .invoke_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::from(e)))
             }
-        };
-        Box::pin(fut)
+            None => Err(StorageError::NotFound),
+        }
     }
 
-    fn len(&self) -> StorageResult<i64> {
+    async fn len(&self) -> StorageResult<i64> {
         let mut conn = self.conn.clone();
         let job_data_hash = format!("{}", &self.queue.job_data_hash);
-        let fut = async move {
-            let length: i64 = redis::cmd("HLEN")
-                .arg(format!("{}", job_data_hash))
-                .query_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::new(e)))?;
-            Ok(length)
-        };
-        Box::pin(fut)
+
+        let length: i64 = redis::cmd("HLEN")
+            .arg(format!("{}", job_data_hash))
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::new(e)))?;
+        Ok(length)
     }
 
-    fn fetch_by_id(&self, job_id: String) -> StorageResult<Option<JobRequest<Self::Output>>> {
+    async fn fetch_by_id(&self, job_id: String) -> StorageResult<Option<JobRequest<Self::Output>>> {
         let mut conn = self.conn.clone();
         let job_data_hash = format!("{}", &self.queue.job_data_hash);
-        let fut = async move {
-            let data: Option<Value> = redis::cmd("HMGET")
-                .arg(job_data_hash)
-                .arg(job_id.clone())
-                .query_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::new(e)))?;
-            Ok(deserialize_job(data.as_ref()))
-        };
-        Box::pin(fut)
+
+        let data: Option<Value> = redis::cmd("HMGET")
+            .arg(job_data_hash)
+            .arg(job_id.clone())
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::new(e)))?;
+        Ok(deserialize_job(data.as_ref()))
     }
-    fn update_by_id(&self, job_id: String, job: &JobRequest<T>) -> StorageResult<()> {
+    async fn update_by_id(&self, job_id: String, job: &JobRequest<T>) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let job_data_hash = format!("{}", &self.queue.job_data_hash);
-        let job = serde_json::to_string(job).unwrap();
-        let fut = async move {
-            let res: Result<i64, RedisError> = redis::cmd("HSET")
-                .arg(job_data_hash)
-                .arg(job_id)
-                .arg(job)
-                .query_async(&mut conn)
-                .await;
-            let _res = res.map_err(|e| StorageError::Database(Box::new(e)))?;
-            Ok(())
-        };
-        Box::pin(fut)
+        let job = serde_json::to_string(job)?;
+        let res: Result<i64, RedisError> = redis::cmd("HSET")
+            .arg(job_data_hash)
+            .arg(job_id)
+            .arg(job)
+            .query_async(&mut conn)
+            .await;
+        let _res = res.map_err(|e| StorageError::Database(Box::new(e)))?;
+        Ok(())
     }
 
-    fn ack(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
+    async fn ack(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let ack_job = self.scripts.ack_job.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let done_jobs_set = format!("{}", &self.queue.done_jobs_set);
-        let fut = async move {
-            let now = Utc::now().timestamp();
-            ack_job
-                .key(inflight_set)
-                .key(done_jobs_set)
-                .arg(job_id)
-                .arg(now)
-                .invoke_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::new(e)))
-        };
-        Box::pin(fut)
+
+        let now = Utc::now().timestamp();
+        ack_job
+            .key(inflight_set)
+            .key(done_jobs_set)
+            .arg(job_id)
+            .arg(now)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::new(e)))
     }
-    fn retry(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
+    async fn retry(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let retry_job = self.scripts.retry_job.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
@@ -393,343 +380,335 @@ where
         let job_fut = self.fetch_by_id(job_id.clone());
         let failed_jobs_set = self.queue.failed_jobs_set.to_string();
         let mut storage = self.clone();
-        let fut = async move {
-            let res = job_fut.await?;
-            match res {
-                Some(job) => {
-                    if job.attempts() >= job.max_attempts() {
-                        warn!("too many retries: {:?}", job.attempts());
-                        let _res = redis::cmd("ZADD")
-                            .arg(failed_jobs_set)
-                            .arg(Utc::now().timestamp())
-                            .arg(job_id.clone())
-                            .query_async(&mut conn)
-                            .await
-                            .map_err(|e| StorageError::Database(Box::new(e)))?;
-                        storage
-                            .kill(worker_id.clone(), job_id.clone())
-                            .await
-                            .map_err(|e| StorageError::Database(Box::new(e)))?;
-                        return Ok(());
-                    }
-                    let job = serde_json::to_string(&job)?;
-                    let now = Utc::now().timestamp();
-                    let res: Result<i32, StorageError> = retry_job
-                        .key(inflight_set)
-                        .key(scheduled_jobs_set)
-                        .key(job_data_hash)
-                        .arg(job_id)
-                        .arg(now)
-                        .arg(job)
-                        .invoke_async(&mut conn)
+
+        let res = job_fut.await?;
+        match res {
+            Some(job) => {
+                if job.attempts() >= job.max_attempts() {
+                    warn!("too many retries: {:?}", job.attempts());
+                    let _res = redis::cmd("ZADD")
+                        .arg(failed_jobs_set)
+                        .arg(Utc::now().timestamp())
+                        .arg(job_id.clone())
+                        .query_async(&mut conn)
                         .await
-                        .map_err(|e| StorageError::Database(Box::new(e)));
-                    match res {
-                        Ok(count) => {
-                            trace!("Jobs to remove: {:?}", count);
-                            Ok(())
-                        }
-                        Err(e) => Err(e),
-                    }
+                        .map_err(|e| StorageError::Database(Box::new(e)))?;
+                    storage
+                        .kill(worker_id.clone(), job_id.clone())
+                        .await
+                        .map_err(|e| StorageError::Database(Box::new(e)))?;
+                    return Ok(());
                 }
-                None => Err(StorageError::NotFound),
+                let job = serde_json::to_string(&job)?;
+                let now = Utc::now().timestamp();
+                let res: Result<i32, StorageError> = retry_job
+                    .key(inflight_set)
+                    .key(scheduled_jobs_set)
+                    .key(job_data_hash)
+                    .arg(job_id)
+                    .arg(now)
+                    .arg(job)
+                    .invoke_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::new(e)));
+                match res {
+                    Ok(count) => {
+                        trace!("Jobs to remove: {:?}", count);
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
             }
-        };
-        Box::pin(fut)
+            None => Err(StorageError::NotFound),
+        }
     }
-    fn keep_alive(&mut self, worker_id: String) -> StorageResult<()> {
+    async fn keep_alive<Service>(&mut self, worker_id: String) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let register_consumer = self.scripts.register_consumer.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let consumers_set = self.queue.consumers_set.to_string();
         let timestamp = Utc::now().timestamp();
-        let fut = async move {
-            register_consumer
-                .key(consumers_set)
-                .arg(timestamp)
-                .arg(inflight_set)
-                .invoke_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Connection(Box::from(e)))
-        };
-        Box::pin(fut)
+
+        register_consumer
+            .key(consumers_set)
+            .arg(timestamp)
+            .arg(inflight_set)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Connection(Box::from(e)))
     }
 
-    fn heartbeat(&mut self, beat: WorkerPulse) -> StorageResult<bool> {
+    async fn heartbeat(&mut self, beat: StorageWorkerPulse) -> StorageResult<bool> {
         let mut conn = self.conn.clone();
         match beat {
-            WorkerPulse::EnqueueScheduled { count } => {
+            StorageWorkerPulse::EnqueueScheduled { count } => {
                 let enqueue_jobs = self.scripts.enqueue_scheduled.clone();
                 let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
                 let active_jobs_list = self.queue.active_jobs_list.to_string();
                 let signal_list = self.queue.signal_list.to_string();
                 let timestamp = Utc::now().timestamp();
-                let fut = async move {
-                    let res: Result<i8, StorageError> = enqueue_jobs
-                        .key(scheduled_jobs_set)
-                        .key(active_jobs_list)
-                        .key(signal_list)
-                        .arg(timestamp)
-                        .arg(count)
-                        .invoke_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::from(e)));
-                    match res {
-                        Ok(count) => {
-                            if count > 0 {
-                                trace!("Jobs to enqueue: {:?}", count);
-                            }
-                            Ok(true)
+                let res: Result<i8, StorageError> = enqueue_jobs
+                    .key(scheduled_jobs_set)
+                    .key(active_jobs_list)
+                    .key(signal_list)
+                    .arg(timestamp)
+                    .arg(count)
+                    .invoke_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::from(e)));
+                match res {
+                    Ok(count) => {
+                        if count > 0 {
+                            trace!("Jobs to enqueue: {:?}", count);
                         }
-                        Err(e) => Err(e),
+                        Ok(true)
                     }
-                };
-                Box::pin(fut)
+                    Err(e) => Err(e),
+                }
             }
 
-            WorkerPulse::RenqueueOrpharned { count } => {
+            StorageWorkerPulse::RenqueueOrpharned { count } => {
                 let reenqueue_orphaned = self.scripts.reenqueue_orphaned.clone();
                 let consumers_set = self.queue.consumers_set.to_string();
                 let active_jobs_list = self.queue.active_jobs_list.to_string();
                 let signal_list = self.queue.signal_list.to_string();
                 let timestamp = Utc::now() - chrono::Duration::minutes(5);
-                let fut = async move {
-                    let res: Result<i8, StorageError> = reenqueue_orphaned
-                        .key(consumers_set)
-                        .key(active_jobs_list)
-                        .key(signal_list)
-                        .arg(timestamp.timestamp())
-                        .arg(count)
-                        .invoke_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::from(e)));
-                    match res {
-                        Ok(count) => {
-                            if count > 0 {
-                                debug!("{} jobs to reenqueue", count);
-                            }
-                            Ok(true)
+                let res: Result<i8, StorageError> = reenqueue_orphaned
+                    .key(consumers_set)
+                    .key(active_jobs_list)
+                    .key(signal_list)
+                    .arg(timestamp.timestamp())
+                    .arg(count)
+                    .invoke_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::from(e)));
+                match res {
+                    Ok(count) => {
+                        if count > 0 {
+                            debug!("{} jobs to reenqueue", count);
                         }
-                        Err(e) => Err(e),
+                        Ok(true)
                     }
-                };
-                Box::pin(fut)
+                    Err(e) => Err(e),
+                }
             }
             _ => todo!(),
         }
     }
-    fn reenqueue_active(&mut self, job_ids: Vec<String>) -> StorageResult<()> {
+    async fn reenqueue_active(&mut self, job_ids: Vec<String>) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let reenqueue_active = self.scripts.reenqueue_active.clone();
         let inflight_set = self.queue.inflight_jobs_set.to_string();
         let active_jobs_list = self.queue.active_jobs_list.to_string();
         let signal_list = self.queue.signal_list.to_string();
-        let fut = async move {
-            reenqueue_active
-                .key(inflight_set)
-                .key(active_jobs_list)
-                .key(signal_list)
-                .arg(job_ids)
-                .invoke_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Connection(Box::from(e)))
-        };
-        Box::pin(fut)
+
+        reenqueue_active
+            .key(inflight_set)
+            .key(active_jobs_list)
+            .key(signal_list)
+            .arg(job_ids)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Connection(Box::from(e)))
     }
-    fn reschedule(&mut self, job: &JobRequest<T>, _wait: Duration) -> StorageResult<()> {
+    async fn reschedule(&mut self, job: &JobRequest<T>, _wait: Duration) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let schedule_job = self.scripts.schedule_job.clone();
         let job_id = job.id();
         let worker_id = job.lock_by().clone().unwrap_or_default();
-        let job = serde_json::to_string(job).unwrap();
+        let job = serde_json::to_string(job)?;
         let job_data_hash = self.queue.job_data_hash.to_string();
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
         let on = Utc::now();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let failed_jobs_set = self.queue.failed_jobs_set.to_string();
-        let fut = async move {
-            let _cmd = redis::cmd("SREM")
-                .arg(inflight_set)
-                .arg(job_id.clone())
-                .query_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
-            let _cmd = redis::cmd("ZADD")
-                .arg(failed_jobs_set)
-                .arg(Utc::now().timestamp())
-                .arg(job_id.clone())
-                .query_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
-            schedule_job
-                .key(job_data_hash)
-                .key(scheduled_jobs_set)
-                .arg(job_id)
-                .arg(job)
-                .arg(on.timestamp())
-                .invoke_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))
-        };
-        Box::pin(fut)
+        let _cmd = redis::cmd("SREM")
+            .arg(inflight_set)
+            .arg(job_id.clone())
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let _cmd = redis::cmd("ZADD")
+            .arg(failed_jobs_set)
+            .arg(Utc::now().timestamp())
+            .arg(job_id.clone())
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        schedule_job
+            .key(job_data_hash)
+            .key(scheduled_jobs_set)
+            .arg(job_id)
+            .arg(job)
+            .arg(on.timestamp())
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))
     }
 }
 
-impl<T> StorageJobExt<T> for RedisStorage<T>
+#[async_trait::async_trait]
+impl<T> JobStreamExt<T> for RedisStorage<T>
 where
     T: 'static + Job + Serialize + DeserializeOwned,
 {
-    fn list_jobs(&mut self, status: &JobState, _page: i32) -> StorageResult<Vec<JobRequest<T>>> {
+    async fn list_jobs(
+        &mut self,
+        status: &JobState,
+        page: i32,
+    ) -> Result<Vec<JobRequest<T>>, JobError> {
         match status {
             JobState::Pending => {
                 let mut conn = self.conn.clone();
                 let active_jobs_list = format!("{}", &self.queue.active_jobs_list);
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);
-                let fut = async move {
-                    let ids: Vec<String> = redis::cmd("LRANGE")
-                        .arg(active_jobs_list)
-                        .arg("0")
-                        .arg("10")
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if ids.len() == 0 {
-                        return Ok(Vec::new());
-                    }
-                    let data: Option<Value> = redis::cmd("HMGET")
-                        .arg(job_data_hash)
-                        .arg(&ids)
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    let jobs: Vec<JobRequest<T>> =
-                        deserialize_multiple_jobs(data.as_ref()).unwrap();
-                    Ok(jobs)
-                };
-                Box::pin(fut)
+                let ids: Vec<String> = redis::cmd("LRANGE")
+                    .arg(active_jobs_list)
+                    .arg(((page - 1) * 10).to_string())
+                    .arg((page * 10).to_string())
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::new(e)))?;
+                if ids.len() == 0 {
+                    return Ok(Vec::new());
+                }
+                let data: Option<Value> = redis::cmd("HMGET")
+                    .arg(job_data_hash)
+                    .arg(&ids)
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::new(e)))?;
+                let jobs: Vec<JobRequest<T>> = deserialize_multiple_jobs(data.as_ref()).unwrap();
+                Ok(jobs)
             }
             JobState::Running => {
                 let mut conn = self.conn.clone();
                 let consumers_set = format!("{}", &self.queue.consumers_set);
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);
-                let fut = async move {
-                    let workers: Vec<String> = redis::cmd("ZRANGE")
-                        .arg(&consumers_set)
-                        .arg("0")
-                        .arg("-1")
+                let workers: Vec<String> = redis::cmd("ZRANGE")
+                    .arg(&consumers_set)
+                    .arg("0")
+                    .arg("-1")
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::new(e)))?;
+                if workers.len() == 0 {
+                    return Ok(Vec::new());
+                }
+                let mut all_jobs = Vec::new();
+                for worker in workers {
+                    let ids: Vec<String> = redis::cmd("SMEMBERS")
+                        .arg(&worker)
                         .query_async(&mut conn)
                         .await
                         .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if workers.len() == 0 {
-                        return Ok(Vec::new());
-                    }
-                    let mut all_jobs = Vec::new();
-                    for worker in workers {
-                        let ids: Vec<String> = redis::cmd("SMEMBERS")
-                            .arg(&worker)
-                            .query_async(&mut conn)
-                            .await
-                            .map_err(|e| StorageError::Database(Box::new(e)))?;
-                        if ids.len() == 0 {
-                            continue;
-                        };
-                        let data: Option<Value> = redis::cmd("HMGET")
-                            .arg(job_data_hash.clone())
-                            .arg(&ids)
-                            .query_async(&mut conn)
-                            .await
-                            .map_err(|e| StorageError::Database(Box::new(e)))?;
-                        let jobs: Vec<JobRequest<T>> =
-                            deserialize_multiple_jobs(data.as_ref()).unwrap();
-                        all_jobs.extend(jobs);
-                    }
+                    if ids.len() == 0 {
+                        continue;
+                    };
+                    let data: Option<Value> = redis::cmd("HMGET")
+                        .arg(job_data_hash.clone())
+                        .arg(&ids)
+                        .query_async(&mut conn)
+                        .await
+                        .map_err(|e| StorageError::Database(Box::new(e)))?;
+                    let jobs: Vec<JobRequest<T>> =
+                        deserialize_multiple_jobs(data.as_ref()).unwrap();
+                    all_jobs.extend(jobs);
+                }
 
-                    Ok(all_jobs)
-                };
-                Box::pin(fut)
+                Ok(all_jobs)
             }
             JobState::Done => {
                 let mut conn = self.conn.clone();
                 let done_jobs_set = format!("{}", &self.queue.done_jobs_set);
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);
-                let fut = async move {
-                    let ids: Vec<String> = redis::cmd("ZRANGE")
-                        .arg(done_jobs_set)
-                        .arg("0")
-                        .arg("10")
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if ids.len() == 0 {
-                        return Ok(Vec::new());
-                    }
-                    let data: Option<Value> = redis::cmd("HMGET")
-                        .arg(job_data_hash)
-                        .arg(&ids)
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    let jobs: Vec<JobRequest<T>> =
-                        deserialize_multiple_jobs(data.as_ref()).unwrap();
-                    Ok(jobs)
-                };
-                Box::pin(fut)
+                let ids: Vec<String> = redis::cmd("ZRANGE")
+                    .arg(done_jobs_set)
+                    .arg(((page - 1) * 10).to_string())
+                    .arg((page * 10).to_string())
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::new(e)))?;
+                if ids.len() == 0 {
+                    return Ok(Vec::new());
+                }
+                let data: Option<Value> = redis::cmd("HMGET")
+                    .arg(job_data_hash)
+                    .arg(&ids)
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::new(e)))?;
+                let jobs: Vec<JobRequest<T>> = deserialize_multiple_jobs(data.as_ref()).unwrap();
+                Ok(jobs)
             }
-            JobState::Retry => Box::pin(async { Ok(Vec::new()) }),
+            JobState::Retry => Ok(Vec::new()),
             JobState::Failed => {
                 let mut conn = self.conn.clone();
                 let failed_jobs_set = format!("{}", &self.queue.failed_jobs_set);
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);
-                let fut = async move {
-                    let ids: Vec<String> = redis::cmd("ZRANGE")
-                        .arg(failed_jobs_set)
-                        .arg("0")
-                        .arg("10")
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if ids.len() == 0 {
-                        return Ok(Vec::new());
-                    }
-                    let data: Option<Value> = redis::cmd("HMGET")
-                        .arg(job_data_hash)
-                        .arg(&ids)
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    let jobs: Vec<JobRequest<T>> =
-                        deserialize_multiple_jobs(data.as_ref()).unwrap();
-                    Ok(jobs)
-                };
-                Box::pin(fut)
+                let ids: Vec<String> = redis::cmd("ZRANGE")
+                    .arg(failed_jobs_set)
+                    .arg(((page - 1) * 10).to_string())
+                    .arg((page * 10).to_string())
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::new(e)))?;
+                if ids.len() == 0 {
+                    return Ok(Vec::new());
+                }
+                let data: Option<Value> = redis::cmd("HMGET")
+                    .arg(job_data_hash)
+                    .arg(&ids)
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::new(e)))?;
+                let jobs: Vec<JobRequest<T>> = deserialize_multiple_jobs(data.as_ref()).unwrap();
+                Ok(jobs)
             }
             JobState::Killed => {
                 let mut conn = self.conn.clone();
                 let dead_jobs_set = format!("{}", &self.queue.dead_jobs_set);
                 let job_data_hash = format!("{}", &self.queue.job_data_hash);
-                let fut = async move {
-                    let ids: Vec<String> = redis::cmd("ZRANGE")
-                        .arg(dead_jobs_set)
-                        .arg("0")
-                        .arg("10")
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if ids.len() == 0 {
-                        return Ok(Vec::new());
-                    }
-                    let data: Option<Value> = redis::cmd("HMGET")
-                        .arg(job_data_hash)
-                        .arg(&ids)
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    let jobs: Vec<JobRequest<T>> =
-                        deserialize_multiple_jobs(data.as_ref()).unwrap();
-                    Ok(jobs)
-                };
-                Box::pin(fut)
+                let ids: Vec<String> = redis::cmd("ZRANGE")
+                    .arg(dead_jobs_set)
+                    .arg(((page - 1) * 10).to_string())
+                    .arg((page * 10).to_string())
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::new(e)))?;
+                if ids.len() == 0 {
+                    return Ok(Vec::new());
+                }
+                let data: Option<Value> = redis::cmd("HMGET")
+                    .arg(job_data_hash)
+                    .arg(&ids)
+                    .query_async(&mut conn)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::new(e)))?;
+                let jobs: Vec<JobRequest<T>> = deserialize_multiple_jobs(data.as_ref()).unwrap();
+                Ok(jobs)
             }
         }
+    }
+    async fn list_workers(&mut self) -> Result<Vec<JobStreamWorker>, JobError> {
+        let consumers_set = format!("{}", &self.queue.consumers_set);
+
+        let mut conn = self.conn.clone();
+        let workers: Vec<String> = redis::cmd("ZRANGE")
+            .arg(&consumers_set)
+            .arg("0")
+            .arg("-1")
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::new(e)))?;
+        Ok(workers
+            .into_iter()
+            .map(|w| {
+                JobStreamWorker::new::<Self, _>(
+                    w.replace(&format!("{}:", &self.queue.inflight_jobs_set), ""),
+                    Utc::now(),
+                )
+            })
+            .collect())
     }
 }

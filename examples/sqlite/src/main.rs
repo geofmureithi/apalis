@@ -1,28 +1,9 @@
-use std::time::Duration;
-
 use apalis::{
-    layers::{RateLimitLayer, TraceLayer},
-    sqlite::SqliteStorage,
-    Job, JobContext, JobFuture, Monitor, Storage, WorkerBuilder,
+    layers::TraceLayer, sqlite::SqliteStorage, Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
 };
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct Email {
-    to: String,
-    subject: String,
-    text: String,
-}
-
-impl Job for Email {
-    const NAME: &'static str = "sqlite::Email";
-}
-
-async fn email_service(email: Email, _ctx: JobContext) {
-    actix::clock::sleep(Duration::from_millis(1000)).await;
-    tracing::info!(subject = ?email.to, "Sent email");
-}
+use email_service::{send_email, Email};
 
 async fn produce_jobs(storage: &SqliteStorage<Email>) {
     let mut storage = storage.clone();
@@ -41,7 +22,7 @@ async fn produce_jobs(storage: &SqliteStorage<Email>) {
     }
 }
 
-#[actix_rt::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
@@ -60,8 +41,7 @@ async fn main() -> std::io::Result<()> {
         .register_with_count(5, move |_| {
             WorkerBuilder::new(sqlite.clone())
                 .layer(TraceLayer::new())
-                .build_fn(email_service)
-                .start()
+                .build_fn(send_email)
         })
         .run()
         .await

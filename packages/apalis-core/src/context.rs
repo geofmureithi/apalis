@@ -2,11 +2,12 @@ use crate::request::JobState;
 
 use chrono::{DateTime, Utc};
 use http::Extensions;
+use serde::{Deserialize, Serialize};
 use std::{any::Any, marker::Send};
 
 /// The context for a job is represented here
 /// Used to provide a context when a job is defined through the [Job] trait
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobContext {
     pub(crate) id: String,
     pub(crate) status: JobState,
@@ -17,7 +18,7 @@ pub struct JobContext {
     pub(crate) lock_at: Option<DateTime<Utc>>,
     pub(crate) lock_by: Option<String>,
     pub(crate) done_at: Option<DateTime<Utc>>,
-
+    #[serde(skip)]
     pub(crate) data: Data,
 }
 
@@ -30,14 +31,8 @@ impl Clone for Data {
     }
 }
 
-impl Default for JobContext {
-    fn default() -> Self {
-        let id = uuid::Uuid::new_v4();
-        JobContext::new(id.to_string())
-    }
-}
-
 impl JobContext {
+    /// Build a new context with defaults given an ID.
     pub fn new(id: String) -> Self {
         JobContext {
             id,
@@ -59,7 +54,7 @@ impl JobContext {
     ///
     /// ```
     /// # use apalis_core::context::JobContext;
-    /// let mut ctx = JobContext::new(id);
+    /// let mut ctx = JobContext::new(1.to_string());
     /// assert!(ctx.data_opt::<i32>().is_none());
     /// ctx.insert(5i32);
     ///
@@ -78,7 +73,7 @@ impl JobContext {
     ///
     /// ```
     /// # use apalis_core::context::JobContext;
-    /// let mut ctx = JobContext::new(id);
+    /// let mut ctx = JobContext::new(1.to_string());
     /// assert!(ctx.insert(5i32).is_none());
     /// assert!(ctx.insert(4u8).is_none());
     /// assert_eq!(ctx.insert(9i32), Some(5i32));
@@ -137,6 +132,7 @@ impl JobContext {
         &self.lock_at
     }
 
+    /// Set the lock_at value
     pub fn set_lock_at(&mut self, lock_at: Option<DateTime<Utc>>) {
         self.lock_at = lock_at;
     }
@@ -146,6 +142,7 @@ impl JobContext {
         &self.status
     }
 
+    /// Set the job status
     pub fn set_status(&mut self, status: JobState) {
         self.status = status;
     }
@@ -155,6 +152,7 @@ impl JobContext {
         &self.lock_by
     }
 
+    /// Set lock_by
     pub fn set_lock_by(&mut self, lock_by: Option<String>) {
         self.lock_by = lock_by;
     }
@@ -164,6 +162,7 @@ impl JobContext {
         &self.last_error
     }
 
+    /// Set the last error
     pub fn set_last_error(&mut self, error: String) {
         self.last_error = Some(error);
     }

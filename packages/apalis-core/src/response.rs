@@ -6,9 +6,13 @@ use std::{any::Any, error::Error, time::Duration};
 /// Any job should return this as a result to control a jobs outcome.
 #[derive(Debug, Clone)]
 pub enum JobResult {
+    /// Job successfully completed
     Success,
+    /// Job needs to be manually retried.
     Retry,
+    /// Job was complete as a result of being killed
     Kill,
+    /// Return job back and process it in [Duration]
     Reschedule(Duration),
 }
 
@@ -24,7 +28,9 @@ impl std::fmt::Display for JobResult {
     }
 }
 
+/// Helper for Job Responses
 pub trait IntoJobResponse {
+    /// converts self into a Result
     fn into_response(self) -> Result<JobResult, JobError>;
 }
 

@@ -3,23 +3,25 @@ use std::{
     task::{Context, Poll},
 };
 
-use actix::clock::Interval;
 use futures::Stream;
+use tokio::time::Interval;
 
-use crate::worker::WorkerPulse;
+use crate::storage::StorageWorkerPulse;
 
-pub struct HeartbeatStream {
+use super::worker::KeepAlive;
+
+pub(crate) struct HeartbeatStream {
     interval: Interval,
-    beat: WorkerPulse,
+    beat: StorageWorkerPulse,
 }
 
 impl HeartbeatStream {
-    pub fn new(beat: WorkerPulse, interval: Interval) -> Self {
+    pub(crate) fn new(beat: StorageWorkerPulse, interval: Interval) -> Self {
         HeartbeatStream { beat, interval }
     }
 }
 impl Stream for HeartbeatStream {
-    type Item = WorkerPulse;
+    type Item = StorageWorkerPulse;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let beat = self.beat.clone();
@@ -27,25 +29,23 @@ impl Stream for HeartbeatStream {
     }
 }
 
-pub struct FetchJobStream {
+pub(crate) struct KeepAliveStream {
     interval: Interval,
 }
 
-pub struct FetchJob;
-
-impl FetchJobStream {
-    pub fn new(interval: Interval) -> Self {
-        FetchJobStream { interval }
+impl KeepAliveStream {
+    pub(crate) fn new(interval: Interval) -> Self {
+        KeepAliveStream { interval }
     }
 }
 
-impl Stream for FetchJobStream {
-    type Item = FetchJob;
+impl Stream for KeepAliveStream {
+    type Item = KeepAlive;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut()
             .interval
             .poll_tick(cx)
-            .map(|_| Some(FetchJob))
+            .map(|_| Some(KeepAlive))
     }
 }

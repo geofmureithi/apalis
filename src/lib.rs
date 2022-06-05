@@ -11,61 +11,47 @@
 //! - Jobs handlers with a macro free API.
 //! - Take full advantage of the [`tower`] ecosystem of
 //!   middleware, services, and utilities.
-//! - Takes full of the [`actix`] actors with each queue being an [`Actor`].
+//! - Takes full advantage of the actor model with each worker being an [`Actor`].
 //! - Bring your own Storage.
 //!
 //! Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] and [`tower-http`] middleware.
 //!
 //!  ### Example
-//! ```no_run
+//! ```rust, no_run
 //! use apalis::*;
 //! use serde::{Deserialize, Serialize};
+//! use apalis_redis::RedisStorage;
 //!
 //! #[derive(Debug, Deserialize, Serialize)]
 //! struct Email {
 //!     to: String,
 //! }
 //!
-//! async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
+//! impl Job for Email {
+//!     const NAME: &'static str = "apalis::Email";
+//! }
+//!
+//! async fn send_email(job: Email, ctx: JobContext) -> Result<JobResult, JobError> {
 //!     Ok(JobResult::Success)
 //! }
 //!
-//! #[actix_rt::main]
+//! #[tokio::main]
 //! async fn main() -> std::io::Result<()> {
-//!     let redis = std::env::var("REDIS_URL")
-//!                     .expect("Missing env variable REDIS_URL");
-//!     let storage = RedisStorage::new().await.unwrap();
+//!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
+//!     let storage = RedisStorage::connect(redis).await.expect("Storage failed");
 //!     Monitor::new()
-//!         .register_with_count(2, move || {
+//!         .register_with_count(2, move |_| {
 //!             WorkerBuilder::new(storage.clone())
-//!                 .build_fn(email_service)
-//!                 .start()
+//!                 .build_fn(send_email)
 //!         })
 //!         .run()
 //!         .await
 //! }
-//! ```
-//! ## Tower
-//! Apalis jobs fully support tower middleware via [`Layer`]
+//!```
 //!
-//! ### Example
-//! ```rust
-//! use apalis::{
-//!     layers::{Extension, DefaultRetryPolicy, RetryLayer},
-//!     WorkerBuilder,
-//! };
-//!
-//! fn main() {
-//!     let queue = WorkerBuilder::new(storage.clone())
-//!         .layer(RetryLayer::new(DefaultRetryPolicy))
-//!         .layer(Extension(EmailState {}))
-//!         .build();
-//!     let addr = queue.start();
-//! }
-
-//! ```
-//!
-//!
+//! ## Web UI Available
+//! ![UI](https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png)
+//! See [this example](https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
 //! ## Feature flags
 #![cfg_attr(
     feature = "docsrs",
@@ -74,29 +60,32 @@
 //!
 //! [`tower::service`]: https://docs.rs/tower/latest/tower/trait.Service.html
 //! [`tower`]: https://crates.io/crates/tower
-//! [`actix`]: https://crates.io/crates/actix
 //! [`tower-http`]: https://crates.io/crates/tower-http
-//! [`actor`]: https://docs.rs/actix/latest/actix/trait.Actor.html
 //! [`Layer`]: https://docs.rs/tower/latest/tower/trait.Layer.html
 
 pub use apalis_core::{
     builder::WorkerBuilder,
+    builder::WorkerFactory,
+    builder::WorkerFactoryFn,
     context::JobContext,
     error::JobError,
-    job::{Job, JobFuture},
-    monitor::Monitor,
+    job::{Counts, Job, JobFuture, JobStreamExt},
     request::JobRequest,
     request::JobState,
     response::{IntoJobResponse, JobResult},
     storage::Storage,
-    storage::StorageJobExt,
-    worker::{Worker, WorkerPulse},
+    storage::StorageWorker,
+    storage::StorageWorkerPulse,
+    worker::prelude::Monitor,
+    worker::prelude::WorkerEvent,
+    worker::prelude::WorkerListener,
+    worker::Actor,
 };
 
 /// Include the default Redis storage
 ///
 /// ### Example
-/// ```rust
+/// ```ignore
 /// let storage = RedisStorage::connect(REDIS_URL).await
 ///                 .expect("Cannot establish connection");
 ///
@@ -115,7 +104,9 @@ pub use apalis_core::{
 #[cfg(feature = "redis")]
 #[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
 pub mod redis {
-    pub use apalis_redis::RedisPubSubListener;
+    #[cfg(feature = "redis-pubsub")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "redis-pubsub")))]
+    pub use apalis_redis::listener::RedisPubSubListener;
     pub use apalis_redis::RedisStorage;
 }
 
@@ -123,27 +114,27 @@ pub mod redis {
 #[cfg(feature = "sqlite")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
 pub mod sqlite {
-    pub use apalis_sql::SqliteStorage;
+    pub use apalis_sql::sqlite::*;
 }
 
 /// Include the default Postgres storage
 #[cfg(feature = "postgres")]
 #[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
 pub mod postgres {
-    pub use apalis_sql::PostgresStorage;
+    pub use apalis_sql::postgres::*;
 }
 
 /// Include the default MySQL storage
 #[cfg(feature = "mysql")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql {
-    pub use apalis_sql::MysqlStorage;
+    pub use apalis_sql::mysql::*;
 }
 
 /// Apalis jobs fully support tower middleware via [`Layer`]
 ///
 /// ## Example
-/// ```rust
+/// ```ignore
 /// use apalis::{
 ///     layers::{Extension, DefaultRetryPolicy, RetryLayer},
 ///     WorkerBuilder,
@@ -180,4 +171,8 @@ pub mod layers {
     #[cfg(feature = "sentry")]
     #[cfg_attr(docsrs, doc(cfg(feature = "sentry")))]
     pub use apalis_core::layers::sentry::SentryJobLayer;
+
+    #[cfg(feature = "prometheus")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "prometheus")))]
+    pub use apalis_core::layers::prometheus::PrometheusLayer;
 }

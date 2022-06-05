@@ -10,7 +10,7 @@ use crate::request::JobRequest;
 ///
 /// This is commonly used to share state across jobs.
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use apalis::{
 ///     Extension,
 ///     WorkerBuilder,
@@ -24,7 +24,7 @@ use crate::request::JobRequest;
 /// }
 ///
 /// async fn email_service(email: Email, ctx: JobContext) {
-///     let state: &Arc<State> = ctx.data_opt().unwrap()
+///     let state: &Arc<State> = ctx.data_opt().unwrap();
 /// }
 ///
 /// let state = Arc::new(State { /* ... */ });
@@ -37,7 +37,7 @@ use crate::request::JobRequest;
 #[derive(Debug, Clone, Copy)]
 pub struct Extension<T>(pub T);
 
-impl<S, T> ::tower::Layer<S> for Extension<T>
+impl<S, T> tower::Layer<S> for Extension<T>
 where
     T: Clone + Send + Sync + 'static,
 {

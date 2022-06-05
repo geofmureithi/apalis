@@ -1,6 +1,6 @@
 [package]
 name = "apalis-redis"
-version = "0.3.0-beta.0"
+version = "0.3.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2018"
 
@@ -10,7 +10,7 @@ description = "Redis Storage for Apalis: simple and reliable background processi
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.3.0-beta.0" }
+apalis-core = { path = "../../packages/apalis-core", version = "0.3.0", default-features = false }
 redis = { version = "0.21" , features = ["tokio-comp"] }
 serde = "1"
 log = "0.4"
@@ -20,4 +20,9 @@ serde_json = "1"
 async-stream = "0.3"
 futures = "0.3"
 tokio = "1"
-actix = "0.13"
+async-trait = "0.1.53"
+
+[features]
+default = ["storage"]
+storage = ["apalis-core/storage"]
+pubsub = ["apalis-core/worker"]

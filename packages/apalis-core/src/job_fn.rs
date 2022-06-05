@@ -8,7 +8,7 @@ use crate::context::JobContext;
 use crate::error::JobError;
 use crate::job::Job;
 use crate::request::JobRequest;
-use crate::response::{IntoJobResponse, JobResult};
+use crate::response::JobResult;
 
 /// Returns a new [`JobFn`] with the given closure.
 ///
@@ -16,25 +16,13 @@ use crate::response::{IntoJobResponse, JobResult};
 ///
 /// # Example
 ///
-/// ```
-/// use tower::{job_fn, Job, JobExt, BoxError};
-/// # struct Request;
-/// # impl Request {
-/// #     fn new() -> Self { Self }
-/// # }
-/// # struct Response(&'static str);
-/// # impl Response {
-/// #     fn new(body: &'static str) -> Self {
-/// #         Self(body)
-/// #     }
-/// #     fn into_body(self) -> &'static str { self.0 }
-/// # }
+/// ```rust,ignore
+/// use apalis_core::{job_fn, Job};
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), BoxError> {
-/// async fn handle(request: Request) -> Result<Response, BoxError> {
-///     let response = Response::new("Hello, World!");
-///     Ok(response)
+/// async fn handle(request: JobRequest) -> Result<JobResult, BoxError> {
+///     Ok(JobResult::Ok)
 /// }
 ///
 /// let mut job = job_fn(handle);
@@ -42,10 +30,10 @@ use crate::response::{IntoJobResponse, JobResult};
 /// let response = job
 ///     .ready()
 ///     .await?
-///     .call(Request::new())
+///     .call(JobRequest::new())
 ///     .await?;
 ///
-/// assert_eq!("Hello, World!", response.into_body());
+/// assert_eq!(JobResult::Ok, response);
 /// #
 /// # Ok(())
 /// # }
@@ -73,17 +61,36 @@ where
     }
 }
 
-impl<T, F, Request, IR> Service<JobRequest<Request>> for JobFn<T>
+pin_project_lite::pin_project! {
+    /// The Future returned from [`JobFn`] service.
+    pub struct JobFnHttpFuture<F> {
+        #[pin]
+        future: F,
+    }
+}
+
+impl<F> Future for JobFnHttpFuture<F>
+where
+    F: Future<Output = Result<JobResult, JobError>> + 'static,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let slf = self.project();
+        slf.future.poll(cx)
+    }
+}
+
+impl<T, F, Request> Service<JobRequest<Request>> for JobFn<T>
 where
     Request: Debug + 'static,
     T: Fn(Request, JobContext) -> F,
-    F: Future<Output = IR> + 'static,
+    F: Future<Output = Result<JobResult, JobError>> + 'static,
     Request: Job,
-    IR: IntoJobResponse,
 {
     type Response = JobResult;
     type Error = JobError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + 'static>>;
+    type Future = JobFnHttpFuture<F>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -91,10 +98,7 @@ where
 
     fn call(&mut self, job: JobRequest<Request>) -> Self::Future {
         let fut = (self.f)(job.job, job.context);
-        let fut = async move {
-            let res = fut.await;
-            res.into_response()
-        };
-        Box::pin(fut)
+
+        JobFnHttpFuture { future: fut }
     }
 }

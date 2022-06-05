@@ -6,13 +6,13 @@ edition = "2018"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-actix = "0.13"
+tokio = { version ="1", features=["macros"]}
 apalis = { path = "../../", features = ["redis", "extensions"] }
 serde = "1"
-actix-rt = "2"
 env_logger = "0.7"
 tracing-subscriber = "0.3.11"
 chrono = { version = "0.4" }
+email-service = { path = "../email-service" }
 
 
 [dependencies.tracing]

@@ -73,7 +73,8 @@ impl<B> MakeSpan<B> for DefaultMakeSpan {
                 tracing::span!(
                     parent: span,
                     $level,
-                    "process",
+                    "job",
+                    job_id = req.id().as_str(),
                     current_attempt = req.attempts(),
                 )
             };

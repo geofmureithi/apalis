@@ -1,17 +1,20 @@
 [package]
 name = "apalis"
-version = "0.3.0-beta.0"
+version = "0.3.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
 documentation = "https://docs.rs/apalis"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-keywords = ["jobs", "background", "task", "actix"]
+keywords = ["jobs", "background", "task", "actors", "workers"]
 edition = "2018"
 
 [features]
-default = ["redis", "apalis-core/default", "tracing"]
+default = ["apalis-core/default", "tracing"]
+## Support Tracing 👀
+tracing = ["apalis-core/trace"]
+
 ## Include redis storage
 redis = ["apalis-redis"]
 ## Include Postgres storage
@@ -20,13 +23,13 @@ postgres = ["apalis-sql/postgres"]
 sqlite = [ "apalis-sql/sqlite"]
 ## Include MySql storage
 mysql = [ "apalis-sql/mysql"]
+## Include Storage utils, and build your own
 storage = ["apalis-core/storage"]
+
 ## Support for Sentry exception and performance monitoring
 sentry = ["apalis-core/sentry"]
 ## Support Prometheus metrics
 prometheus = ["apalis-core/prometheus"]
-## Support Tracing 👀
-tracing = ["apalis-core/trace"]
 ## Support direct retrying jobs
 retry = ["apalis-core/retry"]
 ## Support timeouts on jobs
@@ -37,23 +40,31 @@ limit = ["apalis-core/limit"]
 filter = ["apalis-core/filter"]
 ## Add a global extensions to jobs
 extensions =["apalis-core/extensions"]
+
+## Publish and listen worker events via Redis pubsub
+redis-pubsub = ["apalis-redis/pubsub", "broker"]
+
+## Support event collection, communication between workers.
+broker = ["apalis-core/broker"]
+
 docsrs = ["document-features"]
 
 
 [dependencies.apalis-redis]
-version = "0.3.0-beta.0"
+version = "0.3.0"
 optional = true
 default-features = false
 path = "./packages/apalis-redis"
 
 [dependencies.apalis-sql]
-version = "0.3.0-beta.0"
+version = "0.3.0"
+features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"
 
 [dependencies.apalis-core]
-version = "0.3.0-beta.0"
+version = "0.3.0"
 optional = true
 default-features = false
 path = "./packages/apalis-core"
@@ -71,10 +82,9 @@ all-features = true
 
 [dev-dependencies]
 criterion = { version = "0.3", features=["async_tokio"] }
-actix = "0.13"
 serde = "1"
-actix-rt = "2"
-tokio = "1"
+tokio = { version = "1", features =["macros"] }
+apalis-redis = { version = "0.3.0", path = "./packages/apalis-redis" }
 
 [[bench]]
 name = "redis_benchmark"
@@ -86,6 +96,7 @@ members = [
   "packages/apalis-redis",
   "packages/apalis-sql",
   # Examples
+  "examples/email-service",
   "examples/redis",
   "examples/actix-web",
   "examples/sqlite",
@@ -95,5 +106,5 @@ members = [
   "examples/axum",
   "examples/prometheus",
   "examples/tracing",
-  "examples/rest-api",
+  "examples/rest-api"
 ]

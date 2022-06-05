@@ -1,22 +1,11 @@
 use std::error::Error as StdError;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum StorageError {
-    #[error("Storage encountered a connection error: {0}")]
-    Connection(#[source] BoxDynError),
-    #[error("Storage encountered a database error: {0}")]
-    Database(#[source] BoxDynError),
-    #[error("The resource was not found in storage")]
-    NotFound,
-    #[error("Serialization/Deserialization Error")]
-    SerDe(#[source] BoxDynError),
-}
+use crate::storage::StorageError;
 
 /// Convenience type alias for usage within Apalis.
 ///
-/// Do not make this type public.
-pub type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
+pub(crate) type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
 
 /// Represents an error that is returned from an job.
 #[derive(Error, Debug)]
@@ -30,6 +19,8 @@ pub enum JobError {
     #[error("Job Failed: {0}")]
     Failed(#[source] BoxDynError),
 
+    #[cfg(feature = "storage")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
     /// An error communicating with storage.
     #[error("Error communicating with storage: {0}")]
     Storage(StorageError),
@@ -38,20 +29,27 @@ pub enum JobError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// An unclear error
     #[error("Unknown error")]
     Unknown,
 }
 
-impl From<serde_json::Error> for StorageError {
-    fn from(e: serde_json::Error) -> Self {
-        StorageError::SerDe(Box::from(e))
-    }
-}
-
-/// Represents a queue error.
+/// Represents a worker error.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum WorkerError {
+    #[cfg(feature = "storage")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
     /// An error communicating with storage.
     #[error("error communicating with storage: {0}")]
     Storage(StorageError),
+}
+
+/// Represents a [JobStream] error.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum JobStreamError {
+    /// An error occured during streaming.
+    #[error("Broken Pipe: {0}")]
+    BrokenPipe(#[source] BoxDynError),
 }
