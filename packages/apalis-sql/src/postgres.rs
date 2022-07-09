@@ -1,3 +1,11 @@
+//! Allows persisting jobs on a postgres db.
+//! Comes with helper functions eg:
+//! ## Sql Example:
+//!
+//! ```sql
+//! Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));
+//! ```
+
 use apalis_core::error::{JobError, JobStreamError};
 use apalis_core::job::{Counts, Job, JobStreamExt, JobStreamResult, JobStreamWorker};
 use apalis_core::request::{JobRequest, JobState};
