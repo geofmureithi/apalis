@@ -92,7 +92,7 @@ where
     let mut storage = storage.clone();
     let res = storage.push(job.into_inner()).await;
     match res {
-        Ok(()) => HttpResponse::Ok().body(format!("Job added to queue")),
+        Ok(()) => HttpResponse::Ok().body("Job added to queue".to_string()),
         Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
     }
 }
@@ -185,7 +185,7 @@ impl StorageApiBuilder {
         Self {
             scope: self.scope.service(
                 Scope::new(J::NAME)
-                    .app_data(web::Data::new(storage.clone()))
+                    .app_data(web::Data::new(storage))
                     .route("", web::get().to(get_jobs::<J, S>)) // Fetch jobs in queue
                     .route("/workers", web::get().to(get_workers::<J, S>)) // Fetch jobs in queue
                     .route("/job", web::put().to(push_job::<J, S>)) // Allow add jobs via api
@@ -195,7 +195,7 @@ impl StorageApiBuilder {
         }
     }
 
-    fn to_scope(self) -> Scope {
+    fn build(self) -> Scope {
         async fn fetch_queues(queues: web::Data<QueueList>) -> HttpResponse {
             let mut queue_result = Vec::new();
             for queue in &queues.set {
@@ -311,7 +311,7 @@ async fn main() -> std::io::Result<()> {
                     .add_storage(sqlite.clone())
                     .add_storage(pg.clone())
                     .add_storage(mysql.clone())
-                    .to_scope(),
+                    .build(),
             ),
         )
     })

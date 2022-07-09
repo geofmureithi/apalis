@@ -84,7 +84,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
                     .bind(job_type)
                     .fetch_optional(&mut tx)
                     .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-                yield job.as_job_request()
+                yield job.build_job_request()
             }
         }
     }
@@ -164,7 +164,7 @@ where
             .fetch_optional(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(res.as_job_request())
+        Ok(res.build_job_request())
     }
 
     async fn heartbeat(&mut self, pulse: StorageWorkerPulse) -> StorageResult<bool> {
@@ -306,9 +306,9 @@ where
         let pool = self.pool.clone();
         let status = job.status().as_ref().to_string();
         let attempts = job.attempts();
-        let done_at = job.done_at().clone();
+        let done_at = *job.done_at();
         let lock_by = job.lock_by().clone();
-        let lock_at = job.lock_at().clone();
+        let lock_at = *job.lock_at();
         let last_error = job.last_error().clone();
 
         let mut tx = pool

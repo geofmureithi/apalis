@@ -8,18 +8,18 @@ use sqlx::Row;
 pub(crate) struct SqlJobRequest<T>(JobRequest<T>);
 
 pub(crate) trait IntoJobRequest<T> {
-    fn as_job_request(self) -> Option<JobRequest<T>>;
+    fn build_job_request(self) -> Option<JobRequest<T>>;
 }
 
 impl<T> IntoJobRequest<T> for Option<SqlJobRequest<T>> {
-    fn as_job_request(self) -> Option<JobRequest<T>> {
+    fn build_job_request(self) -> Option<JobRequest<T>> {
         self.map(|j| j.0)
     }
 }
 
-impl<T> Into<JobRequest<T>> for SqlJobRequest<T> {
-    fn into(self) -> JobRequest<T> {
-        self.0
+impl<T> From<SqlJobRequest<T>> for JobRequest<T> {
+    fn from(val: SqlJobRequest<T>) -> Self {
+        val.0
     }
 }
 
@@ -34,10 +34,10 @@ impl<'r, T: DeserializeOwned> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Sql
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
 
-        let attempts = row.try_get("attempts").unwrap_or_else(|_| 0);
+        let attempts = row.try_get("attempts").unwrap_or(0);
         context.set_attempts(attempts);
 
-        let max_attempts = row.try_get("max_attempts").unwrap_or_else(|_| 25);
+        let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
 
         let done_at: Option<DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();
@@ -73,10 +73,10 @@ impl<'r, T: DeserializeOwned> sqlx::FromRow<'r, sqlx::postgres::PgRow> for SqlJo
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
 
-        let attempts = row.try_get("attempts").unwrap_or_else(|_| 0);
+        let attempts = row.try_get("attempts").unwrap_or(0);
         context.set_attempts(attempts);
 
-        let max_attempts = row.try_get("max_attempts").unwrap_or_else(|_| 25);
+        let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
 
         let done_at: Option<DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();
@@ -112,10 +112,10 @@ impl<'r, T: DeserializeOwned> sqlx::FromRow<'r, sqlx::mysql::MySqlRow> for SqlJo
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
 
-        let attempts = row.try_get("attempts").unwrap_or_else(|_| 0);
+        let attempts = row.try_get("attempts").unwrap_or(0);
         context.set_attempts(attempts);
 
-        let max_attempts = row.try_get("max_attempts").unwrap_or_else(|_| 25);
+        let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
 
         let done_at: Option<DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();

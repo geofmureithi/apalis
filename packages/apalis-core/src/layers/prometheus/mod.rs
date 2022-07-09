@@ -83,7 +83,7 @@ where
             .as_ref()
             .ok()
             .map(|res| format!("{}", res))
-            .unwrap_or("Error".to_string());
+            .unwrap_or_else(|| "Error".to_string());
 
         let labels = [
             ("name", this.operation.to_string()),
