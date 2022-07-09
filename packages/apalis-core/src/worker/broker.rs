@@ -23,16 +23,10 @@ impl Clone for Broker {
     }
 }
 
-
-
 impl Broker {
     /// Default constructor for broker
     pub fn global() -> &'static Broker {
-        INSTANCE.get_or_init(|| {
-
-            Broker(Arc::new(DashMap::new()))
-        
-        })
+        INSTANCE.get_or_init(|| Broker(Arc::new(DashMap::new())))
     }
 
     fn message_entry(&'_ self, id: TypeId) -> Entry<'_, TypeId, Vec<(TypeId, BrokerRecipient)>> {
