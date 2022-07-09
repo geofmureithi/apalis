@@ -21,6 +21,8 @@
 //!          log::info!("Attempting to send email to {}", job.to);
 //!          Ok(JobResult::Success)
 //!      }
+//!     // This can be even in another language
+//!     db.execute("Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));").await.unwrap();
 //!
 //!      Monitor::new()
 //!          .register_with_count(4, move |_| {

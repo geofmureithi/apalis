@@ -97,6 +97,13 @@ where
 {
     type Output = T;
 
+    /// Push a job to Postgres [Storage]
+    ///
+    /// # SQL Example
+    ///
+    /// ```sql
+    /// Select apalis.push_job(job_type::text, job::json);
+    /// ```
     async fn push(&mut self, job: Self::Output) -> StorageResult<()> {
         let id = Uuid::new_v4();
         let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, 25, NOW() , NULL, NULL, NULL, NULL)";
