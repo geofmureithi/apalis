@@ -86,7 +86,7 @@ where
                     event.event_id = event_id;
                     Some(event)
                 });
-                scope.set_tag("job_type", format!("{}", job_details.job_type));
+                scope.set_tag("job_type", job_details.job_type.to_string());
                 let mut details = std::collections::BTreeMap::new();
                 details.insert(String::from("job_id"), job_details.job_id.into());
                 details.insert(

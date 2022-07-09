@@ -1,4 +1,4 @@
-use std::{convert::identity, marker::PhantomData, time::Duration};
+use std::{marker::PhantomData, time::Duration};
 
 use apalis_core::{
     error::{JobError, JobStreamError},
@@ -77,15 +77,15 @@ impl<T: Job> RedisStorage<T> {
             conn,
             job_type: PhantomData,
             queue: RedisQueueInfo {
-                active_jobs_list: ACTIVE_JOBS_LIST.replace("{queue}", &name),
-                consumers_set: CONSUMERS_SET.replace("{queue}", &name),
-                dead_jobs_set: DEAD_JOBS_SET.replace("{queue}", &name),
-                done_jobs_set: DONE_JOBS_SET.replace("{queue}", &name),
-                failed_jobs_set: FAILED_JOBS_SET.replace("{queue}", &name),
-                inflight_jobs_set: INFLIGHT_JOB_SET.replace("{queue}", &name),
-                job_data_hash: JOB_DATA_HASH.replace("{queue}", &name),
-                scheduled_jobs_set: SCHEDULED_JOBS_SET.replace("{queue}", &name),
-                signal_list: SIGNAL_LIST.replace("{queue}", &name),
+                active_jobs_list: ACTIVE_JOBS_LIST.replace("{queue}", name),
+                consumers_set: CONSUMERS_SET.replace("{queue}", name),
+                dead_jobs_set: DEAD_JOBS_SET.replace("{queue}", name),
+                done_jobs_set: DONE_JOBS_SET.replace("{queue}", name),
+                failed_jobs_set: FAILED_JOBS_SET.replace("{queue}", name),
+                inflight_jobs_set: INFLIGHT_JOB_SET.replace("{queue}", name),
+                job_data_hash: JOB_DATA_HASH.replace("{queue}", name),
+                scheduled_jobs_set: SCHEDULED_JOBS_SET.replace("{queue}", name),
+                signal_list: SIGNAL_LIST.replace("{queue}", name),
             },
             scripts: RedisScript {
                 ack_job: redis::Script::new(include_str!("../lua/ack_job.lua")),
@@ -187,7 +187,7 @@ where
     };
 
     match job {
-        Some(Value::Data(v)) => serde_json::from_slice(&v).ok(),
+        Some(Value::Data(v)) => serde_json::from_slice(v).ok(),
         None => None,
         _ => {
             error!("Decoding Message Failed: {:?}", "Expected Data(&Vec<u8>)");
@@ -212,19 +212,15 @@ where
         }
     };
 
-    match job {
-        Some(values) => Some(
-            values
-                .iter()
-                .map(|v| match v {
-                    Value::Data(data) => serde_json::from_slice(&data).ok(),
-                    _ => None,
-                })
-                .filter_map(identity)
-                .collect(),
-        ),
-        None => None,
-    }
+    job.map(|values| {
+        values
+            .iter()
+            .filter_map(|v| match v {
+                Value::Data(data) => serde_json::from_slice(data).ok(),
+                _ => None,
+            })
+            .collect()
+    })
 }
 
 #[async_trait::async_trait]
@@ -319,10 +315,8 @@ where
 
     async fn len(&self) -> StorageResult<i64> {
         let mut conn = self.conn.clone();
-        let job_data_hash = format!("{}", &self.queue.job_data_hash);
-
         let length: i64 = redis::cmd("HLEN")
-            .arg(format!("{}", job_data_hash))
+            .arg(&self.queue.job_data_hash.to_string())
             .query_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::new(e)))?;
@@ -331,10 +325,8 @@ where
 
     async fn fetch_by_id(&self, job_id: String) -> StorageResult<Option<JobRequest<Self::Output>>> {
         let mut conn = self.conn.clone();
-        let job_data_hash = format!("{}", &self.queue.job_data_hash);
-
         let data: Option<Value> = redis::cmd("HMGET")
-            .arg(job_data_hash)
+            .arg(&self.queue.job_data_hash.to_string())
             .arg(job_id.clone())
             .query_async(&mut conn)
             .await
@@ -343,10 +335,9 @@ where
     }
     async fn update_by_id(&self, job_id: String, job: &JobRequest<T>) -> StorageResult<()> {
         let mut conn = self.conn.clone();
-        let job_data_hash = format!("{}", &self.queue.job_data_hash);
         let job = serde_json::to_string(job)?;
         let res: Result<i64, RedisError> = redis::cmd("HSET")
-            .arg(job_data_hash)
+            .arg(&self.queue.job_data_hash.to_string())
             .arg(job_id)
             .arg(job)
             .query_async(&mut conn)
@@ -359,7 +350,7 @@ where
         let mut conn = self.conn.clone();
         let ack_job = self.scripts.ack_job.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
-        let done_jobs_set = format!("{}", &self.queue.done_jobs_set);
+        let done_jobs_set = &self.queue.done_jobs_set.to_string();
 
         let now = Utc::now().timestamp();
         ack_job
@@ -560,8 +551,8 @@ where
         match status {
             JobState::Pending => {
                 let mut conn = self.conn.clone();
-                let active_jobs_list = format!("{}", &self.queue.active_jobs_list);
-                let job_data_hash = format!("{}", &self.queue.job_data_hash);
+                let active_jobs_list = &self.queue.active_jobs_list;
+                let job_data_hash = &self.queue.job_data_hash;
                 let ids: Vec<String> = redis::cmd("LRANGE")
                     .arg(active_jobs_list)
                     .arg(((page - 1) * 10).to_string())
@@ -569,7 +560,7 @@ where
                     .query_async(&mut conn)
                     .await
                     .map_err(|e| StorageError::Database(Box::new(e)))?;
-                if ids.len() == 0 {
+                if ids.is_empty() {
                     return Ok(Vec::new());
                 }
                 let data: Option<Value> = redis::cmd("HMGET")
@@ -583,8 +574,8 @@ where
             }
             JobState::Running => {
                 let mut conn = self.conn.clone();
-                let consumers_set = format!("{}", &self.queue.consumers_set);
-                let job_data_hash = format!("{}", &self.queue.job_data_hash);
+                let consumers_set = &self.queue.consumers_set;
+                let job_data_hash = &self.queue.job_data_hash;
                 let workers: Vec<String> = redis::cmd("ZRANGE")
                     .arg(&consumers_set)
                     .arg("0")
@@ -592,7 +583,7 @@ where
                     .query_async(&mut conn)
                     .await
                     .map_err(|e| StorageError::Database(Box::new(e)))?;
-                if workers.len() == 0 {
+                if workers.is_empty() {
                     return Ok(Vec::new());
                 }
                 let mut all_jobs = Vec::new();
@@ -602,7 +593,7 @@ where
                         .query_async(&mut conn)
                         .await
                         .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if ids.len() == 0 {
+                    if ids.is_empty() {
                         continue;
                     };
                     let data: Option<Value> = redis::cmd("HMGET")
@@ -620,8 +611,8 @@ where
             }
             JobState::Done => {
                 let mut conn = self.conn.clone();
-                let done_jobs_set = format!("{}", &self.queue.done_jobs_set);
-                let job_data_hash = format!("{}", &self.queue.job_data_hash);
+                let done_jobs_set = &self.queue.done_jobs_set;
+                let job_data_hash = &self.queue.job_data_hash;
                 let ids: Vec<String> = redis::cmd("ZRANGE")
                     .arg(done_jobs_set)
                     .arg(((page - 1) * 10).to_string())
@@ -629,7 +620,7 @@ where
                     .query_async(&mut conn)
                     .await
                     .map_err(|e| StorageError::Database(Box::new(e)))?;
-                if ids.len() == 0 {
+                if ids.is_empty() {
                     return Ok(Vec::new());
                 }
                 let data: Option<Value> = redis::cmd("HMGET")
@@ -644,8 +635,8 @@ where
             JobState::Retry => Ok(Vec::new()),
             JobState::Failed => {
                 let mut conn = self.conn.clone();
-                let failed_jobs_set = format!("{}", &self.queue.failed_jobs_set);
-                let job_data_hash = format!("{}", &self.queue.job_data_hash);
+                let failed_jobs_set = &self.queue.failed_jobs_set;
+                let job_data_hash = &self.queue.job_data_hash;
                 let ids: Vec<String> = redis::cmd("ZRANGE")
                     .arg(failed_jobs_set)
                     .arg(((page - 1) * 10).to_string())
@@ -653,7 +644,7 @@ where
                     .query_async(&mut conn)
                     .await
                     .map_err(|e| StorageError::Database(Box::new(e)))?;
-                if ids.len() == 0 {
+                if ids.is_empty() {
                     return Ok(Vec::new());
                 }
                 let data: Option<Value> = redis::cmd("HMGET")
@@ -667,8 +658,8 @@ where
             }
             JobState::Killed => {
                 let mut conn = self.conn.clone();
-                let dead_jobs_set = format!("{}", &self.queue.dead_jobs_set);
-                let job_data_hash = format!("{}", &self.queue.job_data_hash);
+                let dead_jobs_set = &self.queue.dead_jobs_set;
+                let job_data_hash = &self.queue.job_data_hash;
                 let ids: Vec<String> = redis::cmd("ZRANGE")
                     .arg(dead_jobs_set)
                     .arg(((page - 1) * 10).to_string())
@@ -676,7 +667,7 @@ where
                     .query_async(&mut conn)
                     .await
                     .map_err(|e| StorageError::Database(Box::new(e)))?;
-                if ids.len() == 0 {
+                if ids.is_empty() {
                     return Ok(Vec::new());
                 }
                 let data: Option<Value> = redis::cmd("HMGET")
@@ -691,7 +682,7 @@ where
         }
     }
     async fn list_workers(&mut self) -> Result<Vec<JobStreamWorker>, JobError> {
-        let consumers_set = format!("{}", &self.queue.consumers_set);
+        let consumers_set = &self.queue.consumers_set;
 
         let mut conn = self.conn.clone();
         let workers: Vec<String> = redis::cmd("ZRANGE")

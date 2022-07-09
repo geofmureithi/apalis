@@ -74,6 +74,12 @@ impl TraceLayer {
     }
 }
 
+impl Default for TraceLayer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<MakeSpan, OnRequest, OnResponse, OnFailure>
     TraceLayer<MakeSpan, OnRequest, OnResponse, OnFailure>
 {
@@ -335,15 +341,13 @@ where
             self.inner.call(req)
         };
 
-        let future = ResponseFuture {
+        ResponseFuture {
             inner: job,
             span,
             on_response: Some(self.on_response.clone()),
             on_failure: Some(self.on_failure.clone()),
             start,
-        };
-
-        future
+        }
     }
 }
 

@@ -116,12 +116,12 @@ impl Monitor<JoinHandle<Recipient<WorkerManagement>>> {
     /// Start monitor listening for Ctrl + C
     pub async fn run(self) -> std::io::Result<()> {
         let res = self.run_without_signals().await;
-
+        log::debug!("Listening shut down command (ctrl + c)");
         tokio::signal::ctrl_c()
             .await
             .expect("failed to listen for event");
 
-        println!("received ctrl-c event");
+        log::debug!("Workers shutdown complete");
         res
     }
 }
@@ -129,7 +129,7 @@ impl Monitor<JoinHandle<Recipient<WorkerManagement>>> {
 /// Represents behaviour for listening to workers events via [Monitor]
 pub trait WorkerListener: Send {
     ///  Called when an event is thrown by a worker
-    fn on_event(&self, worker_id: &String, event: &WorkerEvent);
+    fn on_event(&self, worker_id: &str, event: &WorkerEvent);
 }
 
 impl<K> Monitor<K> {

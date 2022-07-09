@@ -94,7 +94,7 @@ where
             tx.commit()
                 .await
                 .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-            Ok(job.as_job_request())
+            Ok(job.build_job_request())
         }
     }
 }
@@ -121,7 +121,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
                     .bind(job_type)
                     .fetch_optional(&mut tx)
                     .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-                yield fetch_next(pool.clone(), worker_id.clone(), job.as_job_request()).await?
+                yield fetch_next(pool.clone(), worker_id.clone(), job.build_job_request()).await?
             }
         }
     }
@@ -195,7 +195,7 @@ where
             .fetch_optional(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(res.as_job_request())
+        Ok(res.build_job_request())
     }
 
     /// Used for scheduling jobs via [StorageWorkerPulse] signals
@@ -356,9 +356,9 @@ where
         let pool = self.pool.clone();
         let status = job.status().as_ref().to_string();
         let attempts = job.attempts();
-        let done_at = job.done_at().clone().map(|v| v.timestamp());
+        let done_at = (*job.done_at()).map(|v| v.timestamp());
         let lock_by = job.lock_by().clone();
-        let lock_at = job.lock_at().clone().map(|v| v.timestamp());
+        let lock_at = (*job.lock_at()).map(|v| v.timestamp());
         let last_error = job.last_error().clone();
 
         let mut tx = pool
@@ -510,5 +510,6 @@ mod tests {
             .expect("Unable to push job");
         let len = sqlite.len().await.expect("Could not fetch the jobs count");
         assert_eq!(len, 1);
+        assert!(sqlite.is_empty().await.is_err())
     }
 }

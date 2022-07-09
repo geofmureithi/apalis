@@ -1,3 +1,11 @@
+//! Allows persisting jobs on a postgres db.
+//! Comes with helper functions eg:
+//! ## Sql Example:
+//!
+//! ```sql
+//! Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));
+//! ```
+
 use apalis_core::error::{JobError, JobStreamError};
 use apalis_core::job::{Counts, Job, JobStreamExt, JobStreamResult, JobStreamWorker};
 use apalis_core::request::{JobRequest, JobState};
@@ -84,7 +92,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
                     .bind(job_type)
                     .fetch_optional(&mut tx)
                     .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-                yield job.as_job_request()
+                yield job.build_job_request()
             }
         }
     }
@@ -97,6 +105,13 @@ where
 {
     type Output = T;
 
+    /// Push a job to Postgres [Storage]
+    ///
+    /// # SQL Example
+    ///
+    /// ```sql
+    /// Select apalis.push_job(job_type::text, job::json);
+    /// ```
     async fn push(&mut self, job: Self::Output) -> StorageResult<()> {
         let id = Uuid::new_v4();
         let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, 25, NOW() , NULL, NULL, NULL, NULL)";
@@ -157,7 +172,7 @@ where
             .fetch_optional(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(res.as_job_request())
+        Ok(res.build_job_request())
     }
 
     async fn heartbeat(&mut self, pulse: StorageWorkerPulse) -> StorageResult<bool> {
@@ -299,9 +314,9 @@ where
         let pool = self.pool.clone();
         let status = job.status().as_ref().to_string();
         let attempts = job.attempts();
-        let done_at = job.done_at().clone();
+        let done_at = *job.done_at();
         let lock_by = job.lock_by().clone();
-        let lock_at = job.lock_at().clone();
+        let lock_at = *job.lock_at();
         let last_error = job.last_error().clone();
 
         let mut tx = pool

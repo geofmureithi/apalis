@@ -6,22 +6,23 @@ use apalis::{
 use email_service::{send_email, Email};
 
 async fn produce_jobs(storage: &PostgresStorage<Email>) {
+    // The programatic way
     let mut storage = storage.clone();
-    for i in 0..10 {
-        storage
-            .push(Email {
-                to: format!("test{}@example.com", i),
-                text: "Test backround job from Apalis".to_string(),
-                subject: "Background email job".to_string(),
-            })
-            .await
-            .unwrap();
-    }
+    storage
+        .push(Email {
+            to: "test@example.com".to_string(),
+            text: "Test backround job from Apalis".to_string(),
+            subject: "Background email job".to_string(),
+        })
+        .await
+        .expect("Unable to push job");
+    // The sql way
+    tracing::info!("You can also add jobs via sql query, run this: \n Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));")
 }
 
 struct TracingListener;
 impl WorkerListener for TracingListener {
-    fn on_event(&self, worker_id: &String, event: &WorkerEvent) {
+    fn on_event(&self, worker_id: &str, event: &WorkerEvent) {
         tracing::info!(worker_id = ?worker_id, event = ?event, "Received message from worker")
     }
 }
