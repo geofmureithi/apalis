@@ -21,7 +21,7 @@ async fn produce_jobs(storage: &PostgresStorage<Email>) {
 
 struct TracingListener;
 impl WorkerListener for TracingListener {
-    fn on_event(&self, worker_id: &String, event: &WorkerEvent) {
+    fn on_event(&self, worker_id: &str, event: &WorkerEvent) {
         tracing::info!(worker_id = ?worker_id, event = ?event, "Received message from worker")
     }
 }

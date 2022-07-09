@@ -510,5 +510,6 @@ mod tests {
             .expect("Unable to push job");
         let len = sqlite.len().await.expect("Could not fetch the jobs count");
         assert_eq!(len, 1);
+        assert!(sqlite.is_empty().await.is_err())
     }
 }

@@ -81,6 +81,12 @@ pub trait Storage: Clone {
     async fn reenqueue_active(&mut self, _job_ids: Vec<String>) -> StorageResult<()> {
         Ok(())
     }
+
+    /// This method is not implemented yet but its self explanatory
+    #[doc(hidden)]
+    async fn is_empty(&self) -> StorageResult<bool> {
+        unimplemented!()
+    }
 }
 
 /// Each [Worker] sends heartbeat messages to storage

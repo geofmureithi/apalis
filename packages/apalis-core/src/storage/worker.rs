@@ -118,7 +118,7 @@ where
             let start = Instant::now() + Duration::from_millis(17);
             ctx.notify_with(HeartbeatStream::new(
                 pulse.clone(),
-                interval_at(start, duration.clone()),
+                interval_at(start, *duration),
             ));
         }
     }
@@ -129,7 +129,7 @@ where
 
     fn consume(&mut self) -> JobStreamResult<Self::Job> {
         self.storage
-            .stream(self.id.to_string(), self.config.fetch_interval.clone())
+            .stream(self.id.to_string(), self.config.fetch_interval)
     }
 
     fn service(&mut self) -> &mut Self::Service {
@@ -154,9 +154,9 @@ where
                     WorkerEvent::Error(format!("{}", e)),
                 ))
                 .await;
-            T::on_worker_error(&job.inner(), &job, &WorkerError::Storage(e));
+            T::on_worker_error(job.inner(), &job, &WorkerError::Storage(e));
         };
-        T::on_service_ready(&job.inner(), &job, instant.elapsed());
+        T::on_service_ready(job.inner(), &job, instant.elapsed());
         let res = handle.call(job).await;
 
         if let Ok(Some(mut job)) = storage.fetch_by_id(job_id.clone()).await {
@@ -205,7 +205,7 @@ where
                         WorkerEvent::Error(format!("{}", e)),
                     ))
                     .await;
-                T::on_worker_error(&job.inner(), &job, &WorkerError::Storage(e));
+                T::on_worker_error(job.inner(), &job, &WorkerError::Storage(e));
             }
             if let Err(e) = storage.update_by_id(job_id.clone(), &job).await {
                 #[cfg(feature = "broker")]
@@ -215,7 +215,7 @@ where
                         WorkerEvent::Error(format!("{}", e)),
                     ))
                     .await;
-                T::on_worker_error(&job.inner(), &job, &WorkerError::Storage(e));
+                T::on_worker_error(job.inner(), &job, &WorkerError::Storage(e));
             };
         }
 

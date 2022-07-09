@@ -51,11 +51,11 @@ trait JobDecodable
 where
     Self: Sized,
 {
-    /// Decode the given Redis value into a message
+    /// Decode the given value into a message
     ///
     /// In the default implementation, the string value is decoded by assuming
     /// it was encoded through the Msgpack encoding.
-    fn decode_job(value: &Vec<u8>) -> Result<Self, JobError>;
+    fn decode_job(value: &[u8]) -> Result<Self, JobError>;
 }
 
 /// Job objects that can be encoded to a string to be stored in Storage.

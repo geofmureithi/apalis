@@ -31,8 +31,6 @@ use {deadlock::WorkerId, std::any::type_name};
 /// Allows communication between [Worker] and [Actor]
 #[cfg(feature = "broker")]
 pub mod broker;
-#[cfg(feature = "broker")]
-use broker::Broker;
 
 #[cfg(feature = "broker")]
 mod deadlock;
