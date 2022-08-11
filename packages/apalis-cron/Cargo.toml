@@ -3,6 +3,8 @@ name = "apalis-cron"
 version = "0.3.2"
 edition = "2021"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
+license = "MIT"
+description = "A simple yet extensible library for cron-like job scheduling for rust."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -17,7 +19,7 @@ async-stream = "0.3.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
-apalis-core = { path = "../../packages/apalis-core", version = "0.3.2", features=["extensions", "retry", "worker", "job-service"] }
+apalis-core = { path = "../../packages/apalis-core", version = "0.3.2", features=["extensions", "retry", "worker", "job-service", "storage"] }
 serde = { version = "1.0", features = ["derive"] }
 
 [package.metadata.docs.rs]

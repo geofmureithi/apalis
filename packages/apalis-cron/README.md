@@ -34,7 +34,7 @@ async fn main() {
 
     Monitor::new()
         .register(worker)
-        .run_without_signals()
+        .run()
         .await
         .unwrap();
 }
