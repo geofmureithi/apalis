@@ -15,10 +15,15 @@
 //! ## Example
 //!
 //! ```rust
-//! use apalis::prelude::*;
-//! use apalis::layers::{Extension, RetryLayer, DefaultRetryPolicy};
+//! use apalis_core::worker::prelude::*;
+//! use apalis_core::context::JobContext;
+//! use apalis_core::layers::retry::RetryLayer;
+//! use apalis_core::layers::retry::DefaultRetryPolicy;
+//! use apalis_core::layers::extensions::Extension;
+//! use apalis_core::job_fn::job_fn;
+//! use apalis_core::job::Job;
 //! use tower::ServiceBuilder;
-//! use apalis::cron::{CronWorker, Schedule};
+//! use apalis_cron::{CronWorker, Schedule};
 //! use std::str::FromStr;
 //! use serde::{Serialize,Deserialize};
 //!
