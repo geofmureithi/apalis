@@ -1,6 +1,8 @@
 use std::error::Error as StdError;
 use thiserror::Error;
 
+#[cfg(feature = "storage")]
+#[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
 use crate::storage::StorageError;
 
 /// Convenience type alias for usage within Apalis.

@@ -17,7 +17,7 @@ async-stream = "0.3.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
-apalis-core = { path = "../../packages/apalis-core", version = "0.3.2", features=["extensions", "retry"] }
+apalis-core = { path = "../../packages/apalis-core", version = "0.3.2", features=["extensions", "retry", "worker", "job-service"] }
 serde = { version = "1.0", features = ["derive"] }
 
 [package.metadata.docs.rs]
