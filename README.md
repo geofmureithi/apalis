@@ -28,7 +28,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.3.1", features = ["redis"] }
+apalis = { version = "0.3.2", features = ["redis"] }
 ```
 
 ## Usage
@@ -93,6 +93,7 @@ If you are running [Apalis Board](https://github.com/geofmureithi/apalis-board),
 - _postgres_ — Include Postgres storage
 - _sqlite_ — Include SQlite storage
 - _mysql_ — Include MySql storage
+- _cron_ — Include cron job processing
 - _sentry_ — Support for Sentry exception and performance monitoring
 - _prometheus_ — Support Prometheus metrics
 - _retry_ — Support direct retrying jobs
