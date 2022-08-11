@@ -8,27 +8,49 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! # Apalis Cron
-//! A simple yet extensible library for cron-like job scheduling for rust .
+//! A simple yet extensible library for cron-like job scheduling for rust.
+//! Since `apalis-cron` is build on top of `apalis` which supports tower middlerware, you should be able to easily
+//! add middleware such as tracing, retries, load shed, concurrency etc.
+//!
+//! ## Example
 //!
 //! ```rust
 //! use apalis::prelude::*;
+//! use apalis::layers::{Extension, RetryLayer, DefaultRetryPolicy};
+//! use tower::ServiceBuilder;
 //! use apalis::cron::{CronWorker, Schedule};
 //! use std::str::FromStr;
 //! use serde::{Serialize,Deserialize};
 //!
-//! #[derive(Serialize, Deserialize, Default, Debug)]
+//! #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 //! struct Reminder;
 //!
 //! impl Job for Reminder {
 //!     const NAME: &'static str = "reminder::DailyReminder";
 //! }
-//! async fn send_reminder(_job: Reminder, _ctx: JobContext) -> Result<JobResult, JobError> {
-//!     Ok(JobResult::Success)
+//! async fn send_reminder(job: Reminder, ctx: JobContext) {
+//!     // Do reminder stuff
+//!     let db = ctx.data_opt::<FakeService>().unwrap();
+//!     db.push(job);
+//!     
 //! }
+//!
+//! #[derive(Clone)]
+//! struct FakeService;
+//!
+//! impl FakeService {
+//!     fn push(&self, item: Reminder){}
+//! }
+//!
 //! #[tokio::main]
 //! async fn main() {
 //!     let schedule = Schedule::from_str("@daily").unwrap();
-//!     let worker = CronWorker::new(schedule, job_fn(send_reminder));
+//!     let service = ServiceBuilder::new()
+//!         .layer(RetryLayer::new(DefaultRetryPolicy))
+//!         .layer(Extension(FakeService))
+//!         .service(job_fn(send_reminder));
+//!
+//!     let worker = CronWorker::new(schedule, service);
 //!     Monitor::new()
 //!         .register(worker)
 //!         .run_without_signals() // run()

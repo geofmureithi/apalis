@@ -144,6 +144,10 @@ pub mod layers {
     #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
     pub use apalis_core::layers::retry::RetryLayer;
 
+    #[cfg(feature = "retry")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
+    pub use apalis_core::layers::retry::DefaultRetryPolicy;
+
     #[cfg(feature = "tracing")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tracing")))]
     pub use apalis_core::layers::tracing::{Trace, TraceLayer};

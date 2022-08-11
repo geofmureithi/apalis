@@ -1,3 +1,5 @@
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use std::fmt::{self, Debug};
 use std::future::Future;
 use std::pin::Pin;
@@ -8,7 +10,7 @@ use crate::context::JobContext;
 use crate::error::JobError;
 use crate::job::Job;
 use crate::request::JobRequest;
-use crate::response::JobResult;
+use crate::response::{IntoJobResponse, JobResult};
 
 /// Returns a new [`JobFn`] with the given closure.
 ///
@@ -69,9 +71,9 @@ pin_project_lite::pin_project! {
     }
 }
 
-impl<F> Future for JobFnHttpFuture<F>
+impl<F, Res> Future for JobFnHttpFuture<F>
 where
-    F: Future<Output = Result<JobResult, JobError>> + 'static,
+    F: Future<Output = Res> + 'static,
 {
     type Output = F::Output;
 
@@ -81,24 +83,28 @@ where
     }
 }
 
-impl<T, F, Request> Service<JobRequest<Request>> for JobFn<T>
+impl<T, F, Res, Request> Service<JobRequest<Request>> for JobFn<T>
 where
     Request: Debug + 'static,
     T: Fn(Request, JobContext) -> F,
-    F: Future<Output = Result<JobResult, JobError>> + 'static,
+    Res: IntoJobResponse,
+    F: Future<Output = Res> + 'static + Send,
     Request: Job,
 {
     type Response = JobResult;
     type Error = JobError;
-    type Future = JobFnHttpFuture<F>;
+    // TODO: Improve this to remove the send
+    type Future = JobFnHttpFuture<BoxFuture<'static, Result<JobResult, JobError>>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, job: JobRequest<Request>) -> Self::Future {
-        let fut = (self.f)(job.job, job.context);
+        let fut = (self.f)(job.job, job.context).map(|res| res.into_response());
 
-        JobFnHttpFuture { future: fut }
+        JobFnHttpFuture {
+            future: Box::pin(fut),
+        }
     }
 }
