@@ -1,6 +1,4 @@
-use apalis::{
-    layers::TraceLayer, sqlite::SqliteStorage, Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
-};
+use apalis::{layers::TraceLayer, prelude::*, sqlite::SqliteStorage};
 use chrono::Utc;
 
 use email_service::{send_email, Email};

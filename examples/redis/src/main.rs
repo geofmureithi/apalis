@@ -1,7 +1,7 @@
 use apalis::{
     layers::{Extension, TraceLayer},
+    prelude::*,
     redis::RedisStorage,
-    Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
 };
 
 use email_service::{send_email, Email};

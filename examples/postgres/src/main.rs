@@ -1,7 +1,5 @@
-use apalis::{
-    layers::TraceLayer, postgres::PostgresStorage, Monitor, Storage, WorkerBuilder, WorkerEvent,
-    WorkerFactoryFn, WorkerListener,
-};
+use apalis::prelude::*;
+use apalis::{layers::TraceLayer, postgres::PostgresStorage};
 
 use email_service::{send_email, Email};
 

@@ -1,7 +1,6 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
-use apalis::{
-    layers::TraceLayer, redis::RedisStorage, Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
-};
+use apalis::prelude::*;
+use apalis::{layers::TraceLayer, redis::RedisStorage};
 use futures::future;
 
 use email_service::{send_email, Email};

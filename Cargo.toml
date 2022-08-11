@@ -7,7 +7,7 @@ repository = "https://github.com/geofmureithi/apalis"
 documentation = "https://docs.rs/apalis"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-keywords = ["jobs", "background", "task", "actors", "workers"]
+keywords = ["job", "background", "task", "scheduler", "worker", "cron" ]
 edition = "2018"
 
 [features]
@@ -23,6 +23,8 @@ postgres = ["apalis-sql/postgres"]
 sqlite = [ "apalis-sql/sqlite"]
 ## Include MySql storage
 mysql = [ "apalis-sql/mysql"]
+## Include Cron functionality
+cron = ["apalis-cron"]
 ## Include Storage utils, and build your own
 storage = ["apalis-core/storage"]
 
@@ -47,6 +49,7 @@ redis-pubsub = ["apalis-redis/pubsub", "broker"]
 ## Support event collection, communication between workers.
 broker = ["apalis-core/broker"]
 
+
 docsrs = ["document-features"]
 
 
@@ -68,6 +71,12 @@ version = "0.3.1"
 optional = true
 default-features = false
 path = "./packages/apalis-core"
+
+[dependencies.apalis-cron]
+version = "0.3.1"
+optional = true
+default-features = false
+path = "./packages/apalis-cron"
 
 [dependencies.document-features]
 version = "0.2"
@@ -95,6 +104,7 @@ members = [
   "packages/apalis-core",
   "packages/apalis-redis",
   "packages/apalis-sql",
+  "packages/apalis-cron",
   # Examples
   "examples/email-service",
   "examples/redis",

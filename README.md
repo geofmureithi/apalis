@@ -34,7 +34,8 @@ apalis = { version = "0.3.1", features = ["redis"] }
 ## Usage
 
 ```rust
-use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, WorkerBuilder, Storage, Monitor, JobContext};
+use apalis::prelude::*;
+use apalis::redis::RedisStorage;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -4,10 +4,7 @@ use std::time::Duration;
 
 use tracing_subscriber::prelude::*;
 
-use apalis::{
-    layers::TraceLayer, redis::RedisStorage, JobContext, JobError, JobResult, Monitor, Storage,
-    WorkerBuilder, WorkerFactoryFn,
-};
+use apalis::{layers::TraceLayer, prelude::*, redis::RedisStorage};
 
 use tokio::time::sleep;
 

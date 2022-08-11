@@ -141,7 +141,6 @@ pub struct Counts {
 
 /// JobStream extension usually useful for management via cli, web etc
 #[async_trait::async_trait]
-
 pub trait JobStreamExt<Job>: JobStream<Job = Job>
 where
     Self: Sized,

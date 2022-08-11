@@ -3,11 +3,8 @@
 //! ```not_rust
 //! cd examples && cargo run -p prometheus-example
 //! ```
-
-use apalis::{
-    layers::PrometheusLayer, redis::RedisStorage, Job, Monitor, Storage, WorkerBuilder,
-    WorkerFactoryFn,
-};
+use apalis::prelude::*;
+use apalis::{layers::PrometheusLayer, redis::RedisStorage};
 use axum::{
     extract::Form,
     http::StatusCode,
