@@ -112,7 +112,7 @@ pub mod mysql {
     pub use apalis_sql::mysql::*;
 }
 
-/// Include the default Postgres storage
+/// Include Cron utilities
 #[cfg(feature = "cron")]
 #[cfg_attr(docsrs, doc(cfg(feature = "cron")))]
 pub mod cron {
