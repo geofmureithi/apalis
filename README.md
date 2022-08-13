@@ -19,7 +19,8 @@ Apalis has support for
 - SQlite
 - PostgresSQL
 - MySQL
-- Bring Your Own Job Source eg Cron or Twitter streams
+- Cron Jobs
+- Bring Your Own Job Source eg Twitter streams
 
 ## Getting Started
 
@@ -27,7 +28,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.3.2", features = ["redis"] }
+apalis = { version = "0.3", features = ["redis"] }
 ```
 
 ## Usage
@@ -125,7 +126,7 @@ v 0.4
 - [ ] Improve monitoring
 - [ ] Improve Apalis Board
 - [ ] Add job progress
-- [-] Add more sources
+- [ ] Add more sources \*
 
 v 0.3
 
