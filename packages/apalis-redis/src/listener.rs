@@ -14,7 +14,7 @@ impl RedisPubSubListener {
 }
 
 impl WorkerListener for RedisPubSubListener {
-    fn on_event(&self, worker_id: &String, event: &WorkerEvent) {
+    fn on_event(&self, worker_id: &str, event: &WorkerEvent) {
         let mut conn = self.conn.clone();
         let message = format!("{}: {:?}", worker_id, event);
         let fut = async move {

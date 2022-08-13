@@ -1,4 +1,4 @@
-# Apalis [![Build Status](https://travis-ci.org/geofmureithi/apalis.svg?branch=master)](https://travis-ci.org/geofmureithi/apalis)
+# Apalis [![Build Status](https://github.com/geofmureithi/apalis/actions/workflows/ci.yaml/badge.svg)](https://github.com/geofmureithi/apalis/actions)
 
 Apalis is a simple, extensible multithreaded background job processing library for Rust.
 
@@ -8,11 +8,10 @@ Apalis is a simple, extensible multithreaded background job processing library f
 - Jobs handlers with a macro free API.
 - Take full advantage of the [`tower`] ecosystem of
   middleware, services, and utilities.
-- Workers take full of the actor model.
 - Fully Tokio compatible.
 - Optional Web interface to help you manage your jobs.
 
-Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] and [`tower-http`] middleware.
+Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] middleware.
 
 Apalis has support for
 
@@ -20,7 +19,8 @@ Apalis has support for
 - SQlite
 - PostgresSQL
 - MySQL
-- Bring Your Own Job Source eg Cron or Twitter streams
+- Cron Jobs
+- Bring Your Own Job Source eg Twitter streams
 
 ## Getting Started
 
@@ -28,13 +28,14 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.3.1", features = ["redis"] }
+apalis = { version = "0.3", features = ["redis"] }
 ```
 
 ## Usage
 
 ```rust
-use apalis::{redis::RedisStorage, JobError, JobRequest, JobResult, WorkerBuilder, Storage, Monitor, JobContext};
+use apalis::prelude::*;
+use apalis::redis::RedisStorage;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -92,6 +93,7 @@ If you are running [Apalis Board](https://github.com/geofmureithi/apalis-board),
 - _postgres_ — Include Postgres storage
 - _sqlite_ — Include SQlite storage
 - _mysql_ — Include MySql storage
+- _cron_ — Include cron job processing
 - _sentry_ — Support for Sentry exception and performance monitoring
 - _prometheus_ — Support Prometheus metrics
 - _retry_ — Support direct retrying jobs
@@ -104,12 +106,12 @@ If you are running [Apalis Board](https://github.com/geofmureithi/apalis-board),
 
 Since we provide a few storage solutions, here is a table comparing them:
 
-| Feature         | Redis | Sqlite | Postgres | Sled | Mysql | Mongo |
-| :-------------- | :---: | :----: | :------: | :--: | ----- | ----- |
-| Scheduled jobs  |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
-| Retryable jobs  |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
-| Persistence     |   ✓   |   ✓    |    ✓     |  x   | ✓     | x     |
-| Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   | \*    | x     |
+| Feature         | Redis | Sqlite | Postgres | Sled | Mysql | Mongo | Cron |
+| :-------------- | :---: | :----: | :------: | :--: | :---: | :---: | :--: |
+| Scheduled jobs  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
+| Retryable jobs  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
+| Persistence     |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   | BYO  |
+| Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   |  \*   |   x   |  x   |
 
 ## Thanks to
 
@@ -124,7 +126,7 @@ v 0.4
 - [ ] Improve monitoring
 - [ ] Improve Apalis Board
 - [ ] Add job progress
-- [ ] Add more sources
+- [ ] Add more sources \*
 
 v 0.3
 
@@ -141,6 +143,10 @@ v 0.2
 
 - [x] Redis Example
 - [x] Actix Web Example
+
+## Resources
+
+- [Background job processing with rust using actix and redis](https://mureithi.me/blog/background-job-processing-with-rust-actix-redis)
 
 ## Contributing
 

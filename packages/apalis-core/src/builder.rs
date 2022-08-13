@@ -27,7 +27,7 @@ use crate::{
 ///
 /// ```rust,ignore
 ///
-/// use apalis::WorkerBuilder;
+/// use apalis::prelude::*;
 /// use apalis::sqlite::SqliteStorage;
 ///
 /// let sqlite = SqliteStorage::new("sqlite::memory:").await.unwrap();

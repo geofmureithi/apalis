@@ -10,7 +10,8 @@ type Req<T> = JobRequest<T>;
 type Res = JobResult;
 type Err = JobError;
 
-#[derive(Clone)]
+/// Retries a job instantly until max_attempts
+#[derive(Clone, Debug)]
 pub struct DefaultRetryPolicy;
 
 impl<T> Policy<Req<T>, Res, Err> for DefaultRetryPolicy

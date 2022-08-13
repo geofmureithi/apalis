@@ -100,6 +100,7 @@ impl Monitor<JoinHandle<Recipient<WorkerManagement>>> {
     }
 
     /// Start monitor without listening for Ctrl + C
+    /// TODO: add the signals feature
     pub async fn run_without_signals(self) -> std::io::Result<()> {
         let mut workers = Vec::new();
         for worker in self.workers {

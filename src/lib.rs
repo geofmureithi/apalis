@@ -18,7 +18,7 @@
 //!
 //!  ### Example
 //! ```rust, no_run
-//! use apalis::*;
+//! use apalis::prelude::*;
 //! use serde::{Deserialize, Serialize};
 //! use apalis_redis::RedisStorage;
 //!
@@ -62,25 +62,6 @@
 //! [`tower`]: https://crates.io/crates/tower
 //! [`tower-http`]: https://crates.io/crates/tower-http
 //! [`Layer`]: https://docs.rs/tower/latest/tower/trait.Layer.html
-
-pub use apalis_core::{
-    builder::WorkerBuilder,
-    builder::WorkerFactory,
-    builder::WorkerFactoryFn,
-    context::JobContext,
-    error::JobError,
-    job::{Counts, Job, JobFuture, JobStreamExt},
-    request::JobRequest,
-    request::JobState,
-    response::{IntoJobResponse, JobResult},
-    storage::Storage,
-    storage::StorageWorker,
-    storage::StorageWorkerPulse,
-    worker::prelude::Monitor,
-    worker::prelude::WorkerEvent,
-    worker::prelude::WorkerListener,
-    worker::Actor,
-};
 
 /// Include the default Redis storage
 ///
@@ -131,6 +112,13 @@ pub mod mysql {
     pub use apalis_sql::mysql::*;
 }
 
+/// Include the default Postgres storage
+#[cfg(feature = "cron")]
+#[cfg_attr(docsrs, doc(cfg(feature = "cron")))]
+pub mod cron {
+    pub use apalis_cron::*;
+}
+
 /// Apalis jobs fully support tower middleware via [`Layer`]
 ///
 /// ## Example
@@ -156,6 +144,10 @@ pub mod layers {
     #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
     pub use apalis_core::layers::retry::RetryLayer;
 
+    #[cfg(feature = "retry")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
+    pub use apalis_core::layers::retry::DefaultRetryPolicy;
+
     #[cfg(feature = "tracing")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tracing")))]
     pub use apalis_core::layers::tracing::{Trace, TraceLayer};
@@ -175,4 +167,27 @@ pub mod layers {
     #[cfg(feature = "prometheus")]
     #[cfg_attr(docsrs, doc(cfg(feature = "prometheus")))]
     pub use apalis_core::layers::prometheus::PrometheusLayer;
+}
+
+/// Common imports
+pub mod prelude {
+    pub use apalis_core::{
+        builder::WorkerBuilder,
+        builder::WorkerFactory,
+        builder::WorkerFactoryFn,
+        context::JobContext,
+        error::JobError,
+        job::{Counts, Job, JobFuture, JobStreamExt},
+        job_fn::job_fn,
+        request::JobRequest,
+        request::JobState,
+        response::{IntoJobResponse, JobResult},
+        storage::Storage,
+        storage::StorageWorker,
+        storage::StorageWorkerPulse,
+        worker::prelude::Monitor,
+        worker::prelude::WorkerEvent,
+        worker::prelude::WorkerListener,
+        worker::Actor,
+    };
 }

@@ -1,4 +1,4 @@
-use apalis::{Job, JobContext, JobError, JobResult};
+use apalis::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -12,9 +12,8 @@ impl Job for Email {
     const NAME: &'static str = "apalis::Email";
 }
 
-pub async fn send_email(job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
+pub async fn send_email(job: Email, _ctx: JobContext) -> impl IntoJobResponse {
     log::info!("Attempting to send email to {}", job.to);
-    Ok(JobResult::Success)
 }
 
 pub const FORM_HTML: &str = r#"

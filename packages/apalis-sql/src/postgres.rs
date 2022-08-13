@@ -3,7 +3,11 @@
 //! ## Sql Example:
 //!
 //! ```sql
-//! Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));
+//! Select
+//!     apalis.push_job(
+//!             'apalis::Email',
+//!              json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum')
+//!     );
 //! ```
 
 use apalis_core::error::{JobError, JobStreamError};

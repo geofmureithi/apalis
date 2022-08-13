@@ -1,6 +1,5 @@
-use apalis::{
-    layers::TraceLayer, mysql::MysqlStorage, Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
-};
+use apalis::prelude::*;
+use apalis::{layers::TraceLayer, mysql::MysqlStorage};
 use email_service::{send_email, Email};
 
 async fn produce_jobs(storage: &MysqlStorage<Email>) {

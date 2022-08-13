@@ -3,10 +3,8 @@
 //! ```not_rust
 //! cd examples && cargo run -p axum-example
 //! ```
-
-use apalis::{
-    layers::TraceLayer, redis::RedisStorage, Job, Monitor, Storage, WorkerBuilder, WorkerFactoryFn,
-};
+use apalis::prelude::*;
+use apalis::{layers::TraceLayer, redis::RedisStorage};
 use axum::{
     extract::Form,
     http::StatusCode,

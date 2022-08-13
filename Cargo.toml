@@ -1,13 +1,13 @@
 [package]
 name = "apalis"
-version = "0.3.1"
+version = "0.3.3"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
 documentation = "https://docs.rs/apalis"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-keywords = ["jobs", "background", "task", "actors", "workers"]
+keywords = ["job", "task", "scheduler", "worker", "cron" ]
 edition = "2018"
 
 [features]
@@ -23,6 +23,8 @@ postgres = ["apalis-sql/postgres"]
 sqlite = [ "apalis-sql/sqlite"]
 ## Include MySql storage
 mysql = [ "apalis-sql/mysql"]
+## Include Cron functionality
+cron = ["apalis-cron"]
 ## Include Storage utils, and build your own
 storage = ["apalis-core/storage"]
 
@@ -47,27 +49,34 @@ redis-pubsub = ["apalis-redis/pubsub", "broker"]
 ## Support event collection, communication between workers.
 broker = ["apalis-core/broker"]
 
+
 docsrs = ["document-features"]
 
 
 [dependencies.apalis-redis]
-version = "0.3.1"
+version = "0.3.3"
 optional = true
 default-features = false
 path = "./packages/apalis-redis"
 
 [dependencies.apalis-sql]
-version = "0.3.1"
+version = "0.3.3"
 features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"
 
 [dependencies.apalis-core]
-version = "0.3.1"
+version = "0.3.3"
 optional = true
 default-features = false
 path = "./packages/apalis-core"
+
+[dependencies.apalis-cron]
+version = "0.3.3"
+optional = true
+default-features = false
+path = "./packages/apalis-cron"
 
 [dependencies.document-features]
 version = "0.2"
@@ -84,7 +93,7 @@ all-features = true
 criterion = { version = "0.3", features=["async_tokio"] }
 serde = "1"
 tokio = { version = "1", features =["macros"] }
-apalis-redis = { version = "0.3.1", path = "./packages/apalis-redis" }
+apalis-redis = { version = "0.3.3", path = "./packages/apalis-redis" }
 
 [[bench]]
 name = "redis_benchmark"
@@ -95,6 +104,7 @@ members = [
   "packages/apalis-core",
   "packages/apalis-redis",
   "packages/apalis-sql",
+  "packages/apalis-cron",
   # Examples
   "examples/email-service",
   "examples/redis",
