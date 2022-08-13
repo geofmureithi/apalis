@@ -127,7 +127,7 @@ impl<W: Actor> Addr<W> {
     /// Fails if noone will send message
     /// # Panics
     /// If queue is full
-    #[allow(unused_variables, clippy::expect_used)]
+    #[allow(unused_variables, clippy::expect_used, clippy::let_and_return)]
     pub async fn send<M>(&self, message: M) -> Result<M::Result, RecvError>
     where
         M: Message + Send + 'static,
@@ -331,8 +331,7 @@ where
     type Result = Result<WorkerStatus, WorkerError>;
 
     async fn handle(&mut self, msg: WorkerManagement) -> Result<WorkerStatus, WorkerError> {
-        let res = self.manage(msg).await;
-        res
+        self.manage(msg).await
     }
 }
 impl<T> Message for JobRequestWrapper<T> {
