@@ -91,7 +91,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
                         Some(job) => {
 
                             let job_id = job.id();
-                            let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ? WHERE id = ? AND status = 'Pending' AND lock_by IS NULL;";
+                            let update_query = "UPDATE jobs SET status = 'Running', lock_by = ? WHERE id = ? AND status = 'Pending' AND lock_by IS NULL;";
                             sqlx::query(update_query)
                                 .bind(worker_id.clone())
                                 .bind(job_id.clone())
@@ -205,7 +205,7 @@ where
                 // let query = r#"Update jobs
                 //         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
                 //         WHERE id IN
-                //             (SELECT jobs.id from Jobs INNER join workers ON lock_by = workers.id
+                //             (SELECT jobs.id from jobs INNER join workers ON lock_by = workers.id
                 //                 WHERE status= "Running" AND workers.last_seen < ?
                 //                 AND workers.worker_type = ? ORDER BY lock_at ASC) LIMIT ?;"#;
                 // sqlx::query(query)
@@ -227,7 +227,7 @@ where
             .acquire()
             .await
             .map_err(|e| StorageError::Connection(Box::from(e)))?;
-        let query = "UPDATE Jobs SET status = 'Kill', done_at = NOW() WHERE id = ? AND lock_by = ?";
+        let query = "UPDATE jobs SET status = 'Kill', done_at = NOW() WHERE id = ? AND lock_by = ?";
         sqlx::query(query)
             .bind(job_id.to_owned())
             .bind(worker_id.to_owned())
@@ -247,7 +247,7 @@ where
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         let query =
-                "UPDATE Jobs SET status = 'Pending', done_at = NULL, lock_by = NULL WHERE id = ? AND lock_by = ?";
+                "UPDATE jobs SET status = 'Pending', done_at = NULL, lock_by = NULL WHERE id = ? AND lock_by = ?";
         sqlx::query(query)
             .bind(job_id.to_owned())
             .bind(worker_id.to_owned())
@@ -267,7 +267,7 @@ where
             .acquire()
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
-        let query = "Select Count(*) as count from Jobs where status='Pending'";
+        let query = "Select Count(*) as count from jobs where status='Pending'";
         let record = sqlx::query(query)
             .fetch_one(&mut tx)
             .await
@@ -283,7 +283,7 @@ where
             .acquire()
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
-        let query = "UPDATE Jobs SET status = 'Done', done_at = now() WHERE id = ? AND lock_by = ?";
+        let query = "UPDATE jobs SET status = 'Done', done_at = now() WHERE id = ? AND lock_by = ?";
         sqlx::query(query)
             .bind(job_id.to_owned())
             .bind(worker_id.to_owned())
@@ -307,7 +307,7 @@ where
             .await
             .map_err(|e| StorageError::Connection(Box::from(e)))?;
         let query =
-                "UPDATE Jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ? WHERE id = ?";
+                "UPDATE jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ? WHERE id = ?";
         sqlx::query(query)
             .bind(Utc::now().add(wait))
             .bind(job_id.to_owned())
