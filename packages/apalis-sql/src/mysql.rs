@@ -13,6 +13,7 @@ use sqlx::types::Uuid;
 use sqlx::{MySql, MySqlPool, Pool, Row};
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::ops::Sub;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
 use crate::from_row::{IntoJobRequest, SqlJobRequest};
@@ -191,7 +192,7 @@ where
     }
 
     async fn heartbeat(&mut self, pulse: StorageWorkerPulse) -> StorageResult<bool> {
-        // let pool = self.pool.clone();
+        let pool = self.pool.clone();
 
         match pulse {
             StorageWorkerPulse::EnqueueScheduled { count: _ } => {
@@ -199,21 +200,25 @@ where
                 Ok(true)
             }
             // Worker not seen in 5 minutes yet has running jobs
-            StorageWorkerPulse::RenqueueOrpharned { count: _ } => {
-                // let job_type = T::NAME;
-                // let mut tx = pool.acquire().await?;
-                // let query = r#"Update jobs
-                //         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
-                //         WHERE id IN
-                //             (SELECT jobs.id from jobs INNER join workers ON lock_by = workers.id
-                //                 WHERE status= "Running" AND workers.last_seen < ?
-                //                 AND workers.worker_type = ? ORDER BY lock_at ASC) LIMIT ?;"#;
-                // sqlx::query(query)
-                //     .bind(Utc::now().sub(chrono::Duration::minutes(5)))
-                //     .bind(job_type)
-                //     .bind(count)
-                //     .execute(&mut tx)
-                //     .await?;
+            StorageWorkerPulse::RenqueueOrpharned { count } => {
+                let job_type = T::NAME;
+                let mut tx = pool
+                    .acquire()
+                    .await
+                    .map_err(|e| StorageError::Database(Box::from(e)))?;
+                let query = r#"Update jobs
+                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
+                        WHERE id IN
+                            (SELECT jobs.id from jobs INNER join workers ON lock_by = workers.id
+                                WHERE status= "Running" AND workers.last_seen < ?
+                                AND workers.worker_type = ? ORDER BY lock_at ASC) LIMIT ?;"#;
+                sqlx::query(query)
+                    .bind(Utc::now().sub(chrono::Duration::minutes(5)))
+                    .bind(job_type)
+                    .bind(count)
+                    .execute(&mut tx)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::from(e)))?;
                 Ok(true)
             }
             _ => todo!(),
