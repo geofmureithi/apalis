@@ -483,7 +483,6 @@ mod tests {
     use email_service::Email;
     use futures::StreamExt;
 
-
     async fn setup<'a>() -> MutexGuard<'a, MysqlStorage<Email>> {
         static INSTANCE: OnceCell<Mutex<MysqlStorage<Email>>> = OnceCell::new();
         let mutex = INSTANCE.get_or_init(|| {
