@@ -77,7 +77,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
 
                 let job_type = T::NAME;
                 let fetch_query = "SELECT * FROM jobs
-                    WHERE status = 'Pending' AND run_at < NOW() AND job_type = ? ORDER BY run_at ASC LIMIT 1 FOR UPDATE";
+                    WHERE status = 'Pending' AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT 1 FOR UPDATE";
                 let job: Option<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
                     .bind(job_type)
                     .fetch_optional(&mut tx)
