@@ -452,3 +452,85 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for Postgr
             .collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ops::DerefMut;
+
+    use once_cell::sync::OnceCell;
+    use tokio::sync::Mutex;
+    use tokio::sync::MutexGuard;
+
+    use super::*;
+    use email_service::Email;
+    use futures::StreamExt;
+
+    async fn setup<'a>() -> MutexGuard<'a, PostgresStorage<Email>> {
+        static INSTANCE: OnceCell<Mutex<PostgresStorage<Email>>> = OnceCell::new();
+        let mutex = INSTANCE.get_or_init(|| {
+            let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
+            let pool = PgPool::connect_lazy(db_url).expect("DATABASE_URL is wrong");
+            Mutex::new(PostgresStorage::new(pool))
+        });
+        let storage = mutex.lock().await;
+        storage.setup().await.expect("failed to run migrations");
+        storage
+    }
+
+    fn example_email() -> Email {
+        Email {
+            subject: "Test Subject".to_string(),
+            to: "example@postgres".to_string(),
+            text: "Some Text".to_string(),
+        }
+    }
+
+    struct DummyService {}
+
+    async fn consume_one<S, T>(storage: &mut S, worker_id: String) -> JobRequest<T>
+    where
+        S: Storage<Output = T>,
+    {
+        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10));
+        stream
+            .next()
+            .await
+            .expect("stream is empty")
+            .expect("failed to poll job")
+            .expect("no job is pending")
+    }
+
+    #[tokio::test]
+    async fn test_consume_last_pushed_job() {
+        let mut storage = setup().await;
+        storage.push(example_email()).await.expect("failed to push a job");
+
+        let worker_id = Uuid::new_v4().to_string();
+
+        storage.keep_alive::<DummyService>(worker_id.clone()).await.expect("failed to register worker");
+
+        let job = consume_one(storage.deref_mut(), worker_id.clone()).await;
+
+        assert_eq!(*job.context().status(), JobState::Running);
+        assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
+        assert!(job.context().lock_at().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_acknowledge_job() {
+        let mut storage = setup().await;
+        storage.push(example_email()).await.expect("failed to push a job");
+
+        let worker_id = Uuid::new_v4().to_string();
+
+        storage.keep_alive::<DummyService>(worker_id.clone()).await.expect("failed to register worker");
+
+        let job = consume_one(storage.deref_mut(), worker_id.clone()).await;
+
+        storage.ack(worker_id.clone(), job.context().id()).await.expect("failed to acknowledge the job");
+
+        let job = storage.fetch_by_id(job.context().id()).await.unwrap().unwrap();
+        assert_eq!(*job.context().status(), JobState::Done);
+        assert!(job.context().done_at().is_some());
+    }
+}
