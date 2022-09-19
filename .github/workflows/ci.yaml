@@ -67,7 +67,7 @@ jobs:
         ports:
           - 5432:5432
     env:
-      DATABASE_URL: postgres://posgres:postgres@localhost/postgres
+      DATABASE_URL: postgres://postgres:postgres@localhost/postgres
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
