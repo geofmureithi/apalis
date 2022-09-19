@@ -13,6 +13,7 @@ use sqlx::types::Uuid;
 use sqlx::{MySql, MySqlPool, Pool, Row};
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::ops::Sub;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
 use crate::from_row::{IntoJobRequest, SqlJobRequest};
@@ -76,7 +77,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
 
                 let job_type = T::NAME;
                 let fetch_query = "SELECT * FROM jobs
-                    WHERE status = 'Pending' AND run_at < NOW() AND job_type = ? ORDER BY run_at ASC LIMIT 1 FOR UPDATE";
+                    WHERE status = 'Pending' AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT 1 FOR UPDATE";
                 let job: Option<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
                     .bind(job_type)
                     .fetch_optional(&mut tx)
@@ -114,6 +115,33 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
                     // yield fetch_next(pool.clone(), worker_id.clone(), job.as_job_request()).await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?
             }
         }
+    }
+
+    async fn keep_alive_at<Service>(
+        &mut self,
+        worker_id: String,
+        last_seen: DateTime<Utc>,
+    ) -> StorageResult<()> {
+        let pool = self.pool.clone();
+
+        let mut tx = pool
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Connection(Box::from(e)))?;
+        let worker_type = T::NAME;
+        let storage_name = std::any::type_name::<Self>();
+        let query =
+            "REPLACE INTO workers (id, worker_type, storage_name, layers, last_seen) VALUES (?, ?, ?, ?, ?);";
+        sqlx::query(query)
+            .bind(worker_id.to_owned())
+            .bind(worker_type)
+            .bind(storage_name)
+            .bind(std::any::type_name::<Service>())
+            .bind(last_seen)
+            .execute(&mut tx)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        Ok(())
     }
 }
 
@@ -191,7 +219,7 @@ where
     }
 
     async fn heartbeat(&mut self, pulse: StorageWorkerPulse) -> StorageResult<bool> {
-        // let pool = self.pool.clone();
+        let pool = self.pool.clone();
 
         match pulse {
             StorageWorkerPulse::EnqueueScheduled { count: _ } => {
@@ -199,21 +227,24 @@ where
                 Ok(true)
             }
             // Worker not seen in 5 minutes yet has running jobs
-            StorageWorkerPulse::RenqueueOrpharned { count: _ } => {
-                // let job_type = T::NAME;
-                // let mut tx = pool.acquire().await?;
-                // let query = r#"Update jobs
-                //         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
-                //         WHERE id IN
-                //             (SELECT jobs.id from jobs INNER join workers ON lock_by = workers.id
-                //                 WHERE status= "Running" AND workers.last_seen < ?
-                //                 AND workers.worker_type = ? ORDER BY lock_at ASC) LIMIT ?;"#;
-                // sqlx::query(query)
-                //     .bind(Utc::now().sub(chrono::Duration::minutes(5)))
-                //     .bind(job_type)
-                //     .bind(count)
-                //     .execute(&mut tx)
-                //     .await?;
+            StorageWorkerPulse::RenqueueOrpharned { count } => {
+                let job_type = T::NAME;
+                let mut tx = pool
+                    .acquire()
+                    .await
+                    .map_err(|e| StorageError::Database(Box::from(e)))?;
+                let query = r#"Update jobs 
+                        INNER JOIN workers ON jobs.lock_by = workers.id
+                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
+                        WHERE status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
+                        ORDER BY lock_at ASC LIMIT ?;"#;
+                sqlx::query(query)
+                    .bind(Utc::now().sub(chrono::Duration::minutes(5)))
+                    .bind(job_type)
+                    .bind(count)
+                    .execute(&mut tx)
+                    .await
+                    .map_err(|e| StorageError::Database(Box::from(e)))?;
                 Ok(true)
             }
             _ => todo!(),
@@ -351,26 +382,7 @@ where
     }
 
     async fn keep_alive<Service>(&mut self, worker_id: String) -> StorageResult<()> {
-        let pool = self.pool.clone();
-
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Connection(Box::from(e)))?;
-        let worker_type = T::NAME;
-        let storage_name = std::any::type_name::<Self>();
-        let query =
-            "REPLACE INTO workers (id, worker_type, storage_name, layers, last_seen) VALUES (?, ?, ?, ?, ?);";
-        sqlx::query(query)
-            .bind(worker_id.to_owned())
-            .bind(worker_type)
-            .bind(storage_name)
-            .bind(std::any::type_name::<Service>())
-            .bind(Utc::now())
-            .execute(&mut tx)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(())
+        self.keep_alive_at::<Service>(worker_id, Utc::now()).await
     }
 }
 
@@ -455,5 +467,127 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for MysqlS
                 worker
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::ops::DerefMut;
+
+    use once_cell::sync::OnceCell;
+    use tokio::sync::Mutex;
+    use tokio::sync::MutexGuard;
+
+    use super::*;
+    use email_service::Email;
+    use futures::StreamExt;
+
+    async fn setup<'a>() -> MutexGuard<'a, MysqlStorage<Email>> {
+        static INSTANCE: OnceCell<Mutex<MysqlStorage<Email>>> = OnceCell::new();
+        let mutex = INSTANCE.get_or_init(|| {
+            let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
+            let pool: MySqlPool = MySqlPool::connect_lazy(db_url).expect("DATABASE_URL is wrong");
+            Mutex::new(MysqlStorage::new(pool))
+        });
+        let storage = mutex.lock().await;
+        storage.setup().await.expect("failed to run migrations");
+        storage
+    }
+
+    async fn consume_one<S, T>(storage: &mut S, worker_id: &String) -> JobRequest<T>
+    where
+        S: Storage<Output = T>,
+    {
+        let mut stream = storage.consume(worker_id.clone(), std::time::Duration::from_secs(10));
+        stream
+            .next()
+            .await
+            .expect("stream is empty")
+            .expect("failed to poll job")
+            .expect("no job is pending")
+    }
+
+    fn example_email() -> Email {
+        Email {
+            subject: "Test Subject".to_string(),
+            to: "example@mysql".to_string(),
+            text: "Some Text".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_storage_heartbeat_reenqueuorphaned_pulse_last_seen_6min() {
+        // acquire a lock for storage
+        let mut storage = setup().await;
+
+        // push an Email job
+        storage
+            .push(example_email())
+            .await
+            .expect("failed to push job");
+
+        // register a worker not responding since 6 minutes ago
+        let worker_id = Uuid::new_v4().to_string();
+        let last_seen = Utc::now().sub(chrono::Duration::minutes(6));
+        storage
+            .keep_alive_at::<Email>(worker_id.clone(), last_seen)
+            .await
+            .unwrap();
+
+        // fetch job
+        let job = consume_one(storage.deref_mut(), &worker_id).await;
+        assert_eq!(*job.context().status(), JobState::Running);
+
+        // heartbeat with ReenqueueOrpharned pulse
+        storage
+            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .await
+            .unwrap();
+
+        // then, the job status has changed to Pending
+        let job = storage.fetch_by_id(job.id()).await.unwrap().unwrap();
+        let context = job.context();
+        assert_eq!(*context.status(), JobState::Pending);
+        assert!(context.lock_by().is_none());
+        assert!(context.lock_at().is_none());
+        assert!(context.done_at().is_none());
+        assert_eq!(*context.last_error(), Some("Job was abandoned".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_storage_heartbeat_reenqueuorphaned_pulse_last_seen_4min() {
+        // acquire a lock for storage
+        let mut storage = setup().await;
+
+        // push an Email job
+        storage
+            .push(example_email())
+            .await
+            .expect("failed to push job");
+
+        // register a worker responding at 4 minutes ago
+        let worker_id = Uuid::new_v4().to_string();
+        let last_seen = Utc::now().sub(chrono::Duration::minutes(4));
+        storage
+            .keep_alive_at::<Email>(worker_id.clone(), last_seen)
+            .await
+            .unwrap();
+
+        // fetch job
+        let job = consume_one(storage.deref_mut(), &worker_id).await;
+        assert_eq!(*job.context().status(), JobState::Running);
+
+        // heartbeat with ReenqueueOrpharned pulse
+        storage
+            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .await
+            .unwrap();
+
+        // then, the job status is not changed
+        let job = storage.fetch_by_id(job.id()).await.unwrap().unwrap();
+        let context = job.context();
+        assert_eq!(*context.status(), JobState::Running);
+        assert_eq!(*context.lock_by(), Some(worker_id.clone()));
     }
 }
