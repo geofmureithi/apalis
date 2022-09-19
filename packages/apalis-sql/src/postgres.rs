@@ -503,11 +503,17 @@ mod tests {
     #[tokio::test]
     async fn test_consume_last_pushed_job() {
         let mut storage = setup().await;
-        storage.push(example_email()).await.expect("failed to push a job");
+        storage
+            .push(example_email())
+            .await
+            .expect("failed to push a job");
 
         let worker_id = Uuid::new_v4().to_string();
 
-        storage.keep_alive::<DummyService>(worker_id.clone()).await.expect("failed to register worker");
+        storage
+            .keep_alive::<DummyService>(worker_id.clone())
+            .await
+            .expect("failed to register worker");
 
         let job = consume_one(storage.deref_mut(), worker_id.clone()).await;
 
@@ -519,17 +525,30 @@ mod tests {
     #[tokio::test]
     async fn test_acknowledge_job() {
         let mut storage = setup().await;
-        storage.push(example_email()).await.expect("failed to push a job");
+        storage
+            .push(example_email())
+            .await
+            .expect("failed to push a job");
 
         let worker_id = Uuid::new_v4().to_string();
 
-        storage.keep_alive::<DummyService>(worker_id.clone()).await.expect("failed to register worker");
+        storage
+            .keep_alive::<DummyService>(worker_id.clone())
+            .await
+            .expect("failed to register worker");
 
         let job = consume_one(storage.deref_mut(), worker_id.clone()).await;
 
-        storage.ack(worker_id.clone(), job.context().id()).await.expect("failed to acknowledge the job");
+        storage
+            .ack(worker_id.clone(), job.context().id())
+            .await
+            .expect("failed to acknowledge the job");
 
-        let job = storage.fetch_by_id(job.context().id()).await.unwrap().unwrap();
+        let job = storage
+            .fetch_by_id(job.context().id())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(*job.context().status(), JobState::Done);
         assert!(job.context().done_at().is_some());
     }
