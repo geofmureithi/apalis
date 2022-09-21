@@ -257,7 +257,7 @@ where
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         let query =
-                "UPDATE Jobs SET status = 'Kill', done_at = strftime('%s','now') WHERE id = ?1 AND lock_by = ?2";
+                "UPDATE Jobs SET status = 'Killed', done_at = strftime('%s','now') WHERE id = ?1 AND lock_by = ?2";
         sqlx::query(query)
             .bind(job_id.to_owned())
             .bind(worker_id.to_owned())

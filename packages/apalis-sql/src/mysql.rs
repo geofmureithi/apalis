@@ -258,7 +258,8 @@ where
             .acquire()
             .await
             .map_err(|e| StorageError::Connection(Box::from(e)))?;
-        let query = "UPDATE jobs SET status = 'Kill', done_at = NOW() WHERE id = ? AND lock_by = ?";
+        let query =
+            "UPDATE jobs SET status = 'Killed', done_at = NOW() WHERE id = ? AND lock_by = ?";
         sqlx::query(query)
             .bind(job_id.to_owned())
             .bind(worker_id.to_owned())
