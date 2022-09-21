@@ -500,22 +500,46 @@ mod tests {
             .expect("no job is pending")
     }
 
-    #[tokio::test]
-    async fn test_consume_last_pushed_job() {
-        let mut storage = setup().await;
-        storage
-            .push(example_email())
-            .await
-            .expect("failed to push a job");
-
+    async fn register_worker<S, T>(storage: &mut S) -> String
+    where
+        S: Storage<Output = T>,
+    {
         let worker_id = Uuid::new_v4().to_string();
 
         storage
             .keep_alive::<DummyService>(worker_id.clone())
             .await
             .expect("failed to register worker");
+        worker_id
+    }
 
-        let job = consume_one(storage.deref_mut(), worker_id.clone()).await;
+    async fn push_email<S>(storage: &mut S, email: Email)
+    where
+        S: Storage<Output = Email>,
+    {
+        storage.push(email).await.expect("failed to push a job");
+    }
+
+    async fn get_job<S>(storage: &mut S, job_id: String) -> JobRequest<Email>
+    where
+        S: Storage<Output = Email>,
+    {
+        storage
+            .fetch_by_id(job_id)
+            .await
+            .expect("failed to fetch job by id")
+            .expect("no job found by id")
+    }
+
+    #[tokio::test]
+    async fn test_consume_last_pushed_job() {
+        let mut storage = setup().await;
+        let storage = storage.deref_mut();
+        push_email(storage, example_email()).await;
+
+        let worker_id = register_worker(storage).await;
+
+        let job = consume_one(storage, worker_id.clone()).await;
 
         assert_eq!(*job.context().status(), JobState::Running);
         assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
@@ -525,31 +549,43 @@ mod tests {
     #[tokio::test]
     async fn test_acknowledge_job() {
         let mut storage = setup().await;
-        storage
-            .push(example_email())
-            .await
-            .expect("failed to push a job");
+        let storage = storage.deref_mut();
+        push_email(storage, example_email()).await;
 
-        let worker_id = Uuid::new_v4().to_string();
+        let worker_id = register_worker(storage).await;
 
-        storage
-            .keep_alive::<DummyService>(worker_id.clone())
-            .await
-            .expect("failed to register worker");
-
-        let job = consume_one(storage.deref_mut(), worker_id.clone()).await;
+        let job = consume_one(storage, worker_id.clone()).await;
+        let job_id = job.context().id();
 
         storage
-            .ack(worker_id.clone(), job.context().id())
+            .ack(worker_id.clone(), job_id.clone())
             .await
             .expect("failed to acknowledge the job");
 
-        let job = storage
-            .fetch_by_id(job.context().id())
-            .await
-            .unwrap()
-            .unwrap();
+        let job = get_job(storage, job_id.clone()).await;
         assert_eq!(*job.context().status(), JobState::Done);
+        assert!(job.context().done_at().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_kill_job() {
+        let mut storage = setup().await;
+        let storage = storage.deref_mut();
+
+        push_email(storage, example_email()).await;
+
+        let worker_id = register_worker(storage).await;
+
+        let job = consume_one(storage, worker_id.clone()).await;
+        let job_id = job.context().id();
+
+        storage
+            .kill(worker_id.clone(), job_id.clone())
+            .await
+            .expect("failed to kill job");
+
+        let job = get_job(storage, job_id.clone()).await;
+        assert_eq!(*job.context().status(), JobState::Killed);
         assert!(job.context().done_at().is_some());
     }
 }
