@@ -494,9 +494,12 @@ mod tests {
         }
     }
 
-    async fn cleanup(storage: &mut PostgresStorage<Email>, worker_id: String)
-    {
-        let mut tx = storage.pool.acquire().await.expect("failed to get connection");
+    async fn cleanup(storage: &mut PostgresStorage<Email>, worker_id: String) {
+        let mut tx = storage
+            .pool
+            .acquire()
+            .await
+            .expect("failed to get connection");
         sqlx::query("Delete from apalis.jobs where lock_by = $1 or status = 'Pending'")
             .bind(worker_id.clone())
             .execute(&mut tx)
@@ -524,8 +527,10 @@ mod tests {
             .expect("no job is pending")
     }
 
-    async fn register_worker_at(storage: &mut PostgresStorage<Email>, last_seen: DateTime<Utc>) -> String
-    {
+    async fn register_worker_at(
+        storage: &mut PostgresStorage<Email>,
+        last_seen: DateTime<Utc>,
+    ) -> String {
         let worker_id = Uuid::new_v4().to_string();
 
         storage
@@ -535,8 +540,7 @@ mod tests {
         worker_id
     }
 
-    async fn register_worker(storage: &mut PostgresStorage<Email>) -> String
-    {
+    async fn register_worker(storage: &mut PostgresStorage<Email>) -> String {
         register_worker_at(storage, Utc::now()).await
     }
 
@@ -646,7 +650,10 @@ mod tests {
         assert!(job.context().done_at().is_none());
         assert!(job.context().lock_by().is_none());
         assert!(job.context().lock_at().is_none());
-        assert_eq!(*job.context().last_error(), Some("Job was abandoned".to_string()));
+        assert_eq!(
+            *job.context().last_error(),
+            Some("Job was abandoned".to_string())
+        );
 
         cleanup(storage, worker_id).await;
     }
