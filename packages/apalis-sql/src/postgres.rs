@@ -100,6 +100,35 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
             }
         }
     }
+
+    async fn keep_alive_at<Service>(
+        &mut self,
+        worker_id: String,
+        last_seen: DateTime<Utc>,
+    ) -> StorageResult<()> {
+        let pool = self.pool.clone();
+
+        let mut tx = pool
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let worker_type = T::NAME;
+        let storage_name = std::any::type_name::<Self>();
+        let query = "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (id) DO 
+                   UPDATE SET last_seen = EXCLUDED.last_seen";
+        sqlx::query(query)
+            .bind(worker_id.to_owned())
+            .bind(worker_type)
+            .bind(storage_name)
+            .bind(std::any::type_name::<Service>())
+            .bind(last_seen)
+            .execute(&mut tx)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -344,28 +373,7 @@ where
     }
 
     async fn keep_alive<Service>(&mut self, worker_id: String) -> StorageResult<()> {
-        let pool = self.pool.clone();
-
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        let worker_type = T::NAME;
-        let storage_name = std::any::type_name::<Self>();
-        let query =
-                "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) 
-                DO 
-                   UPDATE SET last_seen = NOW()";
-        sqlx::query(query)
-            .bind(worker_id.to_owned())
-            .bind(worker_type)
-            .bind(storage_name)
-            .bind(std::any::type_name::<Service>())
-            .bind(Utc::now())
-            .execute(&mut tx)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(())
+        self.keep_alive_at::<Service>(worker_id, Utc::now()).await
     }
 }
 
@@ -456,6 +464,7 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for Postgr
 #[cfg(test)]
 mod tests {
     use std::ops::DerefMut;
+    use std::ops::Sub;
 
     use once_cell::sync::OnceCell;
     use tokio::sync::Mutex;
@@ -485,6 +494,21 @@ mod tests {
         }
     }
 
+    async fn cleanup(storage: &mut PostgresStorage<Email>, worker_id: String)
+    {
+        let mut tx = storage.pool.acquire().await.expect("failed to get connection");
+        sqlx::query("Delete from apalis.jobs where lock_by = $1 or status = 'Pending'")
+            .bind(worker_id.clone())
+            .execute(&mut tx)
+            .await
+            .expect("failed to delete jobs");
+        sqlx::query("Delete from apalis.workers where id = $1")
+            .bind(worker_id.clone())
+            .execute(&mut tx)
+            .await
+            .expect("failed to delete worker");
+    }
+
     struct DummyService {}
 
     async fn consume_one<S, T>(storage: &mut S, worker_id: String) -> JobRequest<T>
@@ -500,17 +524,20 @@ mod tests {
             .expect("no job is pending")
     }
 
-    async fn register_worker<S, T>(storage: &mut S) -> String
-    where
-        S: Storage<Output = T>,
+    async fn register_worker_at(storage: &mut PostgresStorage<Email>, last_seen: DateTime<Utc>) -> String
     {
         let worker_id = Uuid::new_v4().to_string();
 
         storage
-            .keep_alive::<DummyService>(worker_id.clone())
+            .keep_alive_at::<DummyService>(worker_id.clone(), last_seen)
             .await
             .expect("failed to register worker");
         worker_id
+    }
+
+    async fn register_worker(storage: &mut PostgresStorage<Email>) -> String
+    {
+        register_worker_at(storage, Utc::now()).await
     }
 
     async fn push_email<S>(storage: &mut S, email: Email)
@@ -544,6 +571,8 @@ mod tests {
         assert_eq!(*job.context().status(), JobState::Running);
         assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
         assert!(job.context().lock_at().is_some());
+
+        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
@@ -565,6 +594,8 @@ mod tests {
         let job = get_job(storage, job_id.clone()).await;
         assert_eq!(*job.context().status(), JobState::Done);
         assert!(job.context().done_at().is_some());
+
+        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
@@ -587,5 +618,36 @@ mod tests {
         let job = get_job(storage, job_id.clone()).await;
         assert_eq!(*job.context().status(), JobState::Killed);
         assert!(job.context().done_at().is_some());
+
+        cleanup(storage, worker_id).await;
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_renqueueorphaned_pulse_last_seen_6min() {
+        let mut storage = setup().await;
+        let storage = storage.deref_mut();
+
+        push_email(storage, example_email()).await;
+
+        let worker_id =
+            register_worker_at(storage, Utc::now().sub(chrono::Duration::minutes(6))).await;
+
+        let job = consume_one(storage, worker_id.clone()).await;
+        let result = storage
+            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .await
+            .expect("failed to heartbeat");
+        assert_eq!(result, true);
+
+        let job_id = job.context().id();
+        let job = get_job(storage, job_id.clone()).await;
+
+        assert_eq!(*job.context().status(), JobState::Pending);
+        assert!(job.context().done_at().is_none());
+        assert!(job.context().lock_by().is_none());
+        assert!(job.context().lock_at().is_none());
+        assert_eq!(*job.context().last_error(), Some("Job was abandoned".to_string()));
+
+        cleanup(storage, worker_id).await;
     }
 }
