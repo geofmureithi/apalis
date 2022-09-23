@@ -657,4 +657,30 @@ mod tests {
 
         cleanup(storage, worker_id).await;
     }
+
+    #[tokio::test]
+    async fn test_heartbeat_renqueueorphaned_pulse_last_seen_4min() {
+        let mut storage = setup().await;
+        let storage = storage.deref_mut();
+
+        push_email(storage, example_email()).await;
+
+        let worker_id =
+            register_worker_at(storage, Utc::now().sub(chrono::Duration::minutes(4))).await;
+
+        let job = consume_one(storage, worker_id.clone()).await;
+        let result = storage
+            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .await
+            .expect("failed to heartbeat");
+        assert_eq!(result, true);
+
+        let job_id = job.context().id();
+        let job = get_job(storage, job_id.clone()).await;
+
+        assert_eq!(*job.context().status(), JobState::Running);
+        assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
+
+        cleanup(storage, worker_id).await;
+    }
 }
