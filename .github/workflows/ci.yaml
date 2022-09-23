@@ -60,7 +60,7 @@ jobs:
     name: Test Suite with Postgres
     runs-on: ubuntu-latest
     services:
-      mysql:
+      postgres:
         image: postgres:14
         env:
           POSTGRES_PASSWORD: postgres
