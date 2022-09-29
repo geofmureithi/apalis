@@ -463,30 +463,21 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for Postgr
 
 #[cfg(test)]
 mod tests {
-    use std::ops::DerefMut;
     use std::ops::Sub;
-
-    use once_cell::sync::OnceCell;
-    use tokio::sync::Mutex;
-    use tokio::sync::MutexGuard;
 
     use super::*;
     use email_service::Email;
     use futures::StreamExt;
 
     /// migrate DB and return a storage instance.
-    /// This function acquire a global lock for the storage instance,
-    /// so that tests run sequentially.
-    async fn setup<'a>() -> MutexGuard<'a, PostgresStorage<Email>> {
-        static INSTANCE: OnceCell<Mutex<PostgresStorage<Email>>> = OnceCell::new();
-        let mutex = INSTANCE.get_or_init(|| {
-            let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
-            let pool = PgPool::connect_lazy(db_url).expect("DATABASE_URL is wrong");
-            Mutex::new(PostgresStorage::new(pool))
-        });
-        let storage = mutex.lock().await;
-        storage.setup().await.expect("failed to run migrations");
-        storage
+    async fn setup() -> PostgresStorage<Email> {
+        let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
+        // Because connections cannot be shared across async runtime
+        // (different runtimes are created for each test),
+        // we don't share the storage and tests must be run sequentially.
+        PostgresStorage::connect(db_url)
+            .await
+            .expect("failed to connect DB server")
     }
 
     /// rollback DB changes made by tests.
@@ -495,7 +486,7 @@ mod tests {
     ///  - worker identified by `worker_id`
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(storage: MutexGuard<'_, PostgresStorage<Email>>, worker_id: String) {
+    async fn cleanup(storage: PostgresStorage<Email>, worker_id: String) {
         let mut tx = storage
             .pool
             .acquire()
@@ -573,30 +564,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_consume_last_pushed_job() {
-        let mut guard = setup().await;
-        let storage = guard.deref_mut();
-        push_email(storage, example_email()).await;
+        let mut storage = setup().await;
+        push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker(storage).await;
+        let worker_id = register_worker(&mut storage).await;
 
-        let job = consume_one(storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, worker_id.clone()).await;
 
         assert_eq!(*job.context().status(), JobState::Running);
         assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
         assert!(job.context().lock_at().is_some());
 
-        cleanup(guard, worker_id).await;
+        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
     async fn test_acknowledge_job() {
-        let mut guard = setup().await;
-        let storage = guard.deref_mut();
-        push_email(storage, example_email()).await;
+        let mut storage = setup().await;
+        push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker(storage).await;
+        let worker_id = register_worker(&mut storage).await;
 
-        let job = consume_one(storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, worker_id.clone()).await;
         let job_id = job.context().id();
 
         storage
@@ -604,23 +593,22 @@ mod tests {
             .await
             .expect("failed to acknowledge the job");
 
-        let job = get_job(storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id.clone()).await;
         assert_eq!(*job.context().status(), JobState::Done);
         assert!(job.context().done_at().is_some());
 
-        cleanup(guard, worker_id).await;
+        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
     async fn test_kill_job() {
-        let mut guard = setup().await;
-        let storage = guard.deref_mut();
+        let mut storage = setup().await;
 
-        push_email(storage, example_email()).await;
+        push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker(storage).await;
+        let worker_id = register_worker(&mut storage).await;
 
-        let job = consume_one(storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, worker_id.clone()).await;
         let job_id = job.context().id();
 
         storage
@@ -628,24 +616,23 @@ mod tests {
             .await
             .expect("failed to kill job");
 
-        let job = get_job(storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id.clone()).await;
         assert_eq!(*job.context().status(), JobState::Killed);
         assert!(job.context().done_at().is_some());
 
-        cleanup(guard, worker_id).await;
+        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
     async fn test_heartbeat_renqueueorphaned_pulse_last_seen_6min() {
-        let mut guard = setup().await;
-        let storage = guard.deref_mut();
+        let mut storage = setup().await;
 
-        push_email(storage, example_email()).await;
+        push_email(&mut storage, example_email()).await;
 
         let worker_id =
-            register_worker_at(storage, Utc::now().sub(chrono::Duration::minutes(6))).await;
+            register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(6))).await;
 
-        let job = consume_one(storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, worker_id.clone()).await;
         let result = storage
             .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
             .await
@@ -653,7 +640,7 @@ mod tests {
         assert_eq!(result, true);
 
         let job_id = job.context().id();
-        let job = get_job(storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id.clone()).await;
 
         assert_eq!(*job.context().status(), JobState::Pending);
         assert!(job.context().done_at().is_none());
@@ -664,20 +651,19 @@ mod tests {
             Some("Job was abandoned".to_string())
         );
 
-        cleanup(guard, worker_id).await;
+        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
     async fn test_heartbeat_renqueueorphaned_pulse_last_seen_4min() {
-        let mut guard = setup().await;
-        let storage = guard.deref_mut();
+        let mut storage = setup().await;
 
-        push_email(storage, example_email()).await;
+        push_email(&mut storage, example_email()).await;
 
         let worker_id =
-            register_worker_at(storage, Utc::now().sub(chrono::Duration::minutes(4))).await;
+            register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(4))).await;
 
-        let job = consume_one(storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, worker_id.clone()).await;
         let result = storage
             .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
             .await
@@ -685,11 +671,11 @@ mod tests {
         assert_eq!(result, true);
 
         let job_id = job.context().id();
-        let job = get_job(storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id.clone()).await;
 
         assert_eq!(*job.context().status(), JobState::Running);
         assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
 
-        cleanup(guard, worker_id).await;
+        cleanup(storage, worker_id).await;
     }
 }
