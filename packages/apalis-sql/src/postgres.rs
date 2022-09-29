@@ -475,9 +475,11 @@ mod tests {
         // Because connections cannot be shared across async runtime
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
-        PostgresStorage::connect(db_url)
+        let storage = PostgresStorage::connect(db_url)
             .await
-            .expect("failed to connect DB server")
+            .expect("failed to connect DB server");
+        storage.setup().await.expect("failed to migrate DB");
+        storage
     }
 
     /// rollback DB changes made by tests.
