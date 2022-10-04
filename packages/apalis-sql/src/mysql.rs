@@ -474,26 +474,35 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for MysqlS
 #[cfg(test)]
 mod tests {
 
-    use std::ops::DerefMut;
-
-    use once_cell::sync::OnceCell;
-    use tokio::sync::Mutex;
-    use tokio::sync::MutexGuard;
 
     use super::*;
     use email_service::Email;
     use futures::StreamExt;
 
-    async fn setup<'a>() -> MutexGuard<'a, MysqlStorage<Email>> {
-        static INSTANCE: OnceCell<Mutex<MysqlStorage<Email>>> = OnceCell::new();
-        let mutex = INSTANCE.get_or_init(|| {
-            let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
-            let pool: MySqlPool = MySqlPool::connect_lazy(db_url).expect("DATABASE_URL is wrong");
-            Mutex::new(MysqlStorage::new(pool))
-        });
-        let storage = mutex.lock().await;
-        storage.setup().await.expect("failed to run migrations");
+    async fn setup() -> MysqlStorage<Email> {
+        let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
+        let storage = MysqlStorage::connect(db_url).await.expect("DATABASE_URL is wrong");
+        storage.setup().await.expect("failed to migrate DB");
         storage
+    }
+
+    /// rollback DB changes made by tests.
+    /// Delete the following rows:
+    ///  - jobs whose state is `Pending` or locked by `worker_id`
+    ///  - worker identified by `worker_id`
+    ///
+    /// You should execute this function in the end of a test
+    async fn cleanup(storage: MysqlStorage<Email>, worker_id: String) {
+        sqlx::query("DELETE FROM jobs WHERE lock_by = ? OR status = 'Pending'")
+            .bind(worker_id.clone())
+            .execute(&storage.pool)
+            .await
+            .expect("failed to delete jobs");
+        sqlx::query("DELETE FROM workers WHERE id = ?")
+            .bind(worker_id.clone())
+            .execute(&storage.pool)
+            .await
+            .expect("failed to delete worker");
     }
 
     async fn consume_one<S, T>(storage: &mut S, worker_id: &String) -> JobRequest<T>
@@ -519,7 +528,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_storage_heartbeat_reenqueuorphaned_pulse_last_seen_6min() {
-        // acquire a lock for storage
         let mut storage = setup().await;
 
         // push an Email job
@@ -537,7 +545,7 @@ mod tests {
             .unwrap();
 
         // fetch job
-        let job = consume_one(storage.deref_mut(), &worker_id).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         assert_eq!(*job.context().status(), JobState::Running);
 
         // heartbeat with ReenqueueOrpharned pulse
@@ -554,11 +562,12 @@ mod tests {
         assert!(context.lock_at().is_none());
         assert!(context.done_at().is_none());
         assert_eq!(*context.last_error(), Some("Job was abandoned".to_string()));
+
+        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
     async fn test_storage_heartbeat_reenqueuorphaned_pulse_last_seen_4min() {
-        // acquire a lock for storage
         let mut storage = setup().await;
 
         // push an Email job
@@ -576,7 +585,7 @@ mod tests {
             .unwrap();
 
         // fetch job
-        let job = consume_one(storage.deref_mut(), &worker_id).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         assert_eq!(*job.context().status(), JobState::Running);
 
         // heartbeat with ReenqueueOrpharned pulse
@@ -590,5 +599,7 @@ mod tests {
         let context = job.context();
         assert_eq!(*context.status(), JobState::Running);
         assert_eq!(*context.lock_by(), Some(worker_id.clone()));
+
+        cleanup(storage, worker_id).await;
     }
 }
