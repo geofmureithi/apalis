@@ -474,14 +474,15 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for MysqlS
 #[cfg(test)]
 mod tests {
 
-
     use super::*;
     use email_service::Email;
     use futures::StreamExt;
 
     async fn setup() -> MysqlStorage<Email> {
         let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
-        let storage = MysqlStorage::connect(db_url).await.expect("DATABASE_URL is wrong");
+        let storage = MysqlStorage::connect(db_url)
+            .await
+            .expect("DATABASE_URL is wrong");
         storage.setup().await.expect("failed to migrate DB");
         storage
     }
