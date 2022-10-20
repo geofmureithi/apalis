@@ -51,7 +51,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: cargo test --no-default-features --features mysql,migrate
+      - run: cargo test --no-default-features --features mysql,migrate -- --test-threads=1
         working-directory: packages/apalis-sql
         env:
           DATABASE_URL: mysql://test:test@localhost/test
