@@ -9,7 +9,7 @@ use async_stream::try_stream;
 use chrono::{DateTime, Utc};
 use futures::Stream;
 use serde::{de::DeserializeOwned, Serialize};
-use sqlx::types::Uuid;
+use uuid::Uuid;
 use sqlx::{Pool, Row, Sqlite, SqlitePool};
 use std::collections::HashMap;
 use std::convert::TryInto;

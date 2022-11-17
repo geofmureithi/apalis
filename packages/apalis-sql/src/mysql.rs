@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use futures::Stream;
 use serde::{de::DeserializeOwned, Serialize};
 
-use sqlx::types::Uuid;
+use uuid::Uuid;
 use sqlx::{MySql, MySqlPool, Pool, Row};
 use std::collections::HashMap;
 use std::convert::TryInto;

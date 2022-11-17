@@ -22,7 +22,7 @@ use futures::{FutureExt, Stream};
 use futures_lite::future;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::postgres::PgListener;
-use sqlx::types::Uuid;
+use uuid::Uuid;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use std::convert::TryInto;
