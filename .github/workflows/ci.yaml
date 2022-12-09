@@ -46,7 +46,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: cargo tests --test-threads=1
+      - run: cargo test --test-threads=1
         working-directory: packages/apalis-redis
         env:
           REDIS_URL: redis://127.0.0.1/
