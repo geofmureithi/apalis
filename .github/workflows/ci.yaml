@@ -34,7 +34,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
-  
+
   test-mysql:
     name: Test Suite with MySQL
     runs-on: ubuntu-latest
@@ -80,6 +80,19 @@ jobs:
           toolchain: stable
           override: true
       - run: cargo test --no-default-features --features postgres,migrate -- --test-threads=1
+        working-directory: packages/apalis-sql
+
+  test-sqlite:
+    name: Test Suite with Sqlite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: cargo test --no-default-features --features sqlite,migrate -- --test-threads=1
         working-directory: packages/apalis-sql
 
   fmt:
