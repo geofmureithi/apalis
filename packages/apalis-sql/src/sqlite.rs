@@ -35,7 +35,7 @@ impl<T> Clone for SqliteStorage<T> {
     }
 }
 
-impl<T> SqliteStorage<T> {
+impl<T: Job> SqliteStorage<T> {
     /// Construct a new Storage from a pool
     pub fn new(pool: SqlitePool) -> Self {
         Self {
@@ -66,6 +66,35 @@ impl<T> SqliteStorage<T> {
         sqlx::migrate!("migrations/sqlite").run(&pool).await?;
         Ok(())
     }
+
+    async fn keep_alive_at<Service>(
+        &mut self,
+        worker_id: String,
+        last_seen: DateTime<Utc>,
+    ) -> StorageResult<()> {
+        let pool = self.pool.clone();
+
+        let mut tx = pool
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let worker_type = T::NAME;
+        let storage_name = std::any::type_name::<Self>();
+        let query = "INSERT INTO Workers (id, worker_type, storage_name, layers, last_seen)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (id) DO 
+                   UPDATE SET last_seen = EXCLUDED.last_seen";
+        sqlx::query(query)
+            .bind(worker_id.to_owned())
+            .bind(worker_type)
+            .bind(storage_name)
+            .bind(std::any::type_name::<Service>())
+            .bind(last_seen.timestamp())
+            .execute(&mut tx)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        Ok(())
+    }
 }
 
 async fn fetch_next<T>(
@@ -84,10 +113,11 @@ where
                 .await
                 .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             let job_id = job.id();
-            let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2 WHERE id = ?1 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2";
+            let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2";
             let job: Option<SqlJobRequest<T>> = sqlx::query_as(update_query)
                 .bind(job_id.clone())
                 .bind(worker_id)
+                .bind(Utc::now().timestamp())
                 .fetch_optional(&mut tx)
                 .await
                 .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
@@ -257,7 +287,7 @@ where
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         let query =
-                "UPDATE Jobs SET status = 'Kill', done_at = strftime('%s','now') WHERE id = ?1 AND lock_by = ?2";
+                "UPDATE Jobs SET status = 'Killed', done_at = strftime('%s','now') WHERE id = ?1 AND lock_by = ?2";
         sqlx::query(query)
             .bind(job_id.to_owned())
             .bind(worker_id.to_owned())
@@ -493,6 +523,20 @@ mod tests {
 
     use super::*;
     use email_service::Email;
+    use futures::StreamExt;
+    use std::ops::Sub;
+
+    /// migrate DB and return a storage instance.
+    async fn setup() -> SqliteStorage<Email> {
+        // Because connections cannot be shared across async runtime
+        // (different runtimes are created for each test),
+        // we don't share the storage and tests must be run sequentially.
+        let storage = SqliteStorage::<Email>::connect("sqlite::memory:")
+            .await
+            .expect("failed to connect DB server");
+        storage.setup().await.expect("failed to migrate DB");
+        storage
+    }
 
     #[tokio::test]
     async fn test_inmemory_sqlite_worker() {
@@ -511,5 +555,170 @@ mod tests {
         let len = sqlite.len().await.expect("Could not fetch the jobs count");
         assert_eq!(len, 1);
         // assert!(sqlite.is_empty().await.is_err())
+    }
+
+    struct DummyService {}
+
+    fn example_email() -> Email {
+        Email {
+            subject: "Test Subject".to_string(),
+            to: "example@postgres".to_string(),
+            text: "Some Text".to_string(),
+        }
+    }
+
+    async fn consume_one<S, T>(storage: &mut S, worker_id: String) -> JobRequest<T>
+    where
+        S: Storage<Output = T>,
+    {
+        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10));
+        stream
+            .next()
+            .await
+            .expect("stream is empty")
+            .expect("failed to poll job")
+            .expect("no job is pending")
+    }
+
+    async fn register_worker_at(
+        storage: &mut SqliteStorage<Email>,
+        last_seen: DateTime<Utc>,
+    ) -> String {
+        let worker_id = Uuid::new_v4().to_string();
+
+        storage
+            .keep_alive_at::<DummyService>(worker_id.clone(), last_seen)
+            .await
+            .expect("failed to register worker");
+        worker_id
+    }
+
+    async fn register_worker(storage: &mut SqliteStorage<Email>) -> String {
+        register_worker_at(storage, Utc::now()).await
+    }
+
+    async fn push_email<S>(storage: &mut S, email: Email)
+    where
+        S: Storage<Output = Email>,
+    {
+        storage.push(email).await.expect("failed to push a job");
+    }
+
+    async fn get_job<S>(storage: &mut S, job_id: String) -> JobRequest<Email>
+    where
+        S: Storage<Output = Email>,
+    {
+        storage
+            .fetch_by_id(job_id)
+            .await
+            .expect("failed to fetch job by id")
+            .expect("no job found by id")
+    }
+
+    #[tokio::test]
+    async fn test_consume_last_pushed_job() {
+        let mut storage = setup().await;
+        push_email(&mut storage, example_email()).await;
+
+        let worker_id = register_worker(&mut storage).await;
+
+        let job = consume_one(&mut storage, worker_id.clone()).await;
+
+        assert_eq!(*job.context().status(), JobState::Running);
+        assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
+        assert!(job.context().lock_at().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_acknowledge_job() {
+        let mut storage = setup().await;
+        push_email(&mut storage, example_email()).await;
+
+        let worker_id = register_worker(&mut storage).await;
+
+        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job_id = job.context().id();
+
+        storage
+            .ack(worker_id.clone(), job_id.clone())
+            .await
+            .expect("failed to acknowledge the job");
+
+        let job = get_job(&mut storage, job_id.clone()).await;
+        assert_eq!(*job.context().status(), JobState::Done);
+        assert!(job.context().done_at().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_kill_job() {
+        let mut storage = setup().await;
+
+        push_email(&mut storage, example_email()).await;
+
+        let worker_id = register_worker(&mut storage).await;
+
+        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job_id = job.context().id();
+
+        storage
+            .kill(worker_id.clone(), job_id.clone())
+            .await
+            .expect("failed to kill job");
+
+        let job = get_job(&mut storage, job_id.clone()).await;
+        assert_eq!(*job.context().status(), JobState::Killed);
+        assert!(job.context().done_at().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_renqueueorphaned_pulse_last_seen_6min() {
+        let mut storage = setup().await;
+
+        push_email(&mut storage, example_email()).await;
+
+        let worker_id =
+            register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(6))).await;
+
+        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let result = storage
+            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .await
+            .expect("failed to heartbeat");
+        assert_eq!(result, true);
+
+        let job_id = job.context().id();
+        let job = get_job(&mut storage, job_id.clone()).await;
+
+        assert_eq!(*job.context().status(), JobState::Pending);
+        assert!(job.context().done_at().is_none());
+        assert!(job.context().lock_by().is_none());
+        assert!(job.context().lock_at().is_none());
+        assert_eq!(
+            *job.context().last_error(),
+            Some("Job was abandoned".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_renqueueorphaned_pulse_last_seen_4min() {
+        let mut storage = setup().await;
+
+        push_email(&mut storage, example_email()).await;
+
+        let worker_id =
+            register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(4))).await;
+
+        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let result = storage
+            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .await
+            .expect("failed to heartbeat");
+        assert_eq!(result, true);
+
+        let job_id = job.context().id();
+        let job = get_job(&mut storage, job_id.clone()).await;
+
+        assert_eq!(*job.context().status(), JobState::Running);
+        assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
     }
 }
