@@ -30,32 +30,6 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
-  
-  test-mysql:
-    name: Test Suite with MySQL
-    runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8
-        env:
-          MYSQL_DATABASE: test
-          MYSQL_USER: test
-          MYSQL_PASSWORD: test
-          MYSQL_ROOT_PASSWORD: root
-        ports:
-          - 3306:3306
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: cargo test --no-default-features --features mysql,migrate
-        working-directory: packages/apalis-sql
-        env:
-          DATABASE_URL: mysql://test:test@localhost/test
-
 
   test-redis:
     name: Test Suite Redis
