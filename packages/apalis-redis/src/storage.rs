@@ -704,6 +704,7 @@ where
     }
 }
 
+#[cfg(test)]
 mod tests {
     use std::ops::Sub;
 
