@@ -89,7 +89,7 @@ impl<T: Job> SqliteStorage<T> {
             .bind(worker_type)
             .bind(storage_name)
             .bind(std::any::type_name::<Service>())
-            .bind(last_seen)
+            .bind(last_seen.timestamp())
             .execute(&mut tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
@@ -113,10 +113,11 @@ where
                 .await
                 .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             let job_id = job.id();
-            let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2 WHERE id = ?1 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2";
+            let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2";
             let job: Option<SqlJobRequest<T>> = sqlx::query_as(update_query)
                 .bind(job_id.clone())
                 .bind(worker_id)
+                .bind(Utc::now().timestamp())
                 .fetch_optional(&mut tx)
                 .await
                 .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
@@ -537,30 +538,6 @@ mod tests {
         storage
     }
 
-    /// rollback DB changes made by tests.
-    /// Delete the following rows:
-    ///  - jobs whose state is `Pending` or locked by `worker_id`
-    ///  - worker identified by `worker_id`
-    ///
-    /// You should execute this function in the end of a test
-    async fn cleanup(storage: SqliteStorage<Email>, worker_id: String) {
-        let mut tx = storage
-            .pool
-            .acquire()
-            .await
-            .expect("failed to get connection");
-        sqlx::query("Delete from Jobs where lock_by = ?1 or status = 'Pending'")
-            .bind(worker_id.clone())
-            .execute(&mut tx)
-            .await
-            .expect("failed to delete jobs");
-        sqlx::query("Delete from Workers where id = ?1")
-            .bind(worker_id.clone())
-            .execute(&mut tx)
-            .await
-            .expect("failed to delete worker");
-    }
-
     #[tokio::test]
     async fn test_inmemory_sqlite_worker() {
         let mut sqlite = SqliteStorage::<Email>::connect("sqlite::memory:")
@@ -650,8 +627,6 @@ mod tests {
         assert_eq!(*job.context().status(), JobState::Running);
         assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
         assert!(job.context().lock_at().is_some());
-
-        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
@@ -672,8 +647,6 @@ mod tests {
         let job = get_job(&mut storage, job_id.clone()).await;
         assert_eq!(*job.context().status(), JobState::Done);
         assert!(job.context().done_at().is_some());
-
-        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
@@ -695,8 +668,6 @@ mod tests {
         let job = get_job(&mut storage, job_id.clone()).await;
         assert_eq!(*job.context().status(), JobState::Killed);
         assert!(job.context().done_at().is_some());
-
-        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
@@ -726,8 +697,6 @@ mod tests {
             *job.context().last_error(),
             Some("Job was abandoned".to_string())
         );
-
-        cleanup(storage, worker_id).await;
     }
 
     #[tokio::test]
@@ -751,7 +720,5 @@ mod tests {
 
         assert_eq!(*job.context().status(), JobState::Running);
         assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
-
-        cleanup(storage, worker_id).await;
     }
 }
