@@ -703,3 +703,208 @@ where
             .collect())
     }
 }
+
+mod tests {
+    use std::ops::Sub;
+
+    use super::*;
+    use email_service::Email;
+    use futures::StreamExt;
+    use uuid::Uuid;
+
+    /// migrate DB and return a storage instance.
+    async fn setup() -> RedisStorage<Email> {
+        let redis_url = &std::env::var("REDIS_URL").expect("No REDIS_URL is specified");
+        // Because connections cannot be shared across async runtime
+        // (different runtimes are created for each test),
+        // we don't share the storage and tests must be run sequentially.
+        let storage = RedisStorage::connect(redis_url.as_str())
+            .await
+            .expect("failed to connect DB server");
+        storage
+    }
+
+    /// rollback DB changes made by tests.
+    ///
+    /// You should execute this function in the end of a test
+    async fn cleanup(mut storage: RedisStorage<Email>, _worker_id: String) {
+        let _resp: String = redis::cmd("FLUSHDB")
+            .query_async(&mut storage.conn)
+            .await
+            .expect("failed to Flushdb");
+    }
+
+    struct DummyService {}
+
+    fn example_email() -> Email {
+        Email {
+            subject: "Test Subject".to_string(),
+            to: "example@postgres".to_string(),
+            text: "Some Text".to_string(),
+        }
+    }
+
+    async fn consume_one<S, T>(storage: &mut S, worker_id: String) -> JobRequest<T>
+    where
+        S: Storage<Output = T>,
+    {
+        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10));
+        stream
+            .next()
+            .await
+            .expect("stream is empty")
+            .expect("failed to poll job")
+            .expect("no job is pending")
+    }
+
+    async fn register_worker_at(
+        storage: &mut RedisStorage<Email>,
+        _last_seen: DateTime<Utc>,
+    ) -> String {
+        let worker_id = Uuid::new_v4().to_string();
+
+        storage
+            .keep_alive::<DummyService>(worker_id.clone())
+            .await
+            .expect("failed to register worker");
+        worker_id
+    }
+
+    async fn register_worker(storage: &mut RedisStorage<Email>) -> String {
+        register_worker_at(storage, Utc::now()).await
+    }
+
+    async fn push_email<S>(storage: &mut S, email: Email)
+    where
+        S: Storage<Output = Email>,
+    {
+        storage.push(email).await.expect("failed to push a job");
+    }
+
+    async fn get_job<S>(storage: &mut S, job_id: String) -> JobRequest<Email>
+    where
+        S: Storage<Output = Email>,
+    {
+        storage
+            .fetch_by_id(job_id)
+            .await
+            .expect("failed to fetch job by id")
+            .expect("no job found by id")
+    }
+
+    #[tokio::test]
+    async fn test_consume_last_pushed_job() {
+        let mut storage = setup().await;
+        push_email(&mut storage, example_email()).await;
+
+        let worker_id = register_worker(&mut storage).await;
+
+        let job = consume_one(&mut storage, worker_id.clone()).await;
+
+        // No worker yet
+        // Redis doesn't update jobs like in sql
+        assert_eq!(*job.context().status(), JobState::Pending);
+        assert_eq!(*job.context().lock_by(), None);
+        assert!(job.context().lock_at().is_none());
+
+        cleanup(storage, worker_id).await;
+    }
+
+    #[tokio::test]
+    async fn test_acknowledge_job() {
+        let mut storage = setup().await;
+        push_email(&mut storage, example_email()).await;
+
+        let worker_id = register_worker(&mut storage).await;
+
+        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job_id = job.context().id();
+
+        storage
+            .ack(worker_id.clone(), job_id.clone())
+            .await
+            .expect("failed to acknowledge the job");
+
+        let job = get_job(&mut storage, job_id.clone()).await;
+        assert_eq!(*job.context().status(), JobState::Pending); // Redis storage uses hset etc to manage status
+        assert!(job.context().done_at().is_none());
+
+        cleanup(storage, worker_id).await;
+    }
+
+    #[tokio::test]
+    async fn test_kill_job() {
+        let mut storage = setup().await;
+
+        push_email(&mut storage, example_email()).await;
+
+        let worker_id = register_worker(&mut storage).await;
+
+        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job_id = job.context().id();
+
+        storage
+            .kill(worker_id.clone(), job_id.clone())
+            .await
+            .expect("failed to kill job");
+
+        let job = get_job(&mut storage, job_id.clone()).await;
+        assert_eq!(*job.context().status(), JobState::Pending);
+        assert!(job.context().done_at().is_none());
+
+        cleanup(storage, worker_id).await;
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_renqueueorphaned_pulse_last_seen_6min() {
+        let mut storage = setup().await;
+
+        push_email(&mut storage, example_email()).await;
+
+        let worker_id =
+            register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(6))).await;
+
+        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let result = storage
+            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .await
+            .expect("failed to heartbeat");
+        assert_eq!(result, true);
+
+        let job_id = job.context().id();
+        let job = get_job(&mut storage, job_id.clone()).await;
+
+        assert_eq!(*job.context().status(), JobState::Pending);
+        assert!(job.context().done_at().is_none());
+        assert!(job.context().lock_by().is_none());
+        assert!(job.context().lock_at().is_none());
+        assert_eq!(*job.context().last_error(), None);
+
+        cleanup(storage, worker_id).await;
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_renqueueorphaned_pulse_last_seen_4min() {
+        let mut storage = setup().await;
+
+        push_email(&mut storage, example_email()).await;
+
+        let worker_id =
+            register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(4))).await;
+
+        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let result = storage
+            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .await
+            .expect("failed to heartbeat");
+        assert_eq!(result, true);
+
+        let job_id = job.context().id();
+        let job = get_job(&mut storage, job_id.clone()).await;
+
+        assert_eq!(*job.context().status(), JobState::Pending);
+        assert_eq!(*job.context().lock_by(), None);
+
+        cleanup(storage, worker_id).await;
+    }
+}
