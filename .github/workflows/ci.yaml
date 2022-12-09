@@ -57,8 +57,6 @@ jobs:
           DATABASE_URL: mysql://test:test@localhost/test
 
 
-<<<<<<< Updated upstream
-=======
   test-redis:
     name: Test Suite Redis
     runs-on: ubuntu-latest
@@ -139,7 +137,6 @@ jobs:
       - run: cargo test --no-default-features --features sqlite,migrate -- --test-threads=1
         working-directory: packages/apalis-sql
 
->>>>>>> Stashed changes
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
