@@ -23,6 +23,11 @@ futures = "0.3"
 tokio = "1"
 async-trait = "0.1.53"
 
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros"] }
+email-service = { path = "../../examples/email-service" }
+
 [features]
 default = ["storage"]
 storage = ["apalis-core/storage"]
