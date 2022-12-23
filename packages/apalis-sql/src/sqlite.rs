@@ -66,6 +66,36 @@ impl<T: Job> SqliteStorage<T> {
         sqlx::migrate!("migrations/sqlite").run(&pool).await?;
         Ok(())
     }
+
+    /// Keeps a storage notified that the worker is still alive manually
+    pub async fn keep_alive_at<Service>(
+        &mut self,
+        worker_id: String,
+        last_seen: DateTime<Utc>,
+    ) -> StorageResult<()> {
+        let pool = self.pool.clone();
+
+        let mut tx = pool
+            .acquire()
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        let worker_type = T::NAME;
+        let storage_name = std::any::type_name::<Self>();
+        let query = "INSERT INTO Workers (id, worker_type, storage_name, layers, last_seen)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (id) DO 
+                   UPDATE SET last_seen = EXCLUDED.last_seen";
+        sqlx::query(query)
+            .bind(worker_id.to_owned())
+            .bind(worker_type)
+            .bind(storage_name)
+            .bind(std::any::type_name::<Service>())
+            .bind(last_seen.timestamp())
+            .execute(&mut tx)
+            .await
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        Ok(())
+    }
 }
 
 async fn fetch_next<T>(

@@ -3,6 +3,7 @@
 //! ```not_rust
 //! cd examples && cargo run -p axum-example
 //! ```
+use anyhow::Result;
 use apalis::prelude::*;
 use apalis::{layers::TraceLayer, redis::RedisStorage};
 use axum::{
@@ -15,7 +16,6 @@ use axum::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt::Debug, io::Error, net::SocketAddr};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use anyhow::Result;
 
 use email_service::{send_email, Email, FORM_HTML};
 
