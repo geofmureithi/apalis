@@ -15,6 +15,7 @@ use axum::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt::Debug, io::Error, net::SocketAddr};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use anyhow::Result;
 
 use email_service::{send_email, Email, FORM_HTML};
 
@@ -46,14 +47,14 @@ where
 }
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "debug".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    let storage: RedisStorage<Email> = RedisStorage::connect("redis://127.0.0.1/").await.unwrap();
+    let storage: RedisStorage<Email> = RedisStorage::connect("redis://127.0.0.1/").await?;
     // build our application with some routes
     let app = Router::new()
         .route("/", get(show_form).post(add_new_job::<Email>))

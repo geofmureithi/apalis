@@ -1,9 +1,10 @@
+use anyhow::Result;
 use apalis::{layers::TraceLayer, prelude::*, sqlite::SqliteStorage};
 use chrono::Utc;
 
 use email_service::{send_email, Email};
 
-async fn produce_jobs(storage: &SqliteStorage<Email>) {
+async fn produce_jobs(storage: &SqliteStorage<Email>) -> Result<()> {
     let mut storage = storage.clone();
     for i in 0..2 {
         storage
@@ -15,17 +16,17 @@ async fn produce_jobs(storage: &SqliteStorage<Email>) {
                 },
                 Utc::now() + chrono::Duration::seconds(i),
             )
-            .await
-            .unwrap();
+            .await?;
     }
+    Ok(())
 }
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
 
-    let sqlite: SqliteStorage<Email> = SqliteStorage::connect("sqlite://data.db").await.unwrap();
+    let sqlite: SqliteStorage<Email> = SqliteStorage::connect("sqlite://data.db").await?;
     // Do migrations: Mainly for "sqlite::memory:"
     sqlite
         .setup()
@@ -33,7 +34,7 @@ async fn main() -> std::io::Result<()> {
         .expect("unable to run migrations for sqlite");
 
     // This can be in another part of the program
-    produce_jobs(&sqlite).await;
+    produce_jobs(&sqlite).await?;
 
     Monitor::new()
         .register_with_count(5, move |_| {

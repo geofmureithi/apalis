@@ -335,7 +335,7 @@ where
     }
 }
 impl<T> Message for JobRequestWrapper<T> {
-    type Result = ();
+    type Result = anyhow::Result<()>;
 }
 
 #[async_trait::async_trait]
@@ -344,19 +344,16 @@ where
     W: Worker<Job = T> + 'static,
     T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
 {
-    type Result = ();
+    type Result = anyhow::Result<()>;
     async fn handle(&mut self, job: JobRequestWrapper<T>) -> Self::Result {
         match job.0 {
             Ok(Some(job)) => {
-                self.handle_job(job).await.unwrap();
+                self.handle_job(job).await?;
+                Ok(())
             }
-            Ok(None) => {
-                // on drain
-            }
-            Err(_e) => {
-                todo!()
-            }
-        };
+            Ok(None) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 
@@ -661,9 +658,9 @@ mod tests {
             S: Service<Job, Response = (), Error = HandlerResult, Future = F> + Send + 'static,
             F: Future<Output = Result<(), HandlerResult>> + Send,
         {
-            type Result = Result<(), HandlerResult>;
+            type Result = anyhow::Result<()>;
             async fn handle(&mut self, msg: Job) -> Self::Result {
-                let handle = self.service.ready().await.unwrap();
+                let handle = self.service.ready().await?;
                 let res = handle.call(msg).await;
                 res
             }

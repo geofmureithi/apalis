@@ -81,25 +81,32 @@ where
         let slf = self.project();
         if let Some((job_details, trx_ctx)) = slf.on_first_poll.take() {
             sentry_core::configure_scope(|scope| {
-                let event_id = uuid::Uuid::parse_str(&job_details.job_id).unwrap();
-                scope.add_event_processor(move |mut event| {
-                    event.event_id = event_id;
-                    Some(event)
-                });
-                scope.set_tag("job_type", job_details.job_type.to_string());
-                let mut details = std::collections::BTreeMap::new();
-                details.insert(String::from("job_id"), job_details.job_id.into());
-                details.insert(
-                    String::from("current_attempt"),
-                    job_details.current_attempt.into(),
-                );
-                scope.set_context("job", sentry_core::protocol::Context::Other(details));
+                let uuid = uuid::Uuid::parse_str(&job_details.job_id);
+                match uuid {
+                    Ok(event_id) => {
+                        scope.add_event_processor(move |mut event| {
+                            event.event_id = event_id;
+                            Some(event)
+                        });
+                        scope.set_tag("job_type", job_details.job_type.to_string());
+                        let mut details = std::collections::BTreeMap::new();
+                        details.insert(String::from("job_id"), job_details.job_id.into());
+                        details.insert(
+                            String::from("current_attempt"),
+                            job_details.current_attempt.into(),
+                        );
+                        scope.set_context("job", sentry_core::protocol::Context::Other(details));
 
-                let transaction: sentry_core::TransactionOrSpan =
-                    sentry_core::start_transaction(trx_ctx).into();
-                let parent_span = scope.get_span();
-                scope.set_span(Some(transaction.clone()));
-                *slf.transaction = Some((transaction, parent_span));
+                        let transaction: sentry_core::TransactionOrSpan =
+                            sentry_core::start_transaction(trx_ctx).into();
+                        let parent_span = scope.get_span();
+                        scope.set_span(Some(transaction.clone()));
+                        *slf.transaction = Some((transaction, parent_span));
+                    }
+                    Err(e) => {
+                        log::error!("Unable to read job_id: {}", e)
+                    }
+                }
             });
         }
         match slf.future.poll(cx) {
