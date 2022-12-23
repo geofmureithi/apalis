@@ -377,19 +377,17 @@ where
         let _guard = this.span.enter();
         let result = futures::ready!(this.inner.poll(cx));
         let done_in = this.start.elapsed();
-        let mut on_failure = this.on_failure.take().unwrap();
-
         match result {
             Ok(res) => {
-                this.on_response
-                    .take()
-                    .unwrap()
-                    .on_response(&res, done_in, this.span);
-
+                if let Some(responder) = this.on_response.take() {
+                    responder.on_response(&res, done_in, this.span);
+                }
                 Poll::Ready(Ok(res))
             }
             Err(err) => {
-                on_failure.on_failure(&err, done_in, this.span);
+                if let Some(mut fail) = this.on_failure.take() {
+                    fail.on_failure(&err, done_in, this.span);
+                }
                 Poll::Ready(Err(err))
             }
         }

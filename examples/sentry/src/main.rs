@@ -5,14 +5,14 @@ use std::time::Duration;
 
 use tracing_subscriber::prelude::*;
 
+use anyhow::Result;
 use apalis::{
     layers::{SentryJobLayer, TraceLayer},
     prelude::*,
     redis::RedisStorage,
 };
-use tokio::time::sleep;
-
 use email_service::Email;
+use tokio::time::sleep;
 
 #[derive(Debug)]
 struct InvalidEmailError {
@@ -95,19 +95,19 @@ async fn email_service(email: Email, _ctx: JobContext) -> Result<JobResult, JobE
     })))
 }
 
-async fn produce_jobs(mut storage: RedisStorage<Email>) {
+async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
     storage
         .push(Email {
             to: "apalis@example".to_string(),
-            text: "Test backround job from Apalis".to_string(),
+            text: "Test background job from Apalis".to_string(),
             subject: "Welcome Sentry Email".to_string(),
         })
-        .await
-        .unwrap();
+        .await?;
+    Ok(())
 }
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
     use tracing_subscriber::EnvFilter;
     std::env::set_var("RUST_LOG", "debug");
     let sentry_dsn =
@@ -123,9 +123,8 @@ async fn main() -> std::io::Result<()> {
         },
     ));
     let fmt_layer = tracing_subscriber::fmt::layer().with_target(false);
-    let filter_layer = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("debug"))
-        .unwrap();
+    let filter_layer =
+        EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("debug"))?;
     tracing_subscriber::registry()
         .with(filter_layer)
         .with(fmt_layer)
@@ -136,7 +135,7 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("Could not connect to RedisStorage");
     //This can be in another part of the program
-    produce_jobs(storage.clone()).await;
+    produce_jobs(storage.clone()).await?;
 
     Monitor::new()
         .register_with_count(2, move |_| {

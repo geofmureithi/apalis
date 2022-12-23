@@ -67,7 +67,8 @@ impl<T: Job> SqliteStorage<T> {
         Ok(())
     }
 
-    async fn keep_alive_at<Service>(
+    /// Keeps a storage notified that the worker is still alive manually
+    pub async fn keep_alive_at<Service>(
         &mut self,
         worker_id: String,
         last_seen: DateTime<Utc>,

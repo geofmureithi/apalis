@@ -6,13 +6,13 @@ edition = "2018"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+anyhow = "1"
 apalis = { path = "../../", features = ["postgres", "broker"] }
 serde = "1"
 tracing-subscriber = "0.3.11"
 chrono = { version = "0.4" }
 tokio = { version ="1", features=["macros"]}
 email-service = { path = "../email-service" }
-
 
 [dependencies.tracing]
 default_features = false

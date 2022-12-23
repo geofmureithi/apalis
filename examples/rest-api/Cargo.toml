@@ -6,6 +6,7 @@ edition = "2018"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+anyhow = "1"
 apalis = { path = "../../", features = ["redis", "sqlite", "sentry", "postgres", "mysql"] }
 serde = "1"
 tokio = { version = "1", features =["macros", "rt-multi-thread"] }
