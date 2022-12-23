@@ -1,4 +1,5 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
+use anyhow::Result;
 use apalis::prelude::*;
 use apalis::{layers::TraceLayer, redis::RedisStorage};
 use futures::future;
@@ -19,19 +20,23 @@ async fn push_email(
 }
 
 #[actix_rt::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
 
-    let storage = RedisStorage::connect("redis://127.0.0.1/").await.unwrap();
+    let storage = RedisStorage::connect("redis://127.0.0.1/").await?;
     let data = web::Data::new(storage.clone());
-    let http = HttpServer::new(move || {
-        App::new()
-            .app_data(data.clone())
-            .service(web::scope("/emails").route("/push", web::post().to(push_email)))
-    })
-    .bind("127.0.0.1:8000")?
-    .run();
+    let http = async {
+        HttpServer::new(move || {
+            App::new()
+                .app_data(data.clone())
+                .service(web::scope("/emails").route("/push", web::post().to(push_email)))
+        })
+        .bind("127.0.0.1:8000")?
+        .run()
+        .await?;
+        Ok(())
+    };
     let worker = Monitor::new()
         .register_with_count(2, move |_| {
             WorkerBuilder::new(storage.clone())

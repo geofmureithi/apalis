@@ -37,6 +37,7 @@ apalis = { version = "0.3", features = ["redis"] }
 use apalis::prelude::*;
 use apalis::redis::RedisStorage;
 use serde::{Deserialize, Serialize};
+use anyhow::Result;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Email {
@@ -48,11 +49,11 @@ async fn email_service(job: Email, _ctx: JobContext) -> Result<JobResult, JobErr
 }
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
     let redis = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
-    let storage = RedisStorage::new(redis).await.unwrap();
+    let storage = RedisStorage::new(redis).await?;
     Monitor::new()
         .register_with_count(2, move || {
             WorkerBuilder::new(storage.clone())
@@ -68,14 +69,13 @@ Then
 
 ```rust
 //This can be in another part of the program or another application
-async fn produce_route_jobs(storage: &RedisStorage<Email>) {
+async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
     let mut storage = storage.clone();
     storage
         .push(Email {
             to: "test@example.com".to_string(),
         })
-        .await
-        .unwrap();
+        .await?;
 }
 
 ```

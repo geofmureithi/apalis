@@ -273,24 +273,24 @@ async fn produce_mysql_jobs(mut storage: MysqlStorage<Upload>) {
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
-async fn main() -> std::io::Result<()> {
+async fn main() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     env_logger::init();
     let database_url = std::env::var("DATABASE_URL").expect("Must specify DATABASE_URL");
-    let pg: PostgresStorage<Document> = PostgresStorage::connect(database_url).await.unwrap();
+    let pg: PostgresStorage<Document> = PostgresStorage::connect(database_url).await?;
     let _res = pg.setup().await.expect("Unable to migrate");
 
     let database_url = std::env::var("MYSQL_URL").expect("Must specify MYSQL_URL");
 
-    let mysql: MysqlStorage<Upload> = MysqlStorage::connect(database_url).await.unwrap();
+    let mysql: MysqlStorage<Upload> = MysqlStorage::connect(database_url).await?;
     mysql
         .setup()
         .await
         .expect("unable to run migrations for mysql");
 
-    let storage = RedisStorage::connect("redis://127.0.0.1/").await.unwrap();
+    let storage = RedisStorage::connect("redis://127.0.0.1/").await?;
 
-    let sqlite = SqliteStorage::connect("sqlite://data.db").await.unwrap();
+    let sqlite = SqliteStorage::connect("sqlite://data.db").await?;
     let _res = sqlite.setup().await.expect("Unable to migrate");
 
     let worker_storage = storage.clone();
@@ -302,20 +302,24 @@ async fn main() -> std::io::Result<()> {
     produce_sqlite_jobs(sqlite.clone()).await;
     produce_postgres_jobs(pg_storage.clone()).await;
     produce_mysql_jobs(mysql.clone()).await;
-    let http = HttpServer::new(move || {
-        App::new().wrap(Cors::permissive()).service(
-            web::scope("/api").service(
-                StorageApiBuilder::new()
-                    .add_storage(storage.clone())
-                    .add_storage(sqlite.clone())
-                    .add_storage(pg.clone())
-                    .add_storage(mysql.clone())
-                    .build(),
-            ),
-        )
-    })
-    .bind("127.0.0.1:8000")?
-    .run();
+    let http = async {
+        HttpServer::new(move || {
+            App::new().wrap(Cors::permissive()).service(
+                web::scope("/api").service(
+                    StorageApiBuilder::new()
+                        .add_storage(storage.clone())
+                        .add_storage(sqlite.clone())
+                        .add_storage(pg.clone())
+                        .add_storage(mysql.clone())
+                        .build(),
+                ),
+            )
+        })
+        .bind("127.0.0.1:8000")?
+        .run()
+        .await?;
+        Ok(())
+    };
 
     let worker = Monitor::new()
         .register_with_count(1, move |_| {

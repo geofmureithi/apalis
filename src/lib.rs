@@ -36,7 +36,7 @@
 //! }
 //!
 //! #[tokio::main]
-//! async fn main() -> std::io::Result<()> {
+//! async fn main() {
 //!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
 //!     let storage = RedisStorage::connect(redis).await.expect("Storage failed");
 //!     Monitor::new()
@@ -46,6 +46,7 @@
 //!         })
 //!         .run()
 //!         .await
+//!         .unwrap();
 //! }
 //!```
 //!

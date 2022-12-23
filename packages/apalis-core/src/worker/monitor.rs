@@ -101,10 +101,10 @@ impl Monitor<JoinHandle<Recipient<WorkerManagement>>> {
 
     /// Start monitor without listening for Ctrl + C
     /// TODO: add the signals feature
-    pub async fn run_without_signals(self) -> std::io::Result<()> {
+    pub async fn run_without_signals(self) -> anyhow::Result<()> {
         let mut workers = Vec::new();
         for worker in self.workers {
-            workers.push(worker.await.unwrap());
+            workers.push(worker.await?);
         }
         let monitor = Monitor {
             workers,
@@ -115,15 +115,15 @@ impl Monitor<JoinHandle<Recipient<WorkerManagement>>> {
     }
 
     /// Start monitor listening for Ctrl + C
-    pub async fn run(self) -> std::io::Result<()> {
-        let res = self.run_without_signals().await;
+    pub async fn run(self) -> anyhow::Result<()> {
+        self.run_without_signals().await?;
         log::debug!("Listening shut down command (ctrl + c)");
         tokio::signal::ctrl_c()
             .await
             .expect("failed to listen for event");
 
         log::debug!("Workers shutdown complete");
-        res
+        Ok(())
     }
 }
 
@@ -151,7 +151,7 @@ pub enum WorkerEvent {
     /// Emitted when a worker encounters a problem outside a job's processing scope
     /// Error(WorkerError),
     Error(String),
-    /// Emitted when a job is proccessd
+    /// Emitted when a job is processed
     Job {
         /// The job id
         id: String,

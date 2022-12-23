@@ -3,6 +3,7 @@
 //! ```not_rust
 //! cd examples && cargo run -p prometheus-example
 //! ```
+use anyhow::Result;
 use apalis::prelude::*;
 use apalis::{layers::PrometheusLayer, redis::RedisStorage};
 use axum::{
@@ -15,20 +16,20 @@ use axum::{
 use futures::future::ready;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt::Debug, io::Error, net::SocketAddr};
+use std::{fmt::Debug, net::SocketAddr};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use email_service::{send_email, Email, FORM_HTML};
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "debug".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    let storage: RedisStorage<Email> = RedisStorage::connect("redis://127.0.0.1/").await.unwrap();
+    let storage: RedisStorage<Email> = RedisStorage::connect("redis://127.0.0.1/").await?;
     // build our application with some routes
     let recorder_handle = setup_metrics_recorder();
     let app = Router::new()
@@ -42,7 +43,7 @@ async fn main() -> std::io::Result<()> {
         axum::Server::bind(&addr)
             .serve(app.into_make_service())
             .await
-            .map_err(|e| Error::new(std::io::ErrorKind::Interrupted, e))
+            .map_err(|e| e.into())
     };
     let monitor = async {
         Monitor::new()
@@ -70,9 +71,9 @@ fn setup_metrics_recorder() -> PrometheusHandle {
             Matcher::Full("job_requests_duration_seconds".to_string()),
             EXPONENTIAL_SECONDS,
         )
-        .unwrap()
+        .expect("Could not setup Prometheus")
         .install_recorder()
-        .unwrap()
+        .expect("Could not install Prometheus recorder")
 }
 
 async fn show_form() -> Html<&'static str> {
