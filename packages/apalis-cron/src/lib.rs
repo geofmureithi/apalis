@@ -27,7 +27,7 @@
 //! use std::str::FromStr;
 //! use serde::{Serialize,Deserialize};
 //!
-//! #[derive(Serialize, Deserialize, Default, Debug, Clone)]
+//! #[derive(Default)]
 //! struct Reminder;
 //!
 //! impl Job for Reminder {
@@ -75,18 +75,26 @@ use async_stream::try_stream;
 use chrono::Utc;
 
 use futures::Future;
-use std::marker::PhantomData;
+use std::{fmt, marker::PhantomData};
 use tokio::time::sleep;
 use tower::Service;
 
 pub use cron::Schedule;
 
 /// Represents a worker that runs cron jobs
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CronWorker<S, J> {
     service: S,
     job_type: PhantomData<J>,
     schedule: Schedule,
+}
+
+impl<S, J> fmt::Debug for CronWorker<S, J> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CronWorker")
+            .field("schedule", &self.schedule)
+            .finish()
+    }
 }
 
 impl<'a, S, J> CronWorker<S, J> {
@@ -115,9 +123,9 @@ where
     }
 
     fn consume(&mut self) -> JobStreamResult<Self::Job> {
-        let shedule = self.schedule.clone();
+        let schedule = self.schedule.clone();
         let stream = try_stream! {
-            let mut schedule = shedule.upcoming_owned(Utc);
+            let mut schedule = schedule.upcoming_owned(Utc);
             loop {
                 let next = schedule.next().unwrap();
                 let to_sleep = next - chrono::Utc::now();
@@ -150,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cron_worker() {
-        #[derive(Debug, serde::Serialize, serde::Deserialize, Default)]
+        #[derive(Default)]
         struct EmailReminder;
 
         #[derive(Debug)]

@@ -6,7 +6,6 @@ use crate::{
     worker::envelope::{Envelope, EnvelopeProxy, SyncEnvelopeProxy, ToEnvelope},
 };
 use futures::{Future, Stream, StreamExt};
-use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
@@ -342,7 +341,7 @@ impl<T> Message for JobRequestWrapper<T> {
 impl<T, W> Handler<JobRequestWrapper<T>> for W
 where
     W: Worker<Job = T> + 'static,
-    T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
+    T: Job + Send + 'static,
 {
     type Result = anyhow::Result<()>;
     async fn handle(&mut self, job: JobRequestWrapper<T>) -> Self::Result {
@@ -618,13 +617,17 @@ mod tests {
         struct Job(String);
 
         impl Message for Job {
-            type Result = Result<(), HandlerResult>;
+            type Result = anyhow::Result<()>;
         }
 
-        #[derive(Debug)]
-        struct HandlerResult;
+        #[derive(Debug, thiserror::Error)]
+        enum HandlerError {
+            #[error("any error")]
+            #[allow(dead_code)]
+            Any,
+        }
 
-        async fn handler(_msg: Job) -> Result<(), HandlerResult> {
+        async fn handler(_msg: Job) -> Result<(), HandlerError> {
             Ok(())
         }
 
@@ -635,9 +638,8 @@ mod tests {
         #[async_trait::async_trait]
         impl<S, F> Actor for TowerActor<S>
         where
-            S::Error: Debug,
-            S: Service<Job, Response = (), Error = HandlerResult, Future = F> + Send + 'static,
-            F: Future<Output = Result<(), HandlerResult>> + Send,
+            S: Service<Job, Response = (), Error = HandlerError, Future = F> + Send + 'static,
+            F: Future<Output = Result<(), HandlerError>> + Send,
         {
             async fn on_start(&mut self, ctx: &mut Context<Self>) {
                 use futures::stream;
@@ -654,15 +656,14 @@ mod tests {
         #[async_trait::async_trait]
         impl<S, F> Handler<Job> for TowerActor<S>
         where
-            S::Error: Debug,
-            S: Service<Job, Response = (), Error = HandlerResult, Future = F> + Send + 'static,
-            F: Future<Output = Result<(), HandlerResult>> + Send,
+            S: Service<Job, Response = (), Error = HandlerError, Future = F> + Send + 'static,
+            F: Future<Output = Result<(), HandlerError>> + Send,
         {
             type Result = anyhow::Result<()>;
             async fn handle(&mut self, msg: Job) -> Self::Result {
                 let handle = self.service.ready().await?;
-                let res = handle.call(msg).await;
-                res
+                handle.call(msg).await?;
+                Ok(())
             }
         }
 
