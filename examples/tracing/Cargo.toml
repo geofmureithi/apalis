@@ -12,11 +12,10 @@ serde = "1"
 tokio = { version ="1", features = ["macros"]}
 env_logger = "0.7"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
-chrono = { version = "0.4" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 email-service = { path = "../email-service" }
 
 
 [dependencies.tracing]
 default_features = false
 version = "0.1"
-

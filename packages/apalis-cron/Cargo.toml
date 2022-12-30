@@ -13,7 +13,7 @@ apalis-core = { path = "../../packages/apalis-core", version = "0.3.5" }
 cron = "0.11.0"
 futures = "0.3"
 tower = { version = "0.4" }
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 tokio = { version = "1", features = ["time"] }
 async-stream = "0.3.3"
 
