@@ -10,7 +10,7 @@ anyhow = "1"
 apalis = { path = "../../", features = ["redis"] }
 serde = "1"
 actix-rt = "2"
-env_logger = "0.7"
+env_logger = "0.10"
 actix-web = "4"
 futures = "0.3"
 email-service = { path = "../email-service" }
