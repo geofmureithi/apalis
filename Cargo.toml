@@ -90,10 +90,11 @@ all-features = true
 
 
 [dev-dependencies]
-criterion = { version = "0.3", features=["async_tokio"] }
+criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
 serde = "1"
-tokio = { version = "1", features =["macros"] }
+tokio = { version = "1", features = ["macros"] }
 apalis-redis = { version = "0.3.5", path = "./packages/apalis-redis" }
+apalis-sql = { version = "0.3", path = "./packages/apalis-sql", features = ["sqlite"] }
 
 [[bench]]
 name = "redis_benchmark"
