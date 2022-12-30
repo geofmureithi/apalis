@@ -92,7 +92,7 @@ where
     let res = storage.push(job.into_inner()).await;
     match res {
         Ok(()) => HttpResponse::Ok().body("Job added to queue".to_string()),
-        Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{e}")),
     }
 }
 
@@ -108,7 +108,7 @@ where
 
     match jobs {
         Ok(jobs) => HttpResponse::Ok().json(JobsResult { jobs, counts }),
-        Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{e}")),
     }
 }
 
@@ -122,7 +122,7 @@ where
     let workers = storage.list_workers().await;
     match workers {
         Ok(workers) => HttpResponse::Ok().json(serde_json::to_value(workers).unwrap()),
-        Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{e}")),
     }
 }
 
@@ -137,7 +137,7 @@ where
     match res {
         Ok(Some(job)) => HttpResponse::Ok().json(job),
         Ok(None) => HttpResponse::NotFound().finish(),
-        Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{e}")),
     }
 }
 
@@ -231,7 +231,7 @@ async fn produce_redis_jobs(mut storage: RedisStorage<Email>) {
     for i in 0..10 {
         storage
             .push(Email {
-                to: format!("test{}@example.com", i),
+                to: format!("test{i}@example.com"),
                 text: "Test backround job from Apalis".to_string(),
                 subject: "Background email job".to_string(),
             })
@@ -243,7 +243,7 @@ async fn produce_sqlite_jobs(mut storage: SqliteStorage<Notification>) {
     for i in 0..100 {
         storage
             .push(Notification {
-                text: format!("Notiification: {}", i),
+                text: format!("Notiification: {i}"),
             })
             .await
             .unwrap();
@@ -254,7 +254,7 @@ async fn produce_postgres_jobs(mut storage: PostgresStorage<Document>) {
     for i in 0..100 {
         storage
             .push(Document {
-                text: format!("Document: {}", i),
+                text: format!("Document: {i}"),
             })
             .await
             .unwrap();
@@ -265,7 +265,7 @@ async fn produce_mysql_jobs(mut storage: MysqlStorage<Upload>) {
     for i in 0..100 {
         storage
             .push(Upload {
-                url: format!("Upload: {}", i),
+                url: format!("Upload: {i}"),
             })
             .await
             .unwrap();
@@ -278,7 +278,7 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let database_url = std::env::var("DATABASE_URL").expect("Must specify DATABASE_URL");
     let pg: PostgresStorage<Document> = PostgresStorage::connect(database_url).await?;
-    let _res = pg.setup().await.expect("Unable to migrate");
+    pg.setup().await.expect("Unable to migrate");
 
     let database_url = std::env::var("MYSQL_URL").expect("Must specify MYSQL_URL");
 
@@ -291,7 +291,7 @@ async fn main() -> anyhow::Result<()> {
     let storage = RedisStorage::connect("redis://127.0.0.1/").await?;
 
     let sqlite = SqliteStorage::connect("sqlite://data.db").await?;
-    let _res = sqlite.setup().await.expect("Unable to migrate");
+    sqlite.setup().await.expect("Unable to migrate");
 
     let worker_storage = storage.clone();
     let sqlite_storage = sqlite.clone();

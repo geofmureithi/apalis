@@ -97,7 +97,7 @@ impl<S, J> fmt::Debug for CronWorker<S, J> {
     }
 }
 
-impl<'a, S, J> CronWorker<S, J> {
+impl<S, J> CronWorker<S, J> {
     /// Creates a new [CronWorker] instance
     pub fn new(schedule: Schedule, service: S) -> Self {
         Self {

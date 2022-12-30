@@ -82,7 +82,7 @@ where
         let status = response
             .as_ref()
             .ok()
-            .map(|res| format!("{}", res))
+            .map(|res| res.to_string())
             .unwrap_or_else(|| "Error".to_string());
 
         let labels = [
