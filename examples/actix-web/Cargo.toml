@@ -9,7 +9,6 @@ license = "MIT OR Apache-2.0"
 anyhow = "1"
 apalis = { path = "../../", features = ["redis"] }
 serde = "1"
-actix-rt = "2"
 env_logger = "0.10"
 actix-web = "4"
 futures = "0.3"

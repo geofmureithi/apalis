@@ -19,7 +19,7 @@ async fn push_email(
     }
 }
 
-#[actix_rt::main]
+#[actix_web::main]
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
