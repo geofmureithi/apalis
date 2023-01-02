@@ -14,7 +14,7 @@ tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 sentry = "0.25"
 sentry-tower = "0.25.0"
 sentry-tracing = "0.25.0"
-chrono = { version = "0.4" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tokio = { version = "1", features=["macros"] }
 email-service = { path = "../email-service" }
 
