@@ -6,7 +6,7 @@ edition = "2018"
 readme = "../../README.md"
 
 license = "MIT"
-description = "Redis Storage for Apalis: simple and reliable background processing based on Actix Actors"
+description = "Redis Storage for Apalis: simple and reliable background processing based on Redis"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

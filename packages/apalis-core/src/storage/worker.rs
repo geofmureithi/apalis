@@ -150,7 +150,7 @@ where
             Broker::global()
                 .issue_send(WorkerMessage::new(
                     worker_id.clone(),
-                    WorkerEvent::Error(format!("{}", e)),
+                    WorkerEvent::Error(format!("{e}")),
                 ))
                 .await;
             T::on_worker_error(job.inner(), &job, &WorkerError::Storage(e));
@@ -182,13 +182,13 @@ where
                 },
                 Err(ref e) => {
                     job.set_status(JobState::Failed);
-                    job.set_last_error(format!("{}", e));
+                    job.set_last_error(format!("{e}"));
 
                     #[cfg(feature = "broker")]
                     Broker::global()
                         .issue_send(WorkerMessage::new(
                             worker_id.clone(),
-                            WorkerEvent::Error(format!("{}", e)),
+                            WorkerEvent::Error(format!("{e}")),
                         ))
                         .await;
                     // let base: i32 = 2; // an explicit type is required
@@ -201,7 +201,7 @@ where
                 Broker::global()
                     .issue_send(WorkerMessage::new(
                         worker_id.clone(),
-                        WorkerEvent::Error(format!("{}", e)),
+                        WorkerEvent::Error(format!("{e}")),
                     ))
                     .await;
                 T::on_worker_error(job.inner(), &job, &WorkerError::Storage(e));
@@ -211,7 +211,7 @@ where
                 Broker::global()
                     .issue_send(WorkerMessage::new(
                         worker_id.clone(),
-                        WorkerEvent::Error(format!("{}", e)),
+                        WorkerEvent::Error(format!("{e}")),
                     ))
                     .await;
                 T::on_worker_error(job.inner(), &job, &WorkerError::Storage(e));

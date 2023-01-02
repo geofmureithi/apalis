@@ -577,7 +577,7 @@ where
                 let consumers_set = &self.queue.consumers_set;
                 let job_data_hash = &self.queue.job_data_hash;
                 let workers: Vec<String> = redis::cmd("ZRANGE")
-                    .arg(&consumers_set)
+                    .arg(consumers_set)
                     .arg("0")
                     .arg("-1")
                     .query_async(&mut conn)
@@ -686,7 +686,7 @@ where
 
         let mut conn = self.conn.clone();
         let workers: Vec<String> = redis::cmd("ZRANGE")
-            .arg(&consumers_set)
+            .arg(consumers_set)
             .arg("0")
             .arg("-1")
             .query_async(&mut conn)
@@ -870,7 +870,7 @@ mod tests {
             .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
             .await
             .expect("failed to heartbeat");
-        assert_eq!(result, true);
+        assert!(result);
 
         let job_id = job.context().id();
         let job = get_job(&mut storage, job_id.clone()).await;
@@ -898,7 +898,7 @@ mod tests {
             .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
             .await
             .expect("failed to heartbeat");
-        assert_eq!(result, true);
+        assert!(result);
 
         let job_id = job.context().id();
         let job = get_job(&mut storage, job_id.clone()).await;

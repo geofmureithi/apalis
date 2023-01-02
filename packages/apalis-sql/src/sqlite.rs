@@ -685,7 +685,7 @@ mod tests {
             .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
             .await
             .expect("failed to heartbeat");
-        assert_eq!(result, true);
+        assert!(result);
 
         let job_id = job.context().id();
         let job = get_job(&mut storage, job_id.clone()).await;
@@ -714,7 +714,7 @@ mod tests {
             .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
             .await
             .expect("failed to heartbeat");
-        assert_eq!(result, true);
+        assert!(result);
 
         let job_id = job.context().id();
         let job = get_job(&mut storage, job_id.clone()).await;

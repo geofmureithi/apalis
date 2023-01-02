@@ -97,7 +97,7 @@ where
         ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("An Error occured {}", e),
+            format!("An Error occured {e}"),
         ),
     }
     .into_response()
