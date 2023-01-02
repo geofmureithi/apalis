@@ -6,7 +6,7 @@ edition = "2018"
 readme = "../../README.md"
 
 license = "MIT"
-description = "Redis Storage for Apalis: simple and reliable background processing based on Actix Actors"
+description = "Redis Storage for Apalis: simple and reliable background processing based on Redis"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -15,7 +15,7 @@ apalis-core = { path = "../../packages/apalis-core", version = "0.3.5", default-
 redis = { version = "0.21" , features = ["tokio-comp"] }
 serde = "1"
 log = "0.4"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 uuid = { version = "0.8", features = ["serde", "v4"] }
 serde_json = "1"
 async-stream = "0.3"

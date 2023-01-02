@@ -15,11 +15,11 @@ async fn push_email(
     let res = storage.push(email.into_inner()).await;
     match res {
         Ok(()) => HttpResponse::Ok().body("Email added to queue".to_string()),
-        Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{e}")),
     }
 }
 
-#[actix_rt::main]
+#[actix_web::main]
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();

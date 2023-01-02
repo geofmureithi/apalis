@@ -2,7 +2,6 @@ use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 use chrono::Utc;
 use futures::Future;
-use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::{interval, interval_at, Instant};
 use tower::{Layer, Service, ServiceExt};
 
@@ -59,7 +58,7 @@ impl Default for StorageWorkerConfig {
 ///
 /// A [Service] must be provided to be called when a new job is detected.
 #[derive(Debug)]
-pub struct StorageWorker<T: Serialize, S: Storage<Output = T>, H> {
+pub struct StorageWorker<T, S: Storage<Output = T>, H> {
     storage: S,
     handler: H,
     config: StorageWorkerConfig,
@@ -68,7 +67,7 @@ pub struct StorageWorker<T: Serialize, S: Storage<Output = T>, H> {
 
 impl<T, S, H> StorageWorker<T, S, H>
 where
-    T: 'static + Job + Serialize + Debug + DeserializeOwned,
+    T: 'static + Job,
     S: 'static + Storage<Output = T> + Unpin,
 {
     /// Create a new Worker instance
@@ -151,7 +150,7 @@ where
             Broker::global()
                 .issue_send(WorkerMessage::new(
                     worker_id.clone(),
-                    WorkerEvent::Error(format!("{}", e)),
+                    WorkerEvent::Error(format!("{e}")),
                 ))
                 .await;
             T::on_worker_error(job.inner(), &job, &WorkerError::Storage(e));
@@ -183,13 +182,13 @@ where
                 },
                 Err(ref e) => {
                     job.set_status(JobState::Failed);
-                    job.set_last_error(format!("{}", e));
+                    job.set_last_error(format!("{e}"));
 
                     #[cfg(feature = "broker")]
                     Broker::global()
                         .issue_send(WorkerMessage::new(
                             worker_id.clone(),
-                            WorkerEvent::Error(format!("{}", e)),
+                            WorkerEvent::Error(format!("{e}")),
                         ))
                         .await;
                     // let base: i32 = 2; // an explicit type is required
@@ -202,7 +201,7 @@ where
                 Broker::global()
                     .issue_send(WorkerMessage::new(
                         worker_id.clone(),
-                        WorkerEvent::Error(format!("{}", e)),
+                        WorkerEvent::Error(format!("{e}")),
                     ))
                     .await;
                 T::on_worker_error(job.inner(), &job, &WorkerError::Storage(e));
@@ -212,7 +211,7 @@ where
                 Broker::global()
                     .issue_send(WorkerMessage::new(
                         worker_id.clone(),
-                        WorkerEvent::Error(format!("{}", e)),
+                        WorkerEvent::Error(format!("{e}")),
                     ))
                     .await;
                 T::on_worker_error(job.inner(), &job, &WorkerError::Storage(e));
@@ -231,7 +230,7 @@ impl Message for StorageWorkerPulse {
 impl<T: 'static, S: 'static, H: 'static, F> Handler<StorageWorkerPulse> for StorageWorker<T, S, H>
 where
     S: Storage<Output = T> + Unpin + Send + Sync,
-    T: Job + Serialize + Debug + DeserializeOwned + Send,
+    T: Job + Send,
     H: Service<JobRequest<T>, Response = JobResult, Error = JobError, Future = F>
         + Unpin
         + Send
@@ -255,7 +254,7 @@ impl Message for KeepAlive {
 impl<T: 'static, S: 'static, H: 'static, F> Handler<KeepAlive> for StorageWorker<T, S, H>
 where
     S: Storage<Output = T> + Unpin + Send + Sync,
-    T: Job + Serialize + Debug + DeserializeOwned + Send,
+    T: Job + Send,
     H: Service<JobRequest<T>, Response = JobResult, Error = JobError, Future = F>
         + Unpin
         + Send
@@ -273,7 +272,7 @@ where
 impl<T, S, M, Ser, Fut> WorkerFactory<Ser> for WorkerBuilder<T, S, M>
 where
     S: Storage<Output = T> + Unpin + Send + 'static + Sync,
-    T: Job + Serialize + Debug + DeserializeOwned + Send + 'static,
+    T: Job + Send + 'static,
     M: Layer<Ser>,
     <M as Layer<Ser>>::Service: Service<JobRequest<T>, Response = JobResult, Error = JobError, Future = Fut>
         + Unpin

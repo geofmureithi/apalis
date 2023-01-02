@@ -81,6 +81,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
 
         try_stream! {
             let mut listener = PgListener::connect_with(&pool).await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+            #[allow(clippy::let_unit_value)]
             let _notify = listener.listen("apalis::job").await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             loop {
                 //  Ideally wait for a job or a tick
@@ -639,7 +640,7 @@ mod tests {
             .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
             .await
             .expect("failed to heartbeat");
-        assert_eq!(result, true);
+        assert!(result);
 
         let job_id = job.context().id();
         let job = get_job(&mut storage, job_id.clone()).await;
@@ -670,7 +671,7 @@ mod tests {
             .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
             .await
             .expect("failed to heartbeat");
-        assert_eq!(result, true);
+        assert!(result);
 
         let job_id = job.context().id();
         let job = get_job(&mut storage, job_id.clone()).await;

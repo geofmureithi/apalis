@@ -127,7 +127,7 @@ impl Monitor<JoinHandle<Recipient<WorkerManagement>>> {
     }
 }
 
-/// Represents behaviour for listening to workers events via [Monitor]
+/// Represents behavior for listening to workers events via [Monitor]
 pub trait WorkerListener: Send {
     ///  Called when an event is thrown by a worker
     fn on_event(&self, worker_id: &str, event: &WorkerEvent);
@@ -212,7 +212,6 @@ mod tests {
     async fn test_simple_worker() {
         struct SimpleWorker<S>(S);
 
-        #[derive(Debug, serde::Serialize, serde::Deserialize)]
         struct Email;
 
         impl Job for Email {

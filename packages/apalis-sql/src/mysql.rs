@@ -510,11 +510,11 @@ mod tests {
             .expect("failed to delete worker");
     }
 
-    async fn consume_one<S, T>(storage: &mut S, worker_id: &String) -> JobRequest<T>
+    async fn consume_one<S, T>(storage: &mut S, worker_id: &str) -> JobRequest<T>
     where
         S: Storage<Output = T>,
     {
-        let mut stream = storage.consume(worker_id.clone(), std::time::Duration::from_secs(10));
+        let mut stream = storage.consume(worker_id.to_owned(), std::time::Duration::from_secs(10));
         stream
             .next()
             .await

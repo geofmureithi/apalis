@@ -24,7 +24,7 @@ impl std::fmt::Display for JobResult {
             JobResult::Kill => "Kill",
             JobResult::Reschedule(_) => "Reschedule",
         };
-        write!(f, "{}", text)
+        f.write_str(text)
     }
 }
 

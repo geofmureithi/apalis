@@ -1,6 +1,6 @@
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use std::fmt::{self, Debug};
+use std::fmt::{self};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -85,7 +85,7 @@ where
 
 impl<T, F, Res, Request> Service<JobRequest<Request>> for JobFn<T>
 where
-    Request: Debug + 'static,
+    Request: 'static,
     T: Fn(Request, JobContext) -> F,
     Res: IntoJobResponse,
     F: Future<Output = Res> + 'static + Send,

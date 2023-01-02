@@ -6,7 +6,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use futures::{future::BoxFuture, stream::BoxStream};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 /// Represents a result for a [Job].
 pub type JobFuture<I> = BoxFuture<'static, I>;
@@ -26,7 +26,7 @@ pub struct JobRequestWrapper<T>(pub Result<Option<JobRequest<T>>, JobStreamError
 ///     const NAME: &'static str = "apalis::Email";
 /// }
 /// ```
-pub trait Job: Sized + Send + Unpin + Serialize + DeserializeOwned + Debug + Sync {
+pub trait Job: Sized + Send + Unpin + Sync {
     /// Represents the name for job.
     const NAME: &'static str;
 
@@ -52,10 +52,7 @@ where
     Self: Sized,
 {
     /// Decode the given value into a message
-    ///
-    /// In the default implementation, the string value is decoded by assuming
-    /// it was encoded through the Msgpack encoding.
-    fn decode_job(value: &[u8]) -> Result<Self, JobError>;
+    fn decode_job(value: &[u8]) -> anyhow::Result<Self>;
 }
 
 /// Job objects that can be encoded to a string to be stored in Storage.
@@ -68,7 +65,7 @@ where
     /// Encode the value into a bytes array to be inserted into Storage.
     ///
     /// In the default implementation, the object is encoded with Serde.
-    fn encode_job(&self) -> Result<Vec<u8>, JobError>;
+    fn encode_job(&self) -> anyhow::Result<Vec<u8>>;
 }
 
 // impl<T> JobDecodable for T

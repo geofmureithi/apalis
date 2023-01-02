@@ -10,7 +10,7 @@ async fn produce_jobs(storage: &SqliteStorage<Email>) -> Result<()> {
         storage
             .schedule(
                 Email {
-                    to: format!("test{}@example.com", i),
+                    to: format!("test{i}@example.com"),
                     text: "Test backround job from Apalis".to_string(),
                     subject: "Background email job".to_string(),
                 },
