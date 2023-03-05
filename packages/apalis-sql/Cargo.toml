@@ -16,7 +16,7 @@ mysql = [ "sqlx/mysql", "sqlx/json", "sqlx/chrono", "sqlx/bigdecimal"]
 migrate = ["sqlx/migrate", "sqlx/macros"]
 
 [dependencies.sqlx]
-version = "0.5.13"
+version = "0.6.2"
 default-features = false
 features = [ "runtime-tokio-rustls", "uuid" ]
 
