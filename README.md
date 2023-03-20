@@ -28,7 +28,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.3", features = ["redis"] }
+apalis = { version = "0.4", features = ["redis"] }
 ```
 
 ## Usage
@@ -44,8 +44,8 @@ struct Email {
     to: String,
 }
 
-async fn email_service(job: Email, _ctx: JobContext){
-    
+async fn email_service(job: Email, ctx: JobContext) {
+    info!("Do something");
 }
 
 #[tokio::main]
@@ -56,7 +56,8 @@ async fn main() -> Result<()> {
     let storage = RedisStorage::new(redis).await?;
     Monitor::new()
         .register_with_count(2, move || {
-            WorkerBuilder::new(storage.clone())
+            WorkerBuilder::new("email-worker-1")
+                .with_storage(storage.clone())
                 .build_fn(email_service)
         })
         .run()
@@ -113,7 +114,7 @@ Since we provide a few storage solutions, here is a table comparing them:
 | Persistence     |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   | BYO  |
 | Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  x   |
 
-## How Apalis works
+## How Apalis works (Draft)
 
 ```mermaid
 sequenceDiagram
@@ -148,6 +149,7 @@ v 0.4
 
 - [x] Move from actor based to layer based processing
 - [x] Graceful Shutdown
+- [ ] Allow other types of executors apart from Tokio
 - [ ] Mock/Test Worker
 - [x] Improve monitoring
 - [ ] Improve Apalis Board
