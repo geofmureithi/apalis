@@ -38,9 +38,10 @@ async fn main() -> Result<()> {
         Ok(())
     };
     let worker = Monitor::new()
-        .register_with_count(2, move |_| {
-            WorkerBuilder::new(storage.clone())
+        .register_with_count(2, move |c| {
+            WorkerBuilder::new(format!("tasty-avocado-{c}"))
                 .layer(TraceLayer::new())
+                .with_storage(storage.clone())
                 .build_fn(send_email)
         })
         .run();

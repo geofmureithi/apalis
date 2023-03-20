@@ -70,7 +70,6 @@
 /// Represent utilities for creating [Worker] instances.
 ///
 /// [`Worker`]: crate::worker::Worker
-#[cfg(feature = "worker")]
 pub mod builder;
 /// Represents the [JobContext].
 pub mod context;
@@ -94,7 +93,6 @@ pub mod response;
 /// Represents ability to persist and consume jobs from storages.
 pub mod storage;
 
-#[cfg(feature = "worker")]
-#[cfg_attr(docsrs, doc(cfg(feature = "worker")))]
 /// Represents the actual executor of a [Job].
 pub mod worker;
+pub mod monitor;

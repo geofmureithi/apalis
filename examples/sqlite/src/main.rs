@@ -37,11 +37,13 @@ async fn main() -> Result<()> {
     produce_jobs(&sqlite).await?;
 
     Monitor::new()
-        .register_with_count(5, move |_| {
-            WorkerBuilder::new(sqlite.clone())
+        .register_with_count(5, move |c| {
+            WorkerBuilder::new(format!("tasty-banana-{c}"))
                 .layer(TraceLayer::new())
+                .with_storage(sqlite.clone())
                 .build_fn(send_email)
         })
         .run()
-        .await
+        .await?;
+    Ok(())
 }

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 use crate::{
-    error::{JobError, JobStreamError, WorkerError},
+    error::{JobError, JobStreamError},
     request::{JobRequest, JobState},
 };
 use chrono::{DateTime, Utc};
@@ -29,59 +29,7 @@ pub struct JobRequestWrapper<T>(pub Result<Option<JobRequest<T>>, JobStreamError
 pub trait Job: Sized + Send + Unpin + Sync {
     /// Represents the name for job.
     const NAME: &'static str;
-
-    /// How long it took before service was ready
-    fn on_service_ready(&self, _req: &JobRequest<Self>, _latency: Duration) {
-        #[cfg(feature = "trace")]
-        tracing::debug!(latency = ?_latency, "service.ready");
-    }
-
-    /// Handle worker errors related to a job
-    fn on_worker_error(&self, _req: &JobRequest<Self>, _error: &WorkerError) {
-        #[cfg(feature = "trace")]
-        tracing::warn!(error =?_error, "storage.error");
-    }
 }
-
-/// Job objects that can be reconstructed from the data stored in Storage.
-///
-/// Implemented for all `Deserialize` objects by default by relying on SerdeJson
-/// decoding.
-trait JobDecodable
-where
-    Self: Sized,
-{
-    /// Decode the given value into a message
-    fn decode_job(value: &[u8]) -> anyhow::Result<Self>;
-}
-
-/// Job objects that can be encoded to a string to be stored in Storage.
-///
-/// Implemented for all `Serialize` objects by default by encoding with Serde.
-trait JobEncodable
-where
-    Self: Sized,
-{
-    /// Encode the value into a bytes array to be inserted into Storage.
-    ///
-    /// In the default implementation, the object is encoded with Serde.
-    fn encode_job(&self) -> anyhow::Result<Vec<u8>>;
-}
-
-// impl<T> JobDecodable for T
-// where
-//     T: DeserializeOwned,
-// {
-//     fn decode_job(value: &Vec<u8>) -> Result<T, JobError> {
-//         Ok(serde_json::from_slice(value)?)
-//     }
-// }
-
-// impl<T: Serialize> JobEncodable for T {
-//     fn encode_job(&self) -> Result<Vec<u8>, JobError> {
-//         Ok(serde_json::to_vec(self)?)
-//     }
-// }
 
 /// Represents a Stream of jobs being consumed by a Worker
 pub trait JobStream {

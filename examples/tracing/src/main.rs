@@ -1,12 +1,17 @@
 use anyhow::Result;
+
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 use tracing_subscriber::prelude::*;
 
-use apalis::{layers::TraceLayer, prelude::*, redis::RedisStorage};
+use apalis::{
+    layers::TraceLayer,
+    prelude::{JobContext, Monitor, Storage, WithStorage, WorkerBuilder, WorkerFactoryFn},
+    redis::RedisStorage,
+};
 
-use tokio::time::sleep;
+use tokio::{time::sleep};
 
 use email_service::Email;
 
@@ -23,11 +28,10 @@ impl fmt::Display for InvalidEmailError {
 
 impl Error for InvalidEmailError {}
 
-async fn email_service(_email: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
+async fn email_service(_email: Email, _ctx: JobContext) {
     tracing::info!("Checking if dns configured");
     sleep(Duration::from_millis(1008)).await;
     tracing::info!("Sent in 1 sec");
-    Ok(JobResult::Success)
 }
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
@@ -64,11 +68,13 @@ async fn main() -> Result<()> {
     produce_jobs(storage.clone()).await?;
 
     Monitor::new()
-        .register_with_count(2, move |_| {
-            WorkerBuilder::new(storage.clone())
-                .layer(TraceLayer::new())
-                .build_fn(email_service)
-        })
+        .register(
+            WorkerBuilder::new("tasty-avocado")
+                .middleware(|srv| srv.layer(TraceLayer::new()))
+                .with_storage(storage)
+                .build_fn(email_service),
+        )
         .run()
-        .await
+        .await?;
+    Ok(())
 }

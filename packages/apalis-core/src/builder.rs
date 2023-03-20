@@ -1,182 +1,134 @@
+use std::{error::Error, fmt::Debug, marker::PhantomData};
+
+use futures::Stream;
 use tower::{
     layer::util::{Identity, Stack},
-    Layer,
+    Layer, Service, ServiceBuilder,
 };
-
-#[cfg(feature = "filter")]
-#[cfg_attr(docsrs, doc(cfg(feature = "filter")))]
-use tower::filter::{AsyncFilterLayer, FilterLayer};
-
-use std::{fmt::Debug, marker::PhantomData};
 
 use crate::{
-    job::JobStream,
+    job::Job,
     job_fn::{job_fn, JobFn},
-    worker::Worker,
+    request::JobRequest,
+    worker::{ready::ReadyWorker, Worker, WorkerRef},
 };
 
-/// Configure and build a [Worker] job service.
-///
-/// `WorkerBuilder` collects all the components and configuration required to
-/// build a job service. Once the service is defined, it can be built
-/// with `build`.
-///
-/// # Examples
-///
-/// Defining a job service with the default [JobService];
-///
-/// ```rust,ignore
-///
-/// use apalis::prelude::*;
-/// use apalis::sqlite::SqliteStorage;
-///
-/// let sqlite = SqliteStorage::new("sqlite::memory:").await.unwrap();
-///
-/// async fn email_service(job: JobRequest<Email>) -> Result<JobResult, JobError> {
-///    Ok(JobResult::Success)
-/// }
-///
-/// let addr = WorkerBuilder::new(sqlite)
-///     .build_fn(email_service)
-///     .start().await;
-///
-/// ```
-///
-///
-/// Defining a middleware stack
-///
-/// ```rust,ignore
-/// use apalis::layers::{
-///    extensions::Extension,
-///    retry::{JobRetryPolicy, RetryLayer},
-/// };
-///
-/// use apalis::WorkerBuilder;
-/// use apalis::sqlite::SqliteStorage;
-///
-/// let sqlite = SqliteStorage::connect("sqlite::memory:").await.unwrap();
-///
-/// #[derive(Clone)]
-/// struct JobState {}
-///
-/// let addr = WorkerBuilder::new(sqlite)
-///     .layer(RetryLayer::new(JobRetryPolicy))
-///     .layer(Extension(JobState {}))
-///     .build()
-///     .start().await;
-///
-/// ```
+/// An abstract that allows building a [Worker].
+/// Usually the output is [ReadyWorker] but you can implement your own via [WorkerFactory]
 #[derive(Debug)]
-pub struct WorkerBuilder<T, S, M> {
-    job: PhantomData<T>,
-    pub(crate) layer: M,
-    pub(crate) source: S,
+pub struct WorkerBuilder<Job, Source, Middleware> {
+    pub(crate) name: String,
+    pub(crate) job: PhantomData<Job>,
+    pub(crate) layer: ServiceBuilder<Middleware>,
+    pub(crate) source: Source,
 }
 
-impl<S> WorkerBuilder<(), S, Identity> {
-    /// Build a new [WorkerBuilder] instance
-    pub fn new(source: S) -> WorkerBuilder<S::Job, S, Identity>
-    where
-        S: JobStream,
-    {
-        let job: PhantomData<S::Job> = PhantomData;
+impl WorkerBuilder<(), (), Identity> {
+    /// Build a new [WorkerBuilder] instance with a name for the worker to build
+    pub fn new<N: Into<String>>(name: N) -> WorkerBuilder<(), (), Identity> {
+        let job: PhantomData<()> = PhantomData;
         WorkerBuilder {
             job,
-            layer: Identity::new(),
-            source,
+            layer: ServiceBuilder::new(),
+            source: (),
+            name: name.into(),
         }
     }
 }
 
-impl<T, S, M> WorkerBuilder<T, S, M> {
-    /// Add a new layer `T` into the [WorkerBuilder].
-    ///
-    /// This wraps the inner service with the service provided by a user-defined
-    /// [Layer]. The provided layer must implement the [Layer] trait.
-    ///
-    pub fn layer<U>(self, layer: U) -> WorkerBuilder<T, S, Stack<U, M>>
+impl<J, S, M> WorkerBuilder<J, S, M> {
+    /// Consume a stream directly
+    pub fn stream<NS: Stream<Item = Result<Option<JobRequest<NJ>>, E>>, E, NJ>(
+        self,
+        stream: NS,
+    ) -> WorkerBuilder<NJ, NS, M> {
+        WorkerBuilder {
+            job: PhantomData,
+            layer: self.layer,
+            source: stream,
+            name: self.name,
+        }
+    }
+
+    /// Get the [WorkerRef] and build a stream.
+    /// Useful when you want to know what worker is consuming the stream.
+    pub fn with_stream<
+        NS: Fn(WorkerRef) -> ST,
+        NJ,
+        E,
+        ST: Stream<Item = Result<Option<JobRequest<NJ>>, E>>,
+    >(
+        self,
+        stream: NS,
+    ) -> WorkerBuilder<NJ, ST, M> {
+        WorkerBuilder {
+            job: PhantomData,
+            layer: self.layer,
+            source: stream(WorkerRef(self.name.clone())),
+            name: self.name,
+        }
+    }
+}
+
+impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
+    /// Allows of decorating the service that consumes jobs.
+    /// Allows adding [tower] middleware
+    pub fn middleware<NewService>(
+        self,
+        f: impl Fn(ServiceBuilder<Serv>) -> ServiceBuilder<NewService>,
+    ) -> WorkerBuilder<Job, Stream, NewService> {
+        let middleware = f(self.layer);
+
+        WorkerBuilder {
+            job: self.job,
+            layer: middleware,
+            name: self.name,
+            source: self.source,
+        }
+    }
+
+    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Job, Stream, Stack<U, Serv>>
     where
-        M: Layer<U>,
+        Serv: Layer<U>,
     {
         WorkerBuilder {
             job: self.job,
             source: self.source,
-            layer: Stack::new(layer, self.layer),
+            layer: self.layer.layer(layer),
+            name: self.name,
         }
     }
+}
 
-    /// Conditionally reject requests based on `predicate`.
-    ///
-    /// `predicate` must implement the [`Predicate`] trait.
-    ///
-    /// This wraps the inner service with an instance of the [`Filter`]
-    /// middleware.
-    ///
-    /// [`Filter`]: tower::filter::Filter
-    #[cfg(feature = "filter")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "filter")))]
-    pub fn filter<P>(self, predicate: P) -> WorkerBuilder<T, S, Stack<FilterLayer<P>, M>>
-    where
-        M: Layer<FilterLayer<P>>,
-    {
-        self.layer(FilterLayer::new(predicate))
-    }
-
-    /// Conditionally reject requests based on an asynchronous `predicate`.
-    ///
-    /// `predicate` must implement the [`AsyncPredicate`] trait.
-    ///
-    /// This wraps the inner service with an instance of the [`AsyncFilter`]
-    /// middleware.
-    /// [`AsyncFilter`]: tower::filter::
-    #[cfg(feature = "filter")]
-    pub fn filter_async<P>(self, predicate: P) -> WorkerBuilder<T, S, Stack<AsyncFilterLayer<P>, M>>
-    where
-        M: Layer<AsyncFilterLayer<P>>,
-    {
-        self.layer(AsyncFilterLayer::new(predicate))
-    }
-
-    /// Map one response type to another.
-    ///
-    /// This wraps the inner service with an instance of the [`MapResponse`]
-    /// middleware.
-    ///
-    /// See the documentation for the [`map_response` combinator] for details.
-    ///
-    /// [`MapResponse`]: tower::util::MapResponse
-    /// [`map_response` combinator]: tower::util::ServiceExt::map_response
-    pub fn map_response<F>(
-        self,
-        f: F,
-    ) -> WorkerBuilder<T, S, Stack<tower::util::MapResponseLayer<F>, M>>
-    where
-        M: Layer<tower::util::MapResponseLayer<F>>,
-    {
-        self.layer(tower::util::MapResponseLayer::new(f))
-    }
-
-    /// Map one error type to another.
-    ///
-    /// This wraps the inner service with an instance of the [`MapErr`]
-    /// middleware.
-    ///
-    /// See the documentation for the [`map_err` combinator] for details.
-    ///
-    /// [`MapErr`]: tower::util::MapErr
-    /// [`map_err` combinator]: tower::util::ServiceExt::map_err
-    pub fn map_err<F>(self, f: F) -> WorkerBuilder<T, S, Stack<tower::util::MapErrLayer<F>, M>>
-    where
-        M: Layer<tower::util::MapErrLayer<F>>,
-    {
-        self.layer(tower::util::MapErrLayer::new(f))
+impl<J, S, M, Ser, E, Request> WorkerFactory<J, Ser> for WorkerBuilder<J, S, M>
+where
+    S: Stream<Item = Result<Option<Request>, E>> + Send + 'static + Unpin,
+    J: Job + Send + 'static,
+    M: Layer<Ser>,
+    <M as Layer<Ser>>::Service: Service<Request> + Send + 'static,
+    E: Sync + Send + 'static + Error,
+    Request: Send,
+    <<M as tower::Layer<Ser>>::Service as Service<Request>>::Future: std::marker::Send,
+    Ser: Service<Request>,
+    <Ser as Service<Request>>::Error: Debug,
+    <<M as tower::Layer<Ser>>::Service as Service<Request>>::Error: std::fmt::Debug,
+    <<M as tower::Layer<Ser>>::Service as Service<Request>>::Future: 'static,
+{
+    type Worker = ReadyWorker<S, <M as Layer<Ser>>::Service>;
+    /// Convert a worker builder to a worker ready to consume jobs
+    fn build(self, service: Ser) -> ReadyWorker<S, <M as Layer<Ser>>::Service> {
+        ReadyWorker {
+            name: self.name,
+            stream: self.source,
+            layers: self.layer.service(service),
+        }
     }
 }
 
 /// Helper trait for building new Workers from [WorkerBuilder]
-pub trait WorkerFactory<S> {
+pub trait WorkerFactory<J, S> {
     /// The worker to build
-    type Worker: Worker;
+    type Worker: Worker<J>;
     /// Builds a [WorkerFactory] using a [tower] service
     /// that can be used to generate new [Worker] actors using the `build` method
     /// # Arguments
@@ -190,9 +142,9 @@ pub trait WorkerFactory<S> {
 
 /// Helper trait for building new Workers from [WorkerBuilder]
 
-pub trait WorkerFactoryFn<F> {
+pub trait WorkerFactoryFn<J, F> {
     /// The worker build
-    type Worker: Worker;
+    type Worker: Worker<J>;
     /// Builds a [WorkerFactoryFn] using a [crate::job_fn::JobFn] service
     /// that can be used to generate new [Worker] actors using the `build` method
     /// # Arguments
@@ -204,9 +156,9 @@ pub trait WorkerFactoryFn<F> {
     fn build_fn(self, f: F) -> Self::Worker;
 }
 
-impl<W, F> WorkerFactoryFn<F> for W
+impl<J, W, F> WorkerFactoryFn<J, F> for W
 where
-    W: WorkerFactory<JobFn<F>>,
+    W: WorkerFactory<J, JobFn<F>>,
 {
     type Worker = W::Worker;
 

@@ -44,8 +44,8 @@ struct Email {
     to: String,
 }
 
-async fn email_service(job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
-    Ok(JobResult::Success)
+async fn email_service(job: Email, _ctx: JobContext){
+    
 }
 
 #[tokio::main]
@@ -111,7 +111,30 @@ Since we provide a few storage solutions, here is a table comparing them:
 | Scheduled jobs  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
 | Retryable jobs  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
 | Persistence     |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   | BYO  |
-| Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   |  \*   |   x   |  x   |
+| Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  x   |
+
+## How Apalis works
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Worker
+    participant Postgres
+
+    App->>+Worker: Add job to queue
+    Worker->>+Postgres: Poll queue for job
+    Postgres-->>-Worker: Job data
+    Worker->>+Postgres: Update job status to 'running'
+    Postgres-->>-Worker: Confirmation
+    Worker->>+App: Notify job started
+    loop job execution
+        Worker-->>-App: Report job progress
+    end
+    Worker->>+Postgres: Update job status to 'completed'
+    Postgres-->>-Worker: Confirmation
+    Worker->>+App: Notify job completed
+
+```
 
 ## Thanks to
 
@@ -123,10 +146,13 @@ Since we provide a few storage solutions, here is a table comparing them:
 
 v 0.4
 
-- [ ] Improve monitoring
+- [x] Move from actor based to layer based processing
+- [x] Graceful Shutdown
+- [ ] Mock/Test Worker
+- [x] Improve monitoring
 - [ ] Improve Apalis Board
-- [ ] Add job progress
-- [ ] Add more sources \*
+- [x] Add job progress via layer
+- [x] Add more sources
 
 v 0.3
 

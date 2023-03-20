@@ -3,7 +3,7 @@ mod on_failure;
 mod on_request;
 mod on_response;
 
-use crate::{error::JobError, request::JobRequest, response::JobResult};
+use crate::{error::JobError, request::JobRequest};
 use std::{
     fmt::{self, Debug},
     pin::Pin,
@@ -310,21 +310,21 @@ impl<S, MakeSpan, OnRequest, OnResponse, OnFailure>
     }
 }
 
-impl<J, S, OnRequestT, OnResponseT, OnFailureT, MakeSpanT, F> Service<JobRequest<J>>
+impl<J, S, OnRequestT, OnResponseT, OnFailureT, MakeSpanT, F, Res> Service<JobRequest<J>>
     for Trace<S, MakeSpanT, OnRequestT, OnResponseT, OnFailureT>
 where
-    S: Service<JobRequest<J>, Response = JobResult, Error = JobError, Future = F>
+    S: Service<JobRequest<J>, Response = Res, Error = JobError, Future = F>
         + Unpin
         + Send
         + 'static,
     S::Error: fmt::Display + 'static,
     MakeSpanT: MakeSpan<J>,
     OnRequestT: OnRequest<J>,
-    OnResponseT: OnResponse + Clone + 'static,
-    F: Future<Output = Result<JobResult, JobError>> + 'static,
+    OnResponseT: OnResponse<Res> + Clone + 'static,
+    F: Future<Output = Result<Res, JobError>> + 'static,
     OnFailureT: OnFailure + Clone + 'static,
 {
-    type Response = JobResult;
+    type Response = Res;
     type Error = JobError;
     type Future = ResponseFuture<F, OnResponseT, OnFailureT>;
 
@@ -363,14 +363,14 @@ pin_project! {
     }
 }
 
-impl<Fut, OnResponseT, OnFailureT> Future for ResponseFuture<Fut, OnResponseT, OnFailureT>
+impl<Fut, OnResponseT, OnFailureT, Res> Future for ResponseFuture<Fut, OnResponseT, OnFailureT>
 where
-    Fut: Future<Output = Result<JobResult, JobError>>,
+    Fut: Future<Output = Result<Res, JobError>>,
 
-    OnResponseT: OnResponse,
+    OnResponseT: OnResponse<Res>,
     OnFailureT: OnFailure,
 {
-    type Output = Result<JobResult, JobError>;
+    type Output = Result<Res, JobError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();

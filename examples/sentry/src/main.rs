@@ -33,7 +33,7 @@ macro_rules! update_progress {
     };
 }
 
-async fn email_service(email: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
+async fn email_service(email: Email, _ctx: JobContext) -> Result<(), JobError> {
     let parent_span = sentry::configure_scope(|scope| scope.get_span());
 
     let tx_ctx =
@@ -138,13 +138,15 @@ async fn main() -> Result<()> {
     produce_jobs(storage.clone()).await?;
 
     Monitor::new()
-        .register_with_count(2, move |_| {
-            WorkerBuilder::new(storage.clone())
+        .register_with_count(2, move |c| {
+            WorkerBuilder::new(format!("tasty-avocado-{c}"))
                 .layer(NewSentryLayer::new_from_top())
                 .layer(SentryJobLayer::new())
                 .layer(TraceLayer::new())
+                .with_storage(storage.clone())
                 .build_fn(email_service)
         })
         .run()
-        .await
+        .await?;
+    Ok(())
 }

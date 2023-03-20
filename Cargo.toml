@@ -43,12 +43,6 @@ filter = ["apalis-core/filter"]
 ## Add a global extensions to jobs
 extensions =["apalis-core/extensions"]
 
-## Publish and listen worker events via Redis pubsub
-redis-pubsub = ["apalis-redis/pubsub", "broker"]
-
-## Support event collection, communication between workers.
-broker = ["apalis-core/broker"]
-
 
 docsrs = ["document-features"]
 

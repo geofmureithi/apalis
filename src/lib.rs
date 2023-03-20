@@ -86,9 +86,6 @@
 #[cfg(feature = "redis")]
 #[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
 pub mod redis {
-    #[cfg(feature = "redis-pubsub")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "redis-pubsub")))]
-    pub use apalis_redis::listener::RedisPubSubListener;
     pub use apalis_redis::RedisStorage;
 }
 
@@ -182,13 +179,10 @@ pub mod prelude {
         job_fn::job_fn,
         request::JobRequest,
         request::JobState,
-        response::{IntoJobResponse, JobResult},
+        response::{IntoResponse},
         storage::Storage,
-        storage::StorageWorker,
         storage::StorageWorkerPulse,
-        worker::prelude::Monitor,
-        worker::prelude::WorkerEvent,
-        worker::prelude::WorkerListener,
-        worker::Actor,
+        monitor::Monitor,
+        storage::builder::WithStorage,
     };
 }

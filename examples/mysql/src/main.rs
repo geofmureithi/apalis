@@ -31,11 +31,13 @@ async fn main() -> Result<()> {
 
     produce_jobs(&mysql).await?;
     Monitor::new()
-        .register_with_count(2, move |_| {
-            WorkerBuilder::new(mysql.clone())
+        .register_with_count(2, move |c| {
+            WorkerBuilder::new(format!("tasty-avocado-{c}"))
                 .layer(TraceLayer::new())
+                .with_storage(mysql.clone())
                 .build_fn(send_email)
         })
         .run()
-        .await
+        .await?;
+    Ok(())
 }

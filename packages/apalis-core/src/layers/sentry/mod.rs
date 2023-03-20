@@ -10,7 +10,6 @@ use tower::Service;
 use crate::error::JobError;
 use crate::job::Job;
 use crate::request::JobRequest;
-use crate::response::JobResult;
 
 /// Tower Layer that logs Job Details.
 ///
@@ -71,9 +70,9 @@ pin_project_lite::pin_project! {
     }
 }
 
-impl<F> Future for SentryHttpFuture<F>
+impl<F, Res> Future for SentryHttpFuture<F>
 where
-    F: Future<Output = Result<JobResult, JobError>> + 'static,
+    F: Future<Output = Result<Res, JobError>> + 'static,
 {
     type Output = F::Output;
 
@@ -132,10 +131,10 @@ where
     }
 }
 
-impl<S, J, F> Service<JobRequest<J>> for SentryJobService<S>
+impl<S, J, F, Res> Service<JobRequest<J>> for SentryJobService<S>
 where
-    S: Service<JobRequest<J>, Response = JobResult, Error = JobError, Future = F>,
-    F: Future<Output = Result<JobResult, JobError>> + 'static,
+    S: Service<JobRequest<J>, Response = Res, Error = JobError, Future = F>,
+    F: Future<Output = Result<Res, JobError>> + 'static,
     J: Job,
 {
     type Response = S::Response;

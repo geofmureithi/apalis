@@ -12,7 +12,7 @@ impl Job for Email {
     const NAME: &'static str = "apalis::Email";
 }
 
-pub async fn send_email(job: Email, _ctx: JobContext) -> impl IntoJobResponse {
+pub async fn send_email(job: Email, _ctx: JobContext) {
     log::info!("Attempting to send email to {}", job.to);
 }
 
