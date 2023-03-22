@@ -8,7 +8,7 @@ use apalis_core::{
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
-use futures::{Stream};
+use futures::Stream;
 use log::*;
 use redis::{aio::MultiplexedConnection, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Serialize};

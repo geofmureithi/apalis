@@ -1,6 +1,6 @@
 [package]
 name = "apalis"
-version = "0.3.6"
+version = "0.4.0-alpha.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
@@ -8,7 +8,7 @@ documentation = "https://docs.rs/apalis"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["job", "task", "scheduler", "worker", "cron" ]
-edition = "2018"
+edition = "2021"
 
 [features]
 default = ["apalis-core/default", "tracing"]
@@ -48,26 +48,26 @@ docsrs = ["document-features"]
 
 
 [dependencies.apalis-redis]
-version = "0.3.6"
+version = "0.4.0-alpha.0"
 optional = true
 default-features = false
 path = "./packages/apalis-redis"
 
 [dependencies.apalis-sql]
-version = "0.3.6"
+version = "0.4.0-alpha.0"
 features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"
 
 [dependencies.apalis-core]
-version = "0.3.6"
+version = "0.4.0-alpha.0"
 optional = true
 default-features = false
 path = "./packages/apalis-core"
 
 [dependencies.apalis-cron]
-version = "0.3.6"
+version = "0.4.0-alpha.0"
 optional = true
 default-features = false
 path = "./packages/apalis-cron"
@@ -87,7 +87,7 @@ all-features = true
 criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
 serde = "1"
 tokio = { version = "1", features = ["macros"] }
-apalis-redis = { version = "0.3.6", path = "./packages/apalis-redis" }
+apalis-redis = { version = "0.4.0-alpha.0", path = "./packages/apalis-redis" }
 apalis-sql = { version = "0.3", path = "./packages/apalis-sql", features = ["sqlite"] }
 
 [[bench]]

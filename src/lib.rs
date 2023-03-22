@@ -16,40 +16,6 @@
 //!
 //! Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] and [`tower-http`] middleware.
 //!
-//!  ### Example
-//! ```rust, no_run
-//! use apalis::prelude::*;
-//! use serde::{Deserialize, Serialize};
-//! use apalis_redis::RedisStorage;
-//!
-//! #[derive(Debug, Deserialize, Serialize)]
-//! struct Email {
-//!     to: String,
-//! }
-//!
-//! impl Job for Email {
-//!     const NAME: &'static str = "apalis::Email";
-//! }
-//!
-//! async fn send_email(job: Email, ctx: JobContext) -> Result<JobResult, JobError> {
-//!     Ok(JobResult::Success)
-//! }
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
-//!     let storage = RedisStorage::connect(redis).await.expect("Storage failed");
-//!     Monitor::new()
-//!         .register_with_count(2, move |_| {
-//!             WorkerBuilder::new(storage.clone())
-//!                 .build_fn(send_email)
-//!         })
-//!         .run()
-//!         .await
-//!         .unwrap();
-//! }
-//!```
-//!
 //! ## Web UI Available
 //! ![UI](https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png)
 //! See [this example](https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
@@ -177,12 +143,12 @@ pub mod prelude {
         error::JobError,
         job::{Counts, Job, JobFuture, JobStreamExt},
         job_fn::job_fn,
+        monitor::Monitor,
         request::JobRequest,
         request::JobState,
-        response::{IntoResponse},
+        response::IntoResponse,
+        storage::builder::WithStorage,
         storage::Storage,
         storage::StorageWorkerPulse,
-        monitor::Monitor,
-        storage::builder::WithStorage,
     };
 }

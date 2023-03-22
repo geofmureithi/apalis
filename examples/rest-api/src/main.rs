@@ -25,10 +25,7 @@ impl Job for Notification {
     const NAME: &'static str = "sqlite::Notification";
 }
 
-async fn notification_service(
-    notif: Notification,
-    _ctx: JobContext,
-) -> Result<(), JobError> {
+async fn notification_service(notif: Notification, _ctx: JobContext) -> Result<(), JobError> {
     println!("Attempting to send notification {}", notif.text);
     tokio::time::sleep(Duration::from_millis(1)).await;
     Ok(())

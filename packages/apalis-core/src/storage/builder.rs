@@ -1,10 +1,10 @@
+use futures::StreamExt;
 use std::{marker::PhantomData, time::Duration};
-use futures::{StreamExt};
 use tower::layer::util::Stack;
 
 use crate::{builder::WorkerBuilder, job::JobStreamResult, worker::WorkerRef};
 
-use super::{Storage, layers::KeepAliveLayer};
+use super::{layers::KeepAliveLayer, Storage};
 
 /// A helper trait to help build a [Worker] that consumes a [Storage]
 pub trait WithStorage<NS, ST: Storage<Output = Self::Job>> {
@@ -28,11 +28,11 @@ where
         storage: ST,
     ) -> WorkerBuilder<J, Self::Stream, Stack<KeepAliveLayer<ST, J>, M>> {
         let layer = self.layer.layer(KeepAliveLayer::new(
-            WorkerRef(self.name.clone()),
+            WorkerRef::new(self.name.clone()),
             storage.clone(),
             Duration::from_secs(30),
         ));
-        let mut storage = storage.clone();
+        let mut storage = storage;
         WorkerBuilder {
             job: PhantomData,
             layer,

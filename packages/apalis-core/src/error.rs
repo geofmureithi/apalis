@@ -36,17 +36,6 @@ pub enum JobError {
     Unknown,
 }
 
-/// Represents a worker error.
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum WorkerError {
-    #[cfg(feature = "storage")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
-    /// An error communicating with storage.
-    #[error("error communicating with storage: {0}")]
-    Storage(StorageError),
-}
-
 /// Represents a [JobStream] error.
 #[derive(Debug, Error)]
 #[non_exhaustive]

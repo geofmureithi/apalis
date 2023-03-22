@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    fmt::{self, Debug, Formatter},
+    time::Duration,
+};
 
 use futures::{Future, FutureExt};
 use graceful_shutdown::Shutdown;
@@ -12,13 +15,42 @@ use crate::{
     request::JobRequest,
     worker::{Worker, WorkerContext},
 };
+
+/// A monitor for coordinating and managing a collection of workers.
+#[derive(Default)]
 pub struct Monitor {
     shutdown: Shutdown,
     worker_handles: Vec<(String, JoinHandle<()>)>,
     timeout: Option<Duration>,
 }
 
+impl Debug for Monitor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Monitor")
+            .field("shutdown", &"[Graceful shutdown listener]")
+            .field(
+                "worker_handles",
+                &self
+                    .worker_handles
+                    .iter()
+                    .map(|(name, handle)| (name.clone(), handle.is_finished()))
+                    .collect::<Vec<_>>(),
+            )
+            .field("timeout", &self.timeout)
+            .finish()
+    }
+}
+
 impl Monitor {
+    /// Registers a worker with the monitor.
+    ///
+    /// # Arguments
+    ///
+    /// * `worker` - The worker to register.
+    ///
+    /// # Returns
+    ///
+    /// The monitor instance, with the worker added to the collection.
     pub fn register<
         Strm,
         Serv: Service<JobRequest<J>>,
@@ -41,6 +73,17 @@ impl Monitor {
         self
     }
 
+    /// Registers multiple workers with the monitor.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - The number of workers to register.
+    /// * `caller` - A function that returns a new worker instance for each index.
+    ///
+    /// # Returns
+    ///
+    /// The monitor instance, with all workers added to the collection.
+    ///
     pub fn register_with_count<
         Strm,
         Serv: Service<JobRequest<J>>,
@@ -65,6 +108,11 @@ impl Monitor {
 }
 
 impl Monitor {
+    /// Creates a new monitor instance.
+    ///
+    /// # Returns
+    ///
+    /// A new monitor instance, with an empty collection of workers.
     pub fn new() -> Self {
         Self {
             shutdown: Shutdown::new(),
@@ -73,10 +121,30 @@ impl Monitor {
         }
     }
 
+    /// Sets a timeout duration for the monitor's shutdown process.
+    ///
+    /// # Arguments
+    ///
+    /// * `duration` - The timeout duration.
+    ///
+    /// # Returns
+    ///
+    /// The monitor instance, with the shutdown timeout duration set.
+    ///
     pub fn shutdown_timeout(mut self, duration: Duration) -> Self {
         self.timeout = Some(duration);
         self
     }
+
+    /// Runs the monitor and all its registered workers until they have all completed or a shutdown signal is received.
+    ///
+    /// # Arguments
+    ///
+    /// * `signal` - A `Future` that resolves when a shutdown signal is received.
+    ///
+    /// # Errors
+    ///
+    /// If the monitor fails to shutdown gracefully, an `std::io::Error` will be returned.
 
     pub async fn run_with_signal<S: Future<Output = std::io::Result<()>>>(
         self,
@@ -88,6 +156,18 @@ impl Monitor {
         Ok(())
     }
 
+    /// Runs the monitor and all its registered workers until they have all completed.
+    ///
+    /// # Errors
+    ///
+    /// If the monitor fails to shutdown gracefully, an `std::io::Error` will be returned.
+    ///
+    /// # Remarks
+    ///
+    /// If a timeout has been set using the `shutdown_timeout` method, the monitor
+    /// will wait for all workers to complete up to the timeout duration before exiting.
+    /// If the timeout is reached and workers have not completed, the monitor will log a warning
+    /// message and exit forcefully.
     pub async fn run(self) -> std::io::Result<()> {
         let _res: Vec<(String, bool)> = self
             .worker_handles
@@ -107,5 +187,108 @@ impl Monitor {
         }
         info!("Successfully shutdown monitor and all workers");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    use crate::{context::JobContext, job_fn::job_fn, worker::WorkerError};
+
+    use super::*;
+    use futures::Stream;
+    use tokio::time::sleep;
+    use tower::ServiceBuilder;
+
+    struct TestJob {}
+
+    impl Job for TestJob {
+        const NAME: &'static str = "TestJob";
+    }
+
+    struct TestWorker<S> {
+        _service: S,
+    }
+
+    async fn test_service(_req: TestJob, _ctx: JobContext) {}
+
+    #[async_trait::async_trait]
+    impl<S: Send> Worker<TestJob> for TestWorker<S> {
+        type Service = S;
+        type Source = TestSource;
+
+        async fn start(self, _ctx: WorkerContext) -> Result<(), WorkerError> {
+            sleep(Duration::from_millis(100)).await;
+            Ok(())
+        }
+    }
+    struct TestSource {}
+
+    impl Stream for TestSource {
+        type Item = Result<TestJob, ()>;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Pending
+        }
+    }
+
+    #[tokio::test]
+    async fn test_monitor_run() {
+        let monitor = Monitor::new()
+            .register(TestWorker {
+                _service: ServiceBuilder::new().service(job_fn(test_service)),
+            })
+            .shutdown_timeout(Duration::from_secs(1));
+        let shutdown = monitor.shutdown.clone();
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(500)).await;
+            shutdown.shutdown();
+        });
+
+        let result = monitor.run().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_monitor_run_with_signal() {
+        let monitor = Monitor::new()
+            .register(TestWorker {
+                _service: ServiceBuilder::new().service(job_fn(test_service)),
+            })
+            .shutdown_timeout(Duration::from_secs(1));
+        let shutdown = monitor.shutdown.clone();
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(500)).await;
+            shutdown.shutdown();
+        });
+
+        let result = monitor.run_with_signal(async { Ok(()) }).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_monitor_register() {
+        let monitor = Monitor::new();
+        assert_eq!(monitor.worker_handles.len(), 0);
+
+        let monitor = monitor.register(TestWorker {
+            _service: ServiceBuilder::new().service(job_fn(test_service)),
+        });
+        assert_eq!(monitor.worker_handles.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_monitor_register_with_count() {
+        let monitor = Monitor::new();
+        assert_eq!(monitor.worker_handles.len(), 0);
+
+        let monitor = monitor.register_with_count(5, |_| TestWorker {
+            _service: ServiceBuilder::new().service(job_fn(test_service)),
+        });
+        assert_eq!(monitor.worker_handles.len(), 5);
     }
 }

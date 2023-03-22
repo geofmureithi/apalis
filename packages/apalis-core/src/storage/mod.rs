@@ -1,6 +1,6 @@
-mod error;
 /// Allows for building workers that consume a [Storage]
 pub mod builder;
+mod error;
 mod layers;
 use std::time::Duration;
 
@@ -14,7 +14,6 @@ use crate::{
 
 #[cfg(feature = "storage")]
 pub use self::error::StorageError;
-
 
 /// Represents a Storage Result
 pub type StorageResult<I> = Result<I, StorageError>;

@@ -1,7 +1,7 @@
 use crate::context::JobContext;
 use crate::job::Job;
 use crate::request::JobRequest;
-use crate::response::{IntoResponse};
+use crate::response::IntoResponse;
 
 use futures::future::BoxFuture;
 
@@ -10,7 +10,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{BoxError, Service};
-
 
 /// A helper method to build job functions
 pub fn job_fn<T>(f: T) -> JobFn<T> {

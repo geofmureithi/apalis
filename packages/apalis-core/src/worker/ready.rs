@@ -1,19 +1,31 @@
-use std::{fmt::Debug, error::Error};
+use std::{error::Error, fmt::Debug};
 
-use futures::{Stream, StreamExt, Future};
-use log::info;
+use futures::{Future, Stream, StreamExt};
 use tokio::sync::mpsc::channel;
 use tower::{Service, ServiceExt};
+use tracing::info;
 use tracing::warn;
 
 use crate::job::Job;
 
-use super::{WorkerContext, Worker};
+use super::{Worker, WorkerContext};
+use std::fmt::Formatter;
 
+/// A worker that is ready to consume jobs
 pub struct ReadyWorker<Stream, Service> {
-    pub (crate) name: String,
-    pub (crate) stream: Stream,
-    pub (crate) layers: Service,
+    pub(crate) name: String,
+    pub(crate) stream: Stream,
+    pub(crate) service: Service,
+}
+
+impl<Stream, Service> Debug for ReadyWorker<Stream, Service> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReadyWorker")
+            .field("name", &self.name)
+            .field("stream", &std::any::type_name::<Stream>())
+            .field("service", &std::any::type_name::<Service>())
+            .finish()
+    }
 }
 
 #[async_trait::async_trait]
@@ -30,9 +42,8 @@ where
 {
     type Service = Serv;
     type Source = Strm;
-    type Error = E;
-    async fn start(self, ctx: WorkerContext) -> Result<(), Self::Error> {
-        let mut service = self.layers;
+    async fn start(self, ctx: WorkerContext) -> Result<(), super::WorkerError> {
+        let mut service = self.service;
         let mut stream = ctx.shutdown.graceful_stream(self.stream);
         let (send, mut recv) = channel::<()>(1);
 

@@ -11,7 +11,7 @@ use apalis::{
     redis::RedisStorage,
 };
 
-use tokio::{time::sleep};
+use tokio::time::sleep;
 
 use email_service::Email;
 

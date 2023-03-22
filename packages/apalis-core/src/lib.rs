@@ -8,64 +8,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //! # Apalis Core
 //! Utilities for building job and message processing tools.
-//!
-//! ```rust
-//! use futures::Future;
-//! use tower::Service;
-//! use apalis_core::{
-//!    context::JobContext,
-//!    error::JobError,
-//!    job::{Job, JobStreamResult},
-//!    job_fn::job_fn,
-//!    request::JobRequest,
-//!    response::JobResult,
-//!    worker::prelude::*,
-//! };
-//! #[tokio::main]
-//! async fn main() {
-//!     struct SimpleWorker<S>(S);
-//!
-//!     #[derive(Debug, serde::Serialize, serde::Deserialize)]
-//!     struct Email;
-//!
-//!     impl Job for Email {
-//!         const NAME: &'static str = "worker::Email";
-//!     }
-//!
-//!     async fn send_email(job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
-//!         Ok(JobResult::Success)
-//!     }
-//!
-//!     impl<S, F> Worker for SimpleWorker<S>
-//!     where
-//!         S: 'static
-//!             + Send
-//!             + Service<JobRequest<Email>, Response = JobResult, Error = JobError, Future = F>,
-//!         F: Future<Output = Result<JobResult, JobError>> + Send + 'static,
-//!     {
-//!         type Job = Email;
-//!         type Service = S;
-//!         type Future = F;
-//!
-//!         fn service(&mut self) -> &mut S {
-//!             &mut self.0
-//!         }
-//!
-//!         fn consume(&mut self) -> JobStreamResult<Self::Job> {
-//!             use futures::stream;
-//!             let stream = stream::iter(vec![
-//!                 Ok(Some(JobRequest::new(Email))),
-//!                 Ok(Some(JobRequest::new(Email))),
-//!                 Ok(Some(JobRequest::new(Email))),
-//!             ]);
-//!             Box::pin(stream)
-//!         }
-//!     }
-//!     Monitor::new()
-//!         .register_with_count(1, move |_| SimpleWorker(job_fn(send_email)))
-//!         .run_without_signals()
-//!         .await;
-//! }
 
 /// Represent utilities for creating [Worker] instances.
 ///
@@ -93,6 +35,7 @@ pub mod response;
 /// Represents ability to persist and consume jobs from storages.
 pub mod storage;
 
+/// Represents monitoring of running workers
+pub mod monitor;
 /// Represents the actual executor of a [Job].
 pub mod worker;
-pub mod monitor;

@@ -14,8 +14,7 @@
 //!
 //! ## Example
 //!
-//! ```rust
-//! use apalis_core::worker::prelude::*;
+//! ```rust,no_run
 //! use apalis_core::context::JobContext;
 //! use apalis_core::layers::retry::RetryLayer;
 //! use apalis_core::layers::retry::DefaultRetryPolicy;
@@ -23,11 +22,14 @@
 //! use apalis_core::job_fn::job_fn;
 //! use apalis_core::job::Job;
 //! use tower::ServiceBuilder;
-//! use apalis_cron::{CronWorker, Schedule};
+//! use apalis_cron::Schedule;
 //! use std::str::FromStr;
 //! use serde::{Serialize,Deserialize};
-//!
-//! #[derive(Default)]
+//! use apalis_core::monitor::Monitor;
+//! use apalis_core::builder::WorkerBuilder;
+//! use apalis_core::builder::WorkerFactory;
+//! use apalis_cron::CronStream;
+//! #[derive(Default, Clone)]
 //! struct Reminder;
 //!
 //! impl Job for Reminder {
@@ -55,34 +57,35 @@
 //!         .layer(Extension(FakeService))
 //!         .service(job_fn(send_reminder));
 //!
-//!     let worker = CronWorker::new(schedule, service);
+//!     let worker = WorkerBuilder::new("morning-cereal").stream(CronStream::new(schedule).to_stream()).build(service);
 //!     Monitor::new()
 //!         .register(worker)
-//!         .run_without_signals() // run()
+//!         .run()
 //!         .await
 //!         .unwrap();
 //! }
 //! ```
 
-use std::marker::PhantomData;
-use futures::StreamExt;
-use apalis_core::{request::JobRequest, error::JobError};
+use apalis_core::{error::JobError, request::JobRequest};
 use chrono::Utc;
-use cron::Schedule;
+pub use cron::Schedule;
 use futures::stream::BoxStream;
+use futures::StreamExt;
+use std::marker::PhantomData;
 use tokio::time::sleep;
 
-#[derive(Clone)]
+/// Represents a stream from a cron schedule
+#[derive(Clone, Debug)]
 pub struct CronStream<J>(Schedule, PhantomData<J>);
 
-
-
 impl<T: Default + Send + 'static> CronStream<T> {
-    fn new(schedule: Schedule) -> Self {
+    /// Build a new cron stream from a schedule
+    pub fn new(schedule: Schedule) -> Self {
         Self(schedule, PhantomData)
     }
 
-    fn to_stream(self) -> BoxStream<'static, Result<Option<JobRequest<T>>, JobError>> {
+    /// Convert to consumable
+    pub fn to_stream(self) -> BoxStream<'static, Result<Option<JobRequest<T>>, JobError>> {
         let stream = async_stream::stream! {
             let mut schedule = self.0.upcoming_owned(Utc);
             loop {

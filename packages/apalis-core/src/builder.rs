@@ -64,7 +64,7 @@ impl<J, S, M> WorkerBuilder<J, S, M> {
         WorkerBuilder {
             job: PhantomData,
             layer: self.layer,
-            source: stream(WorkerRef(self.name.clone())),
+            source: stream(WorkerRef::new(self.name.clone())),
             name: self.name,
         }
     }
@@ -72,7 +72,7 @@ impl<J, S, M> WorkerBuilder<J, S, M> {
 
 impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
     /// Allows of decorating the service that consumes jobs.
-    /// Allows adding [tower] middleware
+    /// Allows adding multiple [tower] middleware
     pub fn middleware<NewService>(
         self,
         f: impl Fn(ServiceBuilder<Serv>) -> ServiceBuilder<NewService>,
@@ -86,7 +86,7 @@ impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
             source: self.source,
         }
     }
-
+    /// SHorthand for decoration. Allows adding a single layer ([tower]) middleware
     pub fn layer<U>(self, layer: U) -> WorkerBuilder<Job, Stream, Stack<U, Serv>>
     where
         Serv: Layer<U>,
@@ -120,7 +120,7 @@ where
         ReadyWorker {
             name: self.name,
             stream: self.source,
-            layers: self.layer.service(service),
+            service: self.layer.service(service),
         }
     }
 }
