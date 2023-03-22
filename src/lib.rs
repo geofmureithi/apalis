@@ -71,15 +71,12 @@
 /// let storage = RedisStorage::connect(REDIS_URL).await
 ///                 .expect("Cannot establish connection");
 ///
-/// let pubsub = RedisPubSubListener::new(storage.get_connection());
-///
 /// Monitor::new()
 ///     .register_with_count(4, move |index| {
 ///         WorkerBuilder::new(&format!("quick-sand-{index}"))
 ///             .with_storage(storage.clone())
 ///             .build_fn(email_service)
 ///     })
-///     .event_handler(pubsub)
 ///     .run()
 ///     .await
 ///```
