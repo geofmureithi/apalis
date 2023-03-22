@@ -39,8 +39,9 @@
 //!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
 //!     let storage = RedisStorage::connect(redis).await.expect("Storage failed");
 //!     Monitor::new()
-//!         .register_with_count(2, move |_| {
-//!             WorkerBuilder::new(storage.clone())
+//!         .register_with_count(2, move |index| {
+//!             WorkerBuilder::new(&format!("quick-sand-{index}"))
+//!                 .with_storage(storage.clone())
 //!                 .build_fn(send_email)
 //!         })
 //!         .run()
@@ -73,10 +74,10 @@
 /// let pubsub = RedisPubSubListener::new(storage.get_connection());
 ///
 /// Monitor::new()
-///     .register_with_count(4, move |_| {
-///         WorkerBuilder::new(storage.clone())
+///     .register_with_count(4, move |index| {
+///         WorkerBuilder::new(&format!("quick-sand-{index}"))
+///             .with_storage(storage.clone())
 ///             .build_fn(email_service)
-///             .start()
 ///     })
 ///     .event_handler(pubsub)
 ///     .run()
