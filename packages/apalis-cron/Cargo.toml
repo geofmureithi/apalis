@@ -1,6 +1,6 @@
 [package]
 name = "apalis-cron"
-version = "0.4.0-alpha.0"
+version = "0.4.0-alpha.1"
 edition = "2021"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 license = "MIT"
@@ -9,7 +9,7 @@ description = "A simple yet extensible library for cron-like job scheduling for 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.0" }
+apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.1" }
 cron = "0.11.0"
 futures = "0.3"
 tower = { version = "0.4" }
@@ -19,7 +19,7 @@ async-stream = "0.3.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
-apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.0", features=["extensions", "retry"] }
+apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.1", features=["extensions", "retry"] }
 serde = { version = "1.0", features = ["derive"] }
 
 [package.metadata.docs.rs]
