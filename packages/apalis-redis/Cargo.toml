@@ -16,7 +16,7 @@ redis = { version = "0.21" , features = ["tokio-comp"] }
 serde = "1"
 log = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-uuid = { version = "0.8", features = ["serde", "v4"] }
+uuid = { version = "1.3", features = ["serde", "v4"] }
 serde_json = "1"
 async-stream = "0.3"
 futures = "0.3"

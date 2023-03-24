@@ -11,9 +11,9 @@ apalis = { path = "../../", features = ["redis", "sentry"] }
 serde = "1"
 env_logger = "0.10"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
-sentry = "0.25"
-sentry-tower = "0.25.0"
-sentry-tracing = "0.25.0"
+sentry = "0.30"
+sentry-tower = "0.30"
+sentry-tracing = "0.30"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tokio = { version = "1", features=["macros"] }
 email-service = { path = "../email-service" }
