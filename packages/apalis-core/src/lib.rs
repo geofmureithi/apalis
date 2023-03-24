@@ -20,8 +20,6 @@ pub mod error;
 /// Includes the utilities for a job.
 pub mod job;
 /// Represents a service that is created from a function.
-/// See more [tower::service_fn]
-#[cfg(feature = "job-service")]
 pub mod job_fn;
 /// Represents middleware offered through [tower::Layer]
 pub mod layers;
