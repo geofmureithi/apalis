@@ -27,7 +27,7 @@
 //! use std::str::FromStr;
 //! use serde::{Serialize,Deserialize};
 //!
-//! #[derive(Default)]
+//! #[derive(Clone, Default)]
 //! struct Reminder;
 //!
 //! impl Job for Reminder {
