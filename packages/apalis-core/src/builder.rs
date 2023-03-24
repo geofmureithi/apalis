@@ -108,11 +108,11 @@ where
     <M as Layer<Ser>>::Service: Service<Request> + Send + 'static,
     E: Sync + Send + 'static + Error,
     Request: Send,
-    <<M as tower::Layer<Ser>>::Service as Service<Request>>::Future: std::marker::Send,
+    <<M as Layer<Ser>>::Service as Service<Request>>::Future: std::marker::Send,
     Ser: Service<Request>,
     <Ser as Service<Request>>::Error: Debug,
-    <<M as tower::Layer<Ser>>::Service as Service<Request>>::Error: std::fmt::Debug,
-    <<M as tower::Layer<Ser>>::Service as Service<Request>>::Future: 'static,
+    <<M as Layer<Ser>>::Service as Service<Request>>::Error: std::fmt::Debug,
+    <<M as Layer<Ser>>::Service as Service<Request>>::Future: 'static,
 {
     type Worker = ReadyWorker<S, <M as Layer<Ser>>::Service>;
     /// Convert a worker builder to a worker ready to consume jobs

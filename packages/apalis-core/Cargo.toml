@@ -1,6 +1,6 @@
 [package]
 name = "apalis-core"
-version = "0.4.0-alpha.1"
+version = "0.4.0-alpha.2"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2021"
 license = "MIT"
@@ -14,7 +14,7 @@ readme = "../../README.md"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 futures =  { version = "0.3", default-features = false, features=["async-await"] }
-tower = { version = "0.4", optional = true, default-features = false }
+tower = { version = "0.4", default-features = false }
 pin-project-lite = "0.2.9"
 tokio =  { version = "1", optional = true, default-features = false, features = ["sync", "time", "rt", "io-util", "rt-multi-thread", "signal", "macros"] }
 thiserror = "1"
