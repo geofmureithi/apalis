@@ -88,7 +88,7 @@ criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
 serde = "1"
 tokio = { version = "1", features = ["macros"] }
 apalis-redis = { version = "0.4.0-alpha.3", path = "./packages/apalis-redis" }
-apalis-sql = { version = "0.3", path = "./packages/apalis-sql", features = ["sqlite"] }
+apalis-sql = { version = "0.4.0-alpha.3", path = "./packages/apalis-sql", features = ["sqlite"] }
 
 [[bench]]
 name = "redis_benchmark"
