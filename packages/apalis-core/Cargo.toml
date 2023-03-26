@@ -29,6 +29,7 @@ metrics-exporter-prometheus = { version = "0.8", optional = true, default-featur
 async-trait = { version = "0.1" }
 graceful-shutdown = { version = "0.2", features = ["stream", "tokio-timeout" ] }
 uuid = { version = "0.8", features = ["serde", "v4"] }
+async-stream = "0.3"
 
 [features]
 default = [ "tower-util", "storage"]

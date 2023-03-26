@@ -42,6 +42,10 @@ where
 {
     type Service = Serv;
     type Source = Strm;
+
+    fn name(&self) -> String {
+        self.name.to_string()
+    }
     async fn start(self, ctx: WorkerContext) -> Result<(), super::WorkerError> {
         let mut service = self.service;
         let mut stream = ctx.shutdown.graceful_stream(self.stream);

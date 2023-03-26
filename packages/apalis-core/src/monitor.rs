@@ -64,7 +64,7 @@ impl Monitor {
         <Serv as Service<JobRequest<J>>>::Future: std::marker::Send,
     {
         let shutdown = self.shutdown.clone();
-        let name = "worker.name.clone()".to_string();
+        let name = worker.name();
         let handle = tokio::spawn(
             self.shutdown
                 .graceful(worker.start(WorkerContext { shutdown }).map(|_| ())),
@@ -231,7 +231,7 @@ mod tests {
     impl Stream for TestSource {
         type Item = Result<TestJob, ()>;
 
-        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             Poll::Pending
         }
     }

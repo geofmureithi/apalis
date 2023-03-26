@@ -50,6 +50,9 @@ pub trait Worker<Job>: Sized {
     /// The source type that this worker will use to receive jobs.
     type Source;
 
+    /// A worker must be named for identification purposes
+    fn name(&self) -> String;
+
     /// Starts the worker, taking ownership of `self` and the provided `ctx`.
     ///
     /// This method should run indefinitely or until it returns an error.
