@@ -13,8 +13,8 @@ use crate::{
     worker::{ready::ReadyWorker, Worker, WorkerRef},
 };
 
-/// An abstract that allows building a [Worker].
-/// Usually the output is [ReadyWorker] but you can implement your own via [WorkerFactory]
+/// An abstract that allows building a [`Worker`].
+/// Usually the output is [`ReadyWorker`] but you can implement your own via [`WorkerFactory`]
 #[derive(Debug)]
 pub struct WorkerBuilder<Job, Source, Middleware> {
     pub(crate) name: String,
@@ -24,7 +24,7 @@ pub struct WorkerBuilder<Job, Source, Middleware> {
 }
 
 impl WorkerBuilder<(), (), Identity> {
-    /// Build a new [WorkerBuilder] instance with a name for the worker to build
+    /// Build a new [`WorkerBuilder`] instance with a name for the worker to build
     pub fn new<N: Into<String>>(name: N) -> WorkerBuilder<(), (), Identity> {
         let job: PhantomData<()> = PhantomData;
         WorkerBuilder {
@@ -50,7 +50,7 @@ impl<J, S, M> WorkerBuilder<J, S, M> {
         }
     }
 
-    /// Get the [WorkerRef] and build a stream.
+    /// Get the [`WorkerRef`] and build a stream.
     /// Useful when you want to know what worker is consuming the stream.
     pub fn with_stream<
         NS: Fn(WorkerRef) -> ST,
@@ -72,7 +72,7 @@ impl<J, S, M> WorkerBuilder<J, S, M> {
 
 impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
     /// Allows of decorating the service that consumes jobs.
-    /// Allows adding multiple [tower] middleware
+    /// Allows adding multiple [`tower`] middleware
     pub fn middleware<NewService>(
         self,
         f: impl Fn(ServiceBuilder<Serv>) -> ServiceBuilder<NewService>,
@@ -86,7 +86,7 @@ impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
             source: self.source,
         }
     }
-    /// SHorthand for decoration. Allows adding a single layer ([tower]) middleware
+    /// Shorthand for decoration. Allows adding a single layer [tower] middleware
     pub fn layer<U>(self, layer: U) -> WorkerBuilder<Job, Stream, Stack<U, Serv>>
     where
         Serv: Layer<U>,
@@ -125,12 +125,12 @@ where
     }
 }
 
-/// Helper trait for building new Workers from [WorkerBuilder]
+/// Helper trait for building new Workers from [`WorkerBuilder`]
 pub trait WorkerFactory<J, S> {
     /// The worker to build
     type Worker: Worker<J>;
-    /// Builds a [WorkerFactory] using a [tower] service
-    /// that can be used to generate new [Worker] actors using the `build` method
+    /// Builds a [`WorkerFactory`] using a [`tower`] service
+    /// that can be used to generate new [`Worker`] actors using the `build` method
     /// # Arguments
     ///
     /// * `service` - A tower service
@@ -140,13 +140,13 @@ pub trait WorkerFactory<J, S> {
     fn build(self, service: S) -> Self::Worker;
 }
 
-/// Helper trait for building new Workers from [WorkerBuilder]
+/// Helper trait for building new Workers from [`WorkerBuilder`]
 
 pub trait WorkerFactoryFn<J, F> {
     /// The worker build
     type Worker: Worker<J>;
-    /// Builds a [WorkerFactoryFn] using a [crate::job_fn::JobFn] service
-    /// that can be used to generate new [Worker] actors using the `build` method
+    /// Builds a [`WorkerFactoryFn`] using a [`crate::job_fn::JobFn`] service
+    /// that can be used to generate new [`Worker`] actors using the `build` method
     /// # Arguments
     ///
     /// * `f` - A tower functional service

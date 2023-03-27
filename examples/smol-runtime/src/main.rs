@@ -35,7 +35,7 @@ struct SmolExecutor;
 impl Executor for SmolExecutor {
     type JoinHandle = ();
     fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) -> Self::JoinHandle {
-        smol::spawn(async { drop(fut.await) }).detach()
+        smol::spawn(async { fut.await }).detach()
     }
 }
 

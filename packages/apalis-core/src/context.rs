@@ -33,6 +33,7 @@ impl Clone for Data {
 
 impl JobContext {
     /// Build a new context with defaults given an ID.
+    #[must_use]
     pub fn new(id: String) -> Self {
         JobContext {
             id,
@@ -44,7 +45,7 @@ impl JobContext {
             max_attempts: 25,
             last_error: None,
             lock_by: None,
-            data: Default::default(),
+            data: Data::default(),
         }
     }
 
@@ -60,6 +61,7 @@ impl JobContext {
     ///
     /// assert_eq!(ctx.data_opt::<i32>(), Some(&5i32));
     /// ```
+    #[must_use]
     pub fn data_opt<D: Any + Send + Sync>(&self) -> Option<&D> {
         self.data.0.get()
     }
@@ -152,7 +154,7 @@ impl JobContext {
         &self.lock_by
     }
 
-    /// Set lock_by
+    /// Set `lock_by`
     pub fn set_lock_by(&mut self, lock_by: Option<String>) {
         self.lock_by = lock_by;
     }

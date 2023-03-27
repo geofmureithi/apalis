@@ -1,4 +1,4 @@
-/// Reperesents a worker that is ready to consume jobs
+/// Represents a worker that is ready to consume jobs
 pub mod ready;
 use async_trait::async_trait;
 use graceful_shutdown::Shutdown;

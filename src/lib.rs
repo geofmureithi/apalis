@@ -172,6 +172,7 @@ pub mod prelude {
         builder::WorkerFactoryFn,
         context::JobContext,
         error::JobError,
+        executor::Executor,
         job::{Counts, Job, JobFuture, JobStreamExt},
         job_fn::job_fn,
         monitor::Monitor,
@@ -181,7 +182,6 @@ pub mod prelude {
         storage::builder::WithStorage,
         storage::Storage,
         storage::StorageWorkerPulse,
-        executor::Executor,
         utils::*,
     };
 }

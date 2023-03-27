@@ -67,8 +67,14 @@ impl<E: Executor + Send + 'static> Monitor<E> {
         let shutdown = self.shutdown.clone();
         let name = worker.name();
         let handle = self.executor.spawn(
-            self.shutdown
-                .graceful(worker.start(WorkerContext { shutdown, executor: self.executor.clone() }).map(|_| ())),
+            self.shutdown.graceful(
+                worker
+                    .start(WorkerContext {
+                        shutdown,
+                        executor: self.executor.clone(),
+                    })
+                    .map(|_| ()),
+            ),
         );
         self.worker_handles.push((name, handle));
         self
@@ -173,6 +179,12 @@ impl<E: Executor + Send + 'static> Monitor<E> {
         }
         info!("Successfully shutdown monitor and all workers");
         Ok(())
+    }
+}
+
+impl Default for Monitor<TokioExecutor> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -1,4 +1,3 @@
-
 use std::{
     future::Future,
     pin::Pin,
@@ -7,7 +6,6 @@ use std::{
 
 /// Represents timer utilities
 pub mod timer;
-
 
 /// A timer which provides timer-like functions.
 pub trait Timer {

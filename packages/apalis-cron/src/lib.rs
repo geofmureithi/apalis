@@ -71,18 +71,19 @@
 use apalis_core::job::Job;
 use apalis_core::utils::Timer;
 use apalis_core::{error::JobError, request::JobRequest};
-use chrono::{Utc, DateTime};
+use chrono::{DateTime, Utc};
 pub use cron::Schedule;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use std::marker::PhantomData;
 
-
 /// Represents a stream from a cron schedule
 #[derive(Clone, Debug)]
 pub struct CronStream<J, T>(Schedule, PhantomData<J>, T);
 
-impl<J: From<DateTime<Utc>> + Job + Send + 'static, T: Timer + Sync + Send + 'static> CronStream<J, T> {
+impl<J: From<DateTime<Utc>> + Job + Send + 'static, T: Timer + Sync + Send + 'static>
+    CronStream<J, T>
+{
     /// Build a new cron stream from a schedule
     pub fn new(schedule: Schedule, timer: T) -> Self {
         Self(schedule, PhantomData, timer)
@@ -97,12 +98,12 @@ impl<J: From<DateTime<Utc>> + Job + Send + 'static, T: Timer + Sync + Send + 'st
                 match next {
                     Some(next) => {
                         let to_sleep = next - chrono::Utc::now();
-                        let to_sleep = to_sleep.to_std().unwrap();
+                        let to_sleep = to_sleep.to_std().map_err(|e| JobError::Failed(e.into()))?;
                         self.2.sleep(to_sleep).await;
                         yield Ok(Some(JobRequest::new(J::from(chrono::Utc::now()))));
                     },
                     None => {
-
+                        yield Ok(None);
                     }
                 }
 

@@ -17,7 +17,7 @@ use crate::request::JobRequest;
 /// performance monitoring transaction for each incoming request,
 /// continuing the trace based on incoming distributed tracing headers.
 ///
-/// The created transaction will automatically use J::NAME as its name.
+/// The created transaction will automatically use `J::NAME` as its name.
 /// This is sometimes not desirable, In which case, users should manually override the transaction name
 /// in the request handler using the [`Scope::set_transaction`](sentry_core::Scope::set_transaction)
 /// method.

@@ -21,7 +21,7 @@ impl Timer for SmolTimer {
 
     fn sleep_until(&self, deadline: Instant) -> Pin<Box<dyn Sleep>> {
         Box::pin(SmolSleep {
-            inner: smol::Timer::at(deadline.into()),
+            inner: smol::Timer::at(deadline),
         })
     }
 }

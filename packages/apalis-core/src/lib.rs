@@ -13,7 +13,7 @@
 ///
 /// [`Worker`]: crate::worker::Worker
 pub mod builder;
-/// Represents the [JobContext].
+/// Represents the [`JobContext`].
 pub mod context;
 /// Includes all possible error types.
 pub mod error;
@@ -21,7 +21,7 @@ pub mod error;
 pub mod job;
 /// Represents a service that is created from a function.
 pub mod job_fn;
-/// Represents middleware offered through [tower::Layer]
+/// Represents middleware offered through [`tower::Layer`]
 pub mod layers;
 /// Represents the job bytes.
 pub mod request;
@@ -33,14 +33,14 @@ pub mod response;
 /// Represents ability to persist and consume jobs from storages.
 pub mod storage;
 
-/// Represents monitoring of running workers
-pub mod monitor;
-/// Represents the actual executor of a [Job].
-pub mod worker;
 /// Represents an async executor. Currently tokio is implemented as default
 pub mod executor;
+/// Represents monitoring of running workers
+pub mod monitor;
 /// Represents extra utils needed for runtime agnostic approach
 pub mod utils;
+/// Represents the actual executor of a [Job].
+pub mod worker;
 
 /// apalis mocking utilities
 pub mod mock {

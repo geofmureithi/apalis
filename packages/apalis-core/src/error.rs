@@ -17,7 +17,7 @@ pub enum JobError {
     #[error("Attempted to communicate with a crashed background worker")]
     WorkerCrashed,
 
-    /// An error occured during execution.
+    /// An error occurred during execution.
     #[error("Job Failed: {0}")]
     Failed(#[source] BoxDynError),
 
@@ -40,7 +40,7 @@ pub enum JobError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum JobStreamError {
-    /// An error occured during streaming.
+    /// An error occurred during streaming.
     #[error("Broken Pipe: {0}")]
     BrokenPipe(#[source] BoxDynError),
 }
