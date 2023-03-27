@@ -29,8 +29,9 @@ use crate::request::JobRequest;
 ///
 /// let state = Arc::new(State { /* ... */ });
 ///
-/// let worker = WorkerBuilder::new(storage)
+/// let worker = WorkerBuilder::new("tasty-avocado")
 ///     .layer(Extension(state))
+///     .with_storage(storage.clone())
 ///     .build_fn(email_service);
 /// ```
 

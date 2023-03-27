@@ -57,7 +57,9 @@
 //!         .layer(Extension(FakeService))
 //!         .service(job_fn(send_reminder));
 //!
-//!     let worker = WorkerBuilder::new("morning-cereal").stream(CronStream::new(schedule).to_stream()).build(service);
+//!     let worker = WorkerBuilder::new("morning-cereal")
+//!         .stream(CronStream::new(schedule)
+//!         .to_stream()).build(service);
 //!     Monitor::new()
 //!         .register(worker)
 //!         .run()

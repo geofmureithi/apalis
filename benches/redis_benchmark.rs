@@ -13,8 +13,8 @@ impl Job for TestJob {
     const NAME: &'static str = "TestJob";
 }
 
-async fn handle_test_job(_req: TestJob, _ctx: JobContext) -> Result<JobResult, JobError> {
-    Ok(JobResult::Success)
+async fn handle_test_job(_req: TestJob, _ctx: JobContext) -> Result<(), JobError> {
+    Ok(())
 }
 
 fn bench(c: &mut Criterion) {
@@ -57,9 +57,9 @@ fn bench(c: &mut Criterion) {
                 for _i in 0..100 {
                     let _ = sqlite.push(TestJob).await;
                 }
-                let _addr = WorkerBuilder::new(sqlite.clone())
-                    // .fetch_interval(Duration::from_millis(10))
-                    .build_fn(handle_test_job);
+                let _addr = WorkerBuilder::new("sqlite-bench")
+                    .with_storage(sqlite.clone())
+                    .build(job_fn(handle_test_job));
 
                 let start = Instant::now();
                 while sqlite.len().await.unwrap_or(-1) != 0 {

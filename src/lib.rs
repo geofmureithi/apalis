@@ -124,11 +124,11 @@ pub mod cron {
 /// };
 ///
 /// fn main() {
-///     let queue = WorkerBuilder::new(storage)
+///     let worker = WorkerBuilder::new("tasty-avocado")
 ///         .layer(RetryLayer::new(DefaultRetryPolicy))
 ///         .layer(Extension(GlobalState {}))
-///         .build();
-///     let addr = queue.start();
+///         .with_storage(storage.clone())
+///         .build(send_email);
 /// }
 
 /// ```

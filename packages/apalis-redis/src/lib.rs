@@ -5,7 +5,8 @@
 //!     let storage = RedisStorage::connect("REDIS_URL").await.unwrap();
 //!     Monitor::new()
 //!        .register(
-//!            WorkerBuilder::new(storage.clone())
+//!            WorkerBuilder::new("tasty-pear")
+//!                .with_storage(storage.clone())
 //!                .build_fn(send_email),
 //!        )
 //!        .run()
