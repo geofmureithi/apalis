@@ -44,7 +44,7 @@ pub mod mock {
     use tokio::sync::mpsc::{Receiver, Sender};
     use tower::Service;
 
-    use crate::{worker::ready::ReadyWorker, job::Job};
+    use crate::{job::Job, worker::ready::ReadyWorker};
 
     fn build_stream<Req: Send + 'static>(mut rx: Receiver<Req>) -> impl Stream<Item = Req> {
         let stream = async_stream::stream! {
@@ -56,9 +56,9 @@ pub mod mock {
     }
 
     /// Useful for mocking a worker usually for testing purposes
-    /// 
+    ///
     /// # Example
-    /// ```rust,no_run
+    /// ```rust
     /// #[tokio::test(flavor = "current_thread")]
     /// async fn test_worker() {
     ///     let (handle, mut worker) = mock_worker(job_fn(job2));
