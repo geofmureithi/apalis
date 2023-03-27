@@ -111,5 +111,6 @@ members = [
   "examples/axum",
   "examples/prometheus",
   "examples/tracing",
-  "examples/rest-api"
+  "examples/rest-api",
+  "examples/smol-runtime"
 ]

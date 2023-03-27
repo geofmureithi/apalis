@@ -6,6 +6,7 @@ use tower::{Service, ServiceExt};
 use tracing::info;
 use tracing::warn;
 
+use crate::executor::Executor;
 use crate::job::Job;
 
 use super::{Worker, WorkerContext};
@@ -46,7 +47,10 @@ where
     fn name(&self) -> String {
         self.name.to_string()
     }
-    async fn start(self, ctx: WorkerContext) -> Result<(), super::WorkerError> {
+    async fn start<Exec: Executor + Send>(
+        self,
+        ctx: WorkerContext<Exec>,
+    ) -> Result<(), super::WorkerError> {
         let mut service = self.service;
         let mut stream = ctx.shutdown.graceful_stream(self.stream);
         let (send, mut recv) = channel::<()>(1);
@@ -60,7 +64,7 @@ where
                 Ok(Some(item)) => {
                     let svc = service.ready().await.unwrap();
                     let fut = svc.call(item);
-                    tokio::spawn(ctx.shutdown.graceful(async move {
+                    ctx.executor.spawn(ctx.shutdown.graceful(async move {
                         fut.await;
                     }));
                     drop(send_clone);

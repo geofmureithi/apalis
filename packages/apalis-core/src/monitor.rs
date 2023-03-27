@@ -6,25 +6,25 @@ use std::{
 use futures::{Future, FutureExt};
 use graceful_shutdown::Shutdown;
 use log::info;
-use tokio::task::JoinHandle;
 use tower::Service;
 use tracing::warn;
 
 use crate::{
+    executor::{Executor, TokioExecutor},
     job::Job,
     request::JobRequest,
     worker::{Worker, WorkerContext},
 };
 
 /// A monitor for coordinating and managing a collection of workers.
-#[derive(Default)]
-pub struct Monitor {
+pub struct Monitor<E: Executor> {
     shutdown: Shutdown,
-    worker_handles: Vec<(String, JoinHandle<()>)>,
+    worker_handles: Vec<(String, E::JoinHandle)>,
     timeout: Option<Duration>,
+    executor: E,
 }
 
-impl Debug for Monitor {
+impl<E: Executor> Debug for Monitor<E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("Monitor")
             .field("shutdown", &"[Graceful shutdown listener]")
@@ -33,15 +33,16 @@ impl Debug for Monitor {
                 &self
                     .worker_handles
                     .iter()
-                    .map(|(name, handle)| (name.clone(), handle.is_finished()))
+                    .map(|(name, _handle)| name.clone())
                     .collect::<Vec<_>>(),
             )
             .field("timeout", &self.timeout)
+            .field("executor", &std::any::type_name::<E>())
             .finish()
     }
 }
 
-impl Monitor {
+impl<E: Executor + Send + 'static> Monitor<E> {
     /// Registers a worker with the monitor.
     ///
     /// # Arguments
@@ -65,9 +66,9 @@ impl Monitor {
     {
         let shutdown = self.shutdown.clone();
         let name = worker.name();
-        let handle = tokio::spawn(
+        let handle = self.executor.spawn(
             self.shutdown
-                .graceful(worker.start(WorkerContext { shutdown }).map(|_| ())),
+                .graceful(worker.start(WorkerContext { shutdown, executor: self.executor.clone() }).map(|_| ())),
         );
         self.worker_handles.push((name, handle));
         self
@@ -104,21 +105,6 @@ impl Monitor {
         }
 
         self
-    }
-}
-
-impl Monitor {
-    /// Creates a new monitor instance.
-    ///
-    /// # Returns
-    ///
-    /// A new monitor instance, with an empty collection of workers.
-    pub fn new() -> Self {
-        Self {
-            shutdown: Shutdown::new(),
-            worker_handles: Vec::new(),
-            timeout: None,
-        }
     }
 
     /// Sets a timeout duration for the monitor's shutdown process.
@@ -169,11 +155,11 @@ impl Monitor {
     /// If the timeout is reached and workers have not completed, the monitor will log a warning
     /// message and exit forcefully.
     pub async fn run(self) -> std::io::Result<()> {
-        let _res: Vec<(String, bool)> = self
-            .worker_handles
-            .into_iter()
-            .map(|h| (h.0, h.1.is_finished()))
-            .collect();
+        // let _res: Vec<(String, bool)> = self
+        //     .worker_handles
+        //     .into_iter()
+        //     .map(|h| (h.0, h.1.is_finished()))
+        //     .collect();
         if let Some(timeout) = self.timeout {
             if self.shutdown.with_timeout(timeout).await {
                 warn!("Shutdown timeout reached. Exiting forcefully");
@@ -187,6 +173,33 @@ impl Monitor {
         }
         info!("Successfully shutdown monitor and all workers");
         Ok(())
+    }
+}
+
+impl Monitor<TokioExecutor> {
+    /// Creates a new monitor instance.
+    ///
+    /// # Returns
+    ///
+    /// A new monitor instance, with an empty collection of workers.
+    pub fn new() -> Self {
+        Self {
+            shutdown: Shutdown::new(),
+            worker_handles: Vec::new(),
+            timeout: None,
+            executor: TokioExecutor,
+        }
+    }
+
+    /// Sets a custom executor for the monitor, allowing the usage of another runtime apart from Tokio.
+    /// The executor must implement the `Executor` trait.
+    pub fn executor<E: Executor>(self, executor: E) -> Monitor<E> {
+        Monitor {
+            shutdown: self.shutdown,
+            worker_handles: Vec::new(),
+            timeout: self.timeout,
+            executor,
+        }
     }
 }
 

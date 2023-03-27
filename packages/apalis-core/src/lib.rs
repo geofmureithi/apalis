@@ -37,6 +37,10 @@ pub mod storage;
 pub mod monitor;
 /// Represents the actual executor of a [Job].
 pub mod worker;
+/// Represents an async executor. Currently tokio is implemented as default
+pub mod executor;
+/// Represents extra utils needed for runtime agnostic approach
+pub mod utils;
 
 /// apalis mocking utilities
 pub mod mock {

@@ -6,6 +6,8 @@ use std::fmt;
 use std::fmt::Debug;
 use thiserror::Error;
 
+use crate::executor::Executor;
+
 /// A worker name wrapper usually used by Worker builder
 #[derive(Debug, Clone)]
 pub struct WorkerRef {
@@ -58,15 +60,16 @@ pub trait Worker<Job>: Sized {
     /// This method should run indefinitely or until it returns an error.
     /// If an error occurs, it should return a `WorkerError` describing
     /// the reason for the failure.
-    async fn start(self, ctx: WorkerContext) -> Result<(), WorkerError>;
+    async fn start<E: Executor + Send>(self, ctx: WorkerContext<E>) -> Result<(), WorkerError>;
 }
 
 /// Stores the Workers context
-pub struct WorkerContext {
+pub struct WorkerContext<E: Executor> {
     pub(crate) shutdown: Shutdown,
+    pub(crate) executor: E,
 }
 
-impl fmt::Debug for WorkerContext {
+impl<E: Executor> fmt::Debug for WorkerContext<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WorkerContext")
             .field("shutdown", &["Shutdown handle"])
@@ -74,7 +77,7 @@ impl fmt::Debug for WorkerContext {
     }
 }
 
-impl WorkerContext {
+impl<E: Executor + Send + 'static> WorkerContext<E> {
     /// Allows spawning of futures that will be gracefully shutdown by the worker
     pub fn spawn() {}
 

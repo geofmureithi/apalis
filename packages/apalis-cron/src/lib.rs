@@ -58,8 +58,8 @@
 //!         .service(job_fn(send_reminder));
 //!
 //!     let worker = WorkerBuilder::new("morning-cereal")
-//!         .stream(CronStream::new(schedule)
-//!         .to_stream()).build(service);
+//!         .stream(CronStream::new(schedule).to_stream())
+//!         .build(service);
 //!     Monitor::new()
 //!         .register(worker)
 //!         .run()
@@ -68,26 +68,28 @@
 //! }
 //! ```
 
+use apalis_core::job::Job;
+use apalis_core::utils::Timer;
 use apalis_core::{error::JobError, request::JobRequest};
-use chrono::Utc;
+use chrono::{Utc, DateTime};
 pub use cron::Schedule;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use std::marker::PhantomData;
-use tokio::time::sleep;
+
 
 /// Represents a stream from a cron schedule
 #[derive(Clone, Debug)]
-pub struct CronStream<J>(Schedule, PhantomData<J>);
+pub struct CronStream<J, T>(Schedule, PhantomData<J>, T);
 
-impl<T: Default + Send + 'static> CronStream<T> {
+impl<J: From<DateTime<Utc>> + Job + Send + 'static, T: Timer + Sync + Send + 'static> CronStream<J, T> {
     /// Build a new cron stream from a schedule
-    pub fn new(schedule: Schedule) -> Self {
-        Self(schedule, PhantomData)
+    pub fn new(schedule: Schedule, timer: T) -> Self {
+        Self(schedule, PhantomData, timer)
     }
 
     /// Convert to consumable
-    pub fn to_stream(self) -> BoxStream<'static, Result<Option<JobRequest<T>>, JobError>> {
+    pub fn to_stream(self) -> BoxStream<'static, Result<Option<JobRequest<J>>, JobError>> {
         let stream = async_stream::stream! {
             let mut schedule = self.0.upcoming_owned(Utc);
             loop {
@@ -96,8 +98,8 @@ impl<T: Default + Send + 'static> CronStream<T> {
                     Some(next) => {
                         let to_sleep = next - chrono::Utc::now();
                         let to_sleep = to_sleep.to_std().unwrap();
-                        sleep(to_sleep).await;
-                        yield Ok(Some(JobRequest::new(T::default())));
+                        self.2.sleep(to_sleep).await;
+                        yield Ok(Some(JobRequest::new(J::from(chrono::Utc::now()))));
                     },
                     None => {
 
