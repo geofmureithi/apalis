@@ -8,7 +8,7 @@ Apalis is a simple, extensible multithreaded background job processing library f
 - Jobs handlers with a macro free API.
 - Take full advantage of the [`tower`] ecosystem of
   middleware, services, and utilities.
-- Fully Tokio compatible.
+- Runtime agnostic - Use tokio, smol etc.
 - Optional Web interface to help you manage your jobs.
 
 Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] middleware.
@@ -110,7 +110,7 @@ Since we provide a few storage solutions, here is a table comparing them:
 | Feature         | Redis | Sqlite | Postgres | Sled | Mysql | Mongo | Cron |
 | :-------------- | :---: | :----: | :------: | :--: | :---: | :---: | :--: |
 | Scheduled jobs  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
-| Retryable jobs  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
+| Retry jobs      |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
 | Persistence     |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   | BYO  |
 | Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  x   |
 
@@ -149,8 +149,8 @@ v 0.4
 
 - [x] Move from actor based to layer based processing
 - [x] Graceful Shutdown
-- [ ] Allow other types of executors apart from Tokio
-- [ ] Mock/Test Worker
+- [x] Allow other types of executors apart from Tokio
+- [x] Mock/Test Worker
 - [x] Improve monitoring
 - [ ] Improve Apalis Board
 - [x] Add job progress via layer

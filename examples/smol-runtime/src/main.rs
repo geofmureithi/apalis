@@ -1,6 +1,6 @@
 pub mod timer;
 
-use std::{future::Future, str::FromStr};
+use std::{future::Future, str::FromStr, time::Duration};
 
 use anyhow::Result;
 use apalis::{
@@ -9,6 +9,7 @@ use apalis::{
     prelude::*,
 };
 use chrono::{DateTime, Utc};
+use smol::Timer;
 use timer::SmolTimer;
 use tracing::debug;
 
@@ -25,7 +26,8 @@ impl Job for Reminder {
     const NAME: &'static str = "reminder::DailyReminder";
 }
 async fn send_reminder(job: Reminder, _ctx: JobContext) {
-    debug!("Called at {job:?}")
+    debug!("Called at {job:?}");
+    Timer::after(Duration::from_secs(3)).await;
 }
 
 /// Spawns futures.
@@ -44,6 +46,12 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     smol::block_on(async {
+        let (s, ctrl_c) = async_channel::bounded(100);
+        let handle = move || {
+            s.try_send(()).ok();
+        };
+        ctrlc::set_handler(handle).unwrap();
+
         let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
         let worker = WorkerBuilder::new("daily-cron-worker")
             .stream(CronStream::new(schedule, SmolTimer).to_stream())
@@ -53,7 +61,10 @@ fn main() -> Result<()> {
         Monitor::new()
             .executor(SmolExecutor)
             .register(worker)
-            .run()
+            .run_with_signal(async {
+                ctrl_c.recv().await.ok();
+                Ok(())
+            })
             .await?;
         Ok(())
     })

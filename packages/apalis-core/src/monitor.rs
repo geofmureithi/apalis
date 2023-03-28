@@ -167,7 +167,7 @@ impl<E: Executor + Send + 'static> Monitor<E> {
         //     .map(|h| (h.0, h.1.is_finished()))
         //     .collect();
         if let Some(timeout) = self.timeout {
-            if self.shutdown.with_timeout(timeout).await {
+            if self.shutdown.with_timer(timeout).await {
                 warn!("Shutdown timeout reached. Exiting forcefully");
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
@@ -246,7 +246,14 @@ mod tests {
         type Service = S;
         type Source = TestSource;
 
-        async fn start(self, _ctx: WorkerContext) -> Result<(), WorkerError> {
+        fn name(&self) -> String {
+            "test-worker".to_string()
+        }
+
+        async fn start<E: Executor + Send>(
+            self,
+            _ctx: WorkerContext<E>,
+        ) -> Result<(), WorkerError> {
             sleep(Duration::from_millis(100)).await;
             Ok(())
         }

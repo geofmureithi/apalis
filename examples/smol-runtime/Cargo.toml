@@ -14,7 +14,8 @@ tracing-subscriber = "0.3.11"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 pin-project-lite = "0.2.9"
 smol-timeout = "0.6.0"
-
+ctrlc = "3.2.5"
+async-channel = "1.8.0"
 
 [dependencies.tracing]
 default_features = false
