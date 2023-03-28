@@ -167,7 +167,7 @@ impl<E: Executor + Send + 'static> Monitor<E> {
         //     .map(|h| (h.0, h.1.is_finished()))
         //     .collect();
         if let Some(timeout) = self.timeout {
-            if self.shutdown.with_timer(timeout).await {
+            if self.shutdown.with_timeout(timeout).await {
                 warn!("Shutdown timeout reached. Exiting forcefully");
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
