@@ -17,17 +17,17 @@
 //!
 //!      let pg: PostgresStorage<Email> = PostgresStorage::connect(database_url).await.unwrap();
 //!
-//!      async fn send_email(job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
+//!      async fn send_email(job: Email, _ctx: JobContext) -> Result<(), JobError> {
 //!          log::info!("Attempting to send email to {}", job.to);
-//!          Ok(JobResult::Success)
+//!          Ok(())
 //!      }
 //!     // This can be even in another program/language
 //!     let query = "Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));";
 //!     db.execute(query).await.unwrap();
 //!
 //!      Monitor::new()
-//!          .register_with_count(4, move |_| {
-//!              WorkerBuilder::new(pg.clone())
+//!          .register_with_count(4, move |index| {
+//!              WorkerBuilder::new(&format!("tasty-avocado-{index}"))
 //!                  .build_fn(send_email)
 //!          })
 //!          .run()

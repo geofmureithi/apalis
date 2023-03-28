@@ -15,7 +15,6 @@
 //! - Bring your own Storage.
 //!
 //! Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] and [`tower-http`] middleware.
-//!
 //!  ### Example
 //! ```rust, no_run
 //! use apalis::prelude::*;
@@ -31,8 +30,8 @@
 //!     const NAME: &'static str = "apalis::Email";
 //! }
 //!
-//! async fn send_email(job: Email, ctx: JobContext) -> Result<JobResult, JobError> {
-//!     Ok(JobResult::Success)
+//! async fn send_email(job: Email, ctx: JobContext) -> Result<(), JobError> {
+//!     Ok(())
 //! }
 //!
 //! #[tokio::main]
@@ -40,8 +39,9 @@
 //!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
 //!     let storage = RedisStorage::connect(redis).await.expect("Storage failed");
 //!     Monitor::new()
-//!         .register_with_count(2, move |_| {
-//!             WorkerBuilder::new(storage.clone())
+//!         .register_with_count(2, move |index| {
+//!             WorkerBuilder::new(&format!("quick-sand-{index}"))
+//!                 .with_storage(storage.clone())
 //!                 .build_fn(send_email)
 //!         })
 //!         .run()
@@ -71,24 +71,18 @@
 /// let storage = RedisStorage::connect(REDIS_URL).await
 ///                 .expect("Cannot establish connection");
 ///
-/// let pubsub = RedisPubSubListener::new(storage.get_connection());
-///
 /// Monitor::new()
-///     .register_with_count(4, move |_| {
-///         WorkerBuilder::new(storage.clone())
+///     .register_with_count(4, move |index| {
+///         WorkerBuilder::new(&format!("quick-sand-{index}"))
+///             .with_storage(storage.clone())
 ///             .build_fn(email_service)
-///             .start()
 ///     })
-///     .event_handler(pubsub)
 ///     .run()
 ///     .await
 ///```
 #[cfg(feature = "redis")]
 #[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
 pub mod redis {
-    #[cfg(feature = "redis-pubsub")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "redis-pubsub")))]
-    pub use apalis_redis::listener::RedisPubSubListener;
     pub use apalis_redis::RedisStorage;
 }
 
@@ -130,11 +124,11 @@ pub mod cron {
 /// };
 ///
 /// fn main() {
-///     let queue = WorkerBuilder::new(storage)
+///     let worker = WorkerBuilder::new("tasty-avocado")
 ///         .layer(RetryLayer::new(DefaultRetryPolicy))
 ///         .layer(Extension(GlobalState {}))
-///         .build();
-///     let addr = queue.start();
+///         .with_storage(storage.clone())
+///         .build(send_email);
 /// }
 
 /// ```
@@ -178,17 +172,16 @@ pub mod prelude {
         builder::WorkerFactoryFn,
         context::JobContext,
         error::JobError,
+        executor::Executor,
         job::{Counts, Job, JobFuture, JobStreamExt},
         job_fn::job_fn,
+        monitor::Monitor,
         request::JobRequest,
         request::JobState,
-        response::{IntoJobResponse, JobResult},
+        response::IntoResponse,
+        storage::builder::WithStorage,
         storage::Storage,
-        storage::StorageWorker,
         storage::StorageWorkerPulse,
-        worker::prelude::Monitor,
-        worker::prelude::WorkerEvent,
-        worker::prelude::WorkerListener,
-        worker::Actor,
+        utils::*,
     };
 }

@@ -1,8 +1,8 @@
 [package]
 name = "apalis-redis"
-version = "0.3.6"
+version = "0.4.0-alpha.4"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
-edition = "2018"
+edition = "2021"
 readme = "../../README.md"
 
 license = "MIT"
@@ -11,7 +11,7 @@ description = "Redis Storage for Apalis: simple and reliable background processi
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.3.6", default-features = false }
+apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.4", default-features = false }
 redis = { version = "0.21" , features = ["tokio-comp"] }
 serde = "1"
 log = "0.4"
@@ -31,4 +31,3 @@ email-service = { path = "../../examples/email-service" }
 [features]
 default = ["storage"]
 storage = ["apalis-core/storage"]
-pubsub = ["apalis-core/worker"]

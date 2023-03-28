@@ -31,11 +31,13 @@ async fn main() -> Result<()> {
 
     Monitor::new()
         .register(
-            WorkerBuilder::new(storage.clone())
+            WorkerBuilder::new("tasty-guava")
                 .layer(Extension(storage.clone()))
                 .layer(TraceLayer::new())
+                .with_storage(storage)
                 .build_fn(send_email),
         )
         .run()
-        .await
+        .await?;
+    Ok(())
 }

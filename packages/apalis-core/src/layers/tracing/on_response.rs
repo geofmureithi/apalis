@@ -1,6 +1,6 @@
 use super::LatencyUnit;
 use super::DEFAULT_MESSAGE_LEVEL;
-use crate::response::JobResult;
+use std::fmt::Debug;
 use std::time::Duration;
 use tracing::Level;
 use tracing::Span;
@@ -11,7 +11,7 @@ use tracing::Span;
 /// `on_response` callback is called.
 ///
 /// [`Trace`]: super::Trace
-pub trait OnResponse {
+pub trait OnResponse<Res> {
     /// Do the thing.
     ///
     /// `latency` is the duration since the request was received.
@@ -23,19 +23,19 @@ pub trait OnResponse {
     /// [`Span`]: https://docs.rs/tracing/latest/tracing/span/index.html
     /// [record]: https://docs.rs/tracing/latest/tracing/span/struct.Span.html#method.record
     /// [`TraceLayer::make_span_with`]: crate::trace::TraceLayer::make_span_with
-    fn on_response(self, res: &JobResult, done_in: Duration, span: &Span);
+    fn on_response(self, res: &Res, done_in: Duration, span: &Span);
 }
 
-impl OnResponse for () {
+impl<Res> OnResponse<Res> for () {
     #[inline]
-    fn on_response(self, _: &JobResult, _: Duration, _: &Span) {}
+    fn on_response(self, _: &Res, _: Duration, _: &Span) {}
 }
 
-impl<F> OnResponse for F
+impl<F, Res> OnResponse<Res> for F
 where
-    F: FnOnce(&JobResult, Duration, &Span),
+    F: FnOnce(&Res, Duration, &Span),
 {
-    fn on_response(self, response: &JobResult, done_in: Duration, span: &Span) {
+    fn on_response(self, response: &Res, done_in: Duration, span: &Span) {
         self(response, done_in, span)
     }
 }
@@ -139,8 +139,8 @@ macro_rules! log_pattern_match {
     };
 }
 
-impl OnResponse for DefaultOnResponse {
-    fn on_response(self, response: &JobResult, done_in: Duration, _: &Span) {
+impl<Res: Debug> OnResponse<Res> for DefaultOnResponse {
+    fn on_response(self, response: &Res, done_in: Duration, _: &Span) {
         log_pattern_match!(self, response, done_in, [ERROR, WARN, INFO, DEBUG, TRACE]);
     }
 }

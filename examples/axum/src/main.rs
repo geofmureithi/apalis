@@ -71,9 +71,10 @@ async fn main() -> Result<()> {
     };
     let monitor = async {
         let monitor = Monitor::new()
-            .register_with_count(2, move |_| {
-                WorkerBuilder::new(storage.clone())
+            .register_with_count(2, move |index| {
+                WorkerBuilder::new(format!("tasty-pear-{index}"))
                     .layer(TraceLayer::new())
+                    .with_storage(storage.clone())
                     .build_fn(send_email)
             })
             .run()

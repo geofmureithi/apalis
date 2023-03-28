@@ -8,7 +8,7 @@ use futures::Future;
 use pin_project_lite::pin_project;
 use tower::{Layer, Service};
 
-use crate::{error::JobError, job::Job, request::JobRequest, response::JobResult};
+use crate::{error::JobError, job::Job, request::JobRequest};
 
 /// A layer to support prometheus metrics
 #[derive(Debug)]
@@ -28,10 +28,10 @@ pub struct PrometheusService<S> {
     service: S,
 }
 
-impl<S, J, F> Service<JobRequest<J>> for PrometheusService<S>
+impl<S, J, F, Res> Service<JobRequest<J>> for PrometheusService<S>
 where
-    S: Service<JobRequest<J>, Response = JobResult, Error = JobError, Future = F>,
-    F: Future<Output = Result<JobResult, JobError>> + 'static,
+    S: Service<JobRequest<J>, Response = Res, Error = JobError, Future = F>,
+    F: Future<Output = Result<Res, JobError>> + 'static,
     J: Job,
 {
     type Response = S::Response;
@@ -67,11 +67,11 @@ pin_project! {
     }
 }
 
-impl<Fut> Future for ResponseFuture<Fut>
+impl<Fut, Res> Future for ResponseFuture<Fut>
 where
-    Fut: Future<Output = Result<JobResult, JobError>>,
+    Fut: Future<Output = Result<Res, JobError>>,
 {
-    type Output = Result<JobResult, JobError>;
+    type Output = Result<Res, JobError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -82,8 +82,8 @@ where
         let status = response
             .as_ref()
             .ok()
-            .map(|res| res.to_string())
-            .unwrap_or_else(|| "Error".to_string());
+            .map(|_res| "Ok".to_string())
+            .unwrap_or_else(|| "Err".to_string());
 
         let labels = [
             ("name", this.operation.to_string()),

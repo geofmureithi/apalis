@@ -25,13 +25,10 @@ impl Job for Notification {
     const NAME: &'static str = "sqlite::Notification";
 }
 
-async fn notification_service(
-    notif: Notification,
-    _ctx: JobContext,
-) -> Result<JobResult, JobError> {
+async fn notification_service(notif: Notification, _ctx: JobContext) -> Result<(), JobError> {
     println!("Attempting to send notification {}", notif.text);
     tokio::time::sleep(Duration::from_millis(1)).await;
-    Ok(JobResult::Success)
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -43,10 +40,10 @@ impl Job for Document {
     const NAME: &'static str = "postgres::Document";
 }
 
-async fn document_service(doc: Document, _ctx: JobContext) -> Result<JobResult, JobError> {
+async fn document_service(doc: Document, _ctx: JobContext) -> Result<(), JobError> {
     println!("Attempting to convert {} to pdf", doc.text);
     tokio::time::sleep(Duration::from_millis(1)).await;
-    Ok(JobResult::Success)
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -58,10 +55,10 @@ impl Job for Upload {
     const NAME: &'static str = "mysql::Upload";
 }
 
-async fn upload_service(upload: Upload, _ctx: JobContext) -> Result<JobResult, JobError> {
+async fn upload_service(upload: Upload, _ctx: JobContext) -> Result<(), JobError> {
     println!("Attempting to upload {} to cloud", upload.url);
     tokio::time::sleep(Duration::from_millis(1)).await;
-    Ok(JobResult::Success)
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -323,27 +320,31 @@ async fn main() -> anyhow::Result<()> {
 
     let worker = Monitor::new()
         .register_with_count(1, move |_| {
-            WorkerBuilder::new(worker_storage.clone())
+            WorkerBuilder::new("tasty-apple")
                 .layer(SentryJobLayer)
                 .layer(TraceLayer::new())
+                .with_storage(worker_storage.clone())
                 .build_fn(send_email)
         })
-        .register_with_count(4, move |_| {
-            WorkerBuilder::new(sqlite_storage.clone())
+        .register_with_count(4, move |c| {
+            WorkerBuilder::new(format!("tasty-avocado-{c}"))
                 .layer(SentryJobLayer)
                 .layer(TraceLayer::new())
+                .with_storage(sqlite_storage.clone())
                 .build_fn(notification_service)
         })
-        .register_with_count(2, move |_| {
-            WorkerBuilder::new(pg_storage.clone())
+        .register_with_count(2, move |c| {
+            WorkerBuilder::new(format!("tasty-banana-{c}"))
                 .layer(SentryJobLayer)
                 .layer(TraceLayer::new())
+                .with_storage(pg_storage.clone())
                 .build_fn(document_service)
         })
-        .register_with_count(2, move |_| {
-            WorkerBuilder::new(mysql_storage.clone())
+        .register_with_count(2, move |c| {
+            WorkerBuilder::new(format!("tasty-pear-{c}"))
                 .layer(SentryJobLayer)
                 .layer(TraceLayer::new())
+                .with_storage(mysql_storage.clone())
                 .build_fn(upload_service)
         })
         .run();

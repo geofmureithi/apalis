@@ -43,13 +43,14 @@ async fn main() -> Result<()> {
         axum::Server::bind(&addr)
             .serve(app.into_make_service())
             .await
-            .map_err(|e| e.into())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))
     };
     let monitor = async {
         Monitor::new()
-            .register_with_count(2, move |_| {
-                WorkerBuilder::new(storage.clone())
+            .register_with_count(2, move |c| {
+                WorkerBuilder::new(format!("tasty-banana-{c}"))
                     .layer(PrometheusLayer)
+                    .with_storage(storage.clone())
                     .build_fn(send_email)
             })
             .run()

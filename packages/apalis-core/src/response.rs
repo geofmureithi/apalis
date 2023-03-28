@@ -1,68 +1,46 @@
+use std::any::Any;
+
+use tower::BoxError;
+
 use crate::error::JobError;
-use std::{any::Any, error::Error, time::Duration};
-
-/// Represents a non-error result for a [Job] or [JobFn] service.
-///
-/// Any job should return this as a result to control a jobs outcome.
-#[derive(Debug, Clone)]
-pub enum JobResult {
-    /// Job successfully completed
-    Success,
-    /// Job needs to be manually retried.
-    Retry,
-    /// Job was complete as a result of being killed
-    Kill,
-    /// Return job back and process it in [Duration]
-    Reschedule(Duration),
-}
-
-impl std::fmt::Display for JobResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let text = match self {
-            JobResult::Success => "Success",
-            JobResult::Retry => "Retry",
-            JobResult::Kill => "Kill",
-            JobResult::Reschedule(_) => "Reschedule",
-        };
-        f.write_str(text)
-    }
-}
 
 /// Helper for Job Responses
-pub trait IntoJobResponse {
+pub trait IntoResponse {
+    /// The final result of the job
+    type Result;
     /// converts self into a Result
-    fn into_response(self) -> Result<JobResult, JobError>;
+    fn into_response(self) -> Self::Result;
 }
 
-impl IntoJobResponse for bool {
-    fn into_response(self) -> Result<JobResult, JobError> {
+impl IntoResponse for bool {
+    type Result = std::result::Result<Self, JobError>;
+    fn into_response(self) -> std::result::Result<Self, JobError> {
         match self {
-            true => Ok(JobResult::Success),
-            false => Err(JobError::Unknown),
+            true => Ok(true),
+            false => Err(JobError::Failed(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Job returned false",
+            )))),
         }
     }
 }
 
-impl<T: Any, E: 'static + Error + Send + Sync> IntoJobResponse for Result<T, E> {
-    fn into_response(self) -> Result<JobResult, JobError> {
+impl<T: Any, E: Into<BoxError> + Send + Sync> IntoResponse for std::result::Result<T, E> {
+    type Result = Result<T, JobError>;
+    fn into_response(self) -> Result<T, JobError> {
         match self {
-            Ok(value) => {
-                let value_any = &value as &dyn Any;
-                match value_any.downcast_ref::<JobResult>() {
-                    Some(res) => Ok(res.clone()),
-                    None => Ok(JobResult::Success),
-                }
-            }
-            Err(e) => Err(JobError::Failed(Box::new(e))),
+            Ok(value) => Ok(value),
+            Err(e) => Err(JobError::Failed(e.into())),
         }
     }
 }
 
 macro_rules! SIMPLE_JOB_RESULT {
     ($type:ty) => {
-        impl IntoJobResponse for $type {
-            fn into_response(self) -> Result<JobResult, JobError> {
-                Ok(JobResult::Success)
+        impl IntoResponse for $type {
+            type Result = std::result::Result<$type, JobError>;
+            fn into_response(self) -> std::result::Result<$type, JobError> {
+                Ok(self)
             }
         }
     };

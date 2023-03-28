@@ -42,8 +42,7 @@ pub struct JobRequest<T> {
 impl<T> JobRequest<T> {
     /// Creates a new [JobRequest]
     pub fn new(job: T) -> Self {
-        let id = uuid::Uuid::new_v4().to_string();
-        let context = JobContext::new(id);
+        let context = JobContext::new(String::new());
         Self { job, context }
     }
 

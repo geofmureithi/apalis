@@ -1,45 +1,17 @@
+use crate::context::JobContext;
+use crate::job::Job;
+use crate::request::JobRequest;
+use crate::response::IntoResponse;
+
 use futures::future::BoxFuture;
-use futures::FutureExt;
+
 use std::fmt::{self};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::Service;
+use tower::{BoxError, Service};
 
-use crate::context::JobContext;
-use crate::error::JobError;
-use crate::job::Job;
-use crate::request::JobRequest;
-use crate::response::{IntoJobResponse, JobResult};
-
-/// Returns a new [`JobFn`] with the given closure.
-///
-/// This lets you build a [`Job`] from an async function that returns a [`Result`].
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use apalis_core::{job_fn, Job};
-///
-/// # #[tokio::main]
-/// # async fn main() -> Result<(), BoxError> {
-/// async fn handle(request: JobRequest) -> Result<JobResult, BoxError> {
-///     Ok(JobResult::Ok)
-/// }
-///
-/// let mut job = job_fn(handle);
-///
-/// let response = job
-///     .ready()
-///     .await?
-///     .call(JobRequest::new())
-///     .await?;
-///
-/// assert_eq!(JobResult::Ok, response);
-/// #
-/// # Ok(())
-/// # }
-/// ```
+/// A helper method to build job functions
 pub fn job_fn<T>(f: T) -> JobFn<T> {
     JobFn { f }
 }
@@ -83,28 +55,29 @@ where
     }
 }
 
-impl<T, F, Res, Request> Service<JobRequest<Request>> for JobFn<T>
+impl<T, F, Res: 'static, Request, E: 'static, R: 'static> Service<JobRequest<Request>> for JobFn<T>
 where
     Request: 'static,
     T: Fn(Request, JobContext) -> F,
-    Res: IntoJobResponse,
+    Res: IntoResponse<Result = std::result::Result<R, E>> + 'static,
     F: Future<Output = Res> + 'static + Send,
     Request: Job,
+    E: Into<BoxError> + Send + Sync,
 {
-    type Response = JobResult;
-    type Error = JobError;
+    type Response = R;
+    type Error = E;
     // TODO: Improve this to remove the send
-    type Future = JobFnHttpFuture<BoxFuture<'static, Result<JobResult, JobError>>>;
+    type Future = JobFnHttpFuture<BoxFuture<'static, std::result::Result<R, E>>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, job: JobRequest<Request>) -> Self::Future {
-        let fut = (self.f)(job.job, job.context).map(|res| res.into_response());
+        let fut = (self.f)(job.job, job.context);
 
         JobFnHttpFuture {
-            future: Box::pin(fut),
+            future: Box::pin(async { fut.await.into_response() }),
         }
     }
 }

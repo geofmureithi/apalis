@@ -18,13 +18,6 @@ async fn produce_jobs(storage: &PostgresStorage<Email>) -> Result<()> {
     Ok(())
 }
 
-struct TracingListener;
-impl WorkerListener for TracingListener {
-    fn on_event(&self, worker_id: &str, event: &WorkerEvent) {
-        tracing::info!(worker_id = ?worker_id, event = ?event, "Received message from worker")
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
@@ -39,12 +32,13 @@ async fn main() -> Result<()> {
     produce_jobs(&pg).await?;
 
     Monitor::new()
-        .register_with_count(4, move |_| {
-            WorkerBuilder::new(pg.clone())
+        .register_with_count(4, move |c| {
+            WorkerBuilder::new(format!("tasty-orange-{c}"))
                 .layer(TraceLayer::new())
+                .with_storage(pg.clone())
                 .build_fn(send_email)
         })
-        .event_handler(TracingListener)
         .run()
-        .await
+        .await?;
+    Ok(())
 }

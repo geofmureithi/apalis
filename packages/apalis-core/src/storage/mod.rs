@@ -1,8 +1,7 @@
+/// Allows for building workers that consume a [Storage]
+pub mod builder;
 mod error;
-#[cfg(feature = "worker")]
-mod streams;
-#[cfg(feature = "worker")]
-mod worker;
+mod layers;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -15,9 +14,6 @@ use crate::{
 
 #[cfg(feature = "storage")]
 pub use self::error::StorageError;
-
-#[cfg(feature = "worker")]
-pub use worker::StorageWorker;
 
 /// Represents a Storage Result
 pub type StorageResult<I> = Result<I, StorageError>;

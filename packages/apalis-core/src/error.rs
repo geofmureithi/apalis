@@ -17,7 +17,7 @@ pub enum JobError {
     #[error("Attempted to communicate with a crashed background worker")]
     WorkerCrashed,
 
-    /// An error occured during execution.
+    /// An error occurred during execution.
     #[error("Job Failed: {0}")]
     Failed(#[source] BoxDynError),
 
@@ -36,22 +36,11 @@ pub enum JobError {
     Unknown,
 }
 
-/// Represents a worker error.
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum WorkerError {
-    #[cfg(feature = "storage")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
-    /// An error communicating with storage.
-    #[error("error communicating with storage: {0}")]
-    Storage(StorageError),
-}
-
 /// Represents a [JobStream] error.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum JobStreamError {
-    /// An error occured during streaming.
+    /// An error occurred during streaming.
     #[error("Broken Pipe: {0}")]
     BrokenPipe(#[source] BoxDynError),
 }

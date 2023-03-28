@@ -1,20 +1,19 @@
 use futures::future;
 use tower::retry::Policy;
 
-/// Re-export from [tower::retry::RetryLayer]
+/// Re-export from [`tower::retry::RetryLayer`]
 pub use tower::retry::RetryLayer;
 
-use crate::{error::JobError, request::JobRequest, response::JobResult};
+use crate::{error::JobError, request::JobRequest};
 
 type Req<T> = JobRequest<T>;
-type Res = JobResult;
 type Err = JobError;
 
-/// Retries a job instantly until max_attempts
+/// Retries a job instantly until `max_attempts`
 #[derive(Clone, Debug)]
 pub struct DefaultRetryPolicy;
 
-impl<T> Policy<Req<T>, Res, Err> for DefaultRetryPolicy
+impl<T, Res> Policy<Req<T>, Res, Err> for DefaultRetryPolicy
 where
     T: Clone,
 {

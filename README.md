@@ -8,7 +8,7 @@ Apalis is a simple, extensible multithreaded background job processing library f
 - Jobs handlers with a macro free API.
 - Take full advantage of the [`tower`] ecosystem of
   middleware, services, and utilities.
-- Fully Tokio compatible.
+- Runtime agnostic - Use tokio, smol etc.
 - Optional Web interface to help you manage your jobs.
 
 Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] middleware.
@@ -28,7 +28,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.3", features = ["redis"] }
+apalis = { version = "0.4", features = ["redis"] }
 ```
 
 ## Usage
@@ -44,8 +44,8 @@ struct Email {
     to: String,
 }
 
-async fn email_service(job: Email, _ctx: JobContext) -> Result<JobResult, JobError> {
-    Ok(JobResult::Success)
+async fn email_service(job: Email, ctx: JobContext) {
+    info!("Do something");
 }
 
 #[tokio::main]
@@ -56,7 +56,8 @@ async fn main() -> Result<()> {
     let storage = RedisStorage::new(redis).await?;
     Monitor::new()
         .register_with_count(2, move || {
-            WorkerBuilder::new(storage.clone())
+            WorkerBuilder::new("email-worker-1")
+                .with_storage(storage.clone())
                 .build_fn(email_service)
         })
         .run()
@@ -109,9 +110,32 @@ Since we provide a few storage solutions, here is a table comparing them:
 | Feature         | Redis | Sqlite | Postgres | Sled | Mysql | Mongo | Cron |
 | :-------------- | :---: | :----: | :------: | :--: | :---: | :---: | :--: |
 | Scheduled jobs  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
-| Retryable jobs  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
+| Retry jobs      |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
 | Persistence     |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   | BYO  |
-| Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   |  \*   |   x   |  x   |
+| Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  x   |
+
+## How Apalis works (Draft)
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Worker
+    participant Postgres
+
+    App->>+Worker: Add job to queue
+    Worker->>+Postgres: Poll queue for job
+    Postgres-->>-Worker: Job data
+    Worker->>+Postgres: Update job status to 'running'
+    Postgres-->>-Worker: Confirmation
+    Worker->>+App: Notify job started
+    loop job execution
+        Worker-->>-App: Report job progress
+    end
+    Worker->>+Postgres: Update job status to 'completed'
+    Postgres-->>-Worker: Confirmation
+    Worker->>+App: Notify job completed
+
+```
 
 ## Thanks to
 
@@ -123,10 +147,14 @@ Since we provide a few storage solutions, here is a table comparing them:
 
 v 0.4
 
-- [ ] Improve monitoring
+- [x] Move from actor based to layer based processing
+- [x] Graceful Shutdown
+- [x] Allow other types of executors apart from Tokio
+- [x] Mock/Test Worker
+- [x] Improve monitoring
 - [ ] Improve Apalis Board
-- [ ] Add job progress
-- [ ] Add more sources \*
+- [x] Add job progress via layer
+- [x] Add more sources
 
 v 0.3
 
