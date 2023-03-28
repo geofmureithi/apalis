@@ -3,13 +3,13 @@ use crate::job::Job;
 use crate::request::JobRequest;
 use crate::response::IntoResponse;
 
-use futures::future::BoxFuture;
+use futures::future::Map;
+use futures::FutureExt;
 
-use std::fmt::{self};
+use std::fmt;
 use std::future::Future;
-use std::pin::Pin;
 use std::task::{Context, Poll};
-use tower::{BoxError, Service};
+use tower::Service;
 
 /// A helper method to build job functions
 pub fn job_fn<T>(f: T) -> JobFn<T> {
@@ -35,39 +35,18 @@ where
     }
 }
 
-pin_project_lite::pin_project! {
-    /// The Future returned from [`JobFn`] service.
-    pub struct JobFnHttpFuture<F> {
-        #[pin]
-        future: F,
-    }
-}
+/// The Future returned from [`JobFn`] service.
+pub type JobFnFuture<F, O, R, E> = Map<F, fn(O) -> std::result::Result<R, E>>;
 
-impl<F, Res> Future for JobFnHttpFuture<F>
+impl<T, F, Request, E, R> Service<JobRequest<Request>> for JobFn<T>
 where
-    F: Future<Output = Res> + 'static,
-{
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let slf = self.project();
-        slf.future.poll(cx)
-    }
-}
-
-impl<T, F, Res: 'static, Request, E: 'static, R: 'static> Service<JobRequest<Request>> for JobFn<T>
-where
-    Request: 'static,
     T: Fn(Request, JobContext) -> F,
-    Res: IntoResponse<Result = std::result::Result<R, E>> + 'static,
-    F: Future<Output = Res> + 'static + Send,
-    Request: Job,
-    E: Into<BoxError> + Send + Sync,
+    F: Future,
+    F::Output: IntoResponse<Result = std::result::Result<R, E>>,
 {
     type Response = R;
     type Error = E;
-    // TODO: Improve this to remove the send
-    type Future = JobFnHttpFuture<BoxFuture<'static, std::result::Result<R, E>>>;
+    type Future = JobFnFuture<F, F::Output, R, E>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -76,8 +55,6 @@ where
     fn call(&mut self, job: JobRequest<Request>) -> Self::Future {
         let fut = (self.f)(job.job, job.context);
 
-        JobFnHttpFuture {
-            future: Box::pin(async { fut.await.into_response() }),
-        }
+        fut.map(F::Output::into_response)
     }
 }
