@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio::time::interval;
 use tower::{layer::util::Identity, Layer, Service};
 
-use crate::{request::JobRequest, worker::WorkerRef};
+use crate::{request::JobRequest, worker::WorkerId};
 
 use super::Storage;
 
@@ -13,7 +13,7 @@ use super::Storage;
 /// to the source to notify it that the worker is still alive. This layer keeps a reference to
 /// the worker and its name and uses it to send the "keep-alive" message.
 pub struct KeepAliveLayer<T, Req> {
-    worker: WorkerRef,
+    worker: WorkerId,
     storage: T,
     period: Duration,
     req_type: PhantomData<Req>,
@@ -34,7 +34,7 @@ impl<T, Req> KeepAliveLayer<T, Req> {
     ///
     /// `make_request` returns a request to be called on the inner service.
     /// `period` gives with interval with which to send the request from `make_request`.
-    pub fn new(worker: WorkerRef, storage: T, period: Duration) -> Self {
+    pub fn new(worker: WorkerId, storage: T, period: Duration) -> Self {
         KeepAliveLayer {
             worker,
             storage,
@@ -55,7 +55,7 @@ where
 
     fn layer(&self, inner: S) -> Self::Service {
         let mut storage = self.storage.clone();
-        let worker_ref = self.worker.clone();
+        let worker_id = self.worker.clone();
         let period = self.period;
         let make_worker = {
             let period = period;
@@ -64,7 +64,7 @@ where
 
                 loop {
                     storage
-                        .keep_alive::<S>(worker_ref.name().to_string())
+                        .keep_alive::<S>(&worker_id)
                         .await
                         .unwrap();
                     let _ = interval.tick().await;

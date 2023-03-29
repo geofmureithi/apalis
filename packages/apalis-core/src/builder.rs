@@ -10,14 +10,14 @@ use crate::{
     job::Job,
     job_fn::{job_fn, JobFn},
     request::JobRequest,
-    worker::{ready::ReadyWorker, Worker, WorkerRef},
+    worker::{ready::ReadyWorker, Worker, WorkerId},
 };
 
 /// An abstract that allows building a [`Worker`].
 /// Usually the output is [`ReadyWorker`] but you can implement your own via [`WorkerFactory`]
 #[derive(Debug)]
 pub struct WorkerBuilder<Job, Source, Middleware> {
-    pub(crate) name: String,
+    pub(crate) id: WorkerId,
     pub(crate) job: PhantomData<Job>,
     pub(crate) layer: ServiceBuilder<Middleware>,
     pub(crate) source: Source,
@@ -25,13 +25,13 @@ pub struct WorkerBuilder<Job, Source, Middleware> {
 
 impl WorkerBuilder<(), (), Identity> {
     /// Build a new [`WorkerBuilder`] instance with a name for the worker to build
-    pub fn new<N: Into<String>>(name: N) -> WorkerBuilder<(), (), Identity> {
+    pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), Identity> {
         let job: PhantomData<()> = PhantomData;
         WorkerBuilder {
             job,
             layer: ServiceBuilder::new(),
             source: (),
-            name: name.into(),
+            id: WorkerId::new(name),
         }
     }
 }
@@ -46,14 +46,14 @@ impl<J, S, M> WorkerBuilder<J, S, M> {
             job: PhantomData,
             layer: self.layer,
             source: stream,
-            name: self.name,
+            id: self.id,
         }
     }
 
-    /// Get the [`WorkerRef`] and build a stream.
+    /// Get the [`WorkerId`] and build a stream.
     /// Useful when you want to know what worker is consuming the stream.
     pub fn with_stream<
-        NS: Fn(WorkerRef) -> ST,
+        NS: Fn(&WorkerId) -> ST,
         NJ,
         E,
         ST: Stream<Item = Result<Option<JobRequest<NJ>>, E>>,
@@ -64,8 +64,8 @@ impl<J, S, M> WorkerBuilder<J, S, M> {
         WorkerBuilder {
             job: PhantomData,
             layer: self.layer,
-            source: stream(WorkerRef::new(self.name.clone())),
-            name: self.name,
+            source: stream(&self.id),
+            id: self.id,
         }
     }
 }
@@ -82,7 +82,7 @@ impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
         WorkerBuilder {
             job: self.job,
             layer: middleware,
-            name: self.name,
+            id: self.id,
             source: self.source,
         }
     }
@@ -95,7 +95,7 @@ impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
             job: self.job,
             source: self.source,
             layer: self.layer.layer(layer),
-            name: self.name,
+            id: self.id,
         }
     }
 }
@@ -118,7 +118,7 @@ where
     /// Convert a worker builder to a worker ready to consume jobs
     fn build(self, service: Ser) -> ReadyWorker<S, <M as Layer<Ser>>::Service> {
         ReadyWorker {
-            name: self.name,
+            id: self.id,
             stream: self.source,
             service: self.layer.service(service),
         }

@@ -9,12 +9,13 @@ use tracing::warn;
 use crate::executor::Executor;
 use crate::job::Job;
 
+use super::WorkerId;
 use super::{Worker, WorkerContext};
 use std::fmt::Formatter;
 
 /// A worker that is ready to consume jobs
 pub struct ReadyWorker<Stream, Service> {
-    pub(crate) name: String,
+    pub(crate) id: WorkerId,
     pub(crate) stream: Stream,
     pub(crate) service: Service,
 }
@@ -22,7 +23,7 @@ pub struct ReadyWorker<Stream, Service> {
 impl<Stream, Service> Debug for ReadyWorker<Stream, Service> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReadyWorker")
-            .field("name", &self.name)
+            .field("name", &self.id)
             .field("stream", &std::any::type_name::<Stream>())
             .field("service", &std::any::type_name::<Service>())
             .finish()
@@ -44,8 +45,8 @@ where
     type Service = Serv;
     type Source = Strm;
 
-    fn name(&self) -> String {
-        self.name.to_string()
+    fn id(&self) -> WorkerId {
+        self.id.clone()
     }
     async fn start<Exec: Executor + Send>(
         self,
@@ -79,9 +80,9 @@ where
             }
         }
         drop(send);
-        info!("Shutting down {} worker", self.name);
+        info!("Shutting down {} worker", self.id);
         let _ = recv.recv().await;
-        info!("Shutdown {} worker successfully", self.name);
+        info!("Shutdown {} worker successfully", self.id);
         Ok(())
     }
 }

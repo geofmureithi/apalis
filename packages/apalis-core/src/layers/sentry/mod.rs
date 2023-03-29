@@ -8,7 +8,7 @@ use tower::Layer;
 use tower::Service;
 
 use crate::error::JobError;
-use crate::job::Job;
+use crate::job::{Job, JobId};
 use crate::request::JobRequest;
 
 /// Tower Layer that logs Job Details.
@@ -49,7 +49,7 @@ impl<S> Layer<S> for SentryJobLayer {
 }
 
 struct JobDetails {
-    job_id: String,
+    job_id: JobId,
     current_attempt: i32,
     job_type: String,
 }
@@ -79,33 +79,26 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let slf = self.project();
         if let Some((job_details, trx_ctx)) = slf.on_first_poll.take() {
+            let jid = job_details.job_id.clone();
             sentry_core::configure_scope(|scope| {
-                let uuid = uuid::Uuid::parse_str(&job_details.job_id);
-                match uuid {
-                    Ok(event_id) => {
-                        scope.add_event_processor(move |mut event| {
-                            event.event_id = event_id;
-                            Some(event)
-                        });
-                        scope.set_tag("job_type", job_details.job_type.to_string());
-                        let mut details = std::collections::BTreeMap::new();
-                        details.insert(String::from("job_id"), job_details.job_id.into());
-                        details.insert(
-                            String::from("current_attempt"),
-                            job_details.current_attempt.into(),
-                        );
-                        scope.set_context("job", sentry_core::protocol::Context::Other(details));
+                scope.add_event_processor(move |mut event| {
+                    event.event_id = uuid::Uuid::from_u128(jid.inner().0);
+                    Some(event)
+                });
+                scope.set_tag("job_type", job_details.job_type.to_string());
+                let mut details = std::collections::BTreeMap::new();
+                details.insert(String::from("job_id"), job_details.job_id.to_string().into());
+                details.insert(
+                    String::from("current_attempt"),
+                    job_details.current_attempt.into(),
+                );
+                scope.set_context("job", sentry_core::protocol::Context::Other(details));
 
-                        let transaction: sentry_core::TransactionOrSpan =
-                            sentry_core::start_transaction(trx_ctx).into();
-                        let parent_span = scope.get_span();
-                        scope.set_span(Some(transaction.clone()));
-                        *slf.transaction = Some((transaction, parent_span));
-                    }
-                    Err(e) => {
-                        log::error!("Unable to read job_id: {}", e)
-                    }
-                }
+                let transaction: sentry_core::TransactionOrSpan =
+                    sentry_core::start_transaction(trx_ctx).into();
+                let parent_span = scope.get_span();
+                scope.set_span(Some(transaction.clone()));
+                *slf.transaction = Some((transaction, parent_span));
             });
         }
         match slf.future.poll(cx) {
@@ -150,7 +143,7 @@ where
         let trx_ctx = sentry_core::TransactionContext::new(op, "apalis.job");
         let job_type = std::any::type_name::<J>().to_string();
         let job_details = JobDetails {
-            job_id: request.id(),
+            job_id: request.id().clone(),
             current_attempt: request.attempts(),
             job_type,
         };

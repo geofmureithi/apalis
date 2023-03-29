@@ -74,7 +74,7 @@ impl<B> MakeSpan<B> for DefaultMakeSpan {
                     parent: span,
                     $level,
                     "job",
-                    job_id = req.id().as_str(),
+                    job_id = req.id().to_string(),
                     current_attempt = req.attempts(),
                 )
             };

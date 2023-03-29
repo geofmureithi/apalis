@@ -2,7 +2,7 @@ use futures::StreamExt;
 use std::{marker::PhantomData, time::Duration};
 use tower::layer::util::Stack;
 
-use crate::{builder::WorkerBuilder, job::JobStreamResult, worker::WorkerRef};
+use crate::{builder::WorkerBuilder, job::JobStreamResult};
 
 use super::{layers::KeepAliveLayer, Storage};
 
@@ -25,21 +25,22 @@ where
     type Stream = JobStreamResult<J>;
     fn with_storage(
         self,
-        storage: ST,
+        mut storage: ST,
     ) -> WorkerBuilder<J, Self::Stream, Stack<KeepAliveLayer<ST, J>, M>> {
+        let worker_id = self.id;
+        let source = storage
+            .consume(&worker_id, Duration::from_millis(10))
+            .boxed();
         let layer = self.layer.layer(KeepAliveLayer::new(
-            WorkerRef::new(self.name.clone()),
+            worker_id.clone(),
             storage.clone(),
             Duration::from_secs(30),
         ));
-        let mut storage = storage;
         WorkerBuilder {
             job: PhantomData,
             layer,
-            source: storage
-                .consume(self.name.clone(), Duration::from_millis(10))
-                .boxed(),
-            name: self.name,
+            source,
+            id: worker_id,
         }
     }
 }

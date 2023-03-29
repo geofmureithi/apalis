@@ -13,13 +13,13 @@ use crate::{
     executor::{Executor, TokioExecutor},
     job::Job,
     request::JobRequest,
-    worker::{Worker, WorkerContext},
+    worker::{Worker, WorkerContext, WorkerId},
 };
 
 /// A monitor for coordinating and managing a collection of workers.
 pub struct Monitor<E: Executor> {
     shutdown: Shutdown,
-    worker_handles: Vec<(String, E::JoinHandle)>,
+    worker_handles: Vec<(WorkerId, E::JoinHandle)>,
     timeout: Option<Duration>,
     executor: E,
 }
@@ -65,18 +65,19 @@ impl<E: Executor + Send + 'static> Monitor<E> {
         <Serv as Service<JobRequest<J>>>::Future: std::marker::Send,
     {
         let shutdown = self.shutdown.clone();
-        let name = worker.name();
+        let worker_id = worker.id();
         let handle = self.executor.spawn(
             self.shutdown.graceful(
                 worker
                     .start(WorkerContext {
                         shutdown,
                         executor: self.executor.clone(),
+                        worker_id: worker_id.clone()
                     })
                     .map(|_| ()),
             ),
         );
-        self.worker_handles.push((name, handle));
+        self.worker_handles.push((worker_id, handle));
         self
     }
 
@@ -246,8 +247,8 @@ mod tests {
         type Service = S;
         type Source = TestSource;
 
-        fn name(&self) -> String {
-            "test-worker".to_string()
+        fn id(&self) -> WorkerId {
+            WorkerId::new("test-worker")
         }
 
         async fn start<E: Executor + Send>(

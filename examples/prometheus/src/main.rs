@@ -92,13 +92,13 @@ where
     let new_job = storage.push(input).await;
 
     match new_job {
-        Ok(()) => (
+        Ok(jid) => (
             StatusCode::CREATED,
-            "Job was successfully added".to_string(),
+            format!("Job [{jid}] was successfully added"),
         ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("An Error occured {e}"),
+            format!("An Error occurred {e}"),
         ),
     }
     .into_response()

@@ -1,4 +1,4 @@
-use crate::request::JobState;
+use crate::{request::JobState, job::JobId, worker::WorkerId};
 
 use chrono::{DateTime, Utc};
 use http::Extensions;
@@ -9,14 +9,14 @@ use std::{any::Any, marker::Send};
 /// Used to provide a context when a job is defined through the [Job] trait
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobContext {
-    pub(crate) id: String,
+    pub(crate) id: JobId,
     pub(crate) status: JobState,
     pub(crate) run_at: DateTime<Utc>,
     pub(crate) attempts: i32,
     pub(crate) max_attempts: i32,
     pub(crate) last_error: Option<String>,
     pub(crate) lock_at: Option<DateTime<Utc>>,
-    pub(crate) lock_by: Option<String>,
+    pub(crate) lock_by: Option<WorkerId>,
     pub(crate) done_at: Option<DateTime<Utc>>,
     #[serde(skip)]
     pub(crate) data: Data,
@@ -34,7 +34,7 @@ impl Clone for Data {
 impl JobContext {
     /// Build a new context with defaults given an ID.
     #[must_use]
-    pub fn new(id: String) -> Self {
+    pub fn new(id: JobId) -> Self {
         JobContext {
             id,
             status: JobState::Pending,
@@ -55,7 +55,8 @@ impl JobContext {
     ///
     /// ```
     /// # use apalis_core::context::JobContext;
-    /// let mut ctx = JobContext::new(1.to_string());
+    /// # use apalis_core::job::JobId;
+    /// let mut ctx = JobContext::new(JobId::new());
     /// assert!(ctx.data_opt::<i32>().is_none());
     /// ctx.insert(5i32);
     ///
@@ -95,8 +96,8 @@ impl JobContext {
     }
 
     /// Get the id for a job
-    pub fn id(&self) -> String {
-        self.id.clone()
+    pub fn id(&self) -> &JobId {
+        &self.id
     }
 
     /// Gets the current attempts for a job. Default 0
@@ -150,12 +151,12 @@ impl JobContext {
     }
 
     /// Get the time a job was locked
-    pub fn lock_by(&self) -> &Option<String> {
+    pub fn lock_by(&self) -> &Option<WorkerId> {
         &self.lock_by
     }
 
     /// Set `lock_by`
-    pub fn set_lock_by(&mut self, lock_by: Option<String>) {
+    pub fn set_lock_by(&mut self, lock_by: Option<WorkerId>) {
         self.lock_by = lock_by;
     }
 

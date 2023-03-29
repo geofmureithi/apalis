@@ -14,7 +14,7 @@ async fn push_email(
     let mut storage = storage.clone();
     let res = storage.push(email.into_inner()).await;
     match res {
-        Ok(()) => HttpResponse::Ok().body("Email added to queue".to_string()),
+        Ok(jid) => HttpResponse::Ok().body(format!("Email with job_id [{jid}] added to queue")),
         Err(e) => HttpResponse::InternalServerError().body(format!("{e}")),
     }
 }

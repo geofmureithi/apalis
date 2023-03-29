@@ -2,9 +2,9 @@ use std::{marker::PhantomData, time::Duration};
 
 use apalis_core::{
     error::{JobError, JobStreamError},
-    job::{Job, JobStreamExt, JobStreamResult, JobStreamWorker},
+    job::{Job, JobStreamExt, JobStreamResult, JobStreamWorker, JobId},
     request::{JobRequest, JobState},
-    storage::{Storage, StorageError, StorageResult, StorageWorkerPulse},
+    storage::{Storage, StorageError, StorageResult, StorageWorkerPulse}, worker::WorkerId,
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -122,7 +122,7 @@ impl<T: Job> RedisStorage<T> {
 impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
     fn stream_jobs(
         &self,
-        worker_id: String,
+        worker_id: &WorkerId,
         interval: Duration,
     ) -> impl Stream<Item = Result<Option<JobRequest<T>>, JobStreamError>> {
         let mut conn = self.conn.clone();
@@ -230,7 +230,7 @@ where
 {
     type Output = T;
 
-    async fn push(&mut self, job: Self::Output) -> StorageResult<()> {
+    async fn push(&mut self, job: Self::Output) -> StorageResult<JobId> {
         let mut conn = self.conn.clone();
         let push_job = self.scripts.push_job.clone();
         let job_data_hash = self.queue.job_data_hash.to_string();
@@ -249,14 +249,15 @@ where
             .key(job_data_hash)
             .key(active_jobs_list)
             .key(signal_list)
-            .arg(job_id)
+            .arg(job_id.to_string())
             .arg(job)
             .invoke_async(&mut conn)
             .await
-            .map_err(|e| StorageError::Database(Box::from(e)))
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        Ok(job_id.clone())
     }
 
-    async fn schedule(&mut self, job: Self::Output, on: DateTime<Utc>) -> StorageResult<()> {
+    async fn schedule(&mut self, job: Self::Output, on: DateTime<Utc>) -> StorageResult<JobId> {
         let mut conn = self.conn.clone();
         let schedule_job = self.scripts.schedule_job.clone();
         let job_data_hash = self.queue.job_data_hash.to_string();
@@ -273,25 +274,26 @@ where
         schedule_job
             .key(job_data_hash)
             .key(scheduled_jobs_set)
-            .arg(job_id)
+            .arg(job_id.to_string())
             .arg(job)
             .arg(on.timestamp())
             .invoke_async(&mut conn)
             .await
-            .map_err(|e| StorageError::Database(Box::from(e)))
+            .map_err(|e| StorageError::Database(Box::from(e)))?;
+        Ok(job_id.clone())
     }
 
-    fn consume(&mut self, worker_id: String, interval: Duration) -> JobStreamResult<T> {
+    fn consume(&mut self, worker_id: &WorkerId, interval: Duration) -> JobStreamResult<T> {
         Box::pin(self.stream_jobs(worker_id, interval))
     }
 
-    async fn kill(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
+    async fn kill(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let kill_job = self.scripts.kill_job.clone();
         let current_worker_id = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let job_data_hash = self.queue.job_data_hash.to_string();
         let dead_jobs_set = self.queue.dead_jobs_set.to_string();
-        let fetch_job = self.fetch_by_id(job_id.clone());
+        let fetch_job = self.fetch_by_id(job_id);
 
         let res = fetch_job.await?;
         match res {
@@ -302,7 +304,7 @@ where
                     .key(current_worker_id)
                     .key(dead_jobs_set)
                     .key(job_data_hash)
-                    .arg(job_id)
+                    .arg(job_id.to_string())
                     .arg(now)
                     .arg(data)
                     .invoke_async(&mut conn)
@@ -323,22 +325,22 @@ where
         Ok(length)
     }
 
-    async fn fetch_by_id(&self, job_id: String) -> StorageResult<Option<JobRequest<Self::Output>>> {
+    async fn fetch_by_id(&self, job_id: &JobId) -> StorageResult<Option<JobRequest<Self::Output>>> {
         let mut conn = self.conn.clone();
         let data: Option<Value> = redis::cmd("HMGET")
             .arg(&self.queue.job_data_hash.to_string())
-            .arg(job_id.clone())
+            .arg(job_id.to_string())
             .query_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::new(e)))?;
         Ok(deserialize_job(data.as_ref()))
     }
-    async fn update_by_id(&self, job_id: String, job: &JobRequest<T>) -> StorageResult<()> {
+    async fn update_by_id(&self, job_id: &JobId, job: &JobRequest<T>) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let job = serde_json::to_string(job)?;
         let res: Result<i64, RedisError> = redis::cmd("HSET")
             .arg(&self.queue.job_data_hash.to_string())
-            .arg(job_id)
+            .arg(job_id.to_string())
             .arg(job)
             .query_async(&mut conn)
             .await;
@@ -346,7 +348,7 @@ where
         Ok(())
     }
 
-    async fn ack(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
+    async fn ack(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let ack_job = self.scripts.ack_job.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
@@ -356,19 +358,19 @@ where
         ack_job
             .key(inflight_set)
             .key(done_jobs_set)
-            .arg(job_id)
+            .arg(job_id.to_string())
             .arg(now)
             .invoke_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::new(e)))
     }
-    async fn retry(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
+    async fn retry(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let retry_job = self.scripts.retry_job.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
         let job_data_hash = self.queue.job_data_hash.to_string();
-        let job_fut = self.fetch_by_id(job_id.clone());
+        let job_fut = self.fetch_by_id(job_id);
         let failed_jobs_set = self.queue.failed_jobs_set.to_string();
         let mut storage = self.clone();
 
@@ -380,12 +382,12 @@ where
                     let _res = redis::cmd("ZADD")
                         .arg(failed_jobs_set)
                         .arg(Utc::now().timestamp())
-                        .arg(job_id.clone())
+                        .arg(job_id.to_string())
                         .query_async(&mut conn)
                         .await
                         .map_err(|e| StorageError::Database(Box::new(e)))?;
                     storage
-                        .kill(worker_id.clone(), job_id.clone())
+                        .kill(worker_id, job_id)
                         .await
                         .map_err(|e| StorageError::Database(Box::new(e)))?;
                     return Ok(());
@@ -396,7 +398,7 @@ where
                     .key(inflight_set)
                     .key(scheduled_jobs_set)
                     .key(job_data_hash)
-                    .arg(job_id)
+                    .arg(job_id.to_string())
                     .arg(now)
                     .arg(job)
                     .invoke_async(&mut conn)
@@ -413,7 +415,7 @@ where
             None => Err(StorageError::NotFound),
         }
     }
-    async fn keep_alive<Service>(&mut self, worker_id: String) -> StorageResult<()> {
+    async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let register_consumer = self.scripts.register_consumer.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
@@ -486,7 +488,7 @@ where
             _ => todo!(),
         }
     }
-    async fn reenqueue_active(&mut self, job_ids: Vec<String>) -> StorageResult<()> {
+    async fn reenqueue_active(&mut self, job_ids: Vec<&JobId>) -> StorageResult<()> {
         let mut conn = self.conn.clone();
         let reenqueue_active = self.scripts.reenqueue_active.clone();
         let inflight_set = self.queue.inflight_jobs_set.to_string();
@@ -497,7 +499,7 @@ where
             .key(inflight_set)
             .key(active_jobs_list)
             .key(signal_list)
-            .arg(job_ids)
+            .arg(job_ids.into_iter().map(|j| j.to_string()).collect::<Vec<String>>())
             .invoke_async(&mut conn)
             .await
             .map_err(|e| StorageError::Connection(Box::from(e)))
@@ -506,7 +508,7 @@ where
         let mut conn = self.conn.clone();
         let schedule_job = self.scripts.schedule_job.clone();
         let job_id = job.id();
-        let worker_id = job.lock_by().clone().unwrap_or_default();
+        let worker_id = job.lock_by().clone().ok_or(StorageError::NotFound)?;
         let job = serde_json::to_string(job)?;
         let job_data_hash = self.queue.job_data_hash.to_string();
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
@@ -515,21 +517,21 @@ where
         let failed_jobs_set = self.queue.failed_jobs_set.to_string();
         let _cmd = redis::cmd("SREM")
             .arg(inflight_set)
-            .arg(job_id.clone())
+            .arg(job_id.clone().to_string())
             .query_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         let _cmd = redis::cmd("ZADD")
             .arg(failed_jobs_set)
             .arg(Utc::now().timestamp())
-            .arg(job_id.clone())
+            .arg(job_id.clone().to_string())
             .query_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         schedule_job
             .key(job_data_hash)
             .key(scheduled_jobs_set)
-            .arg(job_id)
+            .arg(job_id.to_string())
             .arg(job)
             .arg(on.timestamp())
             .invoke_async(&mut conn)
@@ -696,7 +698,7 @@ where
             .into_iter()
             .map(|w| {
                 JobStreamWorker::new::<Self, _>(
-                    w.replace(&format!("{}:", &self.queue.inflight_jobs_set), ""),
+                    WorkerId::new(format!("{}:{w}", &self.queue.inflight_jobs_set)),
                     Utc::now(),
                 )
             })
@@ -711,7 +713,6 @@ mod tests {
     use super::*;
     use email_service::Email;
     use futures::StreamExt;
-    use uuid::Uuid;
 
     /// migrate DB and return a storage instance.
     async fn setup() -> RedisStorage<Email> {
@@ -728,7 +729,7 @@ mod tests {
     /// rollback DB changes made by tests.
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(mut storage: RedisStorage<Email>, _worker_id: String) {
+    async fn cleanup(mut storage: RedisStorage<Email>, _worker_id: &WorkerId) {
         let _resp: String = redis::cmd("FLUSHDB")
             .query_async(&mut storage.conn)
             .await
@@ -745,7 +746,7 @@ mod tests {
         }
     }
 
-    async fn consume_one<S, T>(storage: &mut S, worker_id: String) -> JobRequest<T>
+    async fn consume_one<S, T>(storage: &mut S, worker_id: &WorkerId) -> JobRequest<T>
     where
         S: Storage<Output = T>,
     {
@@ -761,17 +762,17 @@ mod tests {
     async fn register_worker_at(
         storage: &mut RedisStorage<Email>,
         _last_seen: DateTime<Utc>,
-    ) -> String {
-        let worker_id = Uuid::new_v4().to_string();
+    ) -> WorkerId {
+        let worker = WorkerId::new("test-worker");
 
         storage
-            .keep_alive::<DummyService>(worker_id.clone())
+            .keep_alive::<DummyService>(&worker)
             .await
             .expect("failed to register worker");
-        worker_id
+        worker
     }
 
-    async fn register_worker(storage: &mut RedisStorage<Email>) -> String {
+    async fn register_worker(storage: &mut RedisStorage<Email>) -> WorkerId {
         register_worker_at(storage, Utc::now()).await
     }
 
@@ -782,7 +783,7 @@ mod tests {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job<S>(storage: &mut S, job_id: String) -> JobRequest<Email>
+    async fn get_job<S>(storage: &mut S, job_id: &JobId) -> JobRequest<Email>
     where
         S: Storage<Output = Email>,
     {
@@ -800,7 +801,7 @@ mod tests {
 
         let worker_id = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, &worker_id).await;
 
         // No worker yet
         // Redis doesn't update jobs like in sql
@@ -808,7 +809,7 @@ mod tests {
         assert_eq!(*job.context().lock_by(), None);
         assert!(job.context().lock_at().is_none());
 
-        cleanup(storage, worker_id).await;
+        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -818,19 +819,19 @@ mod tests {
 
         let worker_id = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         let job_id = job.context().id();
 
         storage
-            .ack(worker_id.clone(), job_id.clone())
+            .ack(&worker_id, job_id)
             .await
             .expect("failed to acknowledge the job");
 
-        let job = get_job(&mut storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id).await;
         assert_eq!(*job.context().status(), JobState::Pending); // Redis storage uses hset etc to manage status
         assert!(job.context().done_at().is_none());
 
-        cleanup(storage, worker_id).await;
+        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -841,19 +842,19 @@ mod tests {
 
         let worker_id = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         let job_id = job.context().id();
 
         storage
-            .kill(worker_id.clone(), job_id.clone())
+            .kill(&worker_id, job_id)
             .await
             .expect("failed to kill job");
 
-        let job = get_job(&mut storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id).await;
         assert_eq!(*job.context().status(), JobState::Pending);
         assert!(job.context().done_at().is_none());
 
-        cleanup(storage, worker_id).await;
+        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -865,7 +866,7 @@ mod tests {
         let worker_id =
             register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(6))).await;
 
-        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
             .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
             .await
@@ -873,7 +874,7 @@ mod tests {
         assert!(result);
 
         let job_id = job.context().id();
-        let job = get_job(&mut storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id).await;
 
         assert_eq!(*job.context().status(), JobState::Pending);
         assert!(job.context().done_at().is_none());
@@ -881,7 +882,7 @@ mod tests {
         assert!(job.context().lock_at().is_none());
         assert_eq!(*job.context().last_error(), None);
 
-        cleanup(storage, worker_id).await;
+        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -893,7 +894,7 @@ mod tests {
         let worker_id =
             register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(4))).await;
 
-        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
             .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
             .await
@@ -901,11 +902,11 @@ mod tests {
         assert!(result);
 
         let job_id = job.context().id();
-        let job = get_job(&mut storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id).await;
 
         assert_eq!(*job.context().status(), JobState::Pending);
         assert_eq!(*job.context().lock_by(), None);
 
-        cleanup(storage, worker_id).await;
+        cleanup(storage, &worker_id).await;
     }
 }

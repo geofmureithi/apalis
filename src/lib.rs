@@ -173,7 +173,7 @@ pub mod prelude {
         context::JobContext,
         error::JobError,
         executor::Executor,
-        job::{Counts, Job, JobFuture, JobStreamExt},
+        job::{Counts, Job, JobFuture, JobStreamExt, JobId},
         job_fn::job_fn,
         monitor::Monitor,
         request::JobRequest,

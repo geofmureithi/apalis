@@ -48,7 +48,7 @@ pub mod mock {
     use tokio::sync::mpsc::{Receiver, Sender};
     use tower::Service;
 
-    use crate::{job::Job, worker::ready::ReadyWorker};
+    use crate::{job::Job, worker::{ready::ReadyWorker, WorkerId}};
 
     fn build_stream<Req: Send + 'static>(mut rx: Receiver<Req>) -> impl Stream<Item = Req> {
         let stream = async_stream::stream! {
@@ -82,7 +82,7 @@ pub mod mock {
             ReadyWorker {
                 service,
                 stream,
-                name: "test-worker".to_string(),
+                id: WorkerId::new("test-worker"),
             },
         )
     }

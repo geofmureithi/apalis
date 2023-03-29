@@ -1,17 +1,95 @@
-use std::{collections::HashMap, fmt::Debug, time::Duration};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+    str::FromStr,
+    time::Duration,
+};
 
 use crate::{
     error::{JobError, JobStreamError},
-    request::{JobRequest, JobState},
+    request::{JobRequest, JobState}, worker::WorkerId,
 };
 use chrono::{DateTime, Utc};
 use futures::{future::BoxFuture, stream::BoxStream};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, Deserializer, de::Visitor};
+use ulid::Ulid;
 
 /// Represents a result for a [Job].
 pub type JobFuture<I> = BoxFuture<'static, I>;
 /// Represents a stream for [Job].
 pub type JobStreamResult<T> = BoxStream<'static, Result<Option<JobRequest<T>>, JobStreamError>>;
+
+/// A wrapper type that defines a job id.
+/// Job id's are prefixed by `jid-` followed by a [`ulid::Ulid`].
+/// This makes [`JobId`]s orderable
+#[derive(Debug, Clone)]
+pub struct JobId(Ulid);
+
+impl JobId {
+    /// Generate a new [`JobId`]
+    pub fn new() -> Self {
+        Self(Ulid::new())
+    }
+
+    pub (crate) fn inner(&self) -> Ulid {
+        self.0.clone()
+    }
+}
+
+impl FromStr for JobId {
+    type Err = ulid::DecodeError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let prefix = &s[..3];
+        if prefix != "jid-" {
+            return Err(ulid::DecodeError::InvalidChar);
+        }
+        Ok(JobId(Ulid::from_str(&s[3..])?))
+    }
+}
+
+impl Display for JobId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("jid-")?;
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl Serialize for JobId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for JobId {
+    fn deserialize<D>(deserializer: D) -> Result<JobId, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(JobIdVisitor)
+    }
+}
+
+struct JobIdVisitor;
+
+impl<'de> Visitor<'de> for JobIdVisitor {
+    type Value = JobId;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a prefix of `jid-` followed by the `ulid`")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        JobId::from_str(value).map_err(serde::de::Error::custom)
+    }
+
+}
+
 
 #[derive(Debug)]
 /// Represents a wrapper for a job produced from streams
@@ -36,14 +114,14 @@ pub trait JobStream {
     /// The job result
     type Job: Job;
     /// Get the stream of jobs
-    fn stream(&mut self, worker_id: String, interval: Duration) -> JobStreamResult<Self::Job>;
+    fn stream(&mut self, worker_id: &WorkerId, interval: Duration) -> JobStreamResult<Self::Job>;
 }
 
-/// A serializable vesrion of a worker.
+/// A serializable version of a worker.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JobStreamWorker {
     /// The Worker's Id
-    worker_id: String,
+    worker_id: WorkerId,
     /// Target for the worker, useful for display and filtering
     /// uses [std::any::type_name]
     job_type: String,
@@ -58,7 +136,7 @@ pub struct JobStreamWorker {
 
 impl JobStreamWorker {
     /// Build a worker representation for serialization
-    pub fn new<S, T>(worker_id: String, last_seen: DateTime<Utc>) -> Self
+    pub fn new<S, T>(worker_id: WorkerId, last_seen: DateTime<Utc>) -> Self
     where
         S: JobStream<Job = T>,
     {

@@ -2,22 +2,29 @@
 pub mod ready;
 use async_trait::async_trait;
 use graceful_shutdown::Shutdown;
-use std::fmt;
+use serde::{Serialize, Deserialize};
+use std::fmt::{self, Display};
 use std::fmt::Debug;
 use thiserror::Error;
 
 use crate::executor::Executor;
 
 /// A worker name wrapper usually used by Worker builder
-#[derive(Debug, Clone)]
-pub struct WorkerRef {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkerId {
     name: String,
 }
 
-impl WorkerRef {
+impl Display for WorkerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl WorkerId {
     /// Build a new worker ref
-    pub fn new(name: String) -> Self {
-        Self { name }
+    pub fn new<T: AsRef<str>>(name: T) -> Self {
+        Self { name: name.as_ref().to_string() }
     }
     /// Get the name of the worker
     pub fn name(&self) -> &str {
@@ -52,8 +59,8 @@ pub trait Worker<Job>: Sized {
     /// The source type that this worker will use to receive jobs.
     type Source;
 
-    /// A worker must be named for identification purposes
-    fn name(&self) -> String;
+    /// A worker must be identifiable and unique
+    fn id(&self) -> WorkerId;
 
     /// Starts the worker, taking ownership of `self` and the provided `ctx`.
     ///
@@ -67,6 +74,7 @@ pub trait Worker<Job>: Sized {
 pub struct WorkerContext<E: Executor> {
     pub(crate) shutdown: Shutdown,
     pub(crate) executor: E,
+    pub(crate) worker_id: WorkerId
 }
 
 impl<E: Executor> fmt::Debug for WorkerContext<E> {
@@ -78,6 +86,11 @@ impl<E: Executor> fmt::Debug for WorkerContext<E> {
 }
 
 impl<E: Executor + Send + 'static> WorkerContext<E> {
+
+    /// Get the Worker ID
+    pub fn id(&self) -> WorkerId {
+        self.worker_id.clone()
+    }
     /// Allows spawning of futures that will be gracefully shutdown by the worker
     pub fn spawn() {}
 

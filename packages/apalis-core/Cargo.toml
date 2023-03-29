@@ -28,7 +28,9 @@ metrics = { version = "0.20", optional = true, default-features = false }
 metrics-exporter-prometheus = { version = "0.11", optional = true, default-features = false }
 async-trait = { version = "0.1" }
 graceful-shutdown = { version = "0.2", features = ["stream", "tokio-timeout" ] }
-uuid = { version = "0.8", features = ["serde", "v4"] }
+ulid = "1.0.0"
+# Needed only for sentry reporting
+uuid = { version = "0.8", optional = true }
 async-stream = "0.3"
 
 [features]
@@ -36,7 +38,7 @@ default = [ "tower-util", "storage"]
 tower-util = ["tower/util"]
 storage =  ["tower/util"]
 layers = ["sentry", "prometheus", "trace", "retry", "timeout", "limit", "filter", "extensions"]
-sentry = ["sentry-core"]
+sentry = ["sentry-core", "ulid/uuid", "uuid"]
 prometheus = ["metrics", "metrics-exporter-prometheus"]
 trace = ["tracing-futures/std-future", "tracing-futures/tokio"]
 retry = ["tower/retry"]
