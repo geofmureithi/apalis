@@ -1,4 +1,7 @@
-use std::{marker::PhantomData, time::{Duration, Instant}};
+use std::{
+    marker::PhantomData,
+    time::{Duration, Instant},
+};
 
 use apalis_core::{
     error::{JobError, JobStreamError},
