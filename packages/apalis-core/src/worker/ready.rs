@@ -11,8 +11,8 @@ use crate::job::Job;
 
 use super::WorkerId;
 use super::{Worker, WorkerContext, WorkerError};
-use std::fmt::Formatter;
 use futures::future::FutureExt;
+use std::fmt::Formatter;
 
 /// A worker that is ready to consume jobs
 pub struct ReadyWorker<Stream, Service> {

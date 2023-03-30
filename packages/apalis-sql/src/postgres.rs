@@ -6,12 +6,12 @@
 //! Select
 //!     apalis.push_job(
 //!             'apalis::Email',
-//!              json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum')
+//!              json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum')
 //!     );
 //! ```
 
 use apalis_core::error::{JobError, JobStreamError};
-use apalis_core::job::{Counts, Job, JobStreamExt, JobStreamResult, JobStreamWorker, JobId};
+use apalis_core::job::{Counts, Job, JobId, JobStreamExt, JobStreamResult, JobStreamWorker};
 use apalis_core::request::{JobRequest, JobState};
 use apalis_core::storage::StorageError;
 use apalis_core::storage::StorageWorkerPulse;
@@ -279,7 +279,7 @@ where
         Ok(())
     }
 
-    fn consume(&mut self,  worker_id: &WorkerId, interval: Duration) -> JobStreamResult<T> {
+    fn consume(&mut self, worker_id: &WorkerId, interval: Duration) -> JobStreamResult<T> {
         Box::pin(self.stream_jobs(worker_id, interval))
     }
     async fn len(&self) -> StorageResult<i64> {
@@ -298,7 +298,7 @@ where
             .try_get("count")
             .map_err(|e| StorageError::Database(Box::from(e)))?)
     }
-    async fn ack(&mut self,  worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
+    async fn ack(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
         let pool = self.pool.clone();
 
         let mut tx = pool
@@ -454,7 +454,8 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for Postgr
         Ok(res
             .into_iter()
             .map(|(worker_id, layers, last_seen)| {
-                let mut worker = JobStreamWorker::new::<Self, J>(WorkerId::new(worker_id), last_seen);
+                let mut worker =
+                    JobStreamWorker::new::<Self, J>(WorkerId::new(worker_id), last_seen);
                 worker.set_layers(layers);
                 worker
             })

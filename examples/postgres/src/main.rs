@@ -9,12 +9,12 @@ async fn produce_jobs(storage: &PostgresStorage<Email>) -> Result<()> {
     storage
         .push(Email {
             to: "test@example.com".to_string(),
-            text: "Test background job from Apalis".to_string(),
+            text: "Test background job from apalis".to_string(),
             subject: "Background email job".to_string(),
         })
         .await?;
     // The sql way
-    tracing::info!("You can also add jobs via sql query, run this: \n Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));");
+    tracing::info!("You can also add jobs via sql query, run this: \n Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));");
     Ok(())
 }
 

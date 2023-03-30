@@ -8,8 +8,9 @@ use chrono::{DateTime, Utc};
 
 use crate::{
     job::JobStream,
-    job::{Job, JobStreamResult, JobId},
-    request::JobRequest, worker::WorkerId,
+    job::{Job, JobId, JobStreamResult},
+    request::JobRequest,
+    worker::WorkerId,
 };
 
 #[cfg(feature = "storage")]
@@ -39,7 +40,11 @@ pub trait Storage: Clone {
     async fn fetch_by_id(&self, job_id: &JobId) -> StorageResult<Option<JobRequest<Self::Output>>>;
 
     /// Get the stream of jobs
-    fn consume(&mut self, worker_id: &WorkerId, interval: Duration) -> JobStreamResult<Self::Output>;
+    fn consume(
+        &mut self,
+        worker_id: &WorkerId,
+        interval: Duration,
+    ) -> JobStreamResult<Self::Output>;
 
     /// Acknowledge a job which returns Ok
     async fn ack(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()>;

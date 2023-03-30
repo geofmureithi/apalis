@@ -224,7 +224,7 @@ async fn produce_redis_jobs(mut storage: RedisStorage<Email>) {
         storage
             .push(Email {
                 to: format!("test{i}@example.com"),
-                text: "Test backround job from Apalis".to_string(),
+                text: "Test backround job from apalis".to_string(),
                 subject: "Background email job".to_string(),
             })
             .await

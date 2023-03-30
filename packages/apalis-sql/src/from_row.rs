@@ -1,4 +1,4 @@
-use apalis_core::{request::JobRequest};
+use apalis_core::request::JobRequest;
 /// Wrapper for [JobRequest]
 pub(crate) struct SqlJobRequest<T>(JobRequest<T>);
 
@@ -20,9 +20,11 @@ impl<T> From<SqlJobRequest<T>> for JobRequest<T> {
 
 #[cfg(feature = "sqlite")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
-impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for SqlJobRequest<T> {
+impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
+    for SqlJobRequest<T>
+{
     fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
-        use apalis_core::{job::JobId, context::JobContext, worker::WorkerId};
+        use apalis_core::{context::JobContext, job::JobId, worker::WorkerId};
         use chrono::{DateTime, Utc};
         use serde_json::Value;
         use sqlx::Row;
@@ -74,7 +76,9 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::sqlite::SqliteR
 
 #[cfg(feature = "postgres")]
 #[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
-impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::postgres::PgRow> for SqlJobRequest<T> {
+impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::postgres::PgRow>
+    for SqlJobRequest<T>
+{
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
         use apalis_core::{context::JobContext, job::JobId, worker::WorkerId};
         use chrono::{DateTime, Utc};
@@ -128,7 +132,9 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::postgres::PgRow
 
 #[cfg(feature = "mysql")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
-impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::mysql::MySqlRow> for SqlJobRequest<T> {
+impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
+    for SqlJobRequest<T>
+{
     fn from_row(row: &'r sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
         use apalis_core::{context::JobContext, job::JobId, worker::WorkerId};
         use chrono::{DateTime, Utc};

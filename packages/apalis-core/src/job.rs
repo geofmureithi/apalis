@@ -7,11 +7,12 @@ use std::{
 
 use crate::{
     error::{JobError, JobStreamError},
-    request::{JobRequest, JobState}, worker::WorkerId,
+    request::{JobRequest, JobState},
+    worker::WorkerId,
 };
 use chrono::{DateTime, Utc};
 use futures::{future::BoxFuture, stream::BoxStream};
-use serde::{Deserialize, Serialize, Serializer, Deserializer, de::Visitor};
+use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use ulid::Ulid;
 
 /// Represents a result for a [Job].
@@ -20,8 +21,10 @@ pub type JobFuture<I> = BoxFuture<'static, I>;
 pub type JobStreamResult<T> = BoxStream<'static, Result<Option<JobRequest<T>>, JobStreamError>>;
 
 /// A wrapper type that defines a job id.
-/// Job id's are prefixed by `jid-` followed by a [`ulid::Ulid`].
+///
+/// Job id's are prefixed by `JID-` followed by a [`ulid::Ulid`].
 /// This makes [`JobId`]s orderable
+///
 #[derive(Debug, Clone)]
 pub struct JobId(Ulid);
 
@@ -32,24 +35,30 @@ impl JobId {
     }
     /// Get the inner [`Ulid`]
     pub fn inner(&self) -> Ulid {
-        self.0.clone()
+        self.0
+    }
+}
+
+impl Default for JobId {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl FromStr for JobId {
     type Err = ulid::DecodeError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let prefix = &s[..3];
-        if prefix != "jid-" {
+        let prefix = &s[..4];
+        if prefix != "JID-" {
             return Err(ulid::DecodeError::InvalidChar);
         }
-        Ok(JobId(Ulid::from_str(&s[3..])?))
+        Ok(JobId(Ulid::from_str(&s[4..])?))
     }
 }
 
 impl Display for JobId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("jid-")?;
+        f.write_str("JID-")?;
         Display::fmt(&self.0, f)
     }
 }
@@ -87,9 +96,7 @@ impl<'de> Visitor<'de> for JobIdVisitor {
     {
         JobId::from_str(value).map_err(serde::de::Error::custom)
     }
-
 }
-
 
 #[derive(Debug)]
 /// Represents a wrapper for a job produced from streams
@@ -184,4 +191,15 @@ where
         status: &JobState,
         page: i32,
     ) -> Result<Vec<JobRequest<Job>>, JobError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn can_parse_job_id() {
+        let id = "JID-01GWSGFS40RHST0FFZ6V1E1116";
+        JobId::from_str(id).unwrap();
+    }
 }

@@ -38,7 +38,7 @@ async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
     storage
         .push(Email {
             to: "test@example".to_string(),
-            text: "Test background job from Apalis".to_string(),
+            text: "Test background job from apalis".to_string(),
             subject: "Welcome Sentry Email".to_string(),
         })
         .await?;

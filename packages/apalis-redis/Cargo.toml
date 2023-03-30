@@ -6,7 +6,7 @@ edition = "2021"
 readme = "../../README.md"
 
 license = "MIT"
-description = "Redis Storage for Apalis: simple and reliable background processing based on Redis"
+description = "Redis Storage for apalis: simple and reliable background processing based on Redis"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

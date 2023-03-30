@@ -5,8 +5,8 @@
     unreachable_pub
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-//! # Apalis Sql Storage
-//! Apalis offeres Sqlite, Mysql and Postgres storages for its workers.
+//! # apalis Sql Storage
+//! apalis offeres Sqlite, Mysql and Postgres storages for its workers.
 //!
 //! ## Example
 //!  ```rust,ignore
@@ -22,7 +22,7 @@
 //!          Ok(())
 //!      }
 //!     // This can be even in another program/language
-//!     let query = "Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));";
+//!     let query = "Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));";
 //!     db.execute(query).await.unwrap();
 //!
 //!      Monitor::new()
@@ -37,18 +37,18 @@
 
 mod from_row;
 
-/// Postgres storage for Apalis. Uses `NOTIFY` and `SKIP LOCKED`
+/// Postgres storage for apalis. Uses `NOTIFY` and `SKIP LOCKED`
 #[cfg(feature = "postgres")]
 #[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
 pub mod postgres;
 
-/// Sqlite Storage for Apalis.
+/// Sqlite Storage for apalis.
 /// Uses a transaction and min(rowid)
 #[cfg(feature = "sqlite")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
 pub mod sqlite;
 
-/// MySQL storage for Apalis. Uses `SKIP LOCKED`
+/// MySQL storage for apalis. Uses `SKIP LOCKED`
 #[cfg(feature = "mysql")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;

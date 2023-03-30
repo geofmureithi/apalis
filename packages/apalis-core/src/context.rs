@@ -1,12 +1,12 @@
-use crate::{request::JobState, job::JobId, worker::WorkerId};
+use crate::{job::JobId, request::JobState, worker::WorkerId};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "extensions")]
-use std::{any::Any, marker::Send};
-#[cfg(feature = "extensions")]
 use http::Extensions;
+#[cfg(feature = "extensions")]
+use std::{any::Any, marker::Send};
 
 /// The context for a job is represented here
 /// Used to provide a context when a job is defined through the [Job] trait

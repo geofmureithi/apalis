@@ -1,6 +1,6 @@
 use crate::from_row::IntoJobRequest;
 use apalis_core::error::{JobError, JobStreamError};
-use apalis_core::job::{Counts, Job, JobStreamExt, JobStreamResult, JobStreamWorker, JobId};
+use apalis_core::job::{Counts, Job, JobId, JobStreamExt, JobStreamResult, JobStreamWorker};
 use apalis_core::request::{JobRequest, JobState};
 use apalis_core::storage::StorageError;
 use apalis_core::storage::StorageWorkerPulse;
@@ -512,7 +512,8 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for Sqlite
         Ok(res
             .into_iter()
             .map(|(worker_id, layers, last_seen)| {
-                let mut worker = JobStreamWorker::new::<Self, J>(WorkerId::new(worker_id), last_seen);
+                let mut worker =
+                    JobStreamWorker::new::<Self, J>(WorkerId::new(worker_id), last_seen);
                 worker.set_layers(layers);
                 worker
             })

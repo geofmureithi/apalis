@@ -6,12 +6,12 @@
     unreachable_pub
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-//! # Apalis Core
+//! # apalis Core
 //! Utilities for building job and message processing tools.
 
-/// Represent utilities for creating [Worker] instances.
+/// Represent utilities for creating [`Worker`] instances.
 ///
-/// [`Worker`]: crate::worker::Worker
+/// [`Worker`]: apalis_core::worker::Worker
 pub mod builder;
 /// Represents the [`JobContext`].
 pub mod context;
@@ -49,7 +49,10 @@ pub mod mock {
     use tokio::sync::mpsc::{Receiver, Sender};
     use tower::Service;
 
-    use crate::{job::Job, worker::{ready::ReadyWorker, WorkerId}};
+    use crate::{
+        job::Job,
+        worker::{ready::ReadyWorker, WorkerId},
+    };
 
     fn build_stream<Req: Send + 'static>(mut rx: Receiver<Req>) -> impl Stream<Item = Req> {
         let stream = async_stream::stream! {

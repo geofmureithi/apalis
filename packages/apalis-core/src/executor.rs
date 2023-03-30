@@ -6,7 +6,6 @@ pub trait Executor: Clone {
     fn spawn(&self, future: impl Future<Output = ()> + Send + 'static);
 }
 
-
 /// An Executor that uses the tokio runtime
 #[cfg(feature = "tokio-comp")]
 #[derive(Clone, Debug)]
@@ -26,7 +25,6 @@ impl Executor for TokioExecutor {
         tokio::spawn(future);
     }
 }
-
 
 /// An Executor that uses the async-std runtime
 #[derive(Clone, Debug)]
@@ -55,3 +53,9 @@ pub type DefaultExecutor = TokioExecutor;
 #[cfg(feature = "async-std-comp")]
 /// [`AsyncStdExecutor`] as the default executor
 pub type DefaultExecutor = AsyncStdExecutor;
+
+impl Default for DefaultExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}

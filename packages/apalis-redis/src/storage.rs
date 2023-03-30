@@ -2,10 +2,11 @@ use std::{marker::PhantomData, time::Duration};
 
 use apalis_core::{
     error::{JobError, JobStreamError},
-    job::{Job, JobStreamExt, JobStreamResult, JobStreamWorker, JobId},
+    job::{Job, JobId, JobStreamExt, JobStreamResult, JobStreamWorker},
     request::{JobRequest, JobState},
-    storage::{Storage, StorageError, StorageResult, StorageWorkerPulse}, worker::WorkerId,
-    utils::{timer::SleepTimer, Timer}
+    storage::{Storage, StorageError, StorageResult, StorageWorkerPulse},
+    utils::{timer::SleepTimer, Timer},
+    worker::WorkerId,
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -135,7 +136,7 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
         let timer = SleepTimer;
         try_stream! {
             loop {
-                let _ = timer.sleep(interval).await;
+                timer.sleep(interval).await;
                 let res: Result<Vec<Value>, JobStreamError> = fetch_jobs
                     .key(&consumers_set)
                     .key(&active_jobs_list)
@@ -498,7 +499,12 @@ where
             .key(inflight_set)
             .key(active_jobs_list)
             .key(signal_list)
-            .arg(job_ids.into_iter().map(|j| j.to_string()).collect::<Vec<String>>())
+            .arg(
+                job_ids
+                    .into_iter()
+                    .map(|j| j.to_string())
+                    .collect::<Vec<String>>(),
+            )
             .invoke_async(&mut conn)
             .await
             .map_err(|e| StorageError::Connection(Box::from(e)))

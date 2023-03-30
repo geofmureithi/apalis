@@ -1,6 +1,6 @@
-# Apalis [![Build Status](https://github.com/geofmureithi/apalis/actions/workflows/ci.yaml/badge.svg)](https://github.com/geofmureithi/apalis/actions)
+# apalis [![Build Status](https://github.com/geofmureithi/apalis/actions/workflows/ci.yaml/badge.svg)](https://github.com/geofmureithi/apalis/actions)
 
-Apalis is a simple, extensible multithreaded background job processing library for Rust.
+apalis is a simple, extensible multithreaded background job processing library for Rust.
 
 ## Features
 
@@ -11,9 +11,9 @@ Apalis is a simple, extensible multithreaded background job processing library f
 - Runtime agnostic - Use tokio, smol etc.
 - Optional Web interface to help you manage your jobs.
 
-Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] middleware.
+apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] middleware.
 
-Apalis has support for
+apalis has support for
 
 - Redis
 - SQlite
@@ -83,7 +83,7 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
 
 ### Web UI
 
-If you are running [Apalis Board](https://github.com/geofmureithi/apalis-board), you can easily manage your jobs. See a working [Rest API here](https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
+If you are running [apalis Board](https://github.com/geofmureithi/apalis-board), you can easily manage your jobs. See a working [Rest API here](https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
 
 ![UI](https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png)
 
@@ -114,7 +114,7 @@ Since we provide a few storage solutions, here is a table comparing them:
 | Persistence     |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   | BYO  |
 | Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  x   |
 
-## How Apalis works (Draft)
+## How apalis works (Draft)
 
 ```mermaid
 sequenceDiagram
@@ -152,7 +152,7 @@ v 0.4
 - [x] Allow other types of executors apart from Tokio
 - [x] Mock/Test Worker
 - [x] Improve monitoring
-- [ ] Improve Apalis Board
+- [ ] Improve apalis Board
 - [x] Add job progress via layer
 - [x] Add more sources
 

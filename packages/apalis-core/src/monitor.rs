@@ -10,7 +10,7 @@ use tower::Service;
 use tracing::warn;
 
 use crate::{
-    executor::{Executor, DefaultExecutor},
+    executor::{DefaultExecutor, Executor},
     job::Job,
     request::JobRequest,
     worker::{Worker, WorkerContext, WorkerId},
@@ -28,14 +28,7 @@ impl<E: Executor> Debug for Monitor<E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("Monitor")
             .field("shutdown", &"[Graceful shutdown listener]")
-            .field(
-                "worker_handles",
-                &self
-                    .worker_handles
-                    .iter()
-                    .map(|name| name.clone())
-                    .collect::<Vec<_>>(),
-            )
+            .field("worker_handles", &self.worker_handles.iter().cloned())
             .field("timeout", &self.timeout)
             .field("executor", &std::any::type_name::<E>())
             .finish()
@@ -66,13 +59,13 @@ impl<E: Executor + Send + 'static> Monitor<E> {
     {
         let shutdown = self.shutdown.clone();
         let worker_id = worker.id();
-        let _ = self.executor.spawn(
+        self.executor.spawn(
             self.shutdown.graceful(
                 worker
                     .start(WorkerContext {
                         shutdown,
                         executor: self.executor.clone(),
-                        worker_id: worker_id.clone()
+                        worker_id: worker_id.clone(),
                     })
                     .map(|_| ()),
             ),

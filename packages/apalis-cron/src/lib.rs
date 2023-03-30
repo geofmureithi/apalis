@@ -7,7 +7,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! # Apalis Cron
+//! # apalis Cron
 //! A simple yet extensible library for cron-like job scheduling for rust.
 //! Since `apalis-cron` is build on top of `apalis` which supports tower middlerware, you should be able to easily
 //! add middleware such as tracing, retries, load shed, concurrency etc.

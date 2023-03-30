@@ -9,7 +9,7 @@ async fn produce_jobs(storage: &MysqlStorage<Email>) -> Result<()> {
         storage
             .push(Email {
                 to: format!("test{i}@example.com"),
-                text: "Test background job from Apalis".to_string(),
+                text: "Test background job from apalis".to_string(),
                 subject: "Background email job".to_string(),
             })
             .await?;

@@ -5,16 +5,15 @@
     unreachable_pub
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-//! Apalis is a simple, extensible multithreaded background job processing library for Rust.
+//! apalis is a simple, extensible multithreaded background job processing library for rust.
 //! ## Core Features
 //! - Simple and predictable job handling model.
 //! - Jobs handlers with a macro free API.
 //! - Take full advantage of the [`tower`] ecosystem of
 //!   middleware, services, and utilities.
-//! - Takes full advantage of the actor model with each worker being an [`Actor`].
 //! - Bring your own Storage.
 //!
-//! Apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] and [`tower-http`] middleware.
+//! apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] and [`tower-http`] middleware.
 //!  ### Example
 //! ```rust, no_run
 //! use apalis::prelude::*;
@@ -67,8 +66,8 @@
 /// Include the default Redis storage
 ///
 /// ### Example
-/// ```ignore
-/// let storage = RedisStorage::connect(REDIS_URL).await
+/// ```no_run
+/// let storage = RedisStorage::connect("REDIS_URL").await
 ///                 .expect("Cannot establish connection");
 ///
 /// Monitor::new()
@@ -114,7 +113,7 @@ pub mod cron {
     pub use apalis_cron::*;
 }
 
-/// Apalis jobs fully support tower middleware via [`Layer`]
+/// apalis jobs fully support tower middleware via [`Layer`]
 ///
 /// ## Example
 /// ```ignore
@@ -173,7 +172,7 @@ pub mod prelude {
         context::JobContext,
         error::JobError,
         executor::Executor,
-        job::{Counts, Job, JobFuture, JobStreamExt, JobId},
+        job::{Counts, Job, JobFuture, JobId, JobStreamExt},
         job_fn::job_fn,
         monitor::Monitor,
         request::JobRequest,

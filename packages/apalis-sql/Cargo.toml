@@ -6,7 +6,7 @@ edition = "2021"
 readme = "../../README.md"
 
 license = "MIT"
-description = "SQL Storage for Apalis: simple, extensible multithreaded background job processing for Rust"
+description = "SQL Storage for apalis: simple, extensible multithreaded background job processing for Rust"
 
 [features]
 default = [ "sqlite", "migrate", "tokio-comp" ]

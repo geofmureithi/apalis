@@ -1,12 +1,12 @@
 use std::marker::PhantomData;
 
+use crate::executor::{DefaultExecutor, Executor};
+use crate::utils::timer::SleepTimer;
+use crate::utils::Timer;
+use crate::{request::JobRequest, worker::WorkerId};
 use futures::Future;
 use std::time::Duration;
 use tower::{layer::util::Identity, Layer, Service};
-use crate::executor::{DefaultExecutor, Executor};
-use crate::utils::Timer;
-use crate::utils::timer::SleepTimer;
-use crate::{request::JobRequest, worker::WorkerId};
 
 use super::Storage;
 
@@ -64,11 +64,8 @@ where
                 let timer = SleepTimer;
 
                 loop {
-                    storage
-                        .keep_alive::<S>(&worker_id)
-                        .await
-                        .unwrap();
-                    let _ = timer.sleep(period).await;
+                    storage.keep_alive::<S>(&worker_id).await.unwrap();
+                    timer.sleep(period).await;
                 }
             }
         };

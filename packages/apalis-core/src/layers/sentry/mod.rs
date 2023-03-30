@@ -87,7 +87,10 @@ where
                 });
                 scope.set_tag("job_type", job_details.job_type.to_string());
                 let mut details = std::collections::BTreeMap::new();
-                details.insert(String::from("job_id"), job_details.job_id.to_string().into());
+                details.insert(
+                    String::from("job_id"),
+                    job_details.job_id.to_string().into(),
+                );
                 details.insert(
                     String::from("current_attempt"),
                     job_details.current_attempt.into(),

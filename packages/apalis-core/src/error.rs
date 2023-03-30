@@ -5,7 +5,7 @@ use thiserror::Error;
 #[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
 use crate::storage::StorageError;
 
-/// Convenience type alias for usage within Apalis.
+/// Convenience type alias for usage within apalis.
 ///
 pub(crate) type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
 
