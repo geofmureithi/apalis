@@ -1,9 +1,12 @@
 use crate::{request::JobState, job::JobId, worker::WorkerId};
 
 use chrono::{DateTime, Utc};
-use http::Extensions;
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "extensions")]
 use std::{any::Any, marker::Send};
+#[cfg(feature = "extensions")]
+use http::Extensions;
 
 /// The context for a job is represented here
 /// Used to provide a context when a job is defined through the [Job] trait
@@ -18,13 +21,16 @@ pub struct JobContext {
     pub(crate) lock_at: Option<DateTime<Utc>>,
     pub(crate) lock_by: Option<WorkerId>,
     pub(crate) done_at: Option<DateTime<Utc>>,
+    #[cfg(feature = "extensions")]
     #[serde(skip)]
     pub(crate) data: Data,
 }
 
+#[cfg(feature = "extensions")]
 #[derive(Debug, Default)]
 pub(crate) struct Data(Extensions);
 
+#[cfg(feature = "extensions")]
 impl Clone for Data {
     fn clone(&self) -> Self {
         Data(Extensions::new())
@@ -45,6 +51,7 @@ impl JobContext {
             max_attempts: 25,
             last_error: None,
             lock_by: None,
+            #[cfg(feature = "extensions")]
             data: Data::default(),
         }
     }
@@ -62,6 +69,7 @@ impl JobContext {
     ///
     /// assert_eq!(ctx.data_opt::<i32>(), Some(&5i32));
     /// ```
+    #[cfg(feature = "extensions")]
     #[must_use]
     pub fn data_opt<D: Any + Send + Sync>(&self) -> Option<&D> {
         self.data.0.get()
@@ -81,6 +89,7 @@ impl JobContext {
     /// assert!(ctx.insert(4u8).is_none());
     /// assert_eq!(ctx.insert(9i32), Some(5i32));
     /// ```
+    #[cfg(feature = "extensions")]
     pub fn insert<D: Any + Send + Sync>(&mut self, data: D) -> Option<D> {
         self.data.0.insert(data)
     }

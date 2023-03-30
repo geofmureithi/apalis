@@ -25,7 +25,7 @@ impl Timer for TokioTimer {
     }
 }
 
-struct TokioTimeout<T> {
+pub(crate) struct TokioTimeout<T> {
     inner: Pin<Box<tokio::time::Timeout<T>>>,
 }
 

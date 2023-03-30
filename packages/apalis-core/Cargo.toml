@@ -16,10 +16,14 @@ serde_json = "1"
 futures =  { version = "0.3", default-features = false, features=["async-await"] }
 tower = { version = "0.4" }
 pin-project-lite = "0.2.9"
-tokio =  { version = "1", default-features = false, features = ["sync", "time", "rt", "io-util", "rt-multi-thread", "signal", "macros"] }
+tokio = { version = "1", features = ["rt", "net"], optional = true }
+async-std = { version = "1", optional = true}
+smol = { version = "1", optional = true}
+async-channel = { version = "1", optional = true}
+smol-timeout = { version = "0.6", optional = true}
 thiserror = "1"
 log = "0.4"
-http = "0.2.7"
+http = { version = "0.2.7", optional = true}
 strum = { version = "0.24", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 tracing-futures = { version = "0.2.5", optional = true, default-features = false }
@@ -45,7 +49,9 @@ retry = ["tower/retry"]
 timeout = ["tower/timeout"]
 limit = ["tower/limit"]
 filter = ["tower/filter"]
-extensions = []
+extensions = ["http"]
+async-std-comp = ["async-std", "async-channel", "smol-timeout", "smol" ]
+tokio-comp = ["tokio" ]
 
 [dependencies.tracing]
 default_features = false

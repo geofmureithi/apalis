@@ -2,9 +2,10 @@ use std::marker::PhantomData;
 
 use futures::Future;
 use std::time::Duration;
-use tokio::time::interval;
 use tower::{layer::util::Identity, Layer, Service};
-
+use crate::executor::{DefaultExecutor, Executor};
+use crate::utils::Timer;
+use crate::utils::timer::SleepTimer;
 use crate::{request::JobRequest, worker::WorkerId};
 
 use super::Storage;
@@ -60,18 +61,19 @@ where
         let make_worker = {
             let period = period;
             async move {
-                let mut interval = interval(period);
+                let timer = SleepTimer;
 
                 loop {
                     storage
                         .keep_alive::<S>(&worker_id)
                         .await
                         .unwrap();
-                    let _ = interval.tick().await;
+                    let _ = timer.sleep(period).await;
                 }
             }
         };
-        tokio::spawn(make_worker);
+        let executor = DefaultExecutor::new();
+        executor.spawn(make_worker);
 
         Layer::<S>::layer(&Identity::new(), inner)
     }

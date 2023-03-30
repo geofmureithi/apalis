@@ -1,7 +1,7 @@
 use std::{error::Error, fmt::Debug};
 
 use futures::{Future, Stream, StreamExt};
-use tokio::sync::mpsc::channel;
+
 use tower::{Service, ServiceExt};
 use tracing::info;
 use tracing::warn;
@@ -10,8 +10,9 @@ use crate::executor::Executor;
 use crate::job::Job;
 
 use super::WorkerId;
-use super::{Worker, WorkerContext};
+use super::{Worker, WorkerContext, WorkerError};
 use std::fmt::Formatter;
+use futures::future::FutureExt;
 
 /// A worker that is ready to consume jobs
 pub struct ReadyWorker<Stream, Service> {
@@ -51,23 +52,30 @@ where
     async fn start<Exec: Executor + Send>(
         self,
         ctx: WorkerContext<Exec>,
-    ) -> Result<(), super::WorkerError> {
+    ) -> Result<(), WorkerError> {
         let mut service = self.service;
         let mut stream = ctx.shutdown.graceful_stream(self.stream);
-        let (send, mut recv) = channel::<()>(1);
+        #[cfg(feature = "tokio-comp")]
+        let (send, mut recv) = tokio::sync::mpsc::channel::<()>(1);
 
-        while let Some(res) = tokio::select! {
-            res = stream.next() => res,
-            _ = ctx.shutdown.clone() => None
+        #[cfg(feature = "async-std-comp")]
+        let (send, recv) = async_channel::bounded::<()>(1);
+
+        while let Some(res) = futures::select! {
+            res = stream.next().fuse() => res,
+            _ = ctx.shutdown.clone().fuse() => None
         } {
             let send_clone = send.clone();
             match res {
                 Ok(Some(item)) => {
-                    let svc = service.ready().await.unwrap();
+                    let svc = service
+                        .ready()
+                        .await
+                        .map_err(|e| WorkerError::ServiceError(format!("{e:?}")))?;
                     let fut = svc.call(item);
-                    ctx.executor.spawn(ctx.shutdown.graceful(async move {
+                    ctx.spawn(async move {
                         fut.await;
-                    }));
+                    });
                     drop(send_clone);
                 }
                 Err(e) => {

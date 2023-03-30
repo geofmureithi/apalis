@@ -10,7 +10,7 @@ use tower::Service;
 use tracing::warn;
 
 use crate::{
-    executor::{Executor, TokioExecutor},
+    executor::{Executor, DefaultExecutor},
     job::Job,
     request::JobRequest,
     worker::{Worker, WorkerContext, WorkerId},
@@ -19,7 +19,7 @@ use crate::{
 /// A monitor for coordinating and managing a collection of workers.
 pub struct Monitor<E: Executor> {
     shutdown: Shutdown,
-    worker_handles: Vec<(WorkerId, E::JoinHandle)>,
+    worker_handles: Vec<WorkerId>,
     timeout: Option<Duration>,
     executor: E,
 }
@@ -33,7 +33,7 @@ impl<E: Executor> Debug for Monitor<E> {
                 &self
                     .worker_handles
                     .iter()
-                    .map(|(name, _handle)| name.clone())
+                    .map(|name| name.clone())
                     .collect::<Vec<_>>(),
             )
             .field("timeout", &self.timeout)
@@ -66,7 +66,7 @@ impl<E: Executor + Send + 'static> Monitor<E> {
     {
         let shutdown = self.shutdown.clone();
         let worker_id = worker.id();
-        let handle = self.executor.spawn(
+        let _ = self.executor.spawn(
             self.shutdown.graceful(
                 worker
                     .start(WorkerContext {
@@ -77,7 +77,7 @@ impl<E: Executor + Send + 'static> Monitor<E> {
                     .map(|_| ()),
             ),
         );
-        self.worker_handles.push((worker_id, handle));
+        self.worker_handles.push(worker_id);
         self
     }
 
@@ -183,13 +183,13 @@ impl<E: Executor + Send + 'static> Monitor<E> {
     }
 }
 
-impl Default for Monitor<TokioExecutor> {
+impl Default for Monitor<DefaultExecutor> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Monitor<TokioExecutor> {
+impl Monitor<DefaultExecutor> {
     /// Creates a new monitor instance.
     ///
     /// # Returns
@@ -200,7 +200,7 @@ impl Monitor<TokioExecutor> {
             shutdown: Shutdown::new(),
             worker_handles: Vec::new(),
             timeout: None,
-            executor: TokioExecutor,
+            executor: DefaultExecutor::new(),
         }
     }
 

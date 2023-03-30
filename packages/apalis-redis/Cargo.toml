@@ -31,5 +31,5 @@ email-service = { path = "../../examples/email-service" }
 [features]
 default = ["storage", "tokio-comp"]
 storage = ["apalis-core/storage"]
-async-std-comp = ["async-std", "redis/async-std-comp" ]
-tokio-comp = ["tokio", "tokio/net", "redis/tokio-comp" ]
+async-std-comp = ["async-std", "redis/async-std-comp", "apalis-core/async-std-comp" ]
+tokio-comp = ["tokio", "tokio/net", "redis/tokio-comp", "apalis-core/tokio-comp" ]

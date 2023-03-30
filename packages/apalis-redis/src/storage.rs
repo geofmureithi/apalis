@@ -5,6 +5,7 @@ use apalis_core::{
     job::{Job, JobStreamExt, JobStreamResult, JobStreamWorker, JobId},
     request::{JobRequest, JobState},
     storage::{Storage, StorageError, StorageResult, StorageWorkerPulse}, worker::WorkerId,
+    utils::{timer::SleepTimer, Timer}
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -12,7 +13,6 @@ use futures::Stream;
 use log::*;
 use redis::{aio::MultiplexedConnection, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Serialize};
-use tokio::time::Instant;
 
 const ACTIVE_JOBS_LIST: &str = "{queue}:active";
 const CONSUMERS_SET: &str = "{queue}:consumers";
@@ -132,11 +132,10 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
         let job_data_hash = self.queue.job_data_hash.to_string();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let signal_list = self.queue.signal_list.to_string();
-        let start = Instant::now() + Duration::from_millis(5);
-        let mut interval = tokio::time::interval_at(start, interval);
+        let timer = SleepTimer;
         try_stream! {
             loop {
-                interval.tick().await;
+                let _ = timer.sleep(interval).await;
                 let res: Result<Vec<Value>, JobStreamError> = fetch_jobs
                     .key(&consumers_set)
                     .key(&active_jobs_list)

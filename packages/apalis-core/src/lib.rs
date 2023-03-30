@@ -43,6 +43,7 @@ pub mod utils;
 pub mod worker;
 
 /// apalis mocking utilities
+#[cfg(feature = "tokio-comp")]
 pub mod mock {
     use futures::{Stream, StreamExt};
     use tokio::sync::mpsc::{Receiver, Sender};

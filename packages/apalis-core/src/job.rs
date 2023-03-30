@@ -30,8 +30,8 @@ impl JobId {
     pub fn new() -> Self {
         Self(Ulid::new())
     }
-
-    pub (crate) fn inner(&self) -> Ulid {
+    /// Get the inner [`Ulid`]
+    pub fn inner(&self) -> Ulid {
         self.0.clone()
     }
 }

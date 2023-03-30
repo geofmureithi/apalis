@@ -69,6 +69,7 @@
 //! ```
 
 use apalis_core::job::Job;
+use apalis_core::utils::timer::SleepTimer;
 use apalis_core::utils::Timer;
 use apalis_core::{error::JobError, request::JobRequest};
 use chrono::{DateTime, Utc};
@@ -81,14 +82,20 @@ use std::marker::PhantomData;
 #[derive(Clone, Debug)]
 pub struct CronStream<J, T>(Schedule, PhantomData<J>, T);
 
+impl<J: From<DateTime<Utc>> + Job + Send + 'static> CronStream<J, SleepTimer> {
+    /// Build a new cron stream from a schedule
+    pub fn new(schedule: Schedule) -> Self {
+        Self(schedule, PhantomData, SleepTimer)
+    }
+}
+
 impl<J: From<DateTime<Utc>> + Job + Send + 'static, T: Timer + Sync + Send + 'static>
     CronStream<J, T>
 {
-    /// Build a new cron stream from a schedule
-    pub fn new(schedule: Schedule, timer: T) -> Self {
-        Self(schedule, PhantomData, timer)
+    /// Set a custom timer
+    pub fn timer<NT: Timer>(self, timer: NT) -> CronStream<J, NT> {
+        CronStream(self.0, PhantomData, timer)
     }
-
     /// Convert to consumable
     pub fn to_stream(self) -> BoxStream<'static, Result<Option<JobRequest<J>>, JobError>> {
         let stream = async_stream::stream! {

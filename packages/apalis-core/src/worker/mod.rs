@@ -1,12 +1,12 @@
 /// Represents a worker that is ready to consume jobs
 pub mod ready;
 use async_trait::async_trait;
+use futures::Future;
 use graceful_shutdown::Shutdown;
 use serde::{Serialize, Deserialize};
 use std::fmt::{self, Display};
 use std::fmt::Debug;
 use thiserror::Error;
-
 use crate::executor::Executor;
 
 /// A worker name wrapper usually used by Worker builder
@@ -85,14 +85,16 @@ impl<E: Executor> fmt::Debug for WorkerContext<E> {
     }
 }
 
-impl<E: Executor + Send + 'static> WorkerContext<E> {
+impl<E: Executor + Send> WorkerContext<E> {
 
     /// Get the Worker ID
     pub fn id(&self) -> WorkerId {
         self.worker_id.clone()
     }
     /// Allows spawning of futures that will be gracefully shutdown by the worker
-    pub fn spawn() {}
+    pub fn spawn(&self, future: impl Future<Output = ()> + Send + 'static){
+        self.executor.spawn(self.shutdown.graceful(future));
+    }
 
     /// Calling this function triggers shutting down the worker
     pub fn shutdown(&self) {}
