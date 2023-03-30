@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, time::Duration};
+use std::{marker::PhantomData, time::{Duration, Instant}};
 
 use apalis_core::{
     error::{JobError, JobStreamError},
@@ -136,7 +136,7 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
         let timer = SleepTimer;
         try_stream! {
             loop {
-                timer.sleep(interval).await;
+                timer.sleep_until(Instant::now() + interval).await;
                 let res: Result<Vec<Value>, JobStreamError> = fetch_jobs
                     .key(&consumers_set)
                     .key(&active_jobs_list)
@@ -513,7 +513,7 @@ where
         let mut conn = self.conn.clone();
         let schedule_job = self.scripts.schedule_job.clone();
         let job_id = job.id();
-        let worker_id = job.lock_by().clone().ok_or(StorageError::NotFound)?;
+        let worker_id = job.lock_by().as_ref().ok_or(StorageError::NotFound)?;
         let job = serde_json::to_string(job)?;
         let job_data_hash = self.queue.job_data_hash.to_string();
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
@@ -522,14 +522,14 @@ where
         let failed_jobs_set = self.queue.failed_jobs_set.to_string();
         let _cmd = redis::cmd("SREM")
             .arg(inflight_set)
-            .arg(job_id.clone().to_string())
+            .arg(job_id.to_string())
             .query_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         let _cmd = redis::cmd("ZADD")
             .arg(failed_jobs_set)
             .arg(Utc::now().timestamp())
-            .arg(job_id.clone().to_string())
+            .arg(job_id.to_string())
             .query_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
@@ -703,7 +703,7 @@ where
             .into_iter()
             .map(|w| {
                 JobStreamWorker::new::<Self, _>(
-                    WorkerId::new(format!("{}:{w}", &self.queue.inflight_jobs_set)),
+                    WorkerId::new(w.replace(&format!("{}:", &self.queue.inflight_jobs_set), "")),
                     Utc::now(),
                 )
             })

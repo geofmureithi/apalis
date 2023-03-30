@@ -19,7 +19,6 @@ pin-project-lite = "0.2.9"
 tokio = { version = "1", features = ["rt", "net"], optional = true }
 async-std = { version = "1", optional = true}
 smol = { version = "1", optional = true}
-async-channel = { version = "1", optional = true}
 smol-timeout = { version = "0.6", optional = true}
 thiserror = "1"
 log = "0.4"
@@ -38,7 +37,7 @@ uuid = { version = "0.8", optional = true }
 async-stream = "0.3"
 
 [features]
-default = [ "tower-util", "storage", "tokio-comp"]
+default = [ "tower-util", "storage"]
 tower-util = ["tower/util"]
 storage =  ["tower/util"]
 layers = ["sentry", "prometheus", "trace", "retry", "timeout", "limit", "filter", "extensions"]
@@ -50,7 +49,7 @@ timeout = ["tower/timeout"]
 limit = ["tower/limit"]
 filter = ["tower/filter"]
 extensions = ["http"]
-async-std-comp = ["async-std", "async-channel", "smol-timeout", "smol" ]
+async-std-comp = ["async-std", "smol-timeout", "smol" ]
 tokio-comp = ["tokio" ]
 
 [dependencies.tracing]

@@ -45,8 +45,8 @@ pub mod worker;
 /// apalis mocking utilities
 #[cfg(feature = "tokio-comp")]
 pub mod mock {
+    use futures::channel::mpsc::{Receiver, Sender};
     use futures::{Stream, StreamExt};
-    use tokio::sync::mpsc::{Receiver, Sender};
     use tower::Service;
 
     use crate::{
@@ -56,7 +56,7 @@ pub mod mock {
 
     fn build_stream<Req: Send + 'static>(mut rx: Receiver<Req>) -> impl Stream<Item = Req> {
         let stream = async_stream::stream! {
-            while let Some(item) = rx.recv().await {
+            while let Some(item) = rx.next().await {
                 yield item;
             }
         };
@@ -79,14 +79,14 @@ pub mod mock {
         S: Service<Req>,
         Req: Job + Send + 'static,
     {
-        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let (tx, rx) = futures::channel::mpsc::channel(10);
         let stream = build_stream(rx);
         (
             tx,
             ReadyWorker {
                 service,
                 stream,
-                id: WorkerId::new("test-worker"),
+                id: WorkerId::new("mock-worker"),
             },
         )
     }

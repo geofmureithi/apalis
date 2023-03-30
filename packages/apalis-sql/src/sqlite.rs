@@ -116,7 +116,7 @@ where
             let job_id = job.id();
             let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2";
             let job: Option<SqlJobRequest<T>> = sqlx::query_as(update_query)
-                .bind(job_id.clone().to_string())
+                .bind(job_id.to_string())
                 .bind(worker_id.to_string())
                 .bind(Utc::now().timestamp())
                 .fetch_optional(&mut tx)

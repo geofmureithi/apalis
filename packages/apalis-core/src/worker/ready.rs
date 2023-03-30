@@ -55,12 +55,7 @@ where
     ) -> Result<(), WorkerError> {
         let mut service = self.service;
         let mut stream = ctx.shutdown.graceful_stream(self.stream);
-        #[cfg(feature = "tokio-comp")]
-        let (send, mut recv) = tokio::sync::mpsc::channel::<()>(1);
-
-        #[cfg(feature = "async-std-comp")]
-        let (send, recv) = async_channel::bounded::<()>(1);
-
+        let (send, mut recv) = futures::channel::mpsc::channel::<()>(1);
         while let Some(res) = futures::select! {
             res = stream.next().fuse() => res,
             _ = ctx.shutdown.clone().fuse() => None
@@ -89,7 +84,7 @@ where
         }
         drop(send);
         info!("Shutting down {} worker", self.id);
-        let _ = recv.recv().await;
+        let _ = recv.next().await;
         info!("Shutdown {} worker successfully", self.id);
         Ok(())
     }

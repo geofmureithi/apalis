@@ -46,12 +46,12 @@ impl Executor for AsyncStdExecutor {
     }
 }
 
-#[cfg(feature = "tokio-comp")]
 /// [`TokioExecutor`] as the default executor
+#[cfg(feature = "tokio-comp")]
 pub type DefaultExecutor = TokioExecutor;
 
-#[cfg(feature = "async-std-comp")]
 /// [`AsyncStdExecutor`] as the default executor
+#[cfg(feature = "async-std-comp")]
 pub type DefaultExecutor = AsyncStdExecutor;
 
 impl Default for DefaultExecutor {
