@@ -8,9 +8,12 @@ use tracing::warn;
 
 use crate::executor::Executor;
 use crate::job::Job;
+use crate::utils::Timer;
 
+use super::HeartBeat;
 use super::WorkerId;
 use super::{Worker, WorkerContext, WorkerError};
+use crate::utils::timer::SleepTimer;
 use futures::future::FutureExt;
 use std::fmt::Formatter;
 
@@ -19,6 +22,7 @@ pub struct ReadyWorker<Stream, Service> {
     pub(crate) id: WorkerId,
     pub(crate) stream: Stream,
     pub(crate) service: Service,
+    pub(crate) beats: Vec<Box<dyn HeartBeat + Send>>,
 }
 
 impl<Stream, Service> Debug for ReadyWorker<Stream, Service> {
@@ -56,6 +60,17 @@ where
         let mut service = self.service;
         let mut stream = ctx.shutdown.graceful_stream(self.stream);
         let (send, mut recv) = futures::channel::mpsc::channel::<()>(1);
+        // Setup any heartbeats by the worker
+        for mut beat in self.beats {
+            ctx.spawn(async move {
+                let sleeper = SleepTimer;
+                loop {
+                    let interval = beat.interval();
+                    beat.heart_beat().await;
+                    sleeper.sleep(interval).await;
+                }
+            });
+        }
         while let Some(res) = futures::select! {
             res = stream.next().fuse() => res,
             _ = ctx.shutdown.clone().fuse() => None

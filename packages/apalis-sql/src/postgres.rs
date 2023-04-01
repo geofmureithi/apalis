@@ -16,6 +16,8 @@ use apalis_core::request::{JobRequest, JobState};
 use apalis_core::storage::StorageError;
 use apalis_core::storage::StorageWorkerPulse;
 use apalis_core::storage::{Storage, StorageResult};
+use apalis_core::utils::timer::SleepTimer;
+use apalis_core::utils::Timer;
 use apalis_core::worker::WorkerId;
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -77,7 +79,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
         interval: Duration,
     ) -> impl Stream<Item = Result<Option<JobRequest<T>>, JobStreamError>> {
         let pool = self.pool.clone();
-        let mut interval = tokio::time::interval(interval);
+        let sleeper = SleepTimer;
         let worker_id = worker_id.clone();
         try_stream! {
             let mut listener = PgListener::connect_with(&pool).await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
@@ -85,7 +87,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
             let _notify = listener.listen("apalis::job").await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             loop {
                 //  Ideally wait for a job or a tick
-                let interval = interval.tick().map(|_| ());
+                let interval = sleeper.sleep(interval).map(|_| ());
                 let notification = listener.recv().map(|_| ()); // TODO: This silences errors from pubsub, needs improvement to trigger start queue
                 future::race(interval, notification).await;
                 let tx = pool.clone();

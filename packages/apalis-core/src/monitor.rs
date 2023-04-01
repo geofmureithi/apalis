@@ -10,7 +10,7 @@ use tower::Service;
 use tracing::warn;
 
 use crate::{
-    executor::{DefaultExecutor, Executor},
+    executor::{Executor, TokioExecutor},
     job::Job,
     request::JobRequest,
     worker::{Worker, WorkerContext, WorkerId},
@@ -176,13 +176,13 @@ impl<E: Executor + Send + 'static> Monitor<E> {
     }
 }
 
-impl Default for Monitor<DefaultExecutor> {
+impl Default for Monitor<TokioExecutor> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Monitor<DefaultExecutor> {
+impl Monitor<TokioExecutor> {
     /// Creates a new monitor instance.
     ///
     /// # Returns
@@ -193,7 +193,7 @@ impl Monitor<DefaultExecutor> {
             shutdown: Shutdown::new(),
             worker_handles: Vec::new(),
             timeout: None,
-            executor: DefaultExecutor::new(),
+            executor: TokioExecutor::new(),
         }
     }
 

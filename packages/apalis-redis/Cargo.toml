@@ -11,8 +11,8 @@ description = "Redis Storage for apalis: simple and reliable background processi
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.4", default-features = false }
-redis = { version = "0.22" , default-features= false, features=["script"] }
+apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.4", default-features = false, features= ["storage"] }
+redis = { version = "0.22" , default-features= false, features=["script", "aio"] }
 serde = "1"
 log = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
@@ -29,7 +29,6 @@ tokio = { version = "1", features = ["macros"] }
 email-service = { path = "../../examples/email-service" }
 
 [features]
-default = ["storage", "tokio-comp"]
-storage = ["apalis-core/storage"]
+default = ["tokio-comp"]
 async-std-comp = ["async-std", "redis/async-std-comp", "apalis-core/async-std-comp" ]
 tokio-comp = ["tokio", "tokio/net", "redis/tokio-comp", "apalis-core/tokio-comp" ]

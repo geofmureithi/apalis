@@ -10,17 +10,18 @@ use crate::{
     job::Job,
     job_fn::{job_fn, JobFn},
     request::JobRequest,
-    worker::{ready::ReadyWorker, Worker, WorkerId},
+    worker::{ready::ReadyWorker, HeartBeat, Worker, WorkerId},
 };
 
 /// An abstract that allows building a [`Worker`].
 /// Usually the output is [`ReadyWorker`] but you can implement your own via [`WorkerFactory`]
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct WorkerBuilder<Job, Source, Middleware> {
     pub(crate) id: WorkerId,
     pub(crate) job: PhantomData<Job>,
     pub(crate) layer: ServiceBuilder<Middleware>,
     pub(crate) source: Source,
+    pub(crate) beats: Vec<Box<dyn HeartBeat + Send>>,
 }
 
 impl WorkerBuilder<(), (), Identity> {
@@ -32,6 +33,7 @@ impl WorkerBuilder<(), (), Identity> {
             layer: ServiceBuilder::new(),
             source: (),
             id: WorkerId::new(name),
+            beats: Vec::new(),
         }
     }
 }
@@ -47,6 +49,7 @@ impl<J, S, M> WorkerBuilder<J, S, M> {
             layer: self.layer,
             source: stream,
             id: self.id,
+            beats: self.beats,
         }
     }
 
@@ -66,6 +69,7 @@ impl<J, S, M> WorkerBuilder<J, S, M> {
             layer: self.layer,
             source: stream(&self.id),
             id: self.id,
+            beats: self.beats,
         }
     }
 }
@@ -84,6 +88,7 @@ impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
             layer: middleware,
             id: self.id,
             source: self.source,
+            beats: self.beats,
         }
     }
     /// Shorthand for decoration. Allows adding a single layer [tower] middleware
@@ -96,6 +101,7 @@ impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
             source: self.source,
             layer: self.layer.layer(layer),
             id: self.id,
+            beats: self.beats,
         }
     }
 }
@@ -121,6 +127,7 @@ where
             id: self.id,
             stream: self.source,
             service: self.layer.service(service),
+            beats: self.beats,
         }
     }
 }

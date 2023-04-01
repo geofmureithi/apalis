@@ -14,7 +14,7 @@ readme = "../../README.md"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 futures =  { version = "0.3", features=["async-await"] }
-tower = { version = "0.4" }
+tower = { version = "0.4", features= ["util"] }
 pin-project-lite = "0.2.9"
 tokio = { version = "1", features = ["rt", "net"], optional = true }
 async-std = { version = "1", optional = true}
@@ -37,9 +37,8 @@ uuid = { version = "0.8", optional = true }
 async-stream = "0.3"
 
 [features]
-default = [ "tower-util", "storage"]
-tower-util = ["tower/util"]
-storage =  ["tower/util"]
+default = ["storage", "tokio-comp"]
+storage =  []
 layers = ["sentry", "prometheus", "trace", "retry", "timeout", "limit", "filter", "extensions"]
 sentry = ["sentry-core", "ulid/uuid", "uuid"]
 prometheus = ["metrics", "metrics-exporter-prometheus"]

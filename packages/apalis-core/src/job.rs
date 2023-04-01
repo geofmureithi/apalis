@@ -68,7 +68,7 @@ impl Serialize for JobId {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&self.0.to_string())
+        serializer.serialize_str(&self.to_string())
     }
 }
 
@@ -87,7 +87,7 @@ impl<'de> Visitor<'de> for JobIdVisitor {
     type Value = JobId;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("a prefix of `jid-` followed by the `ulid`")
+        formatter.write_str("a prefix of `JID-` followed by the `ulid`")
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>

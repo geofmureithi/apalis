@@ -1,7 +1,7 @@
+mod beats;
 /// Allows for building workers that consume a [Storage]
 pub mod builder;
 mod error;
-mod layers;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};

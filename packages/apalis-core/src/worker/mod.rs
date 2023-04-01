@@ -7,6 +7,7 @@ use graceful_shutdown::Shutdown;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::fmt::{self, Display};
+use std::time::Duration;
 use thiserror::Error;
 
 /// A worker name wrapper usually used by Worker builder
@@ -99,4 +100,11 @@ impl<E: Executor + Send> WorkerContext<E> {
 
     /// Calling this function triggers shutting down the worker
     pub fn shutdown(&self) {}
+}
+
+/// A worker can have heartbeats to keep alive or enqueue new jobs
+#[async_trait::async_trait]
+pub trait HeartBeat {
+    async fn heart_beat(&mut self);
+    fn interval(&self) -> Duration;
 }

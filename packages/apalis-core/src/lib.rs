@@ -87,6 +87,7 @@ pub mod mock {
                 service,
                 stream,
                 id: WorkerId::new("mock-worker"),
+                beats: Vec::new(),
             },
         )
     }

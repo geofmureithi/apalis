@@ -25,8 +25,6 @@ sqlite = [ "apalis-sql/sqlite"]
 mysql = [ "apalis-sql/mysql"]
 ## Include Cron functionality
 cron = ["apalis-cron"]
-## Include Storage utils, and build your own
-storage = ["apalis-core/storage"]
 
 ## Support for Sentry exception and performance monitoring
 sentry = ["apalis-core/sentry"]
@@ -45,7 +43,7 @@ extensions =["apalis-core/extensions"]
 ## Compatibility with async-std and smol runtimes
 async-std-comp = ["apalis-sql/async-std-comp", "apalis-redis/async-std-comp" ]
 ## Compatibility with tokio and actix runtimes
-tokio-comp = ["apalis-sql/tokio-comp", "apalis-redis/tokio-comp" ]
+tokio-comp = ["apalis-core/tokio-comp", "apalis-sql/tokio-comp", "apalis-redis/tokio-comp" ]
 
 
 docsrs = ["document-features"]
@@ -54,7 +52,6 @@ docsrs = ["document-features"]
 [dependencies.apalis-redis]
 version = "0.4.0-alpha.4"
 optional = true
-default-features = false
 path = "./packages/apalis-redis"
 
 [dependencies.apalis-sql]
@@ -68,6 +65,7 @@ path = "./packages/apalis-sql"
 version = "0.4.0-alpha.4"
 default-features = false
 path = "./packages/apalis-core"
+features = ["storage"]
 
 [dependencies.apalis-cron]
 version = "0.4.0-alpha.4"

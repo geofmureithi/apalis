@@ -4,6 +4,8 @@ use apalis_core::request::{JobRequest, JobState};
 use apalis_core::storage::StorageError;
 use apalis_core::storage::StorageWorkerPulse;
 use apalis_core::storage::{Storage, StorageResult};
+use apalis_core::utils::timer::SleepTimer;
+use apalis_core::utils::Timer;
 use apalis_core::worker::WorkerId;
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -64,11 +66,11 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
         interval: Duration,
     ) -> impl Stream<Item = Result<Option<JobRequest<T>>, JobStreamError>> {
         let pool = self.pool.clone();
-        let mut interval = tokio::time::interval(interval);
+        let sleeper = SleepTimer;
         let worker_id = worker_id.clone();
         try_stream! {
             loop {
-                interval.tick().await;
+                sleeper.sleep(interval).await;
                 let pool = pool.clone();
                 let mut tx = pool
                 .begin()

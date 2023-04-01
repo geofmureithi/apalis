@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
 
-    let sqlite: SqliteStorage<Email> = SqliteStorage::connect("sqlite://data.db").await?;
+    let sqlite: SqliteStorage<Email> = SqliteStorage::connect("sqlite::memory:").await?;
     // Do migrations: Mainly for "sqlite::memory:"
     sqlite
         .setup()
@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
     produce_jobs(&sqlite).await?;
 
     Monitor::new()
-        .register_with_count(5, move |c| {
+        .register_with_count(2, move |c| {
             WorkerBuilder::new(format!("tasty-banana-{c}"))
                 .layer(TraceLayer::new())
                 .with_storage(sqlite.clone())

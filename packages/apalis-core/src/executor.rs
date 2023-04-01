@@ -47,14 +47,15 @@ impl Executor for AsyncStdExecutor {
 }
 
 /// [`TokioExecutor`] as the default executor
-#[cfg(feature = "tokio-comp")]
-pub type DefaultExecutor = TokioExecutor;
+// #[cfg(feature = "tokio-comp")]
+// pub type DefaultExecutor = TokioExecutor;
 
 /// [`AsyncStdExecutor`] as the default executor
-#[cfg(feature = "async-std-comp")]
-pub type DefaultExecutor = AsyncStdExecutor;
+// #[cfg(feature = "async-std-comp")]
+// pub type DefaultExecutor = AsyncStdExecutor;
 
-impl Default for DefaultExecutor {
+#[cfg(feature = "tokio-comp")]
+impl Default for TokioExecutor {
     fn default() -> Self {
         Self::new()
     }
