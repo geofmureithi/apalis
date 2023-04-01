@@ -105,6 +105,8 @@ impl<E: Executor + Send> WorkerContext<E> {
 /// A worker can have heartbeats to keep alive or enqueue new jobs
 #[async_trait::async_trait]
 pub trait HeartBeat {
+    /// The future of a single beat
     async fn heart_beat(&mut self);
+    /// The interval for each beat to be called
     fn interval(&self) -> Duration;
 }

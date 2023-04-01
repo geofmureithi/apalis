@@ -24,6 +24,18 @@ pub struct WorkerBuilder<Job, Source, Middleware> {
     pub(crate) beats: Vec<Box<dyn HeartBeat + Send>>,
 }
 
+impl<Job, Source, Middleware> std::fmt::Debug for WorkerBuilder<Job, Source, Middleware> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkerBuilder")
+            .field("id", &self.id)
+            .field("job", &std::any::type_name::<Job>())
+            .field("layer", &std::any::type_name::<Middleware>())
+            .field("source", &std::any::type_name::<Source>())
+            .field("beats", &self.beats.len())
+            .finish()
+    }
+}
+
 impl WorkerBuilder<(), (), Identity> {
     /// Build a new [`WorkerBuilder`] instance with a name for the worker to build
     pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), Identity> {

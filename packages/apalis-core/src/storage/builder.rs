@@ -22,6 +22,8 @@ pub trait WithStorage<NS, ST: Storage<Output = Self::Job>> {
     fn with_storage(self, storage: ST) -> WorkerBuilder<Self::Job, Self::Stream, NS>;
 }
 
+/// A layer that acknowledges a job completed successfully
+#[derive(Debug)]
 pub struct AckJobLayer<ST, J> {
     storage: ST,
     job_type: PhantomData<J>,
@@ -29,6 +31,7 @@ pub struct AckJobLayer<ST, J> {
 }
 
 impl<ST, J> AckJobLayer<ST, J> {
+    /// Build a new [AckJobLayer] for a worker
     pub fn new(storage: ST, worker_id: WorkerId) -> Self {
         Self {
             storage,
@@ -57,6 +60,8 @@ where
     }
 }
 
+/// The underlying service for an [AckJobLayer]
+#[derive(Debug)]
 pub struct AckJobService<SV, ST, J> {
     service: SV,
     storage: ST,
@@ -90,11 +95,8 @@ where
         let fut = self.service.call(request);
         let fut_with_ack = async move {
             let res = fut.await;
-            match res {
-                Ok(_) => {
-                    storage.ack(&worker_id, &job_id).await.ok();
-                }
-                _ => {}
+            if res.is_ok() {
+                storage.ack(&worker_id, &job_id).await.ok();
             }
             res
         };
