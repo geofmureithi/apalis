@@ -493,6 +493,7 @@ mod tests {
     use std::ops::Sub;
 
     use super::*;
+    use apalis_core::request::JobState;
     use email_service::Email;
     use futures::StreamExt;
 
@@ -547,7 +548,7 @@ mod tests {
     where
         S: Storage<Output = T>,
     {
-        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10));
+        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10), 1);
         stream
             .next()
             .await
