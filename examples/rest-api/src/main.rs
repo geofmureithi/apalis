@@ -64,7 +64,7 @@ async fn upload_service(upload: Upload, _ctx: JobContext) -> Result<(), JobError
 #[derive(Serialize)]
 struct JobsResult<J> {
     jobs: Vec<JobRequest<J>>,
-    counts: Counts,
+    counts: JobStateCount,
 }
 #[derive(Deserialize)]
 struct Filter {
@@ -337,7 +337,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .register_with_count(2, move |c| {
             WorkerBuilder::new(format!("tasty-pear-{c}"))
-                .layer(SentryJobLayer)
+                .layer(SentryJobLayer::new())
                 .layer(TraceLayer::new())
                 .with_storage(mysql_storage.clone())
                 .build_fn(upload_service)

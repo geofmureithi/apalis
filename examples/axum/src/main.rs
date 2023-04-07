@@ -14,6 +14,7 @@ use axum::{
     Extension, Router,
 };
 use serde::{de::DeserializeOwned, Serialize};
+use std::time::Duration;
 use std::{fmt::Debug, io::Error, net::SocketAddr};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -28,7 +29,7 @@ async fn add_new_job<T>(
     Extension(mut storage): Extension<RedisStorage<T>>,
 ) -> impl IntoResponse
 where
-    T: 'static + Debug + Job + Serialize + DeserializeOwned,
+    T: 'static + Debug + Job + Serialize + DeserializeOwned + Send + Sync + Unpin,
 {
     dbg!(&input);
     let new_job = storage.push(input).await;
@@ -74,7 +75,9 @@ async fn main() -> Result<()> {
             .register_with_count(2, move |index| {
                 WorkerBuilder::new(format!("tasty-pear-{index}"))
                     .layer(TraceLayer::new())
-                    .with_storage(storage.clone())
+                    .with_storage_config(storage.clone(), |cfg| {
+                        cfg.fetch_interval(Duration::from_millis(10))
+                    })
                     .build_fn(send_email)
             })
             .run()

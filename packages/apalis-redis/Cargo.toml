@@ -29,6 +29,7 @@ tokio = { version = "1", features = ["macros"] }
 email-service = { path = "../../examples/email-service" }
 
 [features]
-default = ["tokio-comp"]
+default = []
 async-std-comp = ["async-std", "redis/async-std-comp", "apalis-core/async-std-comp" ]
 tokio-comp = ["tokio", "tokio/net", "redis/tokio-comp", "apalis-core/tokio-comp" ]
+expose = ["apalis-core/expose"]

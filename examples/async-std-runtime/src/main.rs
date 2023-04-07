@@ -44,6 +44,7 @@ async fn main() -> Result<()> {
         .build(job_fn(send_reminder));
 
     Monitor::new()
+        .executor(AsyncStdExecutor::new())
         .register(worker)
         .run_with_signal(async {
             ctrl_c.recv().await.ok();

@@ -1,13 +1,12 @@
-mod beats;
 /// Allows for building workers that consume a [Storage]
 pub mod builder;
 mod error;
+mod beats;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
 use crate::{
-    job::JobStream,
     job::{Job, JobId, JobStreamResult},
     request::JobRequest,
     worker::WorkerId,
@@ -44,6 +43,7 @@ pub trait Storage: Clone {
         &mut self,
         worker_id: &WorkerId,
         interval: Duration,
+        buffer_size: usize
     ) -> JobStreamResult<Self::Output>;
 
     /// Acknowledge a job which returns Ok
@@ -98,21 +98,9 @@ pub enum StorageWorkerPulse {
         /// the count of jobs to be scheduled
         count: i32,
     },
-    /// Resque any orphaned jobs
+    /// Rescue any orphaned jobs
     RenqueueOrpharned {
         /// the count of orphaned jobs
         count: i32,
     },
-}
-
-impl<S> JobStream for S
-where
-    S: Storage,
-{
-    type Job = S::Output;
-
-    /// Consume the stream of jobs from Storage
-    fn stream(&mut self, worker_id: &WorkerId, interval: Duration) -> JobStreamResult<S::Output> {
-        self.consume(worker_id, interval)
-    }
 }

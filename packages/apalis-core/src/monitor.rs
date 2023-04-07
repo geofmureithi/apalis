@@ -10,14 +10,14 @@ use tower::Service;
 use tracing::warn;
 
 use crate::{
-    executor::{Executor, TokioExecutor},
+    executor::{Executor},
     job::Job,
     request::JobRequest,
     worker::{Worker, WorkerContext, WorkerId},
 };
 
 /// A monitor for coordinating and managing a collection of workers.
-pub struct Monitor<E: Executor> {
+pub struct Monitor<E> {
     shutdown: Shutdown,
     worker_handles: Vec<WorkerId>,
     timeout: Option<Duration>,
@@ -155,11 +155,6 @@ impl<E: Executor + Send + 'static> Monitor<E> {
     /// If the timeout is reached and workers have not completed, the monitor will log a warning
     /// message and exit forcefully.
     pub async fn run(self) -> std::io::Result<()> {
-        // let _res: Vec<(String, bool)> = self
-        //     .worker_handles
-        //     .into_iter()
-        //     .map(|h| (h.0, h.1.is_finished()))
-        //     .collect();
         if let Some(timeout) = self.timeout {
             if self.shutdown.with_timeout(timeout).await {
                 warn!("Shutdown timeout reached. Exiting forcefully");
@@ -176,13 +171,13 @@ impl<E: Executor + Send + 'static> Monitor<E> {
     }
 }
 
-impl Default for Monitor<TokioExecutor> {
+impl Default for Monitor<()> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Monitor<TokioExecutor> {
+impl Monitor<()> {
     /// Creates a new monitor instance.
     ///
     /// # Returns
@@ -193,7 +188,7 @@ impl Monitor<TokioExecutor> {
             shutdown: Shutdown::new(),
             worker_handles: Vec::new(),
             timeout: None,
-            executor: TokioExecutor::new(),
+            executor: (),
         }
     }
 

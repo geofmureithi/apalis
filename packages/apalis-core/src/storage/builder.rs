@@ -13,13 +13,67 @@ use crate::{builder::WorkerBuilder, job::JobStreamResult};
 use super::{beats::KeepAlive, Storage};
 
 /// A helper trait to help build a [Worker] that consumes a [Storage]
-pub trait WithStorage<NS, ST: Storage<Output = Self::Job>> {
+pub trait WithStorage<NS, ST: Storage<Output = Self::Job>>: Sized {
     /// The job to consume
     type Job;
     /// The [Stream] to produce jobs
     type Stream;
-    /// The builder method to produce a [WorkerBuilder] that will consume jobs
-    fn with_storage(self, storage: ST) -> WorkerBuilder<Self::Job, Self::Stream, NS>;
+    /// The builder method to produce a default [WorkerBuilder] that will consume jobs
+    fn with_storage(self, storage: ST) -> WorkerBuilder<Self::Job, Self::Stream, NS> {
+        self.with_storage_config(storage, |e| e)
+    }
+    /// The builder method to produce a configured [WorkerBuilder] that will consume jobs
+    fn with_storage_config(self, storage: ST, config: impl Fn(WorkerConfig) -> WorkerConfig) -> WorkerBuilder<Self::Job, Self::Stream, NS>;
+}
+
+/// Allows configuring of how storages are consumed
+#[derive(Debug)]
+pub struct WorkerConfig {
+    keep_alive: Duration,
+    enqueue_scheduled: Duration,
+    reenqueue_orphaned: Duration,
+    buffer_size: usize,
+    fetch_interval: Duration,
+}
+
+impl Default for WorkerConfig {
+    fn default() -> Self {
+        Self {
+            keep_alive: Duration::from_secs(30),
+            enqueue_scheduled: Duration::from_secs(10),
+            reenqueue_orphaned: Duration::from_secs(10),
+            buffer_size: 1,
+            fetch_interval: Duration::from_millis(50),
+        }
+    }
+}
+
+impl WorkerConfig {
+    /// The number of jobs to fetch in one poll
+    pub fn buffer_size(mut self, buffer_size: usize) -> Self {
+        self.buffer_size = buffer_size;
+        self
+    }
+
+    /// The rate at which jobs in the scheduled queue are pushed into the active queue
+    /// This mainly applies for redis, as sql jobs use run_at
+    pub fn enqueue_scheduled(mut self, interval: Duration) -> Self {
+        self.enqueue_scheduled = interval;
+        self
+    }
+
+    /// The rate at which orphaned jobs are returned to the queue
+    pub fn reenqueue_orphaned(mut self, interval: Duration) -> Self {
+        self.reenqueue_orphaned = interval;
+        self
+    }
+
+    /// The rate at which polling is occurring
+    /// This may be ignored if the storage uses pubsub
+    pub fn fetch_interval(mut self, interval: Duration) -> Self {
+        self.fetch_interval = interval;
+        self
+    }
 }
 
 /// A layer that acknowledges a job completed successfully
@@ -111,13 +165,15 @@ where
 {
     type Job = J;
     type Stream = JobStreamResult<J>;
-    fn with_storage(
+    fn with_storage_config(
         mut self,
         mut storage: ST,
+        config: impl Fn(WorkerConfig) -> WorkerConfig
     ) -> WorkerBuilder<J, Self::Stream, Stack<AckJobLayer<ST, J>, M>> {
+        let worker_config = config(WorkerConfig::default());
         let worker_id = self.id;
         let source = storage
-            .consume(&worker_id, Duration::from_millis(10))
+            .consume(&worker_id, worker_config.fetch_interval, worker_config.buffer_size)
             .boxed();
 
         let layer = self.layer.layer(AckJobLayer {
@@ -127,7 +183,7 @@ where
         });
 
         let keep_alive: KeepAlive<ST, M> =
-            KeepAlive::new::<J>(&worker_id, storage.clone(), Duration::from_secs(30));
+            KeepAlive::new::<J>(&worker_id, storage.clone(), worker_config.keep_alive);
         self.beats.push(Box::new(keep_alive));
 
         WorkerBuilder {

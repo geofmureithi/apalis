@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::error::{BoxDynError, JobError};
+use crate::error::{BoxDynError};
 
 /// Represents a storage emitted by a worker
 #[derive(Debug, Error)]
@@ -15,19 +15,7 @@ pub enum StorageError {
     /// The resource was not found in storage
     #[error("The resource was not found in storage")]
     NotFound,
-    /// Serialization/Deserialization Error
-    #[error("Serialization/Deserialization Error")]
-    SerDe(#[source] BoxDynError),
-}
-
-impl From<serde_json::Error> for StorageError {
-    fn from(e: serde_json::Error) -> Self {
-        StorageError::SerDe(Box::from(e))
-    }
-}
-
-impl From<StorageError> for JobError {
-    fn from(e: StorageError) -> Self {
-        JobError::Storage(e)
-    }
+    /// Parsing Error
+    #[error("Parsing Error")]
+    Parse(#[source] BoxDynError),
 }

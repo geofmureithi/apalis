@@ -173,16 +173,20 @@ pub mod prelude {
         builder::WorkerFactoryFn,
         context::JobContext,
         error::JobError,
-        executor::Executor,
-        job::{Counts, Job, JobFuture, JobId, JobStreamExt},
+        executor::*,
+        job::{Job, JobFuture, JobId},
         job_fn::job_fn,
         monitor::Monitor,
         request::JobRequest,
         request::JobState,
         response::IntoResponse,
         utils::*,
+        
     };
     pub use apalis_core::{
         storage::builder::WithStorage, storage::Storage, storage::StorageWorkerPulse,
     };
+    #[cfg(feature = "expose")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
+    pub use apalis_core::expose::*;
 }

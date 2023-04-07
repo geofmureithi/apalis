@@ -46,17 +46,10 @@ impl Executor for AsyncStdExecutor {
     }
 }
 
-/// [`TokioExecutor`] as the default executor
-// #[cfg(feature = "tokio-comp")]
-// pub type DefaultExecutor = TokioExecutor;
-
-/// [`AsyncStdExecutor`] as the default executor
-// #[cfg(feature = "async-std-comp")]
-// pub type DefaultExecutor = AsyncStdExecutor;
-
+/// This just allows the tokio executor without being explicit
 #[cfg(feature = "tokio-comp")]
-impl Default for TokioExecutor {
-    fn default() -> Self {
-        Self::new()
+impl Executor for () {
+    fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
+        tokio::spawn(future);
     }
 }

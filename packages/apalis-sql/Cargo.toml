@@ -9,13 +9,14 @@ license = "MIT"
 description = "SQL Storage for apalis: simple, extensible multithreaded background job processing for Rust"
 
 [features]
-default = [ "sqlite", "migrate" ]
+default = [ "sqlite", "migrate"]
 postgres = [ "sqlx/postgres", "sqlx/json", "sqlx/chrono"]
 sqlite = [ "sqlx/sqlite", "sqlx/json", "sqlx/chrono"]
 mysql = [ "sqlx/mysql", "sqlx/json", "sqlx/chrono", "sqlx/bigdecimal"]
 migrate = ["sqlx/migrate", "sqlx/macros"]
 async-std-comp = ["async-std", "apalis-core/async-std-comp", "sqlx/runtime-async-std-rustls"]
 tokio-comp = ["tokio", "apalis-core/tokio-comp", "sqlx/runtime-tokio-rustls"]
+expose = ["apalis-core/expose"]
 
 [dependencies.sqlx]
 version = "0.6"

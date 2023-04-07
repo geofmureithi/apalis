@@ -15,7 +15,6 @@ use crate::{
 
 /// An abstract that allows building a [`Worker`].
 /// Usually the output is [`ReadyWorker`] but you can implement your own via [`WorkerFactory`]
-// #[derive(Debug)]
 pub struct WorkerBuilder<Job, Source, Middleware> {
     pub(crate) id: WorkerId,
     pub(crate) job: PhantomData<Job>,

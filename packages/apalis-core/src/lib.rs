@@ -42,6 +42,11 @@ pub mod utils;
 /// Represents the actual executor of a [Job].
 pub mod worker;
 
+#[cfg(feature = "expose")]
+#[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
+/// Utilities to expose workers and jobs to external tools eg web frameworks and cli tools
+pub mod expose;
+
 /// apalis mocking utilities
 #[cfg(feature = "tokio-comp")]
 pub mod mock {

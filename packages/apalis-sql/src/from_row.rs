@@ -12,6 +12,12 @@ impl<T> IntoJobRequest<T> for Option<SqlJobRequest<T>> {
     }
 }
 
+impl<T> IntoJobRequest<T> for SqlJobRequest<T> {
+    fn build_job_request(self) -> Option<JobRequest<T>> {
+        Some(self.0)
+    }
+}
+
 impl<T> From<SqlJobRequest<T>> for JobRequest<T> {
     fn from(val: SqlJobRequest<T>) -> Self {
         val.0

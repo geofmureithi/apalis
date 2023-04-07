@@ -7,11 +7,11 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1"
-apalis = { path = "../../", features = ["mysql"] }
+apalis = { path = "../../", features = ["mysql", "async-std-comp"] }
 serde = "1"
 tracing-subscriber = "0.3.11"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-tokio = { version = "1", features=["macros"] }
+async-std = { version = "1.12.0", features=["attributes"] }
 email-service = { path = "../email-service" }
 
 
