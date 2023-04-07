@@ -167,6 +167,9 @@ pub mod layers {
 
 /// Common imports
 pub mod prelude {
+    #[cfg(feature = "expose")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
+    pub use apalis_core::expose::*;
     pub use apalis_core::{
         builder::WorkerBuilder,
         builder::WorkerFactory,
@@ -181,12 +184,8 @@ pub mod prelude {
         request::JobState,
         response::IntoResponse,
         utils::*,
-        
     };
     pub use apalis_core::{
         storage::builder::WithStorage, storage::Storage, storage::StorageWorkerPulse,
     };
-    #[cfg(feature = "expose")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
-    pub use apalis_core::expose::*;
 }

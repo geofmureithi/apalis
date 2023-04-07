@@ -10,9 +10,9 @@
 //!     );
 //! ```
 
-use apalis_core::error::{JobStreamError};
+use apalis_core::error::JobStreamError;
 use apalis_core::job::{Job, JobId, JobStreamResult};
-use apalis_core::request::{JobRequest};
+use apalis_core::request::JobRequest;
 use apalis_core::storage::StorageError;
 use apalis_core::storage::StorageWorkerPulse;
 use apalis_core::storage::{Storage, StorageResult};
@@ -76,7 +76,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
         &self,
         worker_id: &WorkerId,
         interval: Duration,
-        buffer_size: usize
+        buffer_size: usize,
     ) -> impl Stream<Item = Result<Option<JobRequest<T>>, JobStreamError>> {
         let pool = self.pool.clone();
         let sleeper = SleepTimer;
@@ -103,7 +103,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
                 for job in jobs {
                     yield job.build_job_request()
                 }
-                
+
             }
         }
     }
@@ -285,7 +285,12 @@ where
         Ok(())
     }
 
-    fn consume(&mut self, worker_id: &WorkerId, interval: Duration, buffer_size: usize) -> JobStreamResult<T> {
+    fn consume(
+        &mut self,
+        worker_id: &WorkerId,
+        interval: Duration,
+        buffer_size: usize,
+    ) -> JobStreamResult<T> {
         Box::pin(self.stream_jobs(worker_id, interval, buffer_size))
     }
     async fn len(&self) -> StorageResult<i64> {
@@ -388,19 +393,21 @@ where
 #[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
 /// Expose an [`PostgresStorage`] for web and cli management tools
 pub mod expose {
+    use super::*;
     use apalis_core::error::JobError;
     use apalis_core::expose::{ExposedWorker, JobStateCount, JobStreamExt};
     use apalis_core::request::JobRequest;
+    use apalis_core::request::JobState;
     use apalis_core::storage::StorageError;
     use apalis_core::worker::WorkerId;
     use chrono::{DateTime, Utc};
-    use apalis_core::request::JobState;
     use std::collections::HashMap;
-    use super::*;
 
     #[async_trait::async_trait]
 
-    impl<J: 'static + Job + Serialize + DeserializeOwned + Send + Sync + Unpin> JobStreamExt<J> for PostgresStorage<J> {
+    impl<J: 'static + Job + Serialize + DeserializeOwned + Send + Sync + Unpin> JobStreamExt<J>
+        for PostgresStorage<J>
+    {
         async fn counts(&mut self) -> Result<JobStateCount, JobError> {
             let mut conn = self
                 .pool

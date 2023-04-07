@@ -20,6 +20,13 @@ impl TokioExecutor {
 }
 
 #[cfg(feature = "tokio-comp")]
+impl Default for TokioExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "tokio-comp")]
 impl Executor for TokioExecutor {
     fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
         tokio::spawn(future);

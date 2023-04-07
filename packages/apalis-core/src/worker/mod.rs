@@ -77,7 +77,7 @@ pub trait Worker<Job>: Sized {
 pub struct WorkerContext<E: Executor> {
     pub(crate) shutdown: Shutdown,
     pub(crate) executor: E,
-    pub(crate) worker_id: WorkerId
+    pub(crate) worker_id: WorkerId,
 }
 
 impl<E: Executor> fmt::Debug for WorkerContext<E> {

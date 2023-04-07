@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::error::{BoxDynError};
+use crate::error::BoxDynError;
 
 /// Represents a storage emitted by a worker
 #[derive(Debug, Error)]

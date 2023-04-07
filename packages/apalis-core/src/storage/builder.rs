@@ -23,7 +23,11 @@ pub trait WithStorage<NS, ST: Storage<Output = Self::Job>>: Sized {
         self.with_storage_config(storage, |e| e)
     }
     /// The builder method to produce a configured [WorkerBuilder] that will consume jobs
-    fn with_storage_config(self, storage: ST, config: impl Fn(WorkerConfig) -> WorkerConfig) -> WorkerBuilder<Self::Job, Self::Stream, NS>;
+    fn with_storage_config(
+        self,
+        storage: ST,
+        config: impl Fn(WorkerConfig) -> WorkerConfig,
+    ) -> WorkerBuilder<Self::Job, Self::Stream, NS>;
 }
 
 /// Allows configuring of how storages are consumed
@@ -168,12 +172,16 @@ where
     fn with_storage_config(
         mut self,
         mut storage: ST,
-        config: impl Fn(WorkerConfig) -> WorkerConfig
+        config: impl Fn(WorkerConfig) -> WorkerConfig,
     ) -> WorkerBuilder<J, Self::Stream, Stack<AckJobLayer<ST, J>, M>> {
         let worker_config = config(WorkerConfig::default());
         let worker_id = self.id;
         let source = storage
-            .consume(&worker_id, worker_config.fetch_interval, worker_config.buffer_size)
+            .consume(
+                &worker_id,
+                worker_config.fetch_interval,
+                worker_config.buffer_size,
+            )
             .boxed();
 
         let layer = self.layer.layer(AckJobLayer {

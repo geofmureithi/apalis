@@ -177,7 +177,7 @@ where
     };
 
     match job {
-        Some(Value::Data(v)) => serde_json::from_slice(&v).ok(),
+        Some(Value::Data(v)) => serde_json::from_slice(v).ok(),
         None => None,
         _ => {
             error!("Decoding Message Failed: {:?}", "Expected Data(&Vec<u8>)");
@@ -731,6 +731,7 @@ mod tests {
     use std::ops::Sub;
 
     use super::*;
+    use apalis_core::request::JobState;
     use email_service::Email;
     use futures::StreamExt;
 
@@ -770,7 +771,7 @@ mod tests {
     where
         S: Storage<Output = T>,
     {
-        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10));
+        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10), 1);
         stream
             .next()
             .await

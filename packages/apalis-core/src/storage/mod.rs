@@ -1,7 +1,7 @@
+mod beats;
 /// Allows for building workers that consume a [Storage]
 pub mod builder;
 mod error;
-mod beats;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -43,7 +43,7 @@ pub trait Storage: Clone {
         &mut self,
         worker_id: &WorkerId,
         interval: Duration,
-        buffer_size: usize
+        buffer_size: usize,
     ) -> JobStreamResult<Self::Output>;
 
     /// Acknowledge a job which returns Ok

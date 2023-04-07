@@ -545,6 +545,7 @@ pub mod expose {
 mod tests {
 
     use super::*;
+    use apalis_core::request::JobState;
     use email_service::Email;
     use futures::StreamExt;
     use std::ops::Sub;
@@ -594,7 +595,7 @@ mod tests {
     where
         S: Storage<Output = T>,
     {
-        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10));
+        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10), 1);
         stream
             .next()
             .await

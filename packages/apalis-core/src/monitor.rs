@@ -10,7 +10,7 @@ use tower::Service;
 use tracing::warn;
 
 use crate::{
-    executor::{Executor},
+    executor::Executor,
     job::Job,
     request::JobRequest,
     worker::{Worker, WorkerContext, WorkerId},
