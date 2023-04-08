@@ -88,6 +88,10 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
                 for job in jobs {
                     let req = job.build_job_request();
                     if let Some(job) = req {
+                        let mut tx = pool
+                            .begin()
+                            .await
+                            .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                         let job_id = job.id();
                         let update_query = "UPDATE jobs SET status = 'Running', lock_by = ?, lock_at = NOW() WHERE id = ? AND status = 'Pending' AND lock_by IS NULL;";
                         sqlx::query(update_query)
@@ -101,12 +105,13 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
                             .fetch_optional(&mut tx)
                             .await
                             .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+                        tx.commit()
+                            .await
+                            .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                         yield job.build_job_request();
                     }
                 }
-                tx.commit()
-                    .await
-                    .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+
             }
         }
     }
@@ -485,7 +490,6 @@ pub mod expose {
 mod tests {
 
     use super::*;
-    use apalis_core::request::JobState;
     use email_service::Email;
     use futures::StreamExt;
 

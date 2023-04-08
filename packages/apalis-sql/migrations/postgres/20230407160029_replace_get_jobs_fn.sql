@@ -1,6 +1,6 @@
 CREATE OR replace FUNCTION apalis.get_jobs( 
                 worker_id TEXT,
-                v_job_type TEXT
+                v_job_type TEXT,
                 v_jobs_count NUMERIC
             ) returns apalis.jobs AS $$
             DECLARE
