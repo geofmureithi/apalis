@@ -36,3 +36,68 @@ impl<S: Storage + Send + Sync, Service: Sync + Send> HeartBeat for KeepAlive<S, 
         self.2
     }
 }
+
+#[derive(Debug, Clone)]
+pub(super) struct ReenqueueOrphaned<ST>(ST, i32, Duration);
+
+impl<ST> ReenqueueOrphaned<ST> {
+    pub(super) fn new<J: 'static>(storage: ST, count: i32, interval: Duration) -> ReenqueueOrphaned<ST>
+    where
+        ST: Storage<Output = J>,
+    {
+        ReenqueueOrphaned(storage, count, interval)
+    }
+}
+
+#[async_trait::async_trait]
+impl<S: Storage + Send + Sync> HeartBeat for ReenqueueOrphaned<S> {
+    async fn heart_beat(&mut self) {
+        match self
+            .0
+            .heartbeat(super::StorageWorkerPulse::ReenqueueOrphaned { count: self.1 }).await
+        {
+            Err(e) => {
+                tracing::warn!("An error occurred while attempting the reenqueue orphaned heartbeat. Error: {}", e)
+            }
+            _ => {
+                tracing::trace!("reenqueue orphaned heartbeat successful for storage")
+            }
+        }
+    }
+    fn interval(&self) -> Duration {
+        self.2
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct EnqueueScheduled<ST>(ST, i32, Duration);
+
+impl<ST> EnqueueScheduled<ST> {
+    pub(super) fn new<J: 'static>(storage: ST, count: i32, interval: Duration) -> EnqueueScheduled<ST>
+    where
+        ST: Storage<Output = J>,
+    {
+        EnqueueScheduled(storage, count, interval)
+    }
+}
+
+#[async_trait::async_trait]
+impl<S: Storage + Send + Sync> HeartBeat for EnqueueScheduled<S> {
+    async fn heart_beat(&mut self) {
+        match self
+            .0
+            .heartbeat(super::StorageWorkerPulse::EnqueueScheduled { count: self.1 }).await
+        {
+            Err(e) => {
+                tracing::warn!("An error occurred while attempting the enqueue scheduled heartbeat. Error: {}", e)
+            }
+            _ => {
+                tracing::trace!("enqueue scheduled heartbeat successful for storage")
+            }
+        }
+    }
+    fn interval(&self) -> Duration {
+        self.2
+    }
+}
+

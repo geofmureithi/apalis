@@ -35,7 +35,7 @@ use crate::from_row::{IntoJobRequest, SqlJobRequest};
 #[derive(Debug)]
 pub struct PostgresStorage<T> {
     pool: PgPool,
-    job_type: PhantomData<T>,
+    job_type: PhantomData<T>
 }
 
 impl<T> Clone for PostgresStorage<T> {
@@ -224,7 +224,7 @@ where
                 Ok(true)
             }
             // Worker not seen in 5 minutes yet has running jobs
-            StorageWorkerPulse::RenqueueOrpharned { count } => {
+            StorageWorkerPulse::ReenqueueOrphaned { count } => {
                 let job_type = T::NAME;
                 let mut tx = pool
                     .acquire()
@@ -665,7 +665,7 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
             .await
             .expect("failed to heartbeat");
         assert!(result);
@@ -696,7 +696,7 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
             .await
             .expect("failed to heartbeat");
         assert!(result);

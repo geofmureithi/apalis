@@ -99,7 +99,7 @@ pub enum StorageWorkerPulse {
         count: i32,
     },
     /// Rescue any orphaned jobs
-    RenqueueOrpharned {
+    ReenqueueOrphaned {
         /// the count of orphaned jobs
         count: i32,
     },

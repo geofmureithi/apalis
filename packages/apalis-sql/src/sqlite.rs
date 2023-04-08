@@ -260,7 +260,7 @@ where
                 Ok(true)
             }
             // Worker not seen in 5 minutes yet has running jobs
-            StorageWorkerPulse::RenqueueOrpharned { count } => {
+            StorageWorkerPulse::ReenqueueOrphaned { count } => {
                 let job_type = T::NAME;
                 let mut tx = pool
                     .acquire()
@@ -705,7 +705,7 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
             .await
             .expect("failed to heartbeat");
         assert!(result);
@@ -734,7 +734,7 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
             .await
             .expect("failed to heartbeat");
         assert!(result);

@@ -429,7 +429,7 @@ where
                 }
             }
 
-            StorageWorkerPulse::RenqueueOrpharned { count } => {
+            StorageWorkerPulse::ReenqueueOrphaned { count } => {
                 let reenqueue_orphaned = self.scripts.reenqueue_orphaned.clone();
                 let consumers_set = self.queue.consumers_set.to_string();
                 let active_jobs_list = self.queue.active_jobs_list.to_string();
@@ -889,7 +889,7 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
             .await
             .expect("failed to heartbeat");
         assert!(result);
@@ -917,7 +917,7 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
             .await
             .expect("failed to heartbeat");
         assert!(result);

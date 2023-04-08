@@ -71,47 +71,19 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
         try_stream! {
             loop {
                 sleeper.sleep(interval).await;
-                let pool = pool.clone();
-                let mut tx = pool
-                    .begin()
-                    .await
-                    .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-
+                let tx = pool.clone();
+                let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 let job_type = T::NAME;
                 let fetch_query = "SELECT * FROM jobs
-                    WHERE status = 'Pending' AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE";
+                WHERE status = 'Pending' AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE";
                 let jobs: Vec<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
                     .bind(job_type)
                     .bind(i64::try_from(buffer_size).map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?)
                     .fetch_all(&mut tx)
                     .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 for job in jobs {
-                    let req = job.build_job_request();
-                    if let Some(job) = req {
-                        let mut tx = pool
-                            .begin()
-                            .await
-                            .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-                        let job_id = job.id();
-                        let update_query = "UPDATE jobs SET status = 'Running', lock_by = ?, lock_at = NOW() WHERE id = ? AND status = 'Pending' AND lock_by IS NULL;";
-                        sqlx::query(update_query)
-                            .bind(worker_id.to_string())
-                            .bind(job_id.to_string())
-                            .execute(&mut tx)
-                            .await
-                            .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-                        let job: Option<SqlJobRequest<T>> = sqlx::query_as("Select * from jobs where id = ?")
-                            .bind(job_id.to_string())
-                            .fetch_optional(&mut tx)
-                            .await
-                            .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-
-                        yield job.build_job_request();
-                    }
+                    yield fetch_next(pool.clone(), &worker_id, job.build_job_request()).await?;
                 }
-                tx.commit()
-                    .await
-                    .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             }
         }
     }
@@ -141,6 +113,42 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
+    }
+}
+
+async fn fetch_next<T>(
+    pool: Pool<MySql>,
+    worker_id: &WorkerId,
+    job: Option<JobRequest<T>>,
+) -> Result<Option<JobRequest<T>>, JobStreamError>
+where
+    T: Send + Unpin + DeserializeOwned,
+{
+    match job {
+        None => Ok(None),
+        Some(job) => {
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+            let job_id = job.id();
+            let update_query = "UPDATE jobs SET status = 'Running', lock_by = ?, lock_at = NOW() WHERE id = ? AND status = 'Pending' AND lock_by IS NULL;";
+            sqlx::query(update_query)
+                .bind(worker_id.to_string())
+                .bind(job_id.to_string())
+                .execute(&mut tx)
+                .await
+                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+            let job: Option<SqlJobRequest<T>> = sqlx::query_as("Select * from jobs where id = ?")
+                .bind(job_id.to_string())
+                .fetch_optional(&mut tx)
+                .await
+                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+            tx.commit()
+                .await
+                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+            Ok(job.build_job_request())
+        }
     }
 }
 
@@ -226,7 +234,7 @@ where
                 Ok(true)
             }
             // Worker not seen in 5 minutes yet has running jobs
-            StorageWorkerPulse::RenqueueOrpharned { count } => {
+            StorageWorkerPulse::ReenqueueOrphaned { count } => {
                 let job_type = T::NAME;
                 let mut tx = pool
                     .acquire()
@@ -669,7 +677,7 @@ mod tests {
 
         // heartbeat with ReenqueueOrpharned pulse
         storage
-            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
             .await
             .unwrap();
 
@@ -709,7 +717,7 @@ mod tests {
 
         // heartbeat with ReenqueueOrpharned pulse
         storage
-            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
             .await
             .unwrap();
 

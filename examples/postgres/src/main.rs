@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use apalis::prelude::*;
 use apalis::{layers::TraceLayer, postgres::PostgresStorage};
@@ -6,13 +8,15 @@ use email_service::{send_email, Email};
 async fn produce_jobs(storage: &PostgresStorage<Email>) -> Result<()> {
     // The programmatic way
     let mut storage = storage.clone();
-    storage
-        .push(Email {
-            to: "test@example.com".to_string(),
-            text: "Test background job from apalis".to_string(),
-            subject: "Background email job".to_string(),
-        })
-        .await?;
+    for index in 0..1000 {
+        storage
+            .push(Email {
+                to: format!("test{}@example.com", index),
+                text: "Test background job from apalis".to_string(),
+                subject: "Background email job".to_string(),
+            })
+            .await?;
+    }
     // The sql way
     tracing::info!("You can also add jobs via sql query, run this: \n Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));");
     Ok(())
@@ -32,10 +36,16 @@ async fn main() -> Result<()> {
     produce_jobs(&pg).await?;
 
     Monitor::new()
-        .register_with_count(4, move |c| {
+        .register_with_count(5, move |c| {
             WorkerBuilder::new(format!("tasty-orange-{c}"))
                 .layer(TraceLayer::new())
-                .with_storage(pg.clone())
+                .with_storage_config(pg.clone(), |cfg| {
+                    cfg
+                        // Set the buffer size to 100
+                        .buffer_size(100)
+                        // Lower the fetch interval because postgres is waiting for notifications
+                        .fetch_interval(Duration::from_secs(1))
+                })
                 .build_fn(send_email)
         })
         .run()

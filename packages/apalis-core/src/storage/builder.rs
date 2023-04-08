@@ -10,6 +10,8 @@ use tower::Service;
 
 use crate::{builder::WorkerBuilder, job::JobStreamResult};
 
+use super::beats::EnqueueScheduled;
+use super::beats::ReenqueueOrphaned;
 use super::{beats::KeepAlive, Storage};
 
 /// A helper trait to help build a [Worker] that consumes a [Storage]
@@ -34,8 +36,8 @@ pub trait WithStorage<NS, ST: Storage<Output = Self::Job>>: Sized {
 #[derive(Debug)]
 pub struct WorkerConfig {
     keep_alive: Duration,
-    enqueue_scheduled: Duration,
-    reenqueue_orphaned: Duration,
+    enqueue_scheduled: Option<(i32, Duration)>,
+    reenqueue_orphaned: Option<(i32, Duration)>,
     buffer_size: usize,
     fetch_interval: Duration,
 }
@@ -44,8 +46,8 @@ impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
             keep_alive: Duration::from_secs(30),
-            enqueue_scheduled: Duration::from_secs(10),
-            reenqueue_orphaned: Duration::from_secs(10),
+            enqueue_scheduled: Some((10, Duration::from_secs(10))),
+            reenqueue_orphaned: Some((10, Duration::from_secs(10))),
             buffer_size: 1,
             fetch_interval: Duration::from_millis(50),
         }
@@ -54,20 +56,26 @@ impl Default for WorkerConfig {
 
 impl WorkerConfig {
     /// The number of jobs to fetch in one poll
+    ///
+    /// Defaults to 1
     pub fn buffer_size(mut self, buffer_size: usize) -> Self {
         self.buffer_size = buffer_size;
         self
     }
 
     /// The rate at which jobs in the scheduled queue are pushed into the active queue
-    /// This mainly applies for redis, as sql jobs use run_at
-    pub fn enqueue_scheduled(mut self, interval: Duration) -> Self {
+    /// 
+    /// Can be set to none for sql scenarios as sql uses run_at
+    /// This mainly applies for redis currently
+    pub fn enqueue_scheduled(mut self, interval: Option<(i32, Duration)>) -> Self {
         self.enqueue_scheduled = interval;
         self
     }
 
     /// The rate at which orphaned jobs are returned to the queue
-    pub fn reenqueue_orphaned(mut self, interval: Duration) -> Self {
+    /// 
+    /// If None then no garbage collection of orphaned jobs 
+    pub fn reenqueue_orphaned(mut self, interval: Option<(i32, Duration)>) -> Self {
         self.reenqueue_orphaned = interval;
         self
     }
@@ -193,7 +201,14 @@ where
         let keep_alive: KeepAlive<ST, M> =
             KeepAlive::new::<J>(&worker_id, storage.clone(), worker_config.keep_alive);
         self.beats.push(Box::new(keep_alive));
-
+        if let Some((count, duration)) = worker_config.reenqueue_orphaned {
+            let reenqueue_orphaned = ReenqueueOrphaned::new(storage.clone(), count, duration);
+            self.beats.push(Box::new(reenqueue_orphaned));
+        }
+        if let Some((count, duration)) = worker_config.enqueue_scheduled {
+            let enqueue_scheduled = EnqueueScheduled::new(storage.clone(), count, duration);
+            self.beats.push(Box::new(enqueue_scheduled));
+        }
         WorkerBuilder {
             job: PhantomData,
             layer,
