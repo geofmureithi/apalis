@@ -64,7 +64,7 @@ impl WorkerConfig {
     }
 
     /// The rate at which jobs in the scheduled queue are pushed into the active queue
-    /// 
+    ///
     /// Can be set to none for sql scenarios as sql uses run_at
     /// This mainly applies for redis currently
     pub fn enqueue_scheduled(mut self, interval: Option<(i32, Duration)>) -> Self {
@@ -73,8 +73,8 @@ impl WorkerConfig {
     }
 
     /// The rate at which orphaned jobs are returned to the queue
-    /// 
-    /// If None then no garbage collection of orphaned jobs 
+    ///
+    /// If None then no garbage collection of orphaned jobs
     pub fn reenqueue_orphaned(mut self, interval: Option<(i32, Duration)>) -> Self {
         self.reenqueue_orphaned = interval;
         self

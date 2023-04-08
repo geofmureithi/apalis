@@ -35,7 +35,7 @@ use crate::from_row::{IntoJobRequest, SqlJobRequest};
 #[derive(Debug)]
 pub struct PostgresStorage<T> {
     pool: PgPool,
-    job_type: PhantomData<T>
+    job_type: PhantomData<T>,
 }
 
 impl<T> Clone for PostgresStorage<T> {
