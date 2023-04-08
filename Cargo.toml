@@ -1,6 +1,6 @@
 [package]
 name = "apalis"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
@@ -52,25 +52,25 @@ docsrs = ["document-features"]
 
 
 [dependencies.apalis-redis]
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 optional = true
 path = "./packages/apalis-redis"
 
 [dependencies.apalis-sql]
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"
 
 [dependencies.apalis-core]
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 default-features = false
 path = "./packages/apalis-core"
 features = ["storage"]
 
 [dependencies.apalis-cron]
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 optional = true
 default-features = false
 path = "./packages/apalis-cron"
@@ -90,8 +90,8 @@ all-features = true
 criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
 serde = "1"
 tokio = { version = "1", features = ["macros"] }
-apalis-redis = { version = "0.4.0-alpha.4", path = "./packages/apalis-redis" }
-apalis-sql = { version = "0.4.0-alpha.4", path = "./packages/apalis-sql", features = ["sqlite"] }
+apalis-redis = { version = "0.4.0-alpha.5", path = "./packages/apalis-redis" }
+apalis-sql = { version = "0.4.0-alpha.5", path = "./packages/apalis-sql", features = ["sqlite"] }
 
 [[bench]]
 name = "redis_benchmark"

@@ -28,7 +28,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.4", features = ["redis"] }
+apalis = { version = "0.4", features = ["redis", "tokio-comp"] }
 ```
 
 ## Usage
