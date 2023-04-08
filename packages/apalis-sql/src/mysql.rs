@@ -105,13 +105,13 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
                             .fetch_optional(&mut tx)
                             .await
                             .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-                        tx.commit()
-                            .await
-                            .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+
                         yield job.build_job_request();
                     }
                 }
-
+                tx.commit()
+                    .await
+                    .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             }
         }
     }
