@@ -93,7 +93,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
                 let tx = pool.clone();
                 let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 let job_type = T::NAME;
-                let fetch_query = "Select * FROM apalis.get_jobs($1, $2, $3) WHERE job IS NOT NULL;";
+                let fetch_query = "Select * from (Select apalis.get_job($1, $2) as job from generate_series(1,5)) as jobs where job is not null";
                 let jobs: Vec<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
                     .bind(worker_id.to_string())
                     .bind(job_type)
