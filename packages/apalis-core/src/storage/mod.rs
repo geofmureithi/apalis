@@ -1,15 +1,15 @@
+mod beats;
 /// Allows for building workers that consume a [Storage]
 pub mod builder;
 mod error;
-mod layers;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
 use crate::{
-    job::JobStream,
-    job::{Job, JobStreamResult},
+    job::{Job, JobId, JobStreamResult},
     request::JobRequest,
+    worker::WorkerId,
 };
 
 #[cfg(feature = "storage")]
@@ -27,38 +27,41 @@ pub trait Storage: Clone {
     type Output: Job;
 
     /// Pushes a job to a storage
-    ///
-    /// TODO: return id
-    async fn push(&mut self, job: Self::Output) -> StorageResult<()>;
+    async fn push(&mut self, job: Self::Output) -> StorageResult<JobId>;
 
     /// Push a job into the scheduled set
-    async fn schedule(&mut self, job: Self::Output, on: DateTime<Utc>) -> StorageResult<()>;
+    async fn schedule(&mut self, job: Self::Output, on: DateTime<Utc>) -> StorageResult<JobId>;
 
     /// Return the number of pending jobs from the queue
     async fn len(&self) -> StorageResult<i64>;
 
     /// Fetch a job given an id
-    async fn fetch_by_id(&self, job_id: String) -> StorageResult<Option<JobRequest<Self::Output>>>;
+    async fn fetch_by_id(&self, job_id: &JobId) -> StorageResult<Option<JobRequest<Self::Output>>>;
 
     /// Get the stream of jobs
-    fn consume(&mut self, worker_id: String, interval: Duration) -> JobStreamResult<Self::Output>;
+    fn consume(
+        &mut self,
+        worker_id: &WorkerId,
+        interval: Duration,
+        buffer_size: usize,
+    ) -> JobStreamResult<Self::Output>;
 
-    /// Acknowledge a job which returns [JobResult::Success]
-    async fn ack(&mut self, worker_id: String, job_id: String) -> StorageResult<()>;
+    /// Acknowledge a job which returns Ok
+    async fn ack(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()>;
 
-    /// Retry a job which returns [JobResult::Retry]
-    async fn retry(&mut self, worker_id: String, job_id: String) -> StorageResult<()>;
+    /// Retry a job
+    async fn retry(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()>;
 
     /// Called by a Worker to keep the storage alive and prevent jobs from being deemed as orphaned
-    async fn keep_alive<Service>(&mut self, worker_id: String) -> StorageResult<()>;
+    async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()>;
 
     /// Kill a job that returns [JobResult::Kill]
-    async fn kill(&mut self, worker_id: String, job_id: String) -> StorageResult<()>;
+    async fn kill(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()>;
 
     /// Update a job details
     async fn update_by_id(
         &self,
-        job_id: String,
+        job_id: &JobId,
         job: &JobRequest<Self::Output>,
     ) -> StorageResult<()>;
 
@@ -74,7 +77,7 @@ pub trait Storage: Clone {
     ) -> StorageResult<()>;
 
     /// Used to recover jobs when a Worker shuts down.
-    async fn reenqueue_active(&mut self, _job_ids: Vec<String>) -> StorageResult<()> {
+    async fn reenqueue_active(&mut self, _job_ids: Vec<&JobId>) -> StorageResult<()> {
         Ok(())
     }
 
@@ -95,21 +98,9 @@ pub enum StorageWorkerPulse {
         /// the count of jobs to be scheduled
         count: i32,
     },
-    /// Resque any orphaned jobs
-    RenqueueOrpharned {
+    /// Rescue any orphaned jobs
+    ReenqueueOrphaned {
         /// the count of orphaned jobs
         count: i32,
     },
-}
-
-impl<S> JobStream for S
-where
-    S: Storage,
-{
-    type Job = S::Output;
-
-    /// Consume the stream of jobs from Storage
-    fn stream(&mut self, worker_id: String, interval: Duration) -> JobStreamResult<S::Output> {
-        self.consume(worker_id, interval)
-    }
 }

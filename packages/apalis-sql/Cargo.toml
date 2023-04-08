@@ -1,33 +1,36 @@
 [package]
 name = "apalis-sql"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2021"
 readme = "../../README.md"
 
 license = "MIT"
-description = "SQL Storage for Apalis: simple, extensible multithreaded background job processing for Rust"
+description = "SQL Storage for apalis: simple, extensible multithreaded background job processing for Rust"
 
 [features]
-default = [ "sqlite", "migrate" ]
+default = [ "sqlite", "migrate"]
 postgres = [ "sqlx/postgres", "sqlx/json", "sqlx/chrono"]
 sqlite = [ "sqlx/sqlite", "sqlx/json", "sqlx/chrono"]
 mysql = [ "sqlx/mysql", "sqlx/json", "sqlx/chrono", "sqlx/bigdecimal"]
 migrate = ["sqlx/migrate", "sqlx/macros"]
+async-std-comp = ["async-std", "apalis-core/async-std-comp", "sqlx/runtime-async-std-rustls"]
+tokio-comp = ["tokio", "apalis-core/tokio-comp", "sqlx/runtime-tokio-rustls"]
+expose = ["apalis-core/expose"]
 
 [dependencies.sqlx]
-version = "0.5.13"
+version = "0.6"
 default-features = false
-features = [ "runtime-tokio-rustls", "uuid" ]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.4", features= ["storage"],  default-features = false}
+apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.5", features= ["storage"],  default-features = false}
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 futures = "0.3"
 async-stream = "0.3"
-tokio = "1"
+tokio = { version = "1", features = ["rt", "net"], optional = true }
+async-std = { version = "1.8.0", optional = true}
 futures-lite = "1.12.0"
 async-trait = "0.1.53"
 

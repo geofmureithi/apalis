@@ -20,6 +20,8 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: check
+          args: --features tokio-comp
+
 
   test:
     name: Test Suite
@@ -34,6 +36,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --features tokio-comp
 
   test-redis:
     name: Test Suite Redis
@@ -50,7 +53,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: cargo test -- --test-threads=1
+      - run: cargo test --features tokio-comp -- --test-threads=1
         working-directory: packages/apalis-redis
         env:
           REDIS_URL: redis://127.0.0.1/
@@ -75,7 +78,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: cargo test --no-default-features --features mysql,migrate -- --test-threads=1
+      - run: cargo test --no-default-features --features mysql,migrate,tokio-comp -- --test-threads=1
         working-directory: packages/apalis-sql
         env:
           DATABASE_URL: mysql://test:test@localhost/test
@@ -99,7 +102,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: cargo test --no-default-features --features postgres,migrate -- --test-threads=1
+      - run: cargo test --no-default-features --features postgres,migrate,tokio-comp -- --test-threads=1
         working-directory: packages/apalis-sql
 
   test-sqlite:
@@ -112,7 +115,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: cargo test --no-default-features --features sqlite,migrate -- --test-threads=1
+      - run: cargo test --no-default-features --features sqlite,migrate,tokio-comp -- --test-threads=1
         working-directory: packages/apalis-sql
 
   fmt:
@@ -145,4 +148,4 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warnings
+          args: --features tokio-comp -- -D warnings

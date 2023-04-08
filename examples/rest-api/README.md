@@ -1,4 +1,4 @@
-# Apalis Rest API Example
+# apalis Rest API Example
 
 ![UI](https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png)
 

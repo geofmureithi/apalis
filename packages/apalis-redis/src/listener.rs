@@ -14,9 +14,9 @@ impl RedisPubSubListener {
 }
 
 impl WorkerListener for RedisPubSubListener {
-    fn on_event(&self, worker_id: &str, event: &WorkerEvent) {
+    fn on_event(&self, worker_id: &WorkerId, event: &WorkerEvent) {
         let mut conn = self.conn.clone();
-        let message = format!("{worker_id}: {event:?}");
+        let message = format!("{worker_id:?}: {event:?}");
         let fut = async move {
             let _res: Result<(), _> = Cmd::publish("apalis::workers", message)
                 .query_async(&mut conn)

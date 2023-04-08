@@ -1,4 +1,4 @@
-//! Apalis storage using Redis as a backend
+//! apalis storage using Redis as a backend
 //! ```rust,ignore
 //! #[tokio::main]
 //! async fn main() -> std::io::Result<()> {

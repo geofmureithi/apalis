@@ -1,4 +1,6 @@
-use apalis::prelude::{Sleep, Timer};
+/// TODO: We could use async-std but this feature is available on unstable only.
+/// https://docs.rs/async-std/latest/async_std/stream/fn.interval.html
+use super::{Sleep, Timer};
 use pin_project_lite::pin_project;
 
 use std::{
@@ -10,9 +12,9 @@ use std::{
 
 /// A Timer that uses the smol runtime.
 #[derive(Clone, Debug)]
-pub struct SmolTimer;
+pub struct AsyncStdTimer;
 
-impl Timer for SmolTimer {
+impl Timer for AsyncStdTimer {
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Sleep>> {
         Box::pin(SmolSleep {
             inner: smol::Timer::after(duration),

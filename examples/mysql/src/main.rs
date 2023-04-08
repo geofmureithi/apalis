@@ -9,7 +9,7 @@ async fn produce_jobs(storage: &MysqlStorage<Email>) -> Result<()> {
         storage
             .push(Email {
                 to: format!("test{i}@example.com"),
-                text: "Test background job from Apalis".to_string(),
+                text: "Test background job from apalis".to_string(),
                 subject: "Background email job".to_string(),
             })
             .await?;
@@ -17,7 +17,7 @@ async fn produce_jobs(storage: &MysqlStorage<Email>) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
+#[async_std::main]
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
@@ -31,6 +31,7 @@ async fn main() -> Result<()> {
 
     produce_jobs(&mysql).await?;
     Monitor::new()
+        .executor(AsyncStdExecutor::new())
         .register_with_count(2, move |c| {
             WorkerBuilder::new(format!("tasty-avocado-{c}"))
                 .layer(TraceLayer::new())

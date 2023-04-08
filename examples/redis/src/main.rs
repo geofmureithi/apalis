@@ -7,11 +7,11 @@ use apalis::{
 use email_service::{send_email, Email};
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
-    for _i in 0..10 {
+    for _i in 0..1 {
         storage
             .push(Email {
                 to: "test@example.com".to_string(),
-                text: "Test background job from Apalis".to_string(),
+                text: "Test background job from apalis".to_string(),
                 subject: "Background email job".to_string(),
             })
             .await?;

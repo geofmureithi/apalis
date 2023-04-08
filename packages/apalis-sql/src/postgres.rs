@@ -6,25 +6,26 @@
 //! Select
 //!     apalis.push_job(
 //!             'apalis::Email',
-//!              json_build_object('subject', 'Test Apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum')
+//!              json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum')
 //!     );
 //! ```
 
-use apalis_core::error::{JobError, JobStreamError};
-use apalis_core::job::{Counts, Job, JobStreamExt, JobStreamResult, JobStreamWorker};
-use apalis_core::request::{JobRequest, JobState};
+use apalis_core::error::JobStreamError;
+use apalis_core::job::{Job, JobId, JobStreamResult};
+use apalis_core::request::JobRequest;
 use apalis_core::storage::StorageError;
 use apalis_core::storage::StorageWorkerPulse;
 use apalis_core::storage::{Storage, StorageResult};
+use apalis_core::utils::timer::SleepTimer;
+use apalis_core::utils::Timer;
+use apalis_core::worker::WorkerId;
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
 use futures::{FutureExt, Stream};
 use futures_lite::future;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::postgres::PgListener;
-use sqlx::types::Uuid;
 use sqlx::{PgPool, Row};
-use std::collections::HashMap;
 use std::convert::TryInto;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
@@ -73,38 +74,44 @@ impl<T> PostgresStorage<T> {
 impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
     fn stream_jobs(
         &self,
-        worker_id: String,
+        worker_id: &WorkerId,
         interval: Duration,
+        buffer_size: usize,
     ) -> impl Stream<Item = Result<Option<JobRequest<T>>, JobStreamError>> {
         let pool = self.pool.clone();
-        let mut interval = tokio::time::interval(interval);
-
+        let sleeper = SleepTimer;
+        let worker_id = worker_id.clone();
         try_stream! {
             let mut listener = PgListener::connect_with(&pool).await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             #[allow(clippy::let_unit_value)]
             let _notify = listener.listen("apalis::job").await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             loop {
                 //  Ideally wait for a job or a tick
-                let interval = interval.tick().map(|_| ());
+                let interval = sleeper.sleep(interval).map(|_| ());
                 let notification = listener.recv().map(|_| ()); // TODO: This silences errors from pubsub, needs improvement to trigger start queue
                 future::race(interval, notification).await;
                 let tx = pool.clone();
                 let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 let job_type = T::NAME;
-                let fetch_query = "Select * FROM apalis.get_job($1, $2) WHERE job IS NOT NULL;";
-                let job: Option<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
-                    .bind(worker_id.clone())
+                let fetch_query = "Select * from apalis.get_jobs($1, $2, $3);";
+                let jobs: Vec<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
+                    .bind(worker_id.to_string())
                     .bind(job_type)
-                    .fetch_optional(&mut tx)
+                    // https://docs.rs/sqlx/latest/sqlx/postgres/types/index.html
+                    .bind(i32::try_from(buffer_size).map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?)
+                    .fetch_all(&mut tx)
                     .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-                yield job.build_job_request()
+                for job in jobs {
+                    yield job.build_job_request()
+                }
+
             }
         }
     }
 
     async fn keep_alive_at<Service>(
         &mut self,
-        worker_id: String,
+        worker_id: &WorkerId,
         last_seen: DateTime<Utc>,
     ) -> StorageResult<()> {
         let pool = self.pool.clone();
@@ -120,7 +127,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
                 ON CONFLICT (id) DO 
                    UPDATE SET last_seen = EXCLUDED.last_seen";
         sqlx::query(query)
-            .bind(worker_id.to_owned())
+            .bind(worker_id.to_string())
             .bind(worker_type)
             .bind(storage_name)
             .bind(std::any::type_name::<Service>())
@@ -135,7 +142,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
 #[async_trait::async_trait]
 impl<T> Storage for PostgresStorage<T>
 where
-    T: Job + Serialize + DeserializeOwned + Send + 'static + Unpin,
+    T: Job + Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
 {
     type Output = T;
 
@@ -146,11 +153,11 @@ where
     /// ```sql
     /// Select apalis.push_job(job_type::text, job::json);
     /// ```
-    async fn push(&mut self, job: Self::Output) -> StorageResult<()> {
-        let id = Uuid::new_v4();
+    async fn push(&mut self, job: Self::Output) -> StorageResult<JobId> {
+        let id = JobId::new();
         let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, 25, NOW() , NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
-        let job = serde_json::to_value(&job)?;
+        let job = serde_json::to_value(&job).map_err(|e| StorageError::Parse(Box::from(e)))?;
         let mut pool = pool
             .acquire()
             .await
@@ -163,19 +170,19 @@ where
             .execute(&mut pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(())
+        Ok(id)
     }
 
     async fn schedule(
         &mut self,
         job: Self::Output,
         on: chrono::DateTime<Utc>,
-    ) -> StorageResult<()> {
+    ) -> StorageResult<JobId> {
         let query =
             "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, 25, $4, NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
-        let id = Uuid::new_v4();
-        let job = serde_json::to_value(&job)?;
+        let id = JobId::new();
+        let job = serde_json::to_value(&job).map_err(|e| StorageError::Parse(Box::from(e)))?;
         let mut pool = pool
             .acquire()
             .await
@@ -189,10 +196,10 @@ where
             .execute(&mut pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(())
+        Ok(id)
     }
 
-    async fn fetch_by_id(&self, job_id: String) -> StorageResult<Option<JobRequest<Self::Output>>> {
+    async fn fetch_by_id(&self, job_id: &JobId) -> StorageResult<Option<JobRequest<Self::Output>>> {
         let pool = self.pool.clone();
 
         let mut conn = pool
@@ -202,7 +209,7 @@ where
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         let fetch_query = "SELECT * FROM apalis.jobs WHERE id = $1";
         let res = sqlx::query_as(fetch_query)
-            .bind(job_id)
+            .bind(job_id.to_string())
             .fetch_optional(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
@@ -217,7 +224,7 @@ where
                 Ok(true)
             }
             // Worker not seen in 5 minutes yet has running jobs
-            StorageWorkerPulse::RenqueueOrpharned { count } => {
+            StorageWorkerPulse::ReenqueueOrphaned { count } => {
                 let job_type = T::NAME;
                 let mut tx = pool
                     .acquire()
@@ -241,7 +248,7 @@ where
         }
     }
 
-    async fn kill(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
+    async fn kill(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
         let pool = self.pool.clone();
 
         let mut tx = pool
@@ -251,8 +258,8 @@ where
         let query =
                 "UPDATE apalis.jobs SET status = 'Killed', done_at = now() WHERE id = $1 AND lock_by = $2";
         sqlx::query(query)
-            .bind(job_id.to_owned())
-            .bind(worker_id.to_owned())
+            .bind(job_id.to_string())
+            .bind(worker_id.to_string())
             .execute(&mut tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
@@ -261,7 +268,7 @@ where
 
     /// Puts the job instantly back into the queue
     /// Another [Worker] may consume
-    async fn retry(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
+    async fn retry(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
         let pool = self.pool.clone();
 
         let mut tx = pool
@@ -271,16 +278,21 @@ where
         let query =
                 "UPDATE apalis.jobs SET status = 'Pending', done_at = NULL, lock_by = NULL WHERE id = $1 AND lock_by = $2";
         sqlx::query(query)
-            .bind(job_id.to_owned())
-            .bind(worker_id.to_owned())
+            .bind(job_id.to_string())
+            .bind(worker_id.to_string())
             .execute(&mut tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
     }
 
-    fn consume(&mut self, worker_id: String, interval: Duration) -> JobStreamResult<T> {
-        Box::pin(self.stream_jobs(worker_id, interval))
+    fn consume(
+        &mut self,
+        worker_id: &WorkerId,
+        interval: Duration,
+        buffer_size: usize,
+    ) -> JobStreamResult<T> {
+        Box::pin(self.stream_jobs(worker_id, interval, buffer_size))
     }
     async fn len(&self) -> StorageResult<i64> {
         let pool = self.pool.clone();
@@ -298,7 +310,7 @@ where
             .try_get("count")
             .map_err(|e| StorageError::Database(Box::from(e)))?)
     }
-    async fn ack(&mut self, worker_id: String, job_id: String) -> StorageResult<()> {
+    async fn ack(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
         let pool = self.pool.clone();
 
         let mut tx = pool
@@ -308,8 +320,8 @@ where
         let query =
                 "UPDATE apalis.jobs SET status = 'Done', done_at = now() WHERE id = $1 AND lock_by = $2";
         sqlx::query(query)
-            .bind(job_id.to_owned())
-            .bind(worker_id.to_owned())
+            .bind(job_id.to_string())
+            .bind(worker_id.to_string())
             .execute(&mut tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
@@ -332,7 +344,7 @@ where
         let query =
                 "UPDATE apalis.jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = $2 WHERE id = $1";
         sqlx::query(query)
-            .bind(job_id.to_owned())
+            .bind(job_id.to_string())
             .bind(Utc::now().add(wait))
             .execute(&mut tx)
             .await
@@ -342,7 +354,7 @@ where
 
     async fn update_by_id(
         &self,
-        job_id: String,
+        job_id: &JobId,
         job: &JobRequest<Self::Output>,
     ) -> StorageResult<()> {
         let pool = self.pool.clone();
@@ -363,33 +375,49 @@ where
             .bind(status.to_owned())
             .bind(attempts)
             .bind(done_at)
-            .bind(lock_by)
+            .bind(lock_by.map(|w| w.name().to_string()))
             .bind(lock_at)
             .bind(last_error)
-            .bind(job_id.to_owned())
+            .bind(job_id.to_string())
             .execute(&mut tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
     }
 
-    async fn keep_alive<Service>(&mut self, worker_id: String) -> StorageResult<()> {
+    async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()> {
         self.keep_alive_at::<Service>(worker_id, Utc::now()).await
     }
 }
 
-#[async_trait::async_trait]
+#[cfg(feature = "expose")]
+#[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
+/// Expose an [`PostgresStorage`] for web and cli management tools
+pub mod expose {
+    use super::*;
+    use apalis_core::error::JobError;
+    use apalis_core::expose::{ExposedWorker, JobStateCount, JobStreamExt};
+    use apalis_core::request::JobRequest;
+    use apalis_core::request::JobState;
+    use apalis_core::storage::StorageError;
+    use apalis_core::worker::WorkerId;
+    use chrono::{DateTime, Utc};
+    use std::collections::HashMap;
 
-impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for PostgresStorage<J> {
-    async fn counts(&mut self) -> Result<Counts, JobError> {
-        let mut conn = self
-            .pool
-            .clone()
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
+    #[async_trait::async_trait]
 
-        let fetch_query = "SELECT
+    impl<J: 'static + Job + Serialize + DeserializeOwned + Send + Sync + Unpin> JobStreamExt<J>
+        for PostgresStorage<J>
+    {
+        async fn counts(&mut self) -> Result<JobStateCount, JobError> {
+            let mut conn = self
+                .pool
+                .clone()
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
+
+            let fetch_query = "SELECT
                             COUNT(1) FILTER (WHERE status = 'Pending') AS pending, 
                             COUNT(1) FILTER (WHERE status = 'Running') AS running,
                             COUNT(1) FILTER (WHERE status = 'Done') AS done,
@@ -397,68 +425,67 @@ impl<J: 'static + Job + Serialize + DeserializeOwned> JobStreamExt<J> for Postgr
                             COUNT(1) FILTER (WHERE status = 'Failed') AS failed, 
                             COUNT(1) FILTER (WHERE status = 'Killed') AS killed
                         FROM apalis.jobs WHERE job_type = $1";
-        let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
-            .bind(J::NAME)
-            .fetch_one(&mut conn)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        let mut inner = HashMap::new();
-        inner.insert(JobState::Pending, res.0);
-        inner.insert(JobState::Running, res.1);
-        inner.insert(JobState::Done, res.2);
-        inner.insert(JobState::Retry, res.3);
-        inner.insert(JobState::Failed, res.4);
-        inner.insert(JobState::Killed, res.5);
-        Ok(Counts { inner })
-    }
+            let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
+                .bind(J::NAME)
+                .fetch_one(&mut conn)
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
+            let mut counts = HashMap::new();
+            counts.insert(JobState::Pending, res.0.try_into()?);
+            counts.insert(JobState::Running, res.1.try_into()?);
+            counts.insert(JobState::Done, res.2.try_into()?);
+            counts.insert(JobState::Retry, res.3.try_into()?);
+            counts.insert(JobState::Failed, res.4.try_into()?);
+            counts.insert(JobState::Killed, res.5.try_into()?);
+            Ok(JobStateCount::new(counts))
+        }
 
-    async fn list_jobs(
-        &mut self,
-        status: &JobState,
-        page: i32,
-    ) -> Result<Vec<JobRequest<J>>, JobError> {
-        let status = status.as_ref().to_string();
+        async fn list_jobs(
+            &mut self,
+            status: &JobState,
+            page: i32,
+        ) -> Result<Vec<JobRequest<J>>, JobError> {
+            let status = status.as_ref().to_string();
 
-        let mut conn = self
-            .pool
-            .clone()
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        let fetch_query = "SELECT * FROM apalis.jobs WHERE status = $1 AND job_type = $2 ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET $3";
-        let res: Vec<SqlJobRequest<J>> = sqlx::query_as(fetch_query)
-            .bind(status)
-            .bind(J::NAME)
-            .bind((page - 1) * 10)
-            .fetch_all(&mut conn)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(res.into_iter().map(|j| j.into()).collect())
-    }
+            let mut conn = self
+                .pool
+                .clone()
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
+            let fetch_query = "SELECT * FROM apalis.jobs WHERE status = $1 AND job_type = $2 ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET $3";
+            let res: Vec<SqlJobRequest<J>> = sqlx::query_as(fetch_query)
+                .bind(status)
+                .bind(J::NAME)
+                .bind((page - 1) * 10)
+                .fetch_all(&mut conn)
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
+            Ok(res.into_iter().map(|j| j.into()).collect())
+        }
 
-    async fn list_workers(&mut self) -> Result<Vec<JobStreamWorker>, JobError> {
-        let mut conn = self
-            .pool
-            .clone()
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        let fetch_query =
+        async fn list_workers(&mut self) -> Result<Vec<ExposedWorker>, JobError> {
+            let mut conn = self
+                .pool
+                .clone()
+                .acquire()
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
+            let fetch_query =
             "SELECT id, layers, last_seen FROM apalis.workers WHERE worker_type = $1 ORDER BY last_seen DESC LIMIT 20 OFFSET $2";
-        let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
-            .bind(J::NAME)
-            .bind(0_i64)
-            .fetch_all(&mut conn)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(res
-            .into_iter()
-            .map(|(worker_id, layers, last_seen)| {
-                let mut worker = JobStreamWorker::new::<Self, J>(worker_id, last_seen);
-                worker.set_layers(layers);
-                worker
-            })
-            .collect())
+            let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
+                .bind(J::NAME)
+                .bind(0_i64)
+                .fetch_all(&mut conn)
+                .await
+                .map_err(|e| StorageError::Database(Box::from(e)))?;
+            Ok(res
+                .into_iter()
+                .map(|(worker_id, layers, last_seen)| {
+                    ExposedWorker::new::<Self, J>(WorkerId::new(worker_id), layers, last_seen)
+                })
+                .collect())
+        }
     }
 }
 
@@ -467,6 +494,7 @@ mod tests {
     use std::ops::Sub;
 
     use super::*;
+    use apalis_core::request::JobState;
     use email_service::Email;
     use futures::StreamExt;
 
@@ -489,19 +517,19 @@ mod tests {
     ///  - worker identified by `worker_id`
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(storage: PostgresStorage<Email>, worker_id: String) {
+    async fn cleanup(storage: PostgresStorage<Email>, worker_id: &WorkerId) {
         let mut tx = storage
             .pool
             .acquire()
             .await
             .expect("failed to get connection");
         sqlx::query("Delete from apalis.jobs where lock_by = $1 or status = 'Pending'")
-            .bind(worker_id.clone())
+            .bind(worker_id.to_string())
             .execute(&mut tx)
             .await
             .expect("failed to delete jobs");
         sqlx::query("Delete from apalis.workers where id = $1")
-            .bind(worker_id.clone())
+            .bind(worker_id.to_string())
             .execute(&mut tx)
             .await
             .expect("failed to delete worker");
@@ -517,11 +545,11 @@ mod tests {
         }
     }
 
-    async fn consume_one<S, T>(storage: &mut S, worker_id: String) -> JobRequest<T>
+    async fn consume_one<S, T>(storage: &mut S, worker_id: &WorkerId) -> JobRequest<T>
     where
         S: Storage<Output = T>,
     {
-        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10));
+        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10), 1);
         stream
             .next()
             .await
@@ -533,17 +561,17 @@ mod tests {
     async fn register_worker_at(
         storage: &mut PostgresStorage<Email>,
         last_seen: DateTime<Utc>,
-    ) -> String {
-        let worker_id = Uuid::new_v4().to_string();
+    ) -> WorkerId {
+        let worker_id = WorkerId::new("test-worker");
 
         storage
-            .keep_alive_at::<DummyService>(worker_id.clone(), last_seen)
+            .keep_alive_at::<DummyService>(&worker_id, last_seen)
             .await
             .expect("failed to register worker");
         worker_id
     }
 
-    async fn register_worker(storage: &mut PostgresStorage<Email>) -> String {
+    async fn register_worker(storage: &mut PostgresStorage<Email>) -> WorkerId {
         register_worker_at(storage, Utc::now()).await
     }
 
@@ -554,7 +582,7 @@ mod tests {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job<S>(storage: &mut S, job_id: String) -> JobRequest<Email>
+    async fn get_job<S>(storage: &mut S, job_id: &JobId) -> JobRequest<Email>
     where
         S: Storage<Output = Email>,
     {
@@ -572,13 +600,13 @@ mod tests {
 
         let worker_id = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, &worker_id).await;
 
         assert_eq!(*job.context().status(), JobState::Running);
         assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
         assert!(job.context().lock_at().is_some());
 
-        cleanup(storage, worker_id).await;
+        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -588,19 +616,19 @@ mod tests {
 
         let worker_id = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         let job_id = job.context().id();
 
         storage
-            .ack(worker_id.clone(), job_id.clone())
+            .ack(&worker_id, job_id)
             .await
             .expect("failed to acknowledge the job");
 
-        let job = get_job(&mut storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id).await;
         assert_eq!(*job.context().status(), JobState::Done);
         assert!(job.context().done_at().is_some());
 
-        cleanup(storage, worker_id).await;
+        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -611,19 +639,19 @@ mod tests {
 
         let worker_id = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         let job_id = job.context().id();
 
         storage
-            .kill(worker_id.clone(), job_id.clone())
+            .kill(&worker_id, job_id)
             .await
             .expect("failed to kill job");
 
-        let job = get_job(&mut storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id).await;
         assert_eq!(*job.context().status(), JobState::Killed);
         assert!(job.context().done_at().is_some());
 
-        cleanup(storage, worker_id).await;
+        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -635,15 +663,15 @@ mod tests {
         let worker_id =
             register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(6))).await;
 
-        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
             .await
             .expect("failed to heartbeat");
         assert!(result);
 
         let job_id = job.context().id();
-        let job = get_job(&mut storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id).await;
 
         assert_eq!(*job.context().status(), JobState::Pending);
         assert!(job.context().done_at().is_none());
@@ -654,7 +682,7 @@ mod tests {
             Some("Job was abandoned".to_string())
         );
 
-        cleanup(storage, worker_id).await;
+        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -666,19 +694,19 @@ mod tests {
         let worker_id =
             register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(4))).await;
 
-        let job = consume_one(&mut storage, worker_id.clone()).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::RenqueueOrpharned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
             .await
             .expect("failed to heartbeat");
         assert!(result);
 
         let job_id = job.context().id();
-        let job = get_job(&mut storage, job_id.clone()).await;
+        let job = get_job(&mut storage, job_id).await;
 
         assert_eq!(*job.context().status(), JobState::Running);
         assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
 
-        cleanup(storage, worker_id).await;
+        cleanup(storage, &worker_id).await;
     }
 }

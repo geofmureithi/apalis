@@ -7,8 +7,8 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1"
-tokio = { version ="1", features=["macros"]}
-apalis = { path = "../../", features = ["redis", "extensions"] }
+tokio = { version ="1", features=["macros", "rt-multi-thread"]}
+apalis = { path = "../../", features = ["redis", "extensions", "tokio-comp"] }
 serde = "1"
 env_logger = "0.10"
 tracing-subscriber = "0.3.11"

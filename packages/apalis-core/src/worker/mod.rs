@@ -1,23 +1,33 @@
 /// Represents a worker that is ready to consume jobs
 pub mod ready;
+use crate::executor::Executor;
 use async_trait::async_trait;
+use futures::Future;
 use graceful_shutdown::Shutdown;
-use std::fmt;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use std::fmt::{self, Display};
+use std::time::Duration;
 use thiserror::Error;
 
-use crate::executor::Executor;
-
 /// A worker name wrapper usually used by Worker builder
-#[derive(Debug, Clone)]
-pub struct WorkerRef {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkerId {
     name: String,
 }
 
-impl WorkerRef {
+impl Display for WorkerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl WorkerId {
     /// Build a new worker ref
-    pub fn new(name: String) -> Self {
-        Self { name }
+    pub fn new<T: AsRef<str>>(name: T) -> Self {
+        Self {
+            name: name.as_ref().to_string(),
+        }
     }
     /// Get the name of the worker
     pub fn name(&self) -> &str {
@@ -52,8 +62,8 @@ pub trait Worker<Job>: Sized {
     /// The source type that this worker will use to receive jobs.
     type Source;
 
-    /// A worker must be named for identification purposes
-    fn name(&self) -> String;
+    /// A worker must be identifiable and unique
+    fn id(&self) -> WorkerId;
 
     /// Starts the worker, taking ownership of `self` and the provided `ctx`.
     ///
@@ -67,20 +77,37 @@ pub trait Worker<Job>: Sized {
 pub struct WorkerContext<E: Executor> {
     pub(crate) shutdown: Shutdown,
     pub(crate) executor: E,
+    pub(crate) worker_id: WorkerId,
 }
 
 impl<E: Executor> fmt::Debug for WorkerContext<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WorkerContext")
             .field("shutdown", &["Shutdown handle"])
+            .field("worker_id", &self.worker_id)
             .finish()
     }
 }
 
-impl<E: Executor + Send + 'static> WorkerContext<E> {
+impl<E: Executor + Send> WorkerContext<E> {
+    /// Get the Worker ID
+    pub fn id(&self) -> WorkerId {
+        self.worker_id.clone()
+    }
     /// Allows spawning of futures that will be gracefully shutdown by the worker
-    pub fn spawn() {}
+    pub fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
+        self.executor.spawn(self.shutdown.graceful(future));
+    }
 
     /// Calling this function triggers shutting down the worker
     pub fn shutdown(&self) {}
+}
+
+/// A worker can have heartbeats to keep alive or enqueue new jobs
+#[async_trait::async_trait]
+pub trait HeartBeat {
+    /// The future of a single beat
+    async fn heart_beat(&mut self);
+    /// The interval for each beat to be called
+    fn interval(&self) -> Duration;
 }

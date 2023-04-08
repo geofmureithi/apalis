@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use strum::{AsRefStr, EnumString};
 
-use crate::context::JobContext;
+use crate::{context::JobContext, job::JobId};
 
 /// Represents the state of a [JobRequest]
 #[derive(
@@ -42,7 +42,7 @@ pub struct JobRequest<T> {
 impl<T> JobRequest<T> {
     /// Creates a new [JobRequest]
     pub fn new(job: T) -> Self {
-        let context = JobContext::new(String::new());
+        let context = JobContext::new(JobId::new());
         Self { job, context }
     }
 

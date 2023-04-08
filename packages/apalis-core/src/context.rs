@@ -1,30 +1,36 @@
-use crate::request::JobState;
+use crate::{job::JobId, request::JobState, worker::WorkerId};
 
 use chrono::{DateTime, Utc};
-use http::Extensions;
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "extensions")]
+use http::Extensions;
+#[cfg(feature = "extensions")]
 use std::{any::Any, marker::Send};
 
 /// The context for a job is represented here
 /// Used to provide a context when a job is defined through the [Job] trait
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobContext {
-    pub(crate) id: String,
+    pub(crate) id: JobId,
     pub(crate) status: JobState,
     pub(crate) run_at: DateTime<Utc>,
     pub(crate) attempts: i32,
     pub(crate) max_attempts: i32,
     pub(crate) last_error: Option<String>,
     pub(crate) lock_at: Option<DateTime<Utc>>,
-    pub(crate) lock_by: Option<String>,
+    pub(crate) lock_by: Option<WorkerId>,
     pub(crate) done_at: Option<DateTime<Utc>>,
+    #[cfg(feature = "extensions")]
     #[serde(skip)]
     pub(crate) data: Data,
 }
 
+#[cfg(feature = "extensions")]
 #[derive(Debug, Default)]
 pub(crate) struct Data(Extensions);
 
+#[cfg(feature = "extensions")]
 impl Clone for Data {
     fn clone(&self) -> Self {
         Data(Extensions::new())
@@ -34,7 +40,7 @@ impl Clone for Data {
 impl JobContext {
     /// Build a new context with defaults given an ID.
     #[must_use]
-    pub fn new(id: String) -> Self {
+    pub fn new(id: JobId) -> Self {
         JobContext {
             id,
             status: JobState::Pending,
@@ -45,6 +51,7 @@ impl JobContext {
             max_attempts: 25,
             last_error: None,
             lock_by: None,
+            #[cfg(feature = "extensions")]
             data: Data::default(),
         }
     }
@@ -55,12 +62,14 @@ impl JobContext {
     ///
     /// ```
     /// # use apalis_core::context::JobContext;
-    /// let mut ctx = JobContext::new(1.to_string());
+    /// # use apalis_core::job::JobId;
+    /// let mut ctx = JobContext::new(JobId::new());
     /// assert!(ctx.data_opt::<i32>().is_none());
     /// ctx.insert(5i32);
     ///
     /// assert_eq!(ctx.data_opt::<i32>(), Some(&5i32));
     /// ```
+    #[cfg(feature = "extensions")]
     #[must_use]
     pub fn data_opt<D: Any + Send + Sync>(&self) -> Option<&D> {
         self.data.0.get()
@@ -80,6 +89,7 @@ impl JobContext {
     /// assert!(ctx.insert(4u8).is_none());
     /// assert_eq!(ctx.insert(9i32), Some(5i32));
     /// ```
+    #[cfg(feature = "extensions")]
     pub fn insert<D: Any + Send + Sync>(&mut self, data: D) -> Option<D> {
         self.data.0.insert(data)
     }
@@ -95,8 +105,8 @@ impl JobContext {
     }
 
     /// Get the id for a job
-    pub fn id(&self) -> String {
-        self.id.clone()
+    pub fn id(&self) -> &JobId {
+        &self.id
     }
 
     /// Gets the current attempts for a job. Default 0
@@ -150,12 +160,12 @@ impl JobContext {
     }
 
     /// Get the time a job was locked
-    pub fn lock_by(&self) -> &Option<String> {
+    pub fn lock_by(&self) -> &Option<WorkerId> {
         &self.lock_by
     }
 
     /// Set `lock_by`
-    pub fn set_lock_by(&mut self, lock_by: Option<String>) {
+    pub fn set_lock_by(&mut self, lock_by: Option<WorkerId>) {
         self.lock_by = lock_by;
     }
 

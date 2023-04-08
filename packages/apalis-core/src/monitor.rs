@@ -10,16 +10,16 @@ use tower::Service;
 use tracing::warn;
 
 use crate::{
-    executor::{Executor, TokioExecutor},
+    executor::Executor,
     job::Job,
     request::JobRequest,
-    worker::{Worker, WorkerContext},
+    worker::{Worker, WorkerContext, WorkerId},
 };
 
 /// A monitor for coordinating and managing a collection of workers.
-pub struct Monitor<E: Executor> {
+pub struct Monitor<E> {
     shutdown: Shutdown,
-    worker_handles: Vec<(String, E::JoinHandle)>,
+    worker_handles: Vec<WorkerId>,
     timeout: Option<Duration>,
     executor: E,
 }
@@ -28,14 +28,7 @@ impl<E: Executor> Debug for Monitor<E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("Monitor")
             .field("shutdown", &"[Graceful shutdown listener]")
-            .field(
-                "worker_handles",
-                &self
-                    .worker_handles
-                    .iter()
-                    .map(|(name, _handle)| name.clone())
-                    .collect::<Vec<_>>(),
-            )
+            .field("worker_handles", &self.worker_handles.iter().cloned())
             .field("timeout", &self.timeout)
             .field("executor", &std::any::type_name::<E>())
             .finish()
@@ -65,18 +58,19 @@ impl<E: Executor + Send + 'static> Monitor<E> {
         <Serv as Service<JobRequest<J>>>::Future: std::marker::Send,
     {
         let shutdown = self.shutdown.clone();
-        let name = worker.name();
-        let handle = self.executor.spawn(
+        let worker_id = worker.id();
+        self.executor.spawn(
             self.shutdown.graceful(
                 worker
                     .start(WorkerContext {
                         shutdown,
                         executor: self.executor.clone(),
+                        worker_id: worker_id.clone(),
                     })
                     .map(|_| ()),
             ),
         );
-        self.worker_handles.push((name, handle));
+        self.worker_handles.push(worker_id);
         self
     }
 
@@ -161,11 +155,6 @@ impl<E: Executor + Send + 'static> Monitor<E> {
     /// If the timeout is reached and workers have not completed, the monitor will log a warning
     /// message and exit forcefully.
     pub async fn run(self) -> std::io::Result<()> {
-        // let _res: Vec<(String, bool)> = self
-        //     .worker_handles
-        //     .into_iter()
-        //     .map(|h| (h.0, h.1.is_finished()))
-        //     .collect();
         if let Some(timeout) = self.timeout {
             if self.shutdown.with_timeout(timeout).await {
                 warn!("Shutdown timeout reached. Exiting forcefully");
@@ -182,13 +171,13 @@ impl<E: Executor + Send + 'static> Monitor<E> {
     }
 }
 
-impl Default for Monitor<TokioExecutor> {
+impl Default for Monitor<()> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Monitor<TokioExecutor> {
+impl Monitor<()> {
     /// Creates a new monitor instance.
     ///
     /// # Returns
@@ -199,7 +188,7 @@ impl Monitor<TokioExecutor> {
             shutdown: Shutdown::new(),
             worker_handles: Vec::new(),
             timeout: None,
-            executor: TokioExecutor,
+            executor: (),
         }
     }
 
@@ -246,8 +235,8 @@ mod tests {
         type Service = S;
         type Source = TestSource;
 
-        fn name(&self) -> String {
-            "test-worker".to_string()
+        fn id(&self) -> WorkerId {
+            WorkerId::new("test-worker")
         }
 
         async fn start<E: Executor + Send>(

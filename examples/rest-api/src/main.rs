@@ -64,7 +64,7 @@ async fn upload_service(upload: Upload, _ctx: JobContext) -> Result<(), JobError
 #[derive(Serialize)]
 struct JobsResult<J> {
     jobs: Vec<JobRequest<J>>,
-    counts: Counts,
+    counts: JobStateCount,
 }
 #[derive(Deserialize)]
 struct Filter {
@@ -72,11 +72,6 @@ struct Filter {
     status: JobState,
     #[serde(default)]
     page: i32,
-}
-
-#[derive(Deserialize)]
-struct JobId {
-    job_id: String,
 }
 
 async fn push_job<J, S>(job: web::Json<J>, storage: web::Data<S>) -> HttpResponse
@@ -88,7 +83,7 @@ where
     let mut storage = storage.clone();
     let res = storage.push(job.into_inner()).await;
     match res {
-        Ok(()) => HttpResponse::Ok().body("Job added to queue".to_string()),
+        Ok(id) => HttpResponse::Ok().body(format!("Job with ID [{id}] added to queue")),
         Err(e) => HttpResponse::InternalServerError().body(format!("{e}")),
     }
 }
@@ -123,14 +118,14 @@ where
     }
 }
 
-async fn get_job<J, S>(job: web::Path<JobId>, storage: web::Data<S>) -> HttpResponse
+async fn get_job<J, S>(job_id: web::Path<JobId>, storage: web::Data<S>) -> HttpResponse
 where
     J: Job + Serialize + DeserializeOwned + 'static,
     S: Storage<Output = J> + 'static,
 {
     let storage = &*storage.into_inner();
     let storage = storage.clone();
-    let res = storage.fetch_by_id(job.job_id.to_string()).await;
+    let res = storage.fetch_by_id(&job_id).await;
     match res {
         Ok(Some(job)) => HttpResponse::Ok().json(job),
         Ok(None) => HttpResponse::NotFound().finish(),
@@ -229,7 +224,7 @@ async fn produce_redis_jobs(mut storage: RedisStorage<Email>) {
         storage
             .push(Email {
                 to: format!("test{i}@example.com"),
-                text: "Test backround job from Apalis".to_string(),
+                text: "Test backround job from apalis".to_string(),
                 subject: "Background email job".to_string(),
             })
             .await
@@ -342,7 +337,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .register_with_count(2, move |c| {
             WorkerBuilder::new(format!("tasty-pear-{c}"))
-                .layer(SentryJobLayer)
+                .layer(SentryJobLayer::new())
                 .layer(TraceLayer::new())
                 .with_storage(mysql_storage.clone())
                 .build_fn(upload_service)

@@ -1,6 +1,6 @@
 [package]
 name = "apalis"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
@@ -11,7 +11,7 @@ keywords = ["job", "task", "scheduler", "worker", "cron" ]
 edition = "2021"
 
 [features]
-default = ["apalis-core/default", "tracing"]
+default = ["tracing"]
 ## Support Tracing 👀
 tracing = ["apalis-core/trace"]
 
@@ -25,8 +25,6 @@ sqlite = [ "apalis-sql/sqlite"]
 mysql = [ "apalis-sql/mysql"]
 ## Include Cron functionality
 cron = ["apalis-cron"]
-## Include Storage utils, and build your own
-storage = ["apalis-core/storage"]
 
 ## Support for Sentry exception and performance monitoring
 sentry = ["apalis-core/sentry"]
@@ -42,32 +40,37 @@ limit = ["apalis-core/limit"]
 filter = ["apalis-core/filter"]
 ## Add a global extensions to jobs
 extensions =["apalis-core/extensions"]
+## Compatibility with async-std and smol runtimes
+async-std-comp = ["apalis-sql/async-std-comp", "apalis-redis/async-std-comp" ]
+## Compatibility with tokio and actix runtimes
+tokio-comp = ["apalis-core/tokio-comp", "apalis-sql/tokio-comp", "apalis-redis/tokio-comp" ]
 
+## Expose job sources for web and cli purposes
+expose = ["apalis-core/expose", "apalis-sql/expose", "apalis-redis/expose"]
 
 docsrs = ["document-features"]
 
 
 [dependencies.apalis-redis]
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 optional = true
-default-features = false
 path = "./packages/apalis-redis"
 
 [dependencies.apalis-sql]
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"
 
 [dependencies.apalis-core]
-version = "0.4.0-alpha.4"
-optional = true
+version = "0.4.0-alpha.5"
 default-features = false
 path = "./packages/apalis-core"
+features = ["storage"]
 
 [dependencies.apalis-cron]
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 optional = true
 default-features = false
 path = "./packages/apalis-cron"
@@ -87,8 +90,8 @@ all-features = true
 criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
 serde = "1"
 tokio = { version = "1", features = ["macros"] }
-apalis-redis = { version = "0.4.0-alpha.4", path = "./packages/apalis-redis" }
-apalis-sql = { version = "0.4.0-alpha.4", path = "./packages/apalis-sql", features = ["sqlite"] }
+apalis-redis = { version = "0.4.0-alpha.5", path = "./packages/apalis-redis" }
+apalis-sql = { version = "0.4.0-alpha.5", path = "./packages/apalis-sql", features = ["sqlite"] }
 
 [[bench]]
 name = "redis_benchmark"
@@ -112,5 +115,5 @@ members = [
   "examples/prometheus",
   "examples/tracing",
   "examples/rest-api",
-  "examples/smol-runtime"
+  "examples/async-std-runtime"
 ]

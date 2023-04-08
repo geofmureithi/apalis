@@ -6,12 +6,12 @@
     unreachable_pub
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-//! # Apalis Core
+//! # apalis Core
 //! Utilities for building job and message processing tools.
 
-/// Represent utilities for creating [Worker] instances.
+/// Represent utilities for creating [`Worker`] instances.
 ///
-/// [`Worker`]: crate::worker::Worker
+/// [`Worker`]: apalis_core::worker::Worker
 pub mod builder;
 /// Represents the [`JobContext`].
 pub mod context;
@@ -42,17 +42,26 @@ pub mod utils;
 /// Represents the actual executor of a [Job].
 pub mod worker;
 
+#[cfg(feature = "expose")]
+#[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
+/// Utilities to expose workers and jobs to external tools eg web frameworks and cli tools
+pub mod expose;
+
 /// apalis mocking utilities
+#[cfg(feature = "tokio-comp")]
 pub mod mock {
+    use futures::channel::mpsc::{Receiver, Sender};
     use futures::{Stream, StreamExt};
-    use tokio::sync::mpsc::{Receiver, Sender};
     use tower::Service;
 
-    use crate::{job::Job, worker::ready::ReadyWorker};
+    use crate::{
+        job::Job,
+        worker::{ready::ReadyWorker, WorkerId},
+    };
 
     fn build_stream<Req: Send + 'static>(mut rx: Receiver<Req>) -> impl Stream<Item = Req> {
         let stream = async_stream::stream! {
-            while let Some(item) = rx.recv().await {
+            while let Some(item) = rx.next().await {
                 yield item;
             }
         };
@@ -75,14 +84,15 @@ pub mod mock {
         S: Service<Req>,
         Req: Job + Send + 'static,
     {
-        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let (tx, rx) = futures::channel::mpsc::channel(10);
         let stream = build_stream(rx);
         (
             tx,
             ReadyWorker {
                 service,
                 stream,
-                name: "test-worker".to_string(),
+                id: WorkerId::new("mock-worker"),
+                beats: Vec::new(),
             },
         )
     }

@@ -1,28 +1,34 @@
 use std::{error::Error, fmt::Debug};
 
 use futures::{Future, Stream, StreamExt};
-use tokio::sync::mpsc::channel;
+
 use tower::{Service, ServiceExt};
 use tracing::info;
 use tracing::warn;
 
 use crate::executor::Executor;
 use crate::job::Job;
+use crate::utils::Timer;
 
-use super::{Worker, WorkerContext};
+use super::HeartBeat;
+use super::WorkerId;
+use super::{Worker, WorkerContext, WorkerError};
+use crate::utils::timer::SleepTimer;
+use futures::future::FutureExt;
 use std::fmt::Formatter;
 
 /// A worker that is ready to consume jobs
 pub struct ReadyWorker<Stream, Service> {
-    pub(crate) name: String,
+    pub(crate) id: WorkerId,
     pub(crate) stream: Stream,
     pub(crate) service: Service,
+    pub(crate) beats: Vec<Box<dyn HeartBeat + Send>>,
 }
 
 impl<Stream, Service> Debug for ReadyWorker<Stream, Service> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReadyWorker")
-            .field("name", &self.name)
+            .field("name", &self.id)
             .field("stream", &std::any::type_name::<Stream>())
             .field("service", &std::any::type_name::<Service>())
             .finish()
@@ -44,29 +50,42 @@ where
     type Service = Serv;
     type Source = Strm;
 
-    fn name(&self) -> String {
-        self.name.to_string()
+    fn id(&self) -> WorkerId {
+        self.id.clone()
     }
     async fn start<Exec: Executor + Send>(
         self,
         ctx: WorkerContext<Exec>,
-    ) -> Result<(), super::WorkerError> {
+    ) -> Result<(), WorkerError> {
         let mut service = self.service;
         let mut stream = ctx.shutdown.graceful_stream(self.stream);
-        let (send, mut recv) = channel::<()>(1);
-
-        while let Some(res) = tokio::select! {
-            res = stream.next() => res,
-            _ = ctx.shutdown.clone() => None
+        let (send, mut recv) = futures::channel::mpsc::channel::<()>(1);
+        // Setup any heartbeats by the worker
+        for mut beat in self.beats {
+            ctx.spawn(async move {
+                let sleeper = SleepTimer;
+                loop {
+                    let interval = beat.interval();
+                    beat.heart_beat().await;
+                    sleeper.sleep(interval).await;
+                }
+            });
+        }
+        while let Some(res) = futures::select! {
+            res = stream.next().fuse() => res,
+            _ = ctx.shutdown.clone().fuse() => None
         } {
             let send_clone = send.clone();
             match res {
                 Ok(Some(item)) => {
-                    let svc = service.ready().await.unwrap();
+                    let svc = service
+                        .ready()
+                        .await
+                        .map_err(|e| WorkerError::ServiceError(format!("{e:?}")))?;
                     let fut = svc.call(item);
-                    ctx.executor.spawn(ctx.shutdown.graceful(async move {
+                    ctx.spawn(async move {
                         fut.await;
-                    }));
+                    });
                     drop(send_clone);
                 }
                 Err(e) => {
@@ -79,9 +98,9 @@ where
             }
         }
         drop(send);
-        info!("Shutting down {} worker", self.name);
-        let _ = recv.recv().await;
-        info!("Shutdown {} worker successfully", self.name);
+        info!("Shutting down {} worker", self.id);
+        let _ = recv.next().await;
+        info!("Shutdown {} worker successfully", self.id);
         Ok(())
     }
 }

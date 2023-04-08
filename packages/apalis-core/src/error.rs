@@ -1,11 +1,11 @@
-use std::error::Error as StdError;
+use std::{error::Error as StdError, num::TryFromIntError};
 use thiserror::Error;
 
 #[cfg(feature = "storage")]
 #[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
 use crate::storage::StorageError;
 
-/// Convenience type alias for usage within Apalis.
+/// Convenience type alias for usage within apalis.
 ///
 pub(crate) type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
 
@@ -13,19 +13,13 @@ pub(crate) type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum JobError {
-    /// A background worker has crashed.
-    #[error("Attempted to communicate with a crashed background worker")]
-    WorkerCrashed,
-
     /// An error occurred during execution.
     #[error("Job Failed: {0}")]
     Failed(#[source] BoxDynError),
 
-    #[cfg(feature = "storage")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
     /// An error communicating with storage.
     #[error("Error communicating with storage: {0}")]
-    Storage(StorageError),
+    Storage(#[from] StorageError),
 
     /// A generic IO error
     #[error("IO error: {0}")]
@@ -34,6 +28,10 @@ pub enum JobError {
     /// An unclear error
     #[error("Unknown error")]
     Unknown,
+
+    /// A parse error occurred during execution.
+    #[error("TryFromIntError {0}")]
+    IntParseError(#[from] TryFromIntError),
 }
 
 /// Represents a [JobStream] error.

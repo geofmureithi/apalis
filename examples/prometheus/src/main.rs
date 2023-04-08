@@ -86,19 +86,19 @@ async fn add_new_job<T>(
     Extension(mut storage): Extension<RedisStorage<T>>,
 ) -> impl IntoResponse
 where
-    T: 'static + Debug + Job + Serialize + DeserializeOwned + Unpin + Send,
+    T: 'static + Debug + Job + Serialize + DeserializeOwned + Unpin + Send + Sync,
 {
     dbg!(&input);
     let new_job = storage.push(input).await;
 
     match new_job {
-        Ok(()) => (
+        Ok(jid) => (
             StatusCode::CREATED,
-            "Job was successfully added".to_string(),
+            format!("Job [{jid}] was successfully added"),
         ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("An Error occured {e}"),
+            format!("An Error occurred {e}"),
         ),
     }
     .into_response()

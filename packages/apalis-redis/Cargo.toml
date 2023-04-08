@@ -1,26 +1,26 @@
 [package]
 name = "apalis-redis"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2021"
 readme = "../../README.md"
 
 license = "MIT"
-description = "Redis Storage for Apalis: simple and reliable background processing based on Redis"
+description = "Redis Storage for apalis: simple and reliable background processing based on Redis"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.4", default-features = false }
-redis = { version = "0.21" , features = ["tokio-comp"] }
+apalis-core = { path = "../../packages/apalis-core", version = "0.4.0-alpha.5", default-features = false, features= ["storage"] }
+redis = { version = "0.22" , default-features= false, features=["script", "aio"] }
 serde = "1"
 log = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-uuid = { version = "0.8", features = ["serde", "v4"] }
 serde_json = "1"
 async-stream = "0.3"
 futures = "0.3"
-tokio = "1"
+tokio = { version = "1", features = ["rt", "net"], optional = true }
+async-std = { version = "1.8.0", optional = true}
 async-trait = "0.1.53"
 
 
@@ -29,5 +29,7 @@ tokio = { version = "1", features = ["macros"] }
 email-service = { path = "../../examples/email-service" }
 
 [features]
-default = ["storage"]
-storage = ["apalis-core/storage"]
+default = []
+async-std-comp = ["async-std", "redis/async-std-comp", "apalis-core/async-std-comp" ]
+tokio-comp = ["tokio", "tokio/net", "redis/tokio-comp", "apalis-core/tokio-comp" ]
+expose = ["apalis-core/expose"]
