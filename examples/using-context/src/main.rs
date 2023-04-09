@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use apalis::{layers::{TraceLayer, Extension}, prelude::*, sqlite::SqliteStorage};
+use apalis::{
+    layers::{Extension, TraceLayer},
+    prelude::*,
+    sqlite::SqliteStorage,
+};
 
 use email_service::Email;
 
@@ -32,7 +36,10 @@ impl EmailService {
         }
     }
     async fn send(&self, email: Email) {
-        tracing::info!("Sending email {email:?} using the reused client: {:?}", self.client);
+        tracing::info!(
+            "Sending email {email:?} using the reused client: {:?}",
+            self.client
+        );
     }
 }
 

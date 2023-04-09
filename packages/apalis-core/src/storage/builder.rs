@@ -171,7 +171,8 @@ where
     }
 }
 
-impl<J: 'static, M, ST> WithStorage<Stack<Extension<ST>, Stack<AckJobLayer<ST, J>, M>>, ST> for WorkerBuilder<(), (), M>
+impl<J: 'static, M, ST> WithStorage<Stack<Extension<ST>, Stack<AckJobLayer<ST, J>, M>>, ST>
+    for WorkerBuilder<(), (), M>
 where
     ST: Storage<Output = J> + Send + Sync + 'static,
     M: Send + Sync + 'static,

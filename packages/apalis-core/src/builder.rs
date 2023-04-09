@@ -7,10 +7,11 @@ use tower::{
 };
 
 use crate::{
+    context::HasJobContext,
     job::Job,
     job_fn::{job_fn, JobFn},
     request::JobRequest,
-    worker::{ready::ReadyWorker, HeartBeat, Worker, WorkerId}, context::HasJobContext,
+    worker::{ready::ReadyWorker, HeartBeat, Worker, WorkerId},
 };
 
 /// An abstract that allows building a [`Worker`].

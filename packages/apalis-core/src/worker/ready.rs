@@ -56,12 +56,14 @@ where
     fn id(&self) -> WorkerId {
         self.id.clone()
     }
-    async fn start<Exec: Executor + Send + Sync +'static>(
+    async fn start<Exec: Executor + Send + Sync + 'static>(
         self,
         ctx: WorkerContext<Exec>,
     ) -> Result<(), WorkerError> {
         #[cfg(feature = "extensions")]
-        let mut service = ServiceBuilder::new().layer(Extension(ctx.clone())).service(self.service);
+        let mut service = ServiceBuilder::new()
+            .layer(Extension(ctx.clone()))
+            .service(self.service);
         #[cfg(not(feature = "extensions"))]
         let mut service = self.service;
         let mut stream = ctx.shutdown.graceful_stream(self.stream);
