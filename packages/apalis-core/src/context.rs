@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "extensions")]
+use crate::error::JobError;
+#[cfg(feature = "extensions")]
 use http::Extensions;
 #[cfg(feature = "extensions")]
 use std::{any::Any, marker::Send};
@@ -56,7 +58,7 @@ impl JobContext {
         }
     }
 
-    /// Get a reference to a type previously inserted on this `JobContext`.
+    /// Get an optional reference to a type previously inserted on this `JobContext`.
     ///
     /// # Example
     ///
@@ -73,6 +75,36 @@ impl JobContext {
     #[must_use]
     pub fn data_opt<D: Any + Send + Sync>(&self) -> Option<&D> {
         self.data.0.get()
+    }
+
+    /// Get a reference to a type previously inserted on this `JobContext`.
+    /// 
+    /// # Errors
+    /// If the type requested is not in the `JobContext`
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use apalis_core::context::JobContext;
+    /// # use apalis_core::job::JobId;
+    /// let mut ctx = JobContext::new(JobId::new());
+    /// assert!(ctx.data::<i32>().is_err());
+    /// assert_eq!(
+    ///     ctx.data::<i32>().unwrap_err().to_string(),
+    ///     "MissingContext: Attempted to fetch context of i32. Did you add `.layer(Extension(i32))"
+    /// );
+    /// ctx.insert(5i32);
+    ///
+    /// assert_eq!(ctx.data::<i32>().unwrap(), &5i32);
+    /// ```
+    #[cfg(feature = "extensions")]
+    #[must_use]
+    pub fn data<D: Any + Send + Sync>(&self) -> Result<&D, JobError> {
+        self.data.0.get().ok_or(JobError::MissingContext(format!(
+            "Attempted to fetch context of {}. Did you add `.layer(Extension({}))",
+            std::any::type_name::<D>(),
+            std::any::type_name::<D>()
+        )))
     }
 
     /// Insert a type into this `JobContext`.
