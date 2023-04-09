@@ -45,8 +45,8 @@ jobs:
           for dir in "." packages/apalis-{core,cron,redis,sql}; do
             PACKAGE=$(cargo get --root $dir -n)
             ACTUAL=$(cargo get --root $dir version)
-            if [[ $VERSION_NUMBER != $ACTUAL ]]; then
-              echo ${PACKAGE}: expected version ${VERSION_NUMBER} but found ${ACTUAL}
+            if [[ $VERSION != $ACTUAL ]]; then
+              echo ${PACKAGE}: expected version ${VERSION} but found ${ACTUAL}
               ERROR=1
             fi
           done
