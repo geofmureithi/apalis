@@ -2,12 +2,15 @@ use std::{error::Error, fmt::Debug};
 
 use futures::{Future, Stream, StreamExt};
 
+use tower::ServiceBuilder;
 use tower::{Service, ServiceExt};
 use tracing::info;
 use tracing::warn;
 
+use crate::context::HasJobContext;
 use crate::executor::Executor;
 use crate::job::Job;
+use crate::layers::extensions::Extension;
 use crate::utils::Timer;
 
 use super::HeartBeat;
@@ -41,7 +44,7 @@ impl<
         Serv: Service<Req, Future = Fut> + Send + 'static,
         J: Job + 'static,
         E: 'static + Send + Error + Sync,
-        Req: Send,
+        Req: Send + HasJobContext,
         Fut: Future + Send + 'static,
     > Worker<J> for ReadyWorker<Strm, Serv>
 where
@@ -53,10 +56,15 @@ where
     fn id(&self) -> WorkerId {
         self.id.clone()
     }
-    async fn start<Exec: Executor + Send>(
+    async fn start<Exec: Executor + Send + Sync + 'static>(
         self,
         ctx: WorkerContext<Exec>,
     ) -> Result<(), WorkerError> {
+        #[cfg(feature = "extensions")]
+        let mut service = ServiceBuilder::new()
+            .layer(Extension(ctx.clone()))
+            .service(self.service);
+        #[cfg(not(feature = "extensions"))]
         let mut service = self.service;
         let mut stream = ctx.shutdown.graceful_stream(self.stream);
         let (send, mut recv) = futures::channel::mpsc::channel::<()>(1);

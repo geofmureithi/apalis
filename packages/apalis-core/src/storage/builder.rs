@@ -1,3 +1,4 @@
+use crate::layers::extensions::Extension;
 use crate::request::JobRequest;
 use crate::worker::WorkerId;
 use futures::future::BoxFuture;
@@ -170,7 +171,8 @@ where
     }
 }
 
-impl<J: 'static, M, ST> WithStorage<Stack<AckJobLayer<ST, J>, M>, ST> for WorkerBuilder<(), (), M>
+impl<J: 'static, M, ST> WithStorage<Stack<Extension<ST>, Stack<AckJobLayer<ST, J>, M>>, ST>
+    for WorkerBuilder<(), (), M>
 where
     ST: Storage<Output = J> + Send + Sync + 'static,
     M: Send + Sync + 'static,
@@ -181,7 +183,7 @@ where
         mut self,
         mut storage: ST,
         config: impl Fn(WorkerConfig) -> WorkerConfig,
-    ) -> WorkerBuilder<J, Self::Stream, Stack<AckJobLayer<ST, J>, M>> {
+    ) -> WorkerBuilder<J, Self::Stream, Stack<Extension<ST>, Stack<AckJobLayer<ST, J>, M>>> {
         let worker_config = config(WorkerConfig::default());
         let worker_id = self.id;
         let source = storage
@@ -192,11 +194,14 @@ where
             )
             .boxed();
 
-        let layer = self.layer.layer(AckJobLayer {
-            storage: storage.clone(),
-            job_type: PhantomData,
-            worker_id: worker_id.clone(),
-        });
+        let layer = self
+            .layer
+            .layer(AckJobLayer {
+                storage: storage.clone(),
+                job_type: PhantomData,
+                worker_id: worker_id.clone(),
+            })
+            .layer(Extension(storage.clone()));
 
         let keep_alive: KeepAlive<ST, M> =
             KeepAlive::new::<J>(&worker_id, storage.clone(), worker_config.keep_alive);

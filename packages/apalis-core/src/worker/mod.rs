@@ -70,10 +70,14 @@ pub trait Worker<Job>: Sized {
     /// This method should run indefinitely or until it returns an error.
     /// If an error occurs, it should return a `WorkerError` describing
     /// the reason for the failure.
-    async fn start<E: Executor + Send>(self, ctx: WorkerContext<E>) -> Result<(), WorkerError>;
+    async fn start<E: Executor + Send + Sync + 'static>(
+        self,
+        ctx: WorkerContext<E>,
+    ) -> Result<(), WorkerError>;
 }
 
 /// Stores the Workers context
+#[derive(Clone)]
 pub struct WorkerContext<E: Executor> {
     pub(crate) shutdown: Shutdown,
     pub(crate) executor: E,

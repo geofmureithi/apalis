@@ -7,6 +7,7 @@ use tower::{
 };
 
 use crate::{
+    context::HasJobContext,
     job::Job,
     job_fn::{job_fn, JobFn},
     request::JobRequest,
@@ -124,7 +125,7 @@ where
     M: Layer<Ser>,
     <M as Layer<Ser>>::Service: Service<Request> + Send + 'static,
     E: Sync + Send + 'static + Error,
-    Request: Send,
+    Request: Send + HasJobContext,
     <<M as Layer<Ser>>::Service as Service<Request>>::Future: std::marker::Send,
     Ser: Service<Request>,
     <Ser as Service<Request>>::Error: Debug,

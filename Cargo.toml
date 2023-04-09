@@ -116,5 +116,6 @@ members = [
   "examples/prometheus",
   "examples/tracing",
   "examples/rest-api",
-  "examples/async-std-runtime"
+  "examples/async-std-runtime",
+  "examples/using-context"
 ]

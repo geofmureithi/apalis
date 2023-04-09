@@ -11,7 +11,7 @@ async fn produce_jobs(storage: &SqliteStorage<Email>) -> Result<()> {
             .schedule(
                 Email {
                     to: format!("test{i}@example.com"),
-                    text: "Test backround job from apalis".to_string(),
+                    text: "Test background job from apalis".to_string(),
                     subject: "Background email job".to_string(),
                 },
                 Utc::now() + chrono::Duration::seconds(i),

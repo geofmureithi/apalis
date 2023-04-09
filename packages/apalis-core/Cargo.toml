@@ -37,7 +37,7 @@ async-stream = "0.3"
 
 [features]
 default = ["storage", "tokio-comp"]
-storage =  []
+storage =  ["extensions"]
 expose =  []
 layers = ["sentry", "prometheus", "trace", "retry", "timeout", "limit", "filter", "extensions"]
 sentry = ["sentry-core", "ulid/uuid", "uuid"]

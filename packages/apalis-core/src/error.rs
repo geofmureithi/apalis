@@ -27,13 +27,14 @@ pub enum JobError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// An unclear error
-    #[error("Unknown error")]
-    Unknown,
-
     /// A parse error occurred during execution.
     #[error("TryFromIntError {0}")]
     IntParseError(#[from] TryFromIntError),
+
+    /// A job is missing some context and yet it was requested during execution.
+    #[cfg(feature = "extensions")]
+    #[error("MissingContext: {0}")]
+    MissingContext(String),
 }
 
 /// Represents a [JobStream] error.

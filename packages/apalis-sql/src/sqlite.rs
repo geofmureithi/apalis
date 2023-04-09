@@ -545,6 +545,7 @@ pub mod expose {
 mod tests {
 
     use super::*;
+    use apalis_core::context::HasJobContext;
     use apalis_core::request::JobState;
     use email_service::Email;
     use futures::StreamExt;

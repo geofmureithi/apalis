@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use strum::{AsRefStr, EnumString};
 
-use crate::{context::JobContext, job::JobId};
+use crate::{
+    context::{HasJobContext, JobContext},
+    job::JobId,
+};
 
 /// Represents the state of a [JobRequest]
 #[derive(
@@ -56,16 +59,6 @@ impl<T> JobRequest<T> {
         &self.job
     }
 
-    /// Gets a mutable reference to the job context.
-    pub fn context_mut(&mut self) -> &mut JobContext {
-        &mut self.context
-    }
-
-    /// Gets a reference to the job context.
-    pub fn context(&self) -> &JobContext {
-        &self.context
-    }
-
     /// Records a job attempt
     pub fn record_attempt(&mut self) {
         self.context.set_attempts(self.context.attempts() + 1);
@@ -82,5 +75,17 @@ impl<T> std::ops::Deref for JobRequest<T> {
 impl<T> std::ops::DerefMut for JobRequest<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.context
+    }
+}
+
+impl<J> HasJobContext for JobRequest<J> {
+    /// Gets a mutable reference to the job context.
+    fn context_mut(&mut self) -> &mut JobContext {
+        &mut self.context
+    }
+
+    /// Gets a reference to the job context.
+    fn context(&self) -> &JobContext {
+        &self.context
     }
 }

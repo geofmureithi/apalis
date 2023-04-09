@@ -184,6 +184,7 @@ pub mod prelude {
         request::JobState,
         response::IntoResponse,
         utils::*,
+        worker::{WorkerContext, WorkerId},
     };
     pub use apalis_core::{
         storage::builder::WithStorage, storage::Storage, storage::StorageWorkerPulse,
