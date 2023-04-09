@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1"
-apalis = { path = "../../", features = ["mysql", "async-std-comp"] }
+apalis = { path = "../../", features = ["mysql", "async-std-comp", "tracing"], default-features = false }
 serde = "1"
 tracing-subscriber = "0.3.11"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

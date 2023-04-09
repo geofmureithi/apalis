@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
                 .layer(TraceLayer::new())
                 .with_storage_config(pg.clone(), |cfg| {
                     cfg
-                        // Set the buffer size to 100
+                        // Set the buffer size to 100 ( Pick 100 jobs per query)
                         .buffer_size(100)
                         // Lower the fetch interval because postgres is waiting for notifications
                         .fetch_interval(Duration::from_secs(1))

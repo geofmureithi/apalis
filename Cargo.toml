@@ -11,7 +11,7 @@ keywords = ["job", "task", "scheduler", "worker", "cron" ]
 edition = "2021"
 
 [features]
-default = ["tracing"]
+default = ["tracing", "tokio-comp"]
 ## Support Tracing 👀
 tracing = ["apalis-core/trace"]
 
