@@ -545,11 +545,11 @@ pub mod expose {
 mod tests {
 
     use super::*;
+    use apalis_core::context::HasJobContext;
     use apalis_core::request::JobState;
     use email_service::Email;
     use futures::StreamExt;
     use std::ops::Sub;
-    use apalis_core::context::HasJobContext;
 
     /// migrate DB and return a storage instance.
     async fn setup() -> SqliteStorage<Email> {

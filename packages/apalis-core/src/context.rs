@@ -98,7 +98,6 @@ impl JobContext {
     /// assert_eq!(ctx.data::<i32>().unwrap(), &5i32);
     /// ```
     #[cfg(feature = "extensions")]
-    #[must_use]
     pub fn data<D: Any + Send + Sync>(&self) -> Result<&D, JobError> {
         self.data.0.get().ok_or(JobError::MissingContext(format!(
             "Attempted to fetch context of {}. Did you add `.layer(Extension({}))",
