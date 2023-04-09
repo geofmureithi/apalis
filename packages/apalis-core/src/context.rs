@@ -212,6 +212,7 @@ impl JobContext {
     }
 }
 
+/// Gets you the job context of a request
 /// This trait allows you to write your own request types
 pub trait HasJobContext {
     /// Gets a mutable reference to the job context.

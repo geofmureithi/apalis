@@ -733,6 +733,7 @@ mod tests {
     use super::*;
     use apalis_core::request::JobState;
     use email_service::Email;
+    use apalis_core::context::HasJobContext;
     use futures::StreamExt;
 
     /// migrate DB and return a storage instance.
