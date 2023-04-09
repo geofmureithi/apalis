@@ -1,7 +1,7 @@
 use std::task::{Context, Poll};
 use tower::Service;
 
-use crate::request::JobRequest;
+use crate::context::HasJobContext;
 
 /// Extension data for jobs.
 ///
@@ -64,10 +64,11 @@ pub struct AddExtension<S, T> {
     pub(crate) value: T,
 }
 
-impl<J, S, T> Service<JobRequest<J>> for AddExtension<S, T>
+impl<S, T, Req> Service<Req> for AddExtension<S, T>
 where
-    S: Service<JobRequest<J>>,
+    S: Service<Req>,
     T: Clone + Send + Sync + 'static,
+    Req: HasJobContext,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -78,7 +79,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: JobRequest<J>) -> Self::Future {
+    fn call(&mut self, mut req: Req) -> Self::Future {
         req.context_mut().insert(self.value.clone());
         self.inner.call(req)
     }

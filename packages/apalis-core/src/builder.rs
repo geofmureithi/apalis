@@ -10,7 +10,7 @@ use crate::{
     job::Job,
     job_fn::{job_fn, JobFn},
     request::JobRequest,
-    worker::{ready::ReadyWorker, HeartBeat, Worker, WorkerId},
+    worker::{ready::ReadyWorker, HeartBeat, Worker, WorkerId}, context::HasJobContext,
 };
 
 /// An abstract that allows building a [`Worker`].
@@ -124,7 +124,7 @@ where
     M: Layer<Ser>,
     <M as Layer<Ser>>::Service: Service<Request> + Send + 'static,
     E: Sync + Send + 'static + Error,
-    Request: Send,
+    Request: Send + HasJobContext,
     <<M as Layer<Ser>>::Service as Service<Request>>::Future: std::marker::Send,
     Ser: Service<Request>,
     <Ser as Service<Request>>::Error: Debug,

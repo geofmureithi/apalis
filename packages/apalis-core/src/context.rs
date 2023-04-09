@@ -78,7 +78,7 @@ impl JobContext {
     }
 
     /// Get a reference to a type previously inserted on this `JobContext`.
-    /// 
+    ///
     /// # Errors
     /// If the type requested is not in the `JobContext`
     ///
@@ -210,4 +210,13 @@ impl JobContext {
     pub fn set_last_error(&mut self, error: String) {
         self.last_error = Some(error);
     }
+}
+
+/// This trait allows you to write your own request types
+pub trait HasJobContext {
+    /// Gets a mutable reference to the job context.
+    fn context_mut(&mut self) -> &mut JobContext;
+
+    /// Gets a reference to the job context.
+    fn context(&self) -> &JobContext;
 }

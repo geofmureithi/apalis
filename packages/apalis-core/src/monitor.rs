@@ -35,7 +35,7 @@ impl<E: Executor> Debug for Monitor<E> {
     }
 }
 
-impl<E: Executor + Send + 'static> Monitor<E> {
+impl<E: Executor + Send + Sync + 'static> Monitor<E> {
     /// Registers a worker with the monitor.
     ///
     /// # Arguments
