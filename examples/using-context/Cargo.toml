@@ -12,6 +12,7 @@ apalis = { path = "../../", features = ["sqlite", "limit", "extensions"] }
 serde = "1"
 tracing-subscriber = "0.3.11"
 email-service = { path = "../email-service" }
+futures = "0.3"
 
 
 [dependencies.tracing]

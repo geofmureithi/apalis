@@ -1,4 +1,8 @@
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use anyhow::Result;
 use apalis::{
@@ -43,9 +47,39 @@ impl EmailService {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ValidEmailCache(Arc<Mutex<HashMap<String, bool>>>);
+
+async fn fetch_validity(email_to: String, cache: ValidEmailCache) -> bool {
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    cache.0.try_lock().unwrap().insert(email_to, true);
+    true
+}
+
+/// Quick solution to prevent spam.
+/// If email in cache, then send email else complete the job but let a validation process run in the background,
 async fn send_email(email: Email, ctx: JobContext) -> anyhow::Result<()> {
-    let email_service: &EmailService = ctx.data()?;
-    email_service.send(email).await;
+    let email_service = ctx.data::<EmailService>()?.clone();
+    let cache = ctx.data::<ValidEmailCache>()?.clone();
+    let worker_ctx = ctx.data::<WorkerContext<()>>()?.clone();
+    let cache_clone = cache.clone();
+    let email_to = email.to.clone();
+    let res = cache.0.try_lock().unwrap().get(&email_to).cloned();
+    match res {
+        None => {
+            //We may not prioritize or care when the email is not in cache
+            worker_ctx.spawn(async move {
+                if fetch_validity(email_to, cache_clone.clone()).await {
+                    email_service.send(email).await;
+                }
+            });
+        }
+
+        Some(_) => {
+            email_service.send(email).await;
+        }
+    }
+
     Ok(())
 }
 
@@ -67,6 +101,7 @@ async fn main() -> Result<()> {
             WorkerBuilder::new(format!("tasty-banana-{c}"))
                 .layer(TraceLayer::new())
                 .layer(Extension(EmailService::new()))
+                .layer(Extension(ValidEmailCache(Arc::default())))
                 .with_storage(sqlite.clone())
                 .build_fn(send_email)
         })
