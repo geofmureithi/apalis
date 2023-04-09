@@ -36,7 +36,7 @@ uuid = { version = "0.8", optional = true }
 async-stream = "0.3"
 
 [features]
-default = ["storage"]
+default = ["storage", "tokio-comp"]
 storage =  []
 expose =  []
 layers = ["sentry", "prometheus", "trace", "retry", "timeout", "limit", "filter", "extensions"]

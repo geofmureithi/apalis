@@ -41,9 +41,9 @@ filter = ["apalis-core/filter"]
 ## Add a global extensions to jobs
 extensions =["apalis-core/extensions"]
 ## Compatibility with async-std and smol runtimes
-async-std-comp = ["apalis-sql/async-std-comp", "apalis-redis/async-std-comp" ]
+async-std-comp = ["apalis-core/async-std-comp", "apalis-sql/async-std-comp", "apalis-redis/async-std-comp", "apalis-cron/async-std-comp", ]
 ## Compatibility with tokio and actix runtimes
-tokio-comp = ["apalis-core/tokio-comp", "apalis-sql/tokio-comp", "apalis-redis/tokio-comp" ]
+tokio-comp = ["apalis-core/tokio-comp", "apalis-sql/tokio-comp", "apalis-redis/tokio-comp", "apalis-cron/tokio-comp" ]
 
 ## Expose job sources for web and cli purposes
 expose = ["apalis-core/expose", "apalis-sql/expose", "apalis-redis/expose"]
@@ -55,6 +55,7 @@ docsrs = ["document-features"]
 version = "0.4.0-alpha.5"
 optional = true
 path = "./packages/apalis-redis"
+default-features = false
 
 [dependencies.apalis-sql]
 version = "0.4.0-alpha.5"

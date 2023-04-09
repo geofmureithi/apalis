@@ -17,6 +17,8 @@ pub enum JobError {
     #[error("Job Failed: {0}")]
     Failed(#[source] BoxDynError),
 
+    #[cfg(feature = "storage")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
     /// An error communicating with storage.
     #[error("Error communicating with storage: {0}")]
     Storage(#[from] StorageError),

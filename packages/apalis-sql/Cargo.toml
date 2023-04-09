@@ -9,7 +9,7 @@ license = "MIT"
 description = "SQL Storage for apalis: simple, extensible multithreaded background job processing for Rust"
 
 [features]
-default = [ "sqlite", "migrate"]
+default = [ "sqlite", "migrate", "tokio-comp"]
 postgres = [ "sqlx/postgres", "sqlx/json", "sqlx/chrono"]
 sqlite = [ "sqlx/sqlite", "sqlx/json", "sqlx/chrono"]
 mysql = [ "sqlx/mysql", "sqlx/json", "sqlx/chrono", "sqlx/bigdecimal"]
