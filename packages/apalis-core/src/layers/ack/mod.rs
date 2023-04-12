@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use futures::{future::BoxFuture, FutureExt};
 use tower::{Layer, Service};
 
-use crate::{error::BoxDynError, job::JobId, request::JobRequest, worker::WorkerId};
+use crate::{error::BoxDynError, request::JobRequest, worker::WorkerId, context::HasJobContext};
 
 /// An error occurred while trying to acknowledge a message.
 #[derive(Debug, thiserror::Error)]
@@ -16,8 +16,10 @@ pub enum AckError {
 /// A trait for acknowledging successful job processing
 #[async_trait::async_trait]
 pub trait Ack<J> {
+    /// The data to fetch from context to allow acknowledgement, usually [`JobId`]
+    type Acknowledger;
     /// Acknowledges successful processing of the given request
-    async fn ack(&self, worker_id: &WorkerId, job_id: &JobId) -> Result<(), AckError>;
+    async fn ack(&self, worker_id: &WorkerId, data: &Self::Acknowledger) -> Result<(), AckError>;
 }
 
 /// A layer that acknowledges a job completed successfully
@@ -73,7 +75,9 @@ where
     SV::Error: std::error::Error + Send + Sync + 'static,
     <SV as Service<JobRequest<J>>>::Future: std::marker::Send + 'static,
     A: Ack<J> + Send + 'static + Clone + Send + Sync,
+    J: 'static,
     <SV as Service<JobRequest<J>>>::Response: std::marker::Send,
+    <A as Ack<J>>::Acknowledger: Sync + Send + Clone,
 {
     type Response = SV::Response;
     type Error = SV::Error;
@@ -88,14 +92,15 @@ where
 
     fn call(&mut self, request: JobRequest<J>) -> Self::Future {
         let ack = self.ack.clone();
-        let job_id = request.id().clone();
         let worker_id = self.worker_id.clone();
+        let data = request.context().data::<<A as Ack<J>>::Acknowledger>().unwrap().clone();
+        
         let fut = self.service.call(request);
         let fut_with_ack = async move {
             let res = fut.await;
             if res.is_ok() {
-                if let Err(e) = ack.ack(&worker_id, &job_id).await {
-                    tracing::warn!("Acknowledgement Failed: {}", e);
+                if let Err(e) =ack.ack(&worker_id.clone(), &data).await  {
+                    tracing::warn!("Acknowledgement Failed: {}", e); 
                 }
             }
             res

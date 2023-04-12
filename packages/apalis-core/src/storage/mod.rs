@@ -93,9 +93,12 @@ pub trait Storage: Clone {
 impl<J, S> Ack<J> for S
 where
     S: Storage<Output = J> + Send + Sync,
+    J: Send + Sync,
 {
+    type Acknowledger = JobId;
     async fn ack(&self, worker_id: &WorkerId, job_id: &JobId) -> Result<(), AckError> {
-        self.ack(worker_id, job_id)
+        let mut storage: S = self.clone();
+        Storage::ack(&mut storage, worker_id, job_id)
             .await
             .map_err(|e| AckError::NoAck(e.into()))
     }
