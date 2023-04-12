@@ -10,6 +10,7 @@ use tracing::warn;
 use crate::context::HasJobContext;
 use crate::executor::Executor;
 use crate::job::Job;
+#[cfg(feature = "extensions")]
 use crate::layers::extensions::Extension;
 use crate::utils::Timer;
 

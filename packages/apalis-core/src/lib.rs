@@ -47,6 +47,9 @@ pub mod worker;
 /// Utilities to expose workers and jobs to external tools eg web frameworks and cli tools
 pub mod expose;
 
+/// Message queuing utilities
+pub mod mq;
+
 /// apalis mocking utilities
 #[cfg(feature = "tokio-comp")]
 pub mod mock {

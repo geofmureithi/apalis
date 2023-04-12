@@ -18,6 +18,8 @@ pub mod sentry;
 #[cfg(feature = "trace")]
 #[cfg_attr(docsrs, doc(cfg(feature = "trace")))]
 pub mod tracing;
+/// Acknowledgement layer for apalis
+pub mod ack;
 /// Rate limit middleware for apalis
 #[cfg(feature = "limit")]
 #[cfg_attr(docsrs, doc(cfg(feature = "limit")))]

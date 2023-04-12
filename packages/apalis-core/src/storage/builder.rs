@@ -1,13 +1,8 @@
+use crate::layers::ack::AckLayer;
 use crate::layers::extensions::Extension;
-use crate::request::JobRequest;
-use crate::worker::WorkerId;
-use futures::future::BoxFuture;
-use futures::FutureExt;
 use futures::StreamExt;
 use std::{marker::PhantomData, time::Duration};
 use tower::layer::util::Stack;
-use tower::Layer;
-use tower::Service;
 
 use crate::{builder::WorkerBuilder, job::JobStreamResult};
 
@@ -15,7 +10,7 @@ use super::beats::EnqueueScheduled;
 use super::beats::ReenqueueOrphaned;
 use super::{beats::KeepAlive, Storage};
 
-/// A helper trait to help build a [Worker] that consumes a [Storage]
+/// A helper trait to help build a [WorkerBuilder] that consumes a [Storage]
 pub trait WithStorage<NS, ST: Storage<Output = Self::Job>>: Sized {
     /// The job to consume
     type Job;
@@ -89,89 +84,7 @@ impl WorkerConfig {
     }
 }
 
-/// A layer that acknowledges a job completed successfully
-#[derive(Debug)]
-pub struct AckJobLayer<ST, J> {
-    storage: ST,
-    job_type: PhantomData<J>,
-    worker_id: WorkerId,
-}
-
-impl<ST, J> AckJobLayer<ST, J> {
-    /// Build a new [AckJobLayer] for a worker
-    pub fn new(storage: ST, worker_id: WorkerId) -> Self {
-        Self {
-            storage,
-            job_type: PhantomData,
-            worker_id,
-        }
-    }
-}
-
-impl<ST, J, S> Layer<S> for AckJobLayer<ST, J>
-where
-    S: Service<JobRequest<J>> + Send + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
-    S::Future: Send + 'static,
-    ST: Storage<Output = J> + Send + Sync + 'static,
-{
-    type Service = AckJobService<S, ST, J>;
-
-    fn layer(&self, service: S) -> Self::Service {
-        AckJobService {
-            service,
-            storage: self.storage.clone(),
-            job_type: PhantomData,
-            worker_id: self.worker_id.clone(),
-        }
-    }
-}
-
-/// The underlying service for an [AckJobLayer]
-#[derive(Debug)]
-pub struct AckJobService<SV, ST, J> {
-    service: SV,
-    storage: ST,
-    job_type: PhantomData<J>,
-    worker_id: WorkerId,
-}
-
-impl<SV, ST, J> Service<JobRequest<J>> for AckJobService<SV, ST, J>
-where
-    SV: Service<JobRequest<J>> + Send + Sync + 'static,
-    SV::Error: std::error::Error + Send + Sync + 'static,
-    <SV as Service<JobRequest<J>>>::Future: std::marker::Send + 'static,
-    ST: Storage<Output = J> + Send + 'static,
-    <SV as Service<JobRequest<J>>>::Response: std::marker::Send,
-{
-    type Response = SV::Response;
-    type Error = SV::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, request: JobRequest<J>) -> Self::Future {
-        let mut storage = self.storage.clone();
-        let job_id = request.id().clone();
-        let worker_id = self.worker_id.clone();
-        let fut = self.service.call(request);
-        let fut_with_ack = async move {
-            let res = fut.await;
-            if res.is_ok() {
-                storage.ack(&worker_id, &job_id).await.ok();
-            }
-            res
-        };
-        fut_with_ack.boxed()
-    }
-}
-
-impl<J: 'static, M, ST> WithStorage<Stack<Extension<ST>, Stack<AckJobLayer<ST, J>, M>>, ST>
+impl<J: 'static, M, ST> WithStorage<Stack<Extension<ST>, Stack<AckLayer<ST, J>, M>>, ST>
     for WorkerBuilder<(), (), M>
 where
     ST: Storage<Output = J> + Send + Sync + 'static,
@@ -183,7 +96,7 @@ where
         mut self,
         mut storage: ST,
         config: impl Fn(WorkerConfig) -> WorkerConfig,
-    ) -> WorkerBuilder<J, Self::Stream, Stack<Extension<ST>, Stack<AckJobLayer<ST, J>, M>>> {
+    ) -> WorkerBuilder<J, Self::Stream, Stack<Extension<ST>, Stack<AckLayer<ST, J>, M>>> {
         let worker_config = config(WorkerConfig::default());
         let worker_id = self.id;
         let source = storage
@@ -196,11 +109,7 @@ where
 
         let layer = self
             .layer
-            .layer(AckJobLayer {
-                storage: storage.clone(),
-                job_type: PhantomData,
-                worker_id: worker_id.clone(),
-            })
+            .layer(AckLayer::new(storage.clone(), worker_id.clone()))
             .layer(Extension(storage.clone()));
 
         let keep_alive: KeepAlive<ST, M> =

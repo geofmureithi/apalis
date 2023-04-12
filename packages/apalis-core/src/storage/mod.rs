@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 
 use crate::{
     job::{Job, JobId, JobStreamResult},
+    layers::ack::{Ack, AckError},
     request::JobRequest,
     worker::WorkerId,
 };
@@ -85,6 +86,18 @@ pub trait Storage: Clone {
     #[doc(hidden)]
     async fn is_empty(&self) -> StorageResult<bool> {
         unimplemented!()
+    }
+}
+
+#[async_trait::async_trait]
+impl<J, S> Ack<J> for S
+where
+    S: Storage<Output = J> + Send + Sync,
+{
+    async fn ack(&self, worker_id: &WorkerId, job_id: &JobId) -> Result<(), AckError> {
+        self.ack(worker_id, job_id)
+            .await
+            .map_err(|e| AckError::NoAck(e.into()))
     }
 }
 
