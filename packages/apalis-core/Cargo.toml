@@ -21,7 +21,7 @@ smol = { version = "1", optional = true}
 smol-timeout = { version = "0.6", optional = true}
 thiserror = "1"
 log = "0.4"
-http = { version = "0.2.7", optional = true}
+http = { version = "0.2.9", optional = true}
 strum = { version = "0.24", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 tracing-futures = { version = "0.2.5", optional = true, default-features = false }
