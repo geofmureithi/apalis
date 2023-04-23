@@ -66,7 +66,9 @@ impl<T> PostgresStorage<T> {
     #[cfg(feature = "migrate")]
     pub async fn setup(&self) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        sqlx::migrate!("migrations/postgres").run(&pool).await?;
+        let mut migrator = sqlx::migrate!("migrations/postgres");
+        migrator.ignore_missing = true;
+        migrator.run(&pool).await?;
         Ok(())
     }
 }
