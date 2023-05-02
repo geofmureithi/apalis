@@ -84,8 +84,8 @@ impl WorkerConfig {
     }
 }
 
-impl<J: 'static + Send + Sync, M, ST> WithStorage<Stack<Extension<ST>, Stack<AckLayer<ST, J>, M>>, ST>
-    for WorkerBuilder<(), (), M>
+impl<J: 'static + Send + Sync, M, ST>
+    WithStorage<Stack<Extension<ST>, Stack<AckLayer<ST, J>, M>>, ST> for WorkerBuilder<(), (), M>
 where
     ST: Storage<Output = J> + Send + Sync + 'static,
     M: Send + Sync + 'static,

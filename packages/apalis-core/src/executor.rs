@@ -45,11 +45,3 @@ impl Executor for AsyncStdExecutor {
         async_std::task::spawn(async { fut.await });
     }
 }
-
-/// This just allows the tokio executor without being explicit
-#[cfg(feature = "tokio-comp")]
-impl Executor for () {
-    fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
-        tokio::spawn(future);
-    }
-}

@@ -69,11 +69,14 @@ async fn send_email(email: Email, ctx: JobContext) -> anyhow::Result<()> {
     match res {
         None => {
             //We may not prioritize or care when the email is not in cache
-            worker_ctx.spawn(async move {
-                if fetch_validity(email_to, cache_clone.clone()).await {
-                    email_service.send(email).await;
+            worker_ctx.spawn(
+                async move {
+                    if fetch_validity(email_to, cache_clone.clone()).await {
+                        email_service.send(email).await;
+                    }
                 }
-            }.instrument(Span::current()));
+                .instrument(Span::current()),
+            );
         }
 
         Some(_) => {

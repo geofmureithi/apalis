@@ -1,4 +1,4 @@
-use crate::{error::JobError, job::JobStreamResult, worker::WorkerId, builder::WorkerBuilder};
+use crate::{builder::WorkerBuilder, error::JobError, job::JobStreamResult, worker::WorkerId};
 
 /// [WorkerBuilder] utilities for building message queue workers.
 pub mod builder;
@@ -11,7 +11,6 @@ pub trait MessageQueue<J> {
     /// Start consuming a stream of messages
     fn consume(&self, worker: &WorkerId) -> JobStreamResult<J>;
 }
-
 
 /// A helper trait to help build a [WorkerBuilder] that consumes a [MessageQueue]
 pub trait WithMq<NS, Mq: MessageQueue<Self::Job>>: Sized {

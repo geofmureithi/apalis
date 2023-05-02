@@ -96,7 +96,6 @@ impl<J: From<DateTime<Utc>> + Job + Send + 'static> CronStream<J, ()> {
 impl<J: From<DateTime<Utc>> + Job + Send + 'static, T: Timer + Sync + Send + 'static>
     CronStream<J, T>
 {
-    
     /// Convert to consumable
     pub fn to_stream(self) -> BoxStream<'static, Result<Option<JobRequest<J>>, JobError>> {
         let stream = async_stream::stream! {
