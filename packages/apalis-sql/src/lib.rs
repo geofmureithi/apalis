@@ -5,8 +5,8 @@
     unreachable_pub
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-//! # apalis Sql Storage
-//! apalis offeres Sqlite, Mysql and Postgres storages for its workers.
+//! # apalis-sql
+//! apalis offers Sqlite, Mysql and Postgres storages for its workers.
 //!
 //! ## Example
 //!  ```rust,ignore
@@ -28,6 +28,7 @@
 //!      Monitor::new()
 //!          .register_with_count(4, move |index| {
 //!              WorkerBuilder::new(&format!("tasty-avocado-{index}"))
+//!                  .with_storage(pg)
 //!                  .build_fn(send_email)
 //!          })
 //!          .run()

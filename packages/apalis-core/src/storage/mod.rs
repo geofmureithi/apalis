@@ -56,7 +56,7 @@ pub trait Storage: Clone {
     /// Called by a Worker to keep the storage alive and prevent jobs from being deemed as orphaned
     async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()>;
 
-    /// Kill a job that returns [JobResult::Kill]
+    /// Kill a job
     async fn kill(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()>;
 
     /// Update a job details
@@ -69,8 +69,7 @@ pub trait Storage: Clone {
     /// Used for scheduling jobs
     async fn heartbeat(&mut self, pulse: StorageWorkerPulse) -> StorageResult<bool>;
 
-    /// Kill a job that returns [JobResult::Reschedule]
-    /// [`JobResult::Reschedule`]: crate::response::JobResult
+    /// Reschedule a job
     async fn reschedule(
         &mut self,
         job: &JobRequest<Self::Output>,

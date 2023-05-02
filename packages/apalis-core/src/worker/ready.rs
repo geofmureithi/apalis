@@ -17,7 +17,6 @@ use crate::utils::Timer;
 use super::HeartBeat;
 use super::WorkerId;
 use super::{Worker, WorkerContext, WorkerError};
-use crate::utils::timer::SleepTimer;
 use futures::future::FutureExt;
 use std::fmt::Formatter;
 
@@ -72,7 +71,11 @@ where
         // Setup any heartbeats by the worker
         for mut beat in self.beats {
             ctx.spawn(async move {
-                let sleeper = SleepTimer;
+                #[cfg(feature = "async-std-comp")]
+                #[allow(unused_variables)]
+                let sleeper = crate::utils::timer::AsyncStdTimer;
+                #[cfg(feature = "tokio-comp")]
+                let sleeper = crate::utils::timer::TokioTimer;
                 loop {
                     let interval = beat.interval();
                     beat.heart_beat().await;

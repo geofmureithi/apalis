@@ -14,7 +14,7 @@ use super::{beats::KeepAlive, Storage};
 pub trait WithStorage<NS, ST: Storage<Output = Self::Job>>: Sized {
     /// The job to consume
     type Job;
-    /// The [Stream] to produce jobs
+    /// The source of jobs
     type Stream;
     /// The builder method to produce a default [WorkerBuilder] that will consume jobs
     fn with_storage(self, storage: ST) -> WorkerBuilder<Self::Job, Self::Stream, NS> {

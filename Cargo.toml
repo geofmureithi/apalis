@@ -8,6 +8,7 @@ documentation = "https://docs.rs/apalis"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["job", "task", "scheduler", "worker", "cron" ]
+categories = ["database"]
 edition = "2021"
 
 [features]
@@ -84,7 +85,7 @@ optional = true
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
-all-features = true
+all-features = false
 
 
 [dev-dependencies]

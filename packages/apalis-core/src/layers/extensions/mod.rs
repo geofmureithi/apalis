@@ -5,7 +5,7 @@ use crate::context::HasJobContext;
 
 /// Extension data for jobs.
 ///
-/// forked from [`axum::Extensions`]
+/// forked from [`http::Extensions`]
 /// # In Context
 ///
 /// This is commonly used to share state across jobs.

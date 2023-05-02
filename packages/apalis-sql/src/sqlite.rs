@@ -5,7 +5,6 @@ use apalis_core::request::JobRequest;
 use apalis_core::storage::StorageError;
 use apalis_core::storage::StorageWorkerPulse;
 use apalis_core::storage::{Storage, StorageResult};
-use apalis_core::utils::timer::SleepTimer;
 use apalis_core::utils::Timer;
 use apalis_core::worker::WorkerId;
 use async_stream::try_stream;
@@ -139,7 +138,11 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
         buffer_size: usize,
     ) -> impl Stream<Item = Result<Option<JobRequest<T>>, JobStreamError>> {
         let pool = self.pool.clone();
-        let sleeper = SleepTimer;
+        #[cfg(feature = "async-std-comp")]
+        #[allow(unused_variables)]
+        let sleeper = apalis_core::utils::timer::AsyncStdTimer;
+        #[cfg(feature = "tokio-comp")]
+        let sleeper = apalis_core::utils::timer::TokioTimer;
         let worker_id = worker_id.clone();
         try_stream! {
             loop {

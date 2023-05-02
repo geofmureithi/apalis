@@ -12,6 +12,7 @@ use apalis::{
 };
 
 use email_service::Email;
+use tracing::{Instrument, Span};
 
 async fn produce_jobs(storage: &SqliteStorage<Email>) -> Result<()> {
     let mut storage = storage.clone();
@@ -72,7 +73,7 @@ async fn send_email(email: Email, ctx: JobContext) -> anyhow::Result<()> {
                 if fetch_validity(email_to, cache_clone.clone()).await {
                     email_service.send(email).await;
                 }
-            });
+            }.instrument(Span::current()));
         }
 
         Some(_) => {

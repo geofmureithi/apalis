@@ -8,7 +8,7 @@ use apalis_core::{
     job::{Job, JobId, JobStreamResult},
     request::JobRequest,
     storage::{Storage, StorageError, StorageResult, StorageWorkerPulse},
-    utils::{timer::SleepTimer, Timer},
+    utils::Timer,
     worker::WorkerId,
 };
 use async_stream::try_stream;
@@ -137,10 +137,14 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
         let job_data_hash = self.queue.job_data_hash.to_string();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let signal_list = self.queue.signal_list.to_string();
-        let timer = SleepTimer;
+        #[cfg(feature = "async-std-comp")]
+        #[allow(unused_variables)]
+        let sleeper = apalis_core::utils::timer::AsyncStdTimer;
+        #[cfg(feature = "tokio-comp")]
+        let sleeper = apalis_core::utils::timer::TokioTimer;
         try_stream! {
             loop {
-                timer.sleep_until(Instant::now() + interval).await;
+                sleeper.sleep_until(Instant::now() + interval).await;
                 let jobs: Vec<Value> = fetch_jobs
                     .key(&consumers_set)
                     .key(&active_jobs_list)
