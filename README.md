@@ -114,27 +114,23 @@ Since we provide a few storage solutions, here is a table comparing them:
 | Persistence     |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   | BYO  |
 | Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  x   |
 
-## How apalis works (Draft)
+## How apalis works
 
 ```mermaid
 sequenceDiagram
     participant App
     participant Worker
-    participant Postgres
+    participant Producer
 
-    App->>+Worker: Add job to queue
-    Worker->>+Postgres: Poll queue for job
-    Postgres-->>-Worker: Job data
-    Worker->>+Postgres: Update job status to 'running'
-    Postgres-->>-Worker: Confirmation
-    Worker->>+App: Notify job started
+    App->>+Producer: Add job to queue
+    Producer-->>+Worker: Job data
+    Worker->>+Producer: Update job status to 'running' via Layer
+    Producer-->>-Worker: Confirmation
+    Worker->>+App: Notify job started via Layer
     loop job execution
-        Worker-->>-App: Report job progress
+        Worker-->>-App: Report job progress via Layer
     end
-    Worker->>+Postgres: Update job status to 'completed'
-    Postgres-->>-Worker: Confirmation
-    Worker->>+App: Notify job completed
-
+    Worker->>+Producer: Update job status to 'completed' via Layer
 ```
 
 ## Thanks to
