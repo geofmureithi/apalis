@@ -118,5 +118,5 @@ members = [
   "examples/tracing",
   "examples/rest-api",
   "examples/async-std-runtime",
-  "examples/using-context"
+  "examples/basics"
 ]
