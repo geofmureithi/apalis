@@ -105,7 +105,7 @@ async fn fetch_next<T>(
     job: Option<JobRequest<T>>,
 ) -> Result<Option<JobRequest<T>>, JobStreamError>
 where
-    T: Send + Unpin + DeserializeOwned,
+    T: Job + Send + Unpin + DeserializeOwned,
 {
     match job {
         None => Ok(None),
@@ -115,11 +115,12 @@ where
                 .await
                 .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             let job_id = job.id();
-            let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2";
+            let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
             let job: Option<SqlJobRequest<T>> = sqlx::query_as(update_query)
                 .bind(job_id.to_string())
                 .bind(worker_id.to_string())
                 .bind(Utc::now().timestamp())
+                .bind(T::NAME)
                 .fetch_optional(&mut tx)
                 .await
                 .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
@@ -148,7 +149,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
                 let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 let job_type = T::NAME;
                 let fetch_query = "SELECT * FROM Jobs
-                    WHERE status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts) AND run_at < ?1 AND job_type = ?2 LIMIT ?3";
+                    WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at < ?1 AND job_type = ?2 LIMIT ?3";
                 let jobs: Vec<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
                     .bind(Utc::now().timestamp())
                     .bind(job_type)
