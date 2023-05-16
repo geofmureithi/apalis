@@ -62,4 +62,4 @@ all-features = true
 
 
 [dev-dependencies]
-tokio = { version = "1.28.0", features = ["macros", "rt", "sync"]}
+tokio = { version = "1.28.1", features = ["macros", "rt", "sync"]}
