@@ -54,7 +54,7 @@ impl<T> JobRequest<T> {
         Self { job, context: ctx }
     }
 
-    /// Get the underlying reference of the [Job]
+    /// Get the underlying reference of the job
     pub fn inner(&self) -> &T {
         &self.job
     }

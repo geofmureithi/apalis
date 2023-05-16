@@ -4,7 +4,7 @@ use anyhow::Result;
 use apalis::{
     cron::{CronStream, Schedule},
     layers::TraceLayer,
-    prelude::{timer::SleepTimer, Timer, *},
+    prelude::{timer::AsyncStdTimer as SleepTimer, Timer, *},
 };
 use chrono::{DateTime, Utc};
 use tracing::debug;
@@ -39,9 +39,9 @@ async fn main() -> Result<()> {
 
     let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
     let worker = WorkerBuilder::new("daily-cron-worker")
-        .stream(CronStream::new(schedule).to_stream())
+        .stream(CronStream::new(schedule).timer(SleepTimer).to_stream())
         .layer(TraceLayer::new())
-        .build(job_fn(send_reminder));
+        .build_fn(send_reminder);
 
     Monitor::new()
         .executor(AsyncStdExecutor::new())

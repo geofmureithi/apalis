@@ -6,12 +6,27 @@
     unreachable_pub
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-//! # apalis Core
+//! # apalis-core
 //! Utilities for building job and message processing tools.
+//! This crate contains traits for working with workers.
+//! ````rust
+//! async fn run() {
+//!     Monitor::new()
+//!         .register_with_count(2, move |c| {
+//!             WorkerBuilder::new(format!("tasty-banana-{c}"))
+//!                 .layer(TraceLayer::new())
+//!                 .with_storage(sqlite.clone())
+//!                 .build_fn(send_email)
+//!         })
+//!         .shutdown_timeout(Duration::from_secs(1))
+//!         /// Here you could use tokio::ctrl_c etc
+//!         .run_with_signal(async { Ok(()) }).await
+//! }
+//! ````
+//!
+//!
 
-/// Represent utilities for creating [`Worker`] instances.
-///
-/// [`Worker`]: apalis_core::worker::Worker
+/// Represent utilities for creating worker instances.
 pub mod builder;
 /// Represents the [`JobContext`].
 pub mod context;
@@ -33,19 +48,24 @@ pub mod response;
 /// Represents ability to persist and consume jobs from storages.
 pub mod storage;
 
-/// Represents an async executor. Currently tokio is implemented as default
+/// Represents an executor. Currently tokio is implemented as default
 pub mod executor;
 /// Represents monitoring of running workers
 pub mod monitor;
 /// Represents extra utils needed for runtime agnostic approach
 pub mod utils;
-/// Represents the actual executor of a [Job].
+/// Represents the utils for building workers.
 pub mod worker;
 
 #[cfg(feature = "expose")]
 #[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
 /// Utilities to expose workers and jobs to external tools eg web frameworks and cli tools
 pub mod expose;
+
+#[cfg(feature = "mq")]
+#[cfg_attr(docsrs, doc(cfg(feature = "mq")))]
+/// Message queuing utilities
+pub mod mq;
 
 /// apalis mocking utilities
 #[cfg(feature = "tokio-comp")]

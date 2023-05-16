@@ -15,9 +15,9 @@ mod async_std_timer;
 /// Runtime agnostic sleep and timer utils
 pub mod timer {
     #[cfg(feature = "async-std-comp")]
-    pub use crate::utils::async_std_timer::AsyncStdTimer as SleepTimer;
+    pub use crate::utils::async_std_timer::AsyncStdTimer;
     #[cfg(feature = "tokio-comp")]
-    pub use crate::utils::tokio_timer::TokioTimer as SleepTimer;
+    pub use crate::utils::tokio_timer::TokioTimer;
 }
 
 /// A timer which provides timer-like functions.

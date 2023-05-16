@@ -8,7 +8,7 @@ pub trait Executor: Clone {
 
 /// An Executor that uses the tokio runtime
 #[cfg(feature = "tokio-comp")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TokioExecutor;
 
 #[cfg(feature = "tokio-comp")]
@@ -16,13 +16,6 @@ impl TokioExecutor {
     /// A new tokio executor
     pub fn new() -> Self {
         Self
-    }
-}
-
-#[cfg(feature = "tokio-comp")]
-impl Default for TokioExecutor {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -50,13 +43,5 @@ impl AsyncStdExecutor {
 impl Executor for AsyncStdExecutor {
     fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) {
         async_std::task::spawn(async { fut.await });
-    }
-}
-
-/// This just allows the tokio executor without being explicit
-#[cfg(feature = "tokio-comp")]
-impl Executor for () {
-    fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
-        tokio::spawn(future);
     }
 }

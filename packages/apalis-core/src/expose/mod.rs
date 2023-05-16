@@ -20,7 +20,7 @@ pub struct ExposedWorker {
     source: String,
     /// The layers that were loaded for worker. uses [std::any::type_name]
     layers: String,
-    /// The last time the worker was seen. [Storage] has keep alive.
+    /// The last time the worker was seen. Some sources use keep alive.
     last_seen: DateTime<Utc>,
 }
 

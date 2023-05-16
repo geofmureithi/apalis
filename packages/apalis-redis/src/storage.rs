@@ -8,7 +8,7 @@ use apalis_core::{
     job::{Job, JobId, JobStreamResult},
     request::JobRequest,
     storage::{Storage, StorageError, StorageResult, StorageWorkerPulse},
-    utils::{timer::SleepTimer, Timer},
+    utils::Timer,
     worker::WorkerId,
 };
 use async_stream::try_stream;
@@ -28,7 +28,7 @@ const JOB_DATA_HASH: &str = "{queue}:data";
 const SCHEDULED_JOBS_SET: &str = "{queue}:scheduled";
 const SIGNAL_LIST: &str = "{queue}:signal";
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct RedisQueueInfo {
     active_jobs_list: String,
     consumers_set: String,
@@ -41,7 +41,7 @@ struct RedisQueueInfo {
     signal_list: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct RedisScript {
     ack_job: Script,
     enqueue_scheduled: Script,
@@ -56,6 +56,7 @@ struct RedisScript {
 }
 
 /// Represents a [Storage] that uses Redis for storage.
+#[derive(Debug)]
 pub struct RedisStorage<T> {
     conn: MultiplexedConnection,
     job_type: PhantomData<T>,
@@ -75,6 +76,7 @@ impl<T> Clone for RedisStorage<T> {
 }
 
 impl<T: Job> RedisStorage<T> {
+    /// Start a new connection
     pub fn new(conn: MultiplexedConnection) -> Self {
         let name = T::NAME;
         RedisStorage {
@@ -112,12 +114,14 @@ impl<T: Job> RedisStorage<T> {
         }
     }
 
+    /// Connect to a redis url
     pub async fn connect<S: IntoConnectionInfo>(redis: S) -> Result<Self, RedisError> {
         let client = Client::open(redis.into_connection_info()?)?;
         let conn = client.get_multiplexed_async_connection().await?;
         Ok(Self::new(conn))
     }
 
+    /// Get current connection
     pub fn get_connection(&self) -> MultiplexedConnection {
         self.conn.clone()
     }
@@ -137,10 +141,14 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
         let job_data_hash = self.queue.job_data_hash.to_string();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let signal_list = self.queue.signal_list.to_string();
-        let timer = SleepTimer;
+        #[cfg(feature = "async-std-comp")]
+        #[allow(unused_variables)]
+        let sleeper = apalis_core::utils::timer::AsyncStdTimer;
+        #[cfg(feature = "tokio-comp")]
+        let sleeper = apalis_core::utils::timer::TokioTimer;
         try_stream! {
             loop {
-                timer.sleep_until(Instant::now() + interval).await;
+                sleeper.sleep_until(Instant::now() + interval).await;
                 let jobs: Vec<Value> = fetch_jobs
                     .key(&consumers_set)
                     .key(&active_jobs_list)

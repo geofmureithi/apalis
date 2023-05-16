@@ -43,6 +43,12 @@ impl JobContext {
     /// Build a new context with defaults given an ID.
     #[must_use]
     pub fn new(id: JobId) -> Self {
+        #[cfg(feature = "extensions")]
+        let data = {
+            let mut data = Data::default();
+            data.0.insert(id.clone());
+            data
+        };
         JobContext {
             id,
             status: JobState::Pending,
@@ -54,7 +60,7 @@ impl JobContext {
             last_error: None,
             lock_by: None,
             #[cfg(feature = "extensions")]
-            data: Data::default(),
+            data,
         }
     }
 

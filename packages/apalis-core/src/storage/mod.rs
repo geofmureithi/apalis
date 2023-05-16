@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 
 use crate::{
     job::{Job, JobId, JobStreamResult},
+    layers::ack::{Ack, AckError},
     request::JobRequest,
     worker::WorkerId,
 };
@@ -55,7 +56,7 @@ pub trait Storage: Clone {
     /// Called by a Worker to keep the storage alive and prevent jobs from being deemed as orphaned
     async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()>;
 
-    /// Kill a job that returns [JobResult::Kill]
+    /// Kill a job
     async fn kill(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()>;
 
     /// Update a job details
@@ -68,8 +69,7 @@ pub trait Storage: Clone {
     /// Used for scheduling jobs
     async fn heartbeat(&mut self, pulse: StorageWorkerPulse) -> StorageResult<bool>;
 
-    /// Kill a job that returns [JobResult::Reschedule]
-    /// [`JobResult::Reschedule`]: crate::response::JobResult
+    /// Reschedule a job
     async fn reschedule(
         &mut self,
         job: &JobRequest<Self::Output>,
@@ -85,6 +85,21 @@ pub trait Storage: Clone {
     #[doc(hidden)]
     async fn is_empty(&self) -> StorageResult<bool> {
         unimplemented!()
+    }
+}
+
+#[async_trait::async_trait]
+impl<J, S> Ack<J> for S
+where
+    S: Storage<Output = J> + Send + Sync,
+    J: Send + Sync,
+{
+    type Acknowledger = JobId;
+    async fn ack(&self, worker_id: &WorkerId, job_id: &JobId) -> Result<(), AckError> {
+        let mut storage: S = self.clone();
+        Storage::ack(&mut storage, worker_id, job_id)
+            .await
+            .map_err(|e| AckError::NoAck(e.into()))
     }
 }
 

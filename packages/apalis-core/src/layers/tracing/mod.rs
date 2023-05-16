@@ -86,8 +86,6 @@ impl<MakeSpan, OnRequest, OnResponse, OnFailure>
     /// Customize what to do when a request is received.
     ///
     /// `NewOnRequest` is expected to implement [`OnRequest`].
-    ///
-    /// [`OnRequest`]: super::OnRequest
     pub fn on_request<NewOnRequest>(
         self,
         new_on_request: NewOnRequest,
@@ -103,8 +101,7 @@ impl<MakeSpan, OnRequest, OnResponse, OnFailure>
     /// Customize what to do when a response has been produced.
     ///
     /// `NewOnResponse` is expected to implement [`OnResponse`].
-    ///
-    /// [`OnResponse`]: super::OnResponse
+
     pub fn on_response<NewOnResponse>(
         self,
         new_on_response: NewOnResponse,
@@ -120,8 +117,6 @@ impl<MakeSpan, OnRequest, OnResponse, OnFailure>
     /// Customize what to do when a response has been classified as a failure.
     ///
     /// `NewOnFailure` is expected to implement [`OnFailure`].
-    ///
-    /// [`OnFailure`]: super::OnFailure
     pub fn on_failure<NewOnFailure>(
         self,
         new_on_failure: NewOnFailure,
@@ -138,9 +133,6 @@ impl<MakeSpan, OnRequest, OnResponse, OnFailure>
     /// Customize how to make [`Span`]s that all request handling will be wrapped in.
     ///
     /// `NewMakeSpan` is expected to implement [`MakeSpan`].
-    ///
-    /// [`MakeSpan`]: super::MakeSpan
-    /// [`Span`]: tracing::Span
     pub fn make_span_with<NewMakeSpan>(
         self,
         new_make_span: NewMakeSpan,
@@ -176,10 +168,10 @@ where
     }
 }
 
-/// Middleware that adds high level [tracing] to an apalis [`Job`].
+/// Middleware that adds high level [`tracing`] to an apalis [`Job`].
 ///
 ///
-/// [tracing]: https://crates.io/crates/tracing
+/// [`tracing`]: https://crates.io/crates/tracing
 /// [`Job`]: crate::job::Job
 #[derive(Debug, Clone, Copy)]
 pub struct Trace<
@@ -212,7 +204,7 @@ impl<S> Trace<S> {
 
     /// Returns a new [`Layer`] that wraps services with a [`TraceLayer`] middleware.
     ///
-    /// [`Layer`]: tower_layer::Layer
+    /// [`Layer`]: tower::Layer
     pub fn layer() -> TraceLayer {
         TraceLayer::new()
     }
@@ -239,8 +231,6 @@ impl<S, MakeSpan, OnRequest, OnResponse, OnFailure>
     /// Customize what to do when a request is received.
     ///
     /// `NewOnRequest` is expected to implement [`OnRequest`].
-    ///
-    /// [`OnRequest`]: super::OnRequest
     pub fn on_request<NewOnRequest>(
         self,
         new_on_request: NewOnRequest,
@@ -257,8 +247,6 @@ impl<S, MakeSpan, OnRequest, OnResponse, OnFailure>
     /// Customize what to do when a response has been produced.
     ///
     /// `NewOnResponse` is expected to implement [`OnResponse`].
-    ///
-    /// [`OnResponse`]: super::OnResponse
     pub fn on_response<NewOnResponse>(
         self,
         new_on_response: NewOnResponse,
@@ -275,8 +263,6 @@ impl<S, MakeSpan, OnRequest, OnResponse, OnFailure>
     /// Customize what to do when a response has been classified as a failure.
     ///
     /// `NewOnFailure` is expected to implement [`OnFailure`].
-    ///
-    /// [`OnFailure`]: super::OnFailure
     pub fn on_failure<NewOnFailure>(
         self,
         new_on_failure: NewOnFailure,
@@ -293,9 +279,6 @@ impl<S, MakeSpan, OnRequest, OnResponse, OnFailure>
     /// Customize how to make [`Span`]s that all request handling will be wrapped in.
     ///
     /// `NewMakeSpan` is expected to implement [`MakeSpan`].
-    ///
-    /// [`MakeSpan`]: self::make_span::MakeSpan
-    /// [`Span`]: tracing::Span
     pub fn make_span_with<NewMakeSpan>(
         self,
         new_make_span: NewMakeSpan,
