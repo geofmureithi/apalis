@@ -10,8 +10,7 @@
 //! Utilities for building job and message processing tools.
 //! This crate contains traits for working with workers.
 //! ````rust
-//! #[tokio::main]
-//! fn main() {
+//! async fn run() {
 //!     Monitor::new()
 //!         .register_with_count(2, move |c| {
 //!             WorkerBuilder::new(format!("tasty-banana-{c}"))

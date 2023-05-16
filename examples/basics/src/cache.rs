@@ -1,4 +1,8 @@
-use std::{time::Duration, collections::HashMap, sync::{Arc, Mutex}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 // Use a wrapper type when adding data via Extension when working on common types.
 #[derive(Debug, Clone)]

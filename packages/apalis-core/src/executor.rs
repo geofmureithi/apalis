@@ -8,7 +8,7 @@ pub trait Executor: Clone {
 
 /// An Executor that uses the tokio runtime
 #[cfg(feature = "tokio-comp")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TokioExecutor;
 
 #[cfg(feature = "tokio-comp")]
