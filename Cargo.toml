@@ -7,7 +7,7 @@ repository = "https://github.com/geofmureithi/apalis"
 documentation = "https://docs.rs/apalis"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-keywords = ["job", "task", "scheduler", "worker", "cron" ]
+keywords = ["job", "task", "scheduler", "worker", "cron"]
 categories = ["database"]
 edition = "2021"
 
@@ -21,9 +21,9 @@ redis = ["apalis-redis"]
 ## Include Postgres storage
 postgres = ["apalis-sql/postgres"]
 ## Include SQlite storage
-sqlite = [ "apalis-sql/sqlite"]
+sqlite = ["apalis-sql/sqlite"]
 ## Include MySql storage
-mysql = [ "apalis-sql/mysql"]
+mysql = ["apalis-sql/mysql"]
 ## Include Cron functionality
 cron = ["apalis-cron"]
 
@@ -40,11 +40,21 @@ limit = ["apalis-core/limit"]
 ## Support filtering jobs based on a predicate
 filter = ["apalis-core/filter"]
 ## Add a global extensions to jobs
-extensions =["apalis-core/extensions"]
+extensions = ["apalis-core/extensions"]
 ## Compatibility with async-std and smol runtimes
-async-std-comp = ["apalis-core/async-std-comp", "apalis-sql/async-std-comp", "apalis-redis/async-std-comp", "apalis-cron/async-std-comp", ]
+async-std-comp = [
+  "apalis-core/async-std-comp",
+  "apalis-sql/async-std-comp",
+  "apalis-redis/async-std-comp",
+  "apalis-cron/async-std-comp",
+]
 ## Compatibility with tokio and actix runtimes
-tokio-comp = ["apalis-core/tokio-comp", "apalis-sql/tokio-comp", "apalis-redis/tokio-comp", "apalis-cron/tokio-comp" ]
+tokio-comp = [
+  "apalis-core/tokio-comp",
+  "apalis-sql/tokio-comp",
+  "apalis-redis/tokio-comp",
+  "apalis-cron/tokio-comp",
+]
 
 ## Expose job sources for web and cli purposes
 expose = ["apalis-core/expose", "apalis-sql/expose", "apalis-redis/expose"]
@@ -85,7 +95,22 @@ optional = true
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
-all-features = false
+features = [
+  "redis",
+  "sqlite",
+  "postgres",
+  "cron",
+  "sentry",
+  "prometheus",
+  "retry",
+  "timeout",
+  "limit",
+  "filter",
+  "extensions",
+  "tokio-comp",
+  "expose",
+  "docsrs",
+]
 
 
 [dev-dependencies]
@@ -93,7 +118,9 @@ criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
 serde = "1"
 tokio = { version = "1", features = ["macros"] }
 apalis-redis = { version = "0.4.0-alpha.9", path = "./packages/apalis-redis" }
-apalis-sql = { version = "0.4.0-alpha.9", path = "./packages/apalis-sql", features = ["sqlite"] }
+apalis-sql = { version = "0.4.0-alpha.9", path = "./packages/apalis-sql", features = [
+  "sqlite",
+] }
 
 [[bench]]
 name = "redis_benchmark"
@@ -118,5 +145,5 @@ members = [
   "examples/tracing",
   "examples/rest-api",
   "examples/async-std-runtime",
-  "examples/basics"
+  "examples/basics",
 ]
