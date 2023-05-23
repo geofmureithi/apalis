@@ -114,7 +114,7 @@ features = [
 
 
 [dev-dependencies]
-criterion = { version = "0.4", features = ["async_tokio", "html_reports"] }
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
 serde = "1"
 tokio = { version = "1", features = ["macros"] }
 apalis-redis = { version = "0.4.0-alpha.9", path = "./packages/apalis-redis" }
