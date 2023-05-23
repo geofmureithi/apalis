@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
 
     Monitor::new()
         .register(
-            WorkerBuilder::new("tasty-guava")            
+            WorkerBuilder::new("tasty-guava")
                 .layer(TraceLayer::new())
                 .with_storage(storage)
                 .build_fn(send_email),

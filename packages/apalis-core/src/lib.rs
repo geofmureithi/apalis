@@ -43,7 +43,7 @@
 //!
 //! ## Middleware aka Layering
 //! `apalis` prefers a functional approach to job handling and uses `tower::Layer` to model services as jobs.
-//! 
+//!
 //! First, we need to define a tower service.
 //! ```rust
 //! // This service implements the Log behavior
@@ -73,9 +73,9 @@
 //!    }
 //!}
 //! ```
-//! 
+//!
 //! Then we define a layer.
-//! 
+//!
 //! ```rust
 //! pub struct LogLayer {
 //!     target: &'static str,
@@ -99,7 +99,7 @@
 //! }
 //! ```
 //! Layers are executed sequentially.
-//! 
+//!
 //! ```rust
 //! .layer(LogLayer::new("log-layer-1"))
 //! .layer(LogLayer::new("log-layer-2"))
@@ -107,7 +107,7 @@
 //! `log-layer-1` would be logged before `log-layer-2`.
 //! This the means you should put your general layers first eg, `TraceLayer` and `CatchPanicLayer` should be before something like `AckLayer`
 //! This also can affect how other layers behave. Eg Any layer before `TraceLayer` may do some tracing, but those traces would not appear in that job's tracing span.
-//! 
+//!
 //! ## Graceful Shutdown
 //! `apalis` allows optional opt-in to graceful shutdown. This can be added to `Monitor::run_with_signal` and this can be any future. We highly recommend using `tokio::signal::ctrl_c` or something similar.  
 

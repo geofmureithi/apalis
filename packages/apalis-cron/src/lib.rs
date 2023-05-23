@@ -29,13 +29,13 @@
 //! # use apalis_core::builder::WorkerFactory;
 //! use apalis_cron::CronStream;
 //! use chrono::{DateTime, Utc};
-//! 
+//!
 //! #[derive(Clone)]
 //! struct FakeService;
 //! impl FakeService {
 //!     fn execute(&self, item: Reminder){}
 //! }
-//! 
+//!
 //! #[derive(Default, Debug, Clone)]
 //! struct Reminder(DateTime<Utc>);
 //! impl From<DateTime<Utc>> for Reminder {
@@ -50,7 +50,7 @@
 //!     let svc = ctx.data_opt::<FakeService>().unwrap();
 //!     svc.execute(job);
 //! }
-//! 
+//!
 //! #[tokio::main]
 //! async fn main() {
 //!     let schedule = Schedule::from_str("@daily").unwrap();

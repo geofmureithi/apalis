@@ -1,11 +1,11 @@
-//! # Message queue 
-//! 
+//! # Message queue
+//!
 //! Message queueing for apalis via `mq` module and feature respectively
 //! The `mq` module provides an abstraction for representing a message queue that supports pushing and consuming messages. It defines the MessageQueue trait, which can be implemented by different types of message queues.
 //! Trait: `MessageQueue<J>`
 
 //! The `MessageQueue` trait represents a message queue that can be pushed and consumed. It provides methods for pushing messages and consuming a stream of messages.
-//! 
+//!
 //! ## Trait Methods
 //!
 //!    - `push(data: J) -> Result<(), JobError>`.
@@ -27,8 +27,6 @@
 //!
 //!    Returns:
 //!        JobStreamResult<J>: A result representing a stream of messages (J). The stream can be processed asynchronously, allowing the worker to consume messages from the queue.
-
-
 
 use crate::{builder::WorkerBuilder, error::JobError, job::JobStreamResult, worker::WorkerId};
 
