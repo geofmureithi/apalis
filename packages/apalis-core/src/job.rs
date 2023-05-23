@@ -95,7 +95,9 @@ impl<'de> Visitor<'de> for JobIdVisitor {
 ///
 ///
 /// # Example
-/// ```rust,ignore
+/// ```rust
+/// # use apalis_core::job::Job;
+/// # struct Email;
 /// impl Job for Email {
 ///     const NAME: &'static str = "apalis::Email";
 /// }

@@ -1,6 +1,34 @@
-# apalis [![Build Status](https://github.com/geofmureithi/apalis/actions/workflows/ci.yaml/badge.svg)](https://github.com/geofmureithi/apalis/actions)
+<h1 align="center">apalis</h1>
+<div align="center">
+ <strong>
+   Simple, extensible multithreaded background job and messages processing library for Rust
+ </strong>
+</div>
 
-apalis is a simple, extensible multithreaded background job processing library for Rust.
+<br />
+
+<div align="center">
+  <!-- Crates version -->
+  <a href="https://crates.io/crates/apalis">
+    <img src="https://img.shields.io/crates/v/apalis.svg?style=flat-square"
+    alt="Crates.io version" />
+  </a>
+  <!-- Downloads -->
+  <a href="https://crates.io/crates/apalis">
+    <img src="https://img.shields.io/crates/d/apalis.svg?style=flat-square"
+      alt="Download" />
+  </a>
+  <!-- docs.rs docs -->
+  <a href="https://docs.rs/apalis">
+    <img src="https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square"
+      alt="docs.rs docs" />
+  </a>
+  <a href="https://github.com/geofmureithi/apalis/actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/geofmureithi/apalis/ci.yaml?branch=master&style=flat-square"
+      alt="CI" />
+  </a>
+</div>
+<br/>
 
 ## Features
 
@@ -13,14 +41,18 @@ apalis is a simple, extensible multithreaded background job processing library f
 
 apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] middleware.
 
-apalis has support for
+apalis has support for:
 
-- Redis
-- SQlite
-- PostgresSQL
-- MySQL
-- Cron Jobs
-- Bring Your Own Job Source eg Twitter streams
+| Source  | Crate | Example |
+| ----------- | ----------- | --------- |
+| Cron Jobs      | <a href="https://docs.rs/apalis-cron"><img src="https://img.shields.io/crates/v/apalis-cron?style=flat-square"></a>       | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/async-std-runtime"><img src="https://img.shields.io/badge/-basic_example-black?style=flat-square&logo=github"/></a>
+| Redis      | <a href="https://docs.rs/apalis-redis"><img src="https://img.shields.io/crates/v/apalis-redis?style=flat-square"></a>       | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/redis"><img src="https://img.shields.io/badge/-basic_example-black?style=flat-square&logo=redis"/></a>
+| Sqlite     | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>       | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/sqlite"><img src="https://img.shields.io/badge/-sqlite_example-black?style=flat-square&logo=sqlite"/></a>
+| Postgres      | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>       | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/postgres"><img src="https://img.shields.io/badge/-postgres_example-black?style=flat-square&logo=postgres"/></a>
+| MySQL     | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>       | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/mysql"><img src="https://img.shields.io/badge/-mysql_example-black?style=flat-square&logo=mysql"/></a>
+| Amqp      | <a href="https://docs.rs/apalis-amqp"><img src="https://img.shields.io/crates/v/apalis-amqp?style=flat-square"></a>       | <a href="https://github.com/geofmureithi/apalis-amqp/tree/master/example/"><img src="https://img.shields.io/badge/-rabbitmq_example-black?style=flat-square&logo=github"/></a>
+| From Scratch      | <img src="https://img.shields.io/crates/v/apalis-core?style=flat-square">       | |
+
 
 ## Getting Started
 
@@ -30,6 +62,7 @@ To get started, just add to Cargo.toml
 [dependencies]
 apalis = { version = "0.4", features = ["redis"] }
 ```
+
 
 ## Usage
 
@@ -55,8 +88,8 @@ async fn main() -> Result<()> {
     let redis = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
     let storage = RedisStorage::new(redis).await?;
     Monitor::new()
-        .register_with_count(2, move || {
-            WorkerBuilder::new("email-worker-1")
+        .register_with_count(2, move |index| {
+            WorkerBuilder::new(format!("email-worker-{index}"))
                 .with_storage(storage.clone())
                 .build_fn(email_service)
         })
@@ -80,12 +113,6 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
 }
 
 ```
-
-### Web UI
-
-If you are running [apalis Board](https://github.com/geofmureithi/apalis-board), you can easily manage your jobs. See a working [Rest API here](https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
-
-![UI](https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png)
 
 ## Feature flags
 
@@ -133,6 +160,13 @@ sequenceDiagram
     Worker->>+Producer: Update job status to 'completed' via Layer
 ```
 
+
+### Web UI
+
+If you are running [apalis Board](https://github.com/geofmureithi/apalis-board), you can easily manage your jobs. See a working [rest API example here](https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
+
+<img src="https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png" width="100%">
+
 ## Thanks to
 
 - [`tower`] - Tower is a library of modular and reusable components for building robust networking clients and servers.
@@ -140,6 +174,15 @@ sequenceDiagram
 - [sqlx](https://github.com/launchbadge/sqlx) - The Rust SQL Toolkit
 
 ## Roadmap
+
+v 1.0
+- [ ] Refactor the crates structure
+- [ ] Mocking utilities
+- [ ] Support for SurrealDB and Mongo
+- [ ] Lock free for Postgres
+- [ ] Add more utility layers
+- [ ] Use extractors in job fn structure
+- [ ] Polish up documentation
 
 v 0.4
 
@@ -186,17 +229,11 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 
 See also the list of [contributors](https://github.com/geofmureithi/apalis/contributors) who participated in this project.
 
-It was formerly `actix-redis-jobs` and if you want to use the crate name please contact me.
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
 
-## Acknowledgments
-
-- Inspiration: The redis part of this project is heavily inspired by [Curlyq](https://github.com/mcmathja/curlyq) which is written in GoLang
-
-[`tower::service`]: https://docs.rs/tower/latest/tower/trait.Service.html
+[`tower::Service`]: https://docs.rs/tower/latest/tower/trait.Service.html
 [`tower`]: https://crates.io/crates/tower
 [`actix`]: https://crates.io/crates/actix
 [`tower-http`]: https://crates.io/crates/tower-http

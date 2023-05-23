@@ -7,7 +7,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! # apalis Cron
+//! # apalis-cron
 //! A simple yet extensible library for cron-like job scheduling for rust.
 //! Since `apalis-cron` is build on top of `apalis` which supports tower middlerware, you should be able to easily
 //! add middleware such as tracing, retries, load shed, concurrency etc.
@@ -15,40 +15,42 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use apalis_core::context::JobContext;
-//! use apalis_core::layers::retry::RetryLayer;
-//! use apalis_core::layers::retry::DefaultRetryPolicy;
-//! use apalis_core::layers::extensions::Extension;
-//! use apalis_core::job_fn::job_fn;
-//! use apalis_core::job::Job;
+//! # use apalis_core::context::JobContext;
+//! # use apalis_core::layers::retry::RetryLayer;
+//! # use apalis_core::layers::retry::DefaultRetryPolicy;
+//! # use apalis_core::layers::extensions::Extension;
+//! # use apalis_core::job_fn::job_fn;
+//! # use apalis_core::job::Job;
 //! use tower::ServiceBuilder;
 //! use apalis_cron::Schedule;
 //! use std::str::FromStr;
-//! use serde::{Serialize,Deserialize};
-//! use apalis_core::monitor::Monitor;
-//! use apalis_core::builder::WorkerBuilder;
-//! use apalis_core::builder::WorkerFactory;
+//! # use apalis_core::monitor::Monitor;
+//! # use apalis_core::builder::WorkerBuilder;
+//! # use apalis_core::builder::WorkerFactory;
 //! use apalis_cron::CronStream;
-//! #[derive(Default, Clone)]
-//! struct Reminder;
-//!
+//! use chrono::{DateTime, Utc};
+//! 
+//! #[derive(Clone)]
+//! struct FakeService;
+//! impl FakeService {
+//!     fn execute(&self, item: Reminder){}
+//! }
+//! 
+//! #[derive(Default, Debug, Clone)]
+//! struct Reminder(DateTime<Utc>);
+//! impl From<DateTime<Utc>> for Reminder {
+//!    fn from(t: DateTime<Utc>) -> Self {
+//!        Reminder(t)
+//!    }
+//! }
 //! impl Job for Reminder {
 //!     const NAME: &'static str = "reminder::DailyReminder";
 //! }
 //! async fn send_reminder(job: Reminder, ctx: JobContext) {
-//!     // Do reminder stuff
-//!     let db = ctx.data_opt::<FakeService>().unwrap();
-//!     db.push(job);
-//!     
+//!     let svc = ctx.data_opt::<FakeService>().unwrap();
+//!     svc.execute(job);
 //! }
-//!
-//! #[derive(Clone)]
-//! struct FakeService;
-//!
-//! impl FakeService {
-//!     fn push(&self, item: Reminder){}
-//! }
-//!
+//! 
 //! #[tokio::main]
 //! async fn main() {
 //!     let schedule = Schedule::from_str("@daily").unwrap();
@@ -56,7 +58,6 @@
 //!         .layer(RetryLayer::new(DefaultRetryPolicy))
 //!         .layer(Extension(FakeService))
 //!         .service(job_fn(send_reminder));
-//!
 //!     let worker = WorkerBuilder::new("morning-cereal")
 //!         .stream(CronStream::new(schedule).to_stream())
 //!         .build(service);

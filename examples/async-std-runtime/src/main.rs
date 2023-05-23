@@ -35,12 +35,12 @@ async fn main() -> Result<()> {
     let handle = move || {
         s.try_send(()).ok();
     };
-    ctrlc::set_handler(handle).unwrap();
+    ctrlc::set_handler(handle)?;
 
     let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
     let worker = WorkerBuilder::new("daily-cron-worker")
-        .stream(CronStream::new(schedule).timer(SleepTimer).to_stream())
         .layer(TraceLayer::new())
+        .stream(CronStream::new(schedule).timer(SleepTimer).to_stream())
         .build_fn(send_reminder);
 
     Monitor::new()

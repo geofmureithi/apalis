@@ -97,7 +97,9 @@ async fn main() -> Result<()> {
                 .with_storage(sqlite.clone())
                 .build_fn(send_email)
         })
-        .run()
+        .shutdown_timeout(Duration::from_secs(5))
+        // Use .run() if you don't want without signals
+        .run_with_signal(tokio::signal::ctrl_c()) // This will wait for ctrl+c then gracefully shutdown
         .await?;
     Ok(())
 }

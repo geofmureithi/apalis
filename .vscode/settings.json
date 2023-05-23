@@ -2,5 +2,6 @@
     "cSpell.words": [
         "apalis",
         "smol"
-    ]
+    ],
+    "rust-analyzer.showUnlinkedFileNotification": false
 }
