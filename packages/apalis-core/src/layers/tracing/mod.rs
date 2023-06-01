@@ -13,7 +13,7 @@ use std::{
 use tower::Service;
 use tracing::{Level, Span};
 
-use self::{
+pub use self::{
     make_span::{DefaultMakeSpan, MakeSpan},
     on_failure::{DefaultOnFailure, OnFailure},
     on_request::{DefaultOnRequest, OnRequest},
