@@ -13,7 +13,7 @@ use apalis_core::{
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
-use futures::Stream;
+use futures::{Stream, StreamExt, TryStreamExt};
 use log::*;
 use redis::{aio::MultiplexedConnection, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Serialize};
@@ -260,7 +260,24 @@ where
         interval: Duration,
         buffer_size: usize,
     ) -> JobStreamResult<T> {
-        Box::pin(self.stream_jobs(worker_id, interval, buffer_size))
+        Box::pin(
+            self.stream_jobs(worker_id, interval, buffer_size)
+                .map_ok(|job| match job {
+                    Some(mut job) => {
+                        let id = job.id().clone();
+                        match job.insert(id) {
+                            None => {
+                                error!("Error occurred during seeding the JobId into data");
+                                None
+                            }
+                            _ => Some(job),
+                        }
+                            
+                        
+                    },
+                    None => None,
+                }),
+        )
     }
 
     async fn kill(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
