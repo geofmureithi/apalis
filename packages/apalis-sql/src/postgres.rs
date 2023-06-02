@@ -24,7 +24,7 @@ use futures::{FutureExt, Stream};
 use futures_lite::future;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::postgres::PgListener;
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Pool};
 use std::convert::TryInto;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
@@ -67,6 +67,11 @@ impl<T> PostgresStorage<T> {
         let pool = self.pool.clone();
         sqlx::migrate!("migrations/postgres").run(&pool).await?;
         Ok(())
+    }
+
+    /// Expose the pool for other functionality, eg custom migrations
+    pub fn pool(&self) -> &Pool<Postgres> {
+        &self.pool
     }
 }
 

@@ -96,6 +96,11 @@ impl<T: Job> SqliteStorage<T> {
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
     }
+
+    /// Expose the pool for other functionality, eg custom migrations
+    pub fn pool(&self) -> &Pool<Sqlite> {
+        &self.pool
+    }
 }
 
 async fn fetch_next<T>(
