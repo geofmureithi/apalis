@@ -13,7 +13,7 @@ use apalis_core::{
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use log::*;
 use redis::{aio::MultiplexedConnection, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Serialize};
@@ -265,13 +265,8 @@ where
                 .map_ok(|job| match job {
                     Some(mut job) => {
                         let id = job.id().clone();
-                        match job.insert(id) {
-                            None => {
-                                error!("Error occurred during seeding the JobId into data");
-                                None
-                            }
-                            _ => Some(job),
-                        }
+                        job.insert(id);
+                        Some(job)
                     }
                     None => None,
                 }),

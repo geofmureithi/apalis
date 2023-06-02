@@ -1,9 +1,7 @@
+use std::time::Duration;
+
 use anyhow::Result;
-use apalis::{
-    layers::{Extension, TraceLayer},
-    prelude::*,
-    redis::RedisStorage,
-};
+use apalis::{layers::TraceLayer, prelude::*, redis::RedisStorage};
 use email_service::{send_email, Email};
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
@@ -33,7 +31,16 @@ async fn main() -> Result<()> {
         .register(
             WorkerBuilder::new("tasty-guava")
                 .layer(TraceLayer::new())
-                .with_storage(storage)
+                .with_storage_config(storage, |cfg| {
+                    cfg
+                        // Reenqueue 100 jobs that are orphaned every second
+                        .reenqueue_orphaned(Some((100, Duration::from_secs(1))))
+                        // Fetch up to 10 jobs every call to database.
+                        .buffer_size(10)
+                        // Control how many jobs are moved from the scheduled queue to active queue per interval
+                        // Set to None if not using scheduled jobs
+                        .enqueue_scheduled(Some((100, Duration::from_secs(1))))
+                })
                 .build_fn(send_email),
         )
         .run()
