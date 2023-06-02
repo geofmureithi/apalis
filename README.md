@@ -51,7 +51,7 @@ apalis has support for:
 | Postgres      | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>       | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/postgres"><img src="https://img.shields.io/badge/-postgres_example-black?style=flat-square&logo=postgres"/></a>
 | MySQL     | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>       | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/mysql"><img src="https://img.shields.io/badge/-mysql_example-black?style=flat-square&logo=mysql"/></a>
 | Amqp      | <a href="https://docs.rs/apalis-amqp"><img src="https://img.shields.io/crates/v/apalis-amqp?style=flat-square"></a>       | <a href="https://github.com/geofmureithi/apalis-amqp/tree/master/examples/basic.rs"><img src="https://img.shields.io/badge/-rabbitmq_example-black?style=flat-square&logo=github"/></a>
-| From Scratch      | <img src="https://img.shields.io/crates/v/apalis-core?style=flat-square">       | |
+| From Scratch      | <a href="https://docs.rs/apalis-core"><img src="https://img.shields.io/crates/v/apalis-core?style=flat-square"></a>       | |
 
 
 ## Getting Started
@@ -75,6 +75,10 @@ use anyhow::Result;
 #[derive(Debug, Deserialize, Serialize)]
 struct Email {
     to: String,
+}
+
+impl Job for Email {
+    const NAME: &'static str = "apalis::Email";
 }
 
 async fn email_service(job: Email, ctx: JobContext) {
@@ -102,7 +106,7 @@ async fn main() -> Result<()> {
 Then
 
 ```rust
-//This can be in another part of the program or another application
+//This can be in another part of the program or another application eg a http server
 async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
     let mut storage = storage.clone();
     storage
