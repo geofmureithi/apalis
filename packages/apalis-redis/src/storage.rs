@@ -272,9 +272,7 @@ where
                             }
                             _ => Some(job),
                         }
-                            
-                        
-                    },
+                    }
                     None => None,
                 }),
         )
