@@ -24,7 +24,7 @@ use futures::{FutureExt, Stream};
 use futures_lite::future;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::postgres::PgListener;
-use sqlx::{PgPool, Postgres, Row, Pool};
+use sqlx::{PgPool, Pool, Postgres, Row};
 use std::convert::TryInto;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
