@@ -55,6 +55,11 @@ impl<T> MysqlStorage<T> {
         sqlx::migrate!("migrations/mysql").run(&pool).await?;
         Ok(())
     }
+
+    /// Expose the pool for other functionality, eg custom migrations
+    pub fn pool(&self) -> &Pool<MySql> {
+        &self.pool
+    }
 }
 
 impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
