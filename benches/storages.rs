@@ -19,20 +19,19 @@ macro_rules! define_bench {
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &s| {
                 b.to_async(Runtime::new().unwrap())
                     .iter_custom(|iters| async move {
-                        let mut interval = tokio::time::interval(Duration::from_millis(10));
+                        let mut interval = tokio::time::interval(Duration::from_millis(100));
                         let storage = { $setup };
-
                         let mut s1 = storage.clone();
-
                         tokio::spawn(async move {
                             Monitor::new()
-                                .register_with_count(2, |index| {
+                                .register_with_count(1, |index| {
                                     let worker =
                                         WorkerBuilder::new(format!("{}-bench-{index}", $name))
                                             .with_storage_config(storage.clone(), |cfg| {
                                                 cfg.buffer_size(1000)
                                                     .enqueue_scheduled(None)
                                                     .reenqueue_orphaned(None)
+                                                    .fetch_interval(Duration::from_millis(100))
                                             })
                                             .build(job_fn(handle_test_job));
                                     worker
@@ -47,7 +46,6 @@ macro_rules! define_bench {
                             for _i in 0..s {
                                 let _ = s1.push(TestJob).await;
                             }
-
                             while s1.len().await.unwrap_or(-1) != 0 {
                                 interval.tick().await;
                             }
