@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use apalis::prelude::*;
 use apalis_redis::RedisStorage;
-use apalis_sql::sqlite::SqliteStorage;
+use apalis_sql::{postgres::PostgresStorage, sqlite::SqliteStorage};
 use criterion::*;
 use paste::paste;
 use serde::{Deserialize, Serialize};
@@ -93,5 +93,13 @@ define_bench!("redis", {
     redis
 });
 
-criterion_group!(benches, redis);
+define_bench!("postgres", {
+    let pg = PostgresStorage::connect(env!("DATABASE_URL"))
+        .await
+        .unwrap();
+    let _ = pg.setup().await;
+    pg
+});
+
+criterion_group!(benches, sqlite_in_memory, redis, postgres);
 criterion_main!(benches);

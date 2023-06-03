@@ -9,6 +9,14 @@ jobs:
         image: redis
         ports:
           - 6379:6379
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost/postgres
     steps:
       - uses: actions/checkout@v3
       - uses: boa-dev/criterion-compare-action@v3
