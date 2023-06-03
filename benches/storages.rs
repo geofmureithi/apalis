@@ -16,17 +16,6 @@ macro_rules! define_bench {
 
             let mut group = c.benchmark_group($name);
             group.sample_size(10);
-            // group.bench_with_input(BenchmarkId::new("push", size), &size, |b, &s| {
-            //     b.to_async(Runtime::new().unwrap()).iter(|| async move {
-            //         let mut storage = { $setup };
-            //         let start = Instant::now();
-            //         for _i in 0..s {
-            //             let _ = black_box(storage.push(TestJob).await);
-            //         }
-            //         start.elapsed()
-            //     });
-            // });
-
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &s| {
                 b.to_async(Runtime::new().unwrap())
                     .iter_custom(|iters| async move {
@@ -66,11 +55,19 @@ macro_rules! define_bench {
                         start.elapsed()
                     })
             });
-        }
-        }
+            group.bench_with_input(BenchmarkId::new("push", size), &size, |b, &s| {
+                b.to_async(Runtime::new().unwrap()).iter(|| async move {
+                    let mut storage = { $setup };
+                    let start = Instant::now();
+                    for _i in 0..s {
+                        let _ = black_box(storage.push(TestJob).await);
+                    }
+                    start.elapsed()
+                });
+            });
+        }}
     };
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 struct TestJob;
@@ -90,7 +87,7 @@ define_bench!("sqlite_in_memory", {
 });
 
 define_bench!("redis", {
-    let redis = RedisStorage::connect("redis://127.0.0.1/").await.unwrap();
+    let redis = RedisStorage::connect(env!("REDIS_URL")).await.unwrap();
     redis
 });
 
