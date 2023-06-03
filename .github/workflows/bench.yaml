@@ -1,8 +1,8 @@
 on: [pull_request]
-name: benchmark pull requests
+name: Benchmark
 jobs:
   storageBenchmark:
-    name: Storage Benchmarks
+    name: Storages
     runs-on: ubuntu-latest
     services:
       redis:
@@ -15,8 +15,18 @@ jobs:
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_DATABASE: test
+          MYSQL_USER: test
+          MYSQL_PASSWORD: test
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
     env:
-      DATABASE_URL: postgres://postgres:postgres@localhost/postgres
+      POSTGRES_URL: postgres://postgres:postgres@localhost/postgres
+      MYSQL_URL: mysql://test:test@localhost/test
     steps:
       - uses: actions/checkout@v3
       - uses: boa-dev/criterion-compare-action@v3

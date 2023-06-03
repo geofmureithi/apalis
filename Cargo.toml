@@ -123,7 +123,7 @@ serde = "1"
 tokio = { version = "1", features = ["macros"] }
 apalis-redis = { version = "0.4.1", path = "./packages/apalis-redis" }
 apalis-sql = { version = "0.4.1", path = "./packages/apalis-sql", features = [
-  "sqlite", "postgres"
+  "sqlite", "postgres", "mysql"
 ] }
 
 [[bench]]
