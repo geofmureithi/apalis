@@ -16,16 +16,16 @@ macro_rules! define_bench {
 
             let mut group = c.benchmark_group($name);
             group.sample_size(10);
-            group.bench_with_input(BenchmarkId::new("push", size), &size, |b, &s| {
-                b.to_async(Runtime::new().unwrap()).iter(|| async move {
-                    let mut storage = { $setup };
-                    let start = Instant::now();
-                    for _i in 0..s {
-                        let _ = black_box(storage.push(TestPush).await);
-                    }
-                    start.elapsed()
-                });
-            });
+            // group.bench_with_input(BenchmarkId::new("push", size), &size, |b, &s| {
+            //     b.to_async(Runtime::new().unwrap()).iter(|| async move {
+            //         let mut storage = { $setup };
+            //         let start = Instant::now();
+            //         for _i in 0..s {
+            //             let _ = black_box(storage.push(TestJob).await);
+            //         }
+            //         start.elapsed()
+            //     });
+            // });
 
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &s| {
                 b.to_async(Runtime::new().unwrap())
@@ -37,7 +37,7 @@ macro_rules! define_bench {
 
                         tokio::spawn(async move {
                             Monitor::new()
-                                .register_with_count(1, |index| {
+                                .register_with_count(2, |index| {
                                     let worker =
                                         WorkerBuilder::new(format!("{}-bench-{index}", $name))
                                             .with_storage_config(storage.clone(), |cfg| {
@@ -71,12 +71,6 @@ macro_rules! define_bench {
     };
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct TestPush;
-
-impl Job for TestPush {
-    const NAME: &'static str = "TestPush";
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 struct TestJob;
@@ -100,18 +94,18 @@ define_bench!("redis", {
     redis
 });
 
-// define_bench!("postgres", {
-//     let pg = PostgresStorage::connect(env!("POSTGRES_URL"))
-//         .await
-//         .unwrap();
-//     let _ = pg.setup().await;
-//     pg
-// });
+define_bench!("postgres", {
+    let pg = PostgresStorage::connect(env!("POSTGRES_URL"))
+        .await
+        .unwrap();
+    let _ = pg.setup().await;
+    pg
+});
 define_bench!("mysql", {
     let mysql = MysqlStorage::connect(env!("MYSQL_URL")).await.unwrap();
-    let _ = mysql.setup().await;
+    let _ = mysql.setup().await.unwrap();
     mysql
 });
 
-criterion_group!(benches, sqlite_in_memory, redis, mysql);
+criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
 criterion_main!(benches);
