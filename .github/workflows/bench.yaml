@@ -12,3 +12,5 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: boa-dev/criterion-compare-action@v3
+        with:
+          branchName: ${{ github.base_ref }}
