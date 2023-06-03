@@ -100,18 +100,18 @@ define_bench!("redis", {
     redis
 });
 
-define_bench!("postgres", {
-    let pg = PostgresStorage::connect(env!("POSTGRES_URL"))
-        .await
-        .unwrap();
-    let _ = pg.setup().await;
-    pg
-});
+// define_bench!("postgres", {
+//     let pg = PostgresStorage::connect(env!("POSTGRES_URL"))
+//         .await
+//         .unwrap();
+//     let _ = pg.setup().await;
+//     pg
+// });
 define_bench!("mysql", {
     let mysql = MysqlStorage::connect(env!("MYSQL_URL")).await.unwrap();
     let _ = mysql.setup().await;
     mysql
 });
 
-criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
+criterion_group!(benches, sqlite_in_memory, redis, mysql);
 criterion_main!(benches);
