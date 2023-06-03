@@ -21,7 +21,7 @@ macro_rules! define_bench {
                     let mut storage = { $setup };
                     let start = Instant::now();
                     for _i in 0..s {
-                        let _ = black_box(storage.push(TestJob).await);
+                        let _ = black_box(storage.push(TestPush).await);
                     }
                     start.elapsed()
                 });
@@ -69,6 +69,13 @@ macro_rules! define_bench {
         }
         }
     };
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TestPush;
+
+impl Job for TestPush {
+    const NAME: &'static str = "TestPush";
 }
 
 #[derive(Serialize, Deserialize, Debug)]

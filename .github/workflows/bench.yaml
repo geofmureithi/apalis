@@ -1,8 +1,8 @@
 on: [pull_request]
 name: benchmark pull requests
 jobs:
-  runBenchmark:
-    name: run benchmark
+  storageBenchmark:
+    name: Storage Benchmarks
     runs-on: ubuntu-latest
     services:
       redis:
