@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use apalis::prelude::*;
 use apalis_redis::RedisStorage;
-use apalis_sql::{postgres::PostgresStorage, sqlite::SqliteStorage, mysql::MysqlStorage};
+use apalis_sql::{mysql::MysqlStorage, postgres::PostgresStorage, sqlite::SqliteStorage};
 use criterion::*;
 use paste::paste;
 use serde::{Deserialize, Serialize};
@@ -108,9 +108,7 @@ define_bench!("postgres", {
     pg
 });
 define_bench!("mysql", {
-    let mysql = MysqlStorage::connect(env!("MYSQL_URL"))
-        .await
-        .unwrap();
+    let mysql = MysqlStorage::connect(env!("MYSQL_URL")).await.unwrap();
     let _ = mysql.setup().await;
     mysql
 });
