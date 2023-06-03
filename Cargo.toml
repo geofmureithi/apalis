@@ -11,6 +11,9 @@ keywords = ["job", "task", "scheduler", "worker", "cron"]
 categories = ["database"]
 edition = "2021"
 
+[lib]
+bench = false
+
 [features]
 default = ["tracing", "tokio-comp"]
 ## Support Tracing 👀
