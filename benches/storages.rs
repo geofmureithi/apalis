@@ -12,7 +12,7 @@ macro_rules! define_bench {
     ($name:expr, $setup:expr ) => {
         paste! {
         fn [<$name>](c: &mut Criterion) {
-            let size: usize = 10000;
+            let size: usize = 1000;
 
             let mut group = c.benchmark_group($name);
             group.sample_size(10);
@@ -28,7 +28,7 @@ macro_rules! define_bench {
                                     let worker =
                                         WorkerBuilder::new(format!("{}-bench-{index}", $name))
                                             .with_storage_config(storage.clone(), |cfg| {
-                                                cfg.buffer_size(200)
+                                                cfg.buffer_size(10)
                                                     .enqueue_scheduled(None)
                                                     .reenqueue_orphaned(None)
                                             })
