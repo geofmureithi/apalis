@@ -46,7 +46,7 @@ async-trait = "0.1.68"
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
 email-service = { path = "../../examples/email-service" }
-once_cell = "1.17.2"
+once_cell = "1.18.0"
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
