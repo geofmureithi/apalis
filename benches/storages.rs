@@ -6,11 +6,6 @@ use paste::paste;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
-mod perf;
-
-fn custom_criterion() -> Criterion {
-    Criterion::default().with_profiler(perf::FlamegraphProfiler::new(100))
-}
 
 macro_rules! define_bench {
     ($name:expr, $setup:expr ) => {
@@ -105,9 +100,5 @@ define_bench!("mysql", {
     mysql
 });
 
-criterion_group! {
-    name = benches;
-    config = custom_criterion();
-    targets = sqlite_in_memory,
-}
+criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
 criterion_main!(benches);
