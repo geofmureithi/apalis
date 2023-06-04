@@ -18,16 +18,16 @@ macro_rules! define_bench {
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &s| {
                 b.to_async(Runtime::new().unwrap())
                     .iter_custom(|iters| async move {
-                        let mut interval = tokio::time::interval(Duration::from_millis(100));
+                        let mut interval = tokio::time::interval(Duration::from_millis(50));
                         let storage = { $setup };
                         let mut s1 = storage.clone();
                         tokio::spawn(async move {
                             Monitor::new()
-                                .register_with_count(1, |index| {
+                                .register_with_count(2, |index| {
                                     let worker =
                                         WorkerBuilder::new(format!("{}-bench-{index}", $name))
                                             .with_storage_config(storage.clone(), |cfg| {
-                                                cfg.buffer_size(100)
+                                                cfg.buffer_size(50)
                                                     .enqueue_scheduled(None)
                                                     .reenqueue_orphaned(None)
                                             })
