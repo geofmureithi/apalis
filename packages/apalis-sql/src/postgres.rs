@@ -20,6 +20,7 @@ use apalis_core::utils::Timer;
 use apalis_core::worker::WorkerId;
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
+use futures::StreamExt;
 use futures::{FutureExt, Stream};
 use futures_lite::future;
 use serde::{de::DeserializeOwned, Serialize};
@@ -93,13 +94,14 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
             let mut listener = PgListener::connect_with(&pool).await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             #[allow(clippy::let_unit_value)]
             let _notify = listener.listen("apalis::job").await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+            let notification = listener.into_stream().map(|_| ());
+            let mut debounced = debounced::debounced(notification, Duration::from_millis(500));
             loop {
                 //  Ideally wait for a job or a tick
-                let interval = sleeper.sleep(interval).map(|_| ());
-                let notification = listener.recv().map(|_| ()); // TODO: This silences errors from pubsub, needs improvement to trigger start queue
-                future::race(interval, notification).await;
+                let interval = sleeper.sleep(interval).map(|_| Some(()));
+                future::race(interval, debounced.next()).await;
                 let tx = pool.clone();
-                let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+                // let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 let job_type = T::NAME;
                 let fetch_query = "Select * from apalis.get_jobs($1, $2, $3);";
                 let jobs: Vec<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
@@ -107,7 +109,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
                     .bind(job_type)
                     // https://docs.rs/sqlx/latest/sqlx/postgres/types/index.html
                     .bind(i32::try_from(buffer_size).map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?)
-                    .fetch_all(&mut tx)
+                    .fetch_all(&tx)
                     .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 for job in jobs {
                     yield job.build_job_request()
@@ -124,10 +126,6 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
     ) -> StorageResult<()> {
         let pool = self.pool.clone();
 
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let worker_type = T::NAME;
         let storage_name = std::any::type_name::<Self>();
         let query = "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen)
@@ -140,7 +138,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
             .bind(storage_name)
             .bind(std::any::type_name::<Service>())
             .bind(last_seen)
-            .execute(&mut tx)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -166,16 +164,12 @@ where
         let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, 25, NOW() , NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
         let job = serde_json::to_value(&job).map_err(|e| StorageError::Parse(Box::from(e)))?;
-        let mut pool = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let job_type = T::NAME;
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
             .bind(job_type.to_string())
-            .execute(&mut pool)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(id)
@@ -191,17 +185,13 @@ where
         let pool = self.pool.clone();
         let id = JobId::new();
         let job = serde_json::to_value(&job).map_err(|e| StorageError::Parse(Box::from(e)))?;
-        let mut pool = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let job_type = T::NAME;
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
             .bind(job_type)
             .bind(on)
-            .execute(&mut pool)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(id)
@@ -210,15 +200,10 @@ where
     async fn fetch_by_id(&self, job_id: &JobId) -> StorageResult<Option<JobRequest<Self::Output>>> {
         let pool = self.pool.clone();
 
-        let mut conn = pool
-            .clone()
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let fetch_query = "SELECT * FROM apalis.jobs WHERE id = $1";
         let res = sqlx::query_as(fetch_query)
             .bind(job_id.to_string())
-            .fetch_optional(&mut conn)
+            .fetch_optional(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(res.build_job_request())
@@ -304,14 +289,9 @@ where
     }
     async fn len(&self) -> StorageResult<i64> {
         let pool = self.pool.clone();
-
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let query = "Select Count(*) as count from apalis.jobs where status='Pending'";
         let record = sqlx::query(query)
-            .fetch_one(&mut tx)
+            .fetch_one(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(record
@@ -320,17 +300,12 @@ where
     }
     async fn ack(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
         let pool = self.pool.clone();
-
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let query =
                 "UPDATE apalis.jobs SET status = 'Done', done_at = now() WHERE id = $1 AND lock_by = $2";
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
