@@ -14,7 +14,7 @@ macro_rules! define_bench {
             let size: usize = 1000;
 
             let mut group = c.benchmark_group($name);
-            group.sample_size(20);
+            group.sample_size(10);
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &s| {
                 b.to_async(Runtime::new().unwrap())
                     .iter_custom(|iters| async move {
