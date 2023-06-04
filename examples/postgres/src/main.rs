@@ -45,8 +45,8 @@ async fn main() -> Result<()> {
                     cfg
                         // Set the buffer size to 100 ( Pick 100 jobs per query)
                         .buffer_size(250)
-                    // Lower the fetch interval because postgres is waiting for notifications
-                    .fetch_interval(Duration::from_millis(200))
+                        // Lower the fetch interval because postgres is waiting for notifications
+                        .fetch_interval(Duration::from_millis(200))
                 })
                 .build_fn(send_email)
         })
