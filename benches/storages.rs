@@ -1,12 +1,16 @@
-use std::time::{Duration, Instant};
-
 use apalis::prelude::*;
 use apalis_redis::RedisStorage;
 use apalis_sql::{mysql::MysqlStorage, postgres::PostgresStorage, sqlite::SqliteStorage};
 use criterion::*;
 use paste::paste;
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
+mod perf;
+
+fn custom_criterion() -> Criterion {
+    Criterion::default().with_profiler(perf::FlamegraphProfiler::new(100))
+}
 
 macro_rules! define_bench {
     ($name:expr, $setup:expr ) => {
@@ -15,7 +19,7 @@ macro_rules! define_bench {
             let size: usize = 1000;
 
             let mut group = c.benchmark_group($name);
-            group.sample_size(10);
+            group.sample_size(20);
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &s| {
                 b.to_async(Runtime::new().unwrap())
                     .iter_custom(|iters| async move {
@@ -24,11 +28,11 @@ macro_rules! define_bench {
                         let mut s1 = storage.clone();
                         tokio::spawn(async move {
                             Monitor::new()
-                                .register_with_count(5, |index| {
+                                .register_with_count(1, |index| {
                                     let worker =
                                         WorkerBuilder::new(format!("{}-bench-{index}", $name))
                                             .with_storage_config(storage.clone(), |cfg| {
-                                                cfg.buffer_size(10)
+                                                cfg.buffer_size(100)
                                                     .enqueue_scheduled(None)
                                                     .reenqueue_orphaned(None)
                                             })
@@ -101,5 +105,9 @@ define_bench!("mysql", {
     mysql
 });
 
-criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
+criterion_group! {
+    name = benches;
+    config = custom_criterion();
+    targets = sqlite_in_memory,
+}
 criterion_main!(benches);

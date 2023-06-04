@@ -2,7 +2,7 @@ on: [pull_request]
 name: Benchmark
 jobs:
   storageBenchmark:
-    name: Storages
+    name: Storage Benchmarks
     runs-on: ubuntu-latest
     services:
       redis:
