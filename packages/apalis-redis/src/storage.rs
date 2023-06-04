@@ -304,12 +304,19 @@ where
 
     async fn len(&self) -> StorageResult<i64> {
         let mut conn = self.conn.clone();
-        let length: i64 = redis::cmd("HLEN")
+        let all_jobs: i64 = redis::cmd("HLEN")
             .arg(&self.queue.job_data_hash.to_string())
             .query_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::new(e)))?;
-        Ok(length)
+        let done_jobs: i64 = redis::cmd("ZCOUNT")
+            .arg(self.queue.done_jobs_set.to_owned())
+            .arg("-inf")
+            .arg("+inf")
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| StorageError::Database(Box::new(e)))?;
+        Ok(all_jobs - done_jobs)
     }
 
     async fn fetch_by_id(&self, job_id: &JobId) -> StorageResult<Option<JobRequest<Self::Output>>> {
