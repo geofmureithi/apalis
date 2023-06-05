@@ -23,11 +23,11 @@ macro_rules! define_bench {
                         let mut s1 = storage.clone();
                         tokio::spawn(async move {
                             Monitor::new()
-                                .register_with_count(2, |index| {
+                                .register_with_count(1, |index| {
                                     let worker =
                                         WorkerBuilder::new(format!("{}-bench-{index}", $name))
                                             .with_storage_config(storage.clone(), |cfg| {
-                                                cfg.buffer_size(50)
+                                                cfg.buffer_size(100)
                                                     .enqueue_scheduled(None)
                                                     .reenqueue_orphaned(None)
                                             })
