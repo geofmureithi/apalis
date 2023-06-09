@@ -72,7 +72,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: publish
-          args: ${{ env.PUBLISH_OPTS }} -p apalis-sql
+          args: ${{ env.PUBLISH_OPTS }} -p apalis-sql --features=tokio-comp
       - name: publish apalis
         uses: actions-rs/cargo@v1
         with:
