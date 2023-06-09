@@ -1,6 +1,6 @@
 [package]
 name = "apalis"
-version = "0.4.1"
+version = "0.4.2"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
@@ -66,26 +66,26 @@ docsrs = ["document-features"]
 
 
 [dependencies.apalis-redis]
-version = "0.4.1"
+version = "0.4.2"
 optional = true
 path = "./packages/apalis-redis"
 default-features = false
 
 [dependencies.apalis-sql]
-version = "0.4.1"
+version = "0.4.2"
 features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"
 
 [dependencies.apalis-core]
-version = "0.4.1"
+version = "0.4.2"
 default-features = false
 path = "./packages/apalis-core"
 features = ["storage"]
 
 [dependencies.apalis-cron]
-version = "0.4.1"
+version = "0.4.2"
 optional = true
 default-features = false
 path = "./packages/apalis-cron"
@@ -122,8 +122,8 @@ pprof = { version = "0.11", features = ["flamegraph"] }
 paste = "1.0.12"
 serde = "1"
 tokio = { version = "1", features = ["macros"] }
-apalis-redis = { version = "0.4.1", path = "./packages/apalis-redis" }
-apalis-sql = { version = "0.4.1", path = "./packages/apalis-sql", features = [
+apalis-redis = { version = "0.4.2", path = "./packages/apalis-redis" }
+apalis-sql = { version = "0.4.2", path = "./packages/apalis-sql", features = [
   "sqlite", "postgres", "mysql"
 ] }
 
