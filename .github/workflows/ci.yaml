@@ -21,6 +21,10 @@ jobs:
         with:
           command: check
           args: --features tokio-comp
+      - uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --features async-std-comp --no-default-features
 
 
   test:
