@@ -17,6 +17,7 @@ apalis-core = { path = "../../packages/apalis-core", version = "0.4.1", default-
 redis = { version = "0.23", default-features = false, features = [
     "script",
     "aio",
+    "connection-manager"
 ] }
 serde = "1"
 log = "0.4"

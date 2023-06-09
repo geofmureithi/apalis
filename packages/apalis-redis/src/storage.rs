@@ -15,8 +15,9 @@ use async_stream::try_stream;
 use chrono::{DateTime, Utc};
 use futures::{Stream, TryStreamExt};
 use log::*;
-use redis::{aio::MultiplexedConnection, Client, IntoConnectionInfo, RedisError, Script, Value};
+use redis::{aio::ConnectionManager, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Serialize};
+use std::fmt;
 
 const ACTIVE_JOBS_LIST: &str = "{queue}:active";
 const CONSUMERS_SET: &str = "{queue}:consumers";
@@ -56,12 +57,22 @@ struct RedisScript {
 }
 
 /// Represents a [Storage] that uses Redis for storage.
-#[derive(Debug)]
 pub struct RedisStorage<T> {
-    conn: MultiplexedConnection,
+    conn: ConnectionManager,
     job_type: PhantomData<T>,
     queue: RedisQueueInfo,
     scripts: RedisScript,
+}
+
+impl<T> fmt::Debug for RedisStorage<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RedisStorage")
+            .field("conn", &"ConnectionManager")
+            .field("job_type", &std::any::type_name::<T>())
+            .field("queue", &self.queue)
+            .field("scripts", &self.scripts)
+            .finish()
+    }
 }
 
 impl<T> Clone for RedisStorage<T> {
@@ -77,7 +88,7 @@ impl<T> Clone for RedisStorage<T> {
 
 impl<T: Job> RedisStorage<T> {
     /// Start a new connection
-    pub fn new(conn: MultiplexedConnection) -> Self {
+    pub fn new(conn: ConnectionManager) -> Self {
         let name = T::NAME;
         RedisStorage {
             conn,
@@ -117,12 +128,12 @@ impl<T: Job> RedisStorage<T> {
     /// Connect to a redis url
     pub async fn connect<S: IntoConnectionInfo>(redis: S) -> Result<Self, RedisError> {
         let client = Client::open(redis.into_connection_info()?)?;
-        let conn = client.get_multiplexed_async_connection().await?;
+        let conn = client.get_tokio_connection_manager().await?;
         Ok(Self::new(conn))
     }
 
     /// Get current connection
-    pub fn get_connection(&self) -> MultiplexedConnection {
+    pub fn get_connection(&self) -> ConnectionManager {
         self.conn.clone()
     }
 }
@@ -149,7 +160,7 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
         try_stream! {
             loop {
                 sleeper.sleep_until(Instant::now() + interval).await;
-                let jobs: Vec<Value> = fetch_jobs
+                let result = fetch_jobs
                     .key(&consumers_set)
                     .key(&active_jobs_list)
                     .key(&inflight_set)
@@ -157,11 +168,18 @@ impl<T: DeserializeOwned + Send + Unpin> RedisStorage<T> {
                     .key(&signal_list)
                     .arg(buffer_size) // No of jobs to fetch
                     .arg(&inflight_set)
-                    .invoke_async(&mut conn)
-                    .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-                for job in jobs {
-                    yield deserialize_job(&job)
+                    .invoke_async::<_, Vec<Value>>(&mut conn).await;
+                match result {
+                    Ok(jobs) => {
+                        for job in jobs {
+                            yield deserialize_job::<JobRequest<T>>(&job)
+                        }
+                    },
+                    Err(e) => {
+                        warn!("An error occurred during streaming jobs: {e}");
+                    }
                 }
+
 
             }
         }
