@@ -4,11 +4,12 @@ use anyhow::Result;
 use apalis::prelude::*;
 use apalis::{layers::TraceLayer, postgres::PostgresStorage};
 use email_service::{send_email, Email};
+use tower::buffer::BufferLayer;
 
 async fn produce_jobs(storage: &PostgresStorage<Email>) -> Result<()> {
     // The programmatic way
     let mut storage = storage.clone();
-    for index in 0..1000 {
+    for index in 0..10000 {
         storage
             .push(Email {
                 to: format!("test{}@example.com", index),
@@ -36,15 +37,16 @@ async fn main() -> Result<()> {
     produce_jobs(&pg).await?;
 
     Monitor::new()
-        .register_with_count(5, move |c| {
+        .register_with_count(4, move |c| {
             WorkerBuilder::new(format!("tasty-orange-{c}"))
-                .layer(TraceLayer::new())
+                // .layer(TraceLayer::new())
+                .layer(BufferLayer::<JobRequest<Email>>::new(250))
                 .with_storage_config(pg.clone(), |cfg| {
                     cfg
                         // Set the buffer size to 100 ( Pick 100 jobs per query)
-                        .buffer_size(100)
+                        .buffer_size(250)
                         // Lower the fetch interval because postgres is waiting for notifications
-                        .fetch_interval(Duration::from_secs(1))
+                        .fetch_interval(Duration::from_millis(200))
                 })
                 .build_fn(send_email)
         })

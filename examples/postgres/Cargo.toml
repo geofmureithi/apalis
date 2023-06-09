@@ -11,8 +11,9 @@ apalis = { path = "../../", features = ["postgres"] }
 serde = "1"
 tracing-subscriber = "0.3.11"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-tokio = { version ="1", features=["macros"]}
+tokio = { version = "1", features = ["macros"] }
 email-service = { path = "../email-service" }
+tower = { version = "0.4", features = ["buffer"] }
 
 [dependencies.tracing]
 default_features = false

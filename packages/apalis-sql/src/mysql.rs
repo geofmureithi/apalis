@@ -79,15 +79,15 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
         try_stream! {
             loop {
                 sleeper.sleep(interval).await;
-                let tx = pool.clone();
-                let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+                let pool = pool.clone();
+                // let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 let job_type = T::NAME;
                 let fetch_query = "SELECT * FROM jobs
                 WHERE status = 'Pending' AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE";
                 let jobs: Vec<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
                     .bind(job_type)
                     .bind(i64::try_from(buffer_size).map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?)
-                    .fetch_all(&mut tx)
+                    .fetch_all(&pool)
                     .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 for job in jobs {
                     yield fetch_next(pool.clone(), &worker_id, job.build_job_request()).await?;
@@ -135,24 +135,17 @@ where
     match job {
         None => Ok(None),
         Some(job) => {
-            let mut tx = pool
-                .begin()
-                .await
-                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             let job_id = job.id();
             let update_query = "UPDATE jobs SET status = 'Running', lock_by = ?, lock_at = NOW() WHERE id = ? AND status = 'Pending' AND lock_by IS NULL;";
             sqlx::query(update_query)
                 .bind(worker_id.to_string())
                 .bind(job_id.to_string())
-                .execute(&mut tx)
+                .execute(&pool)
                 .await
                 .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             let job: Option<SqlJobRequest<T>> = sqlx::query_as("Select * from jobs where id = ?")
                 .bind(job_id.to_string())
-                .fetch_optional(&mut tx)
-                .await
-                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-            tx.commit()
+                .fetch_optional(&pool)
                 .await
                 .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             Ok(job.build_job_request())
@@ -174,16 +167,12 @@ where
         let pool = self.pool.clone();
 
         let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
-        let mut pool = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Connection(Box::from(e)))?;
         let job_type = T::NAME;
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
             .bind(job_type.to_string())
-            .execute(&mut pool)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(id)
@@ -200,17 +189,14 @@ where
         let id = JobId::new();
 
         let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
-        let mut pool = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Connection(Box::from(e)))?;
+
         let job_type = T::NAME;
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
             .bind(job_type)
             .bind(on)
-            .execute(&mut pool)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(id)
@@ -218,16 +204,10 @@ where
 
     async fn fetch_by_id(&self, job_id: &JobId) -> StorageResult<Option<JobRequest<Self::Output>>> {
         let pool = self.pool.clone();
-
-        let mut conn = pool
-            .clone()
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Connection(Box::from(e)))?;
         let fetch_query = "SELECT * FROM jobs WHERE id = ?";
         let res: Option<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
             .bind(job_id.to_string())
-            .fetch_optional(&mut conn)
+            .fetch_optional(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(res.build_job_request())
@@ -315,13 +295,9 @@ where
     async fn len(&self) -> StorageResult<i64> {
         let pool = self.pool.clone();
 
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let query = "Select Count(*) as count from jobs where status='Pending'";
         let record = sqlx::query(query)
-            .fetch_one(&mut tx)
+            .fetch_one(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(record
@@ -331,15 +307,11 @@ where
     async fn ack(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
         let pool = self.pool.clone();
 
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let query = "UPDATE jobs SET status = 'Done', done_at = now() WHERE id = ? AND lock_by = ?";
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())

@@ -74,11 +74,6 @@ impl<T: Job> SqliteStorage<T> {
         last_seen: DateTime<Utc>,
     ) -> StorageResult<()> {
         let pool = self.pool.clone();
-
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let worker_type = T::NAME;
         let storage_name = std::any::type_name::<Self>();
         let query = "INSERT INTO Workers (id, worker_type, storage_name, layers, last_seen)
@@ -91,7 +86,7 @@ impl<T: Job> SqliteStorage<T> {
             .bind(storage_name)
             .bind(std::any::type_name::<Service>())
             .bind(last_seen.timestamp())
-            .execute(&mut tx)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -114,10 +109,6 @@ where
     match job {
         None => Ok(None),
         Some(job) => {
-            let mut tx = pool
-                .begin()
-                .await
-                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
             let job_id = job.id();
             let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
             let job: Option<SqlJobRequest<T>> = sqlx::query_as(update_query)
@@ -125,12 +116,10 @@ where
                 .bind(worker_id.to_string())
                 .bind(Utc::now().timestamp())
                 .bind(T::NAME)
-                .fetch_optional(&mut tx)
+                .fetch_optional(&pool)
                 .await
                 .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-            tx.commit()
-                .await
-                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+
             Ok(job.build_job_request())
         }
     }
@@ -184,16 +173,12 @@ where
         let pool = self.pool.clone();
 
         let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
-        let mut pool = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let job_type = T::NAME;
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
             .bind(job_type.to_string())
-            .execute(&mut pool)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(id)
@@ -210,17 +195,13 @@ where
         let id = JobId::new();
 
         let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
-        let mut pool = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let job_type = T::NAME;
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
             .bind(job_type)
             .bind(on.timestamp())
-            .execute(&mut pool)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(id)
@@ -228,16 +209,10 @@ where
 
     async fn fetch_by_id(&self, job_id: &JobId) -> StorageResult<Option<JobRequest<Self::Output>>> {
         let pool = self.pool.clone();
-
-        let mut conn = pool
-            .clone()
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let fetch_query = "SELECT * FROM Jobs WHERE id = ?1";
         let res: Option<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
             .bind(job_id.to_string())
-            .fetch_optional(&mut conn)
+            .fetch_optional(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(res.build_job_request())
@@ -343,13 +318,9 @@ where
     async fn len(&self) -> StorageResult<i64> {
         let pool = self.pool.clone();
 
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let query = "Select Count(*) as count from Jobs where status='Pending'";
         let record = sqlx::query(query)
-            .fetch_one(&mut tx)
+            .fetch_one(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(record
@@ -358,17 +329,12 @@ where
     }
     async fn ack(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
         let pool = self.pool.clone();
-
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
         let query =
                 "UPDATE Jobs SET status = 'Done', done_at = strftime('%s','now') WHERE id = ?1 AND lock_by = ?2";
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&pool)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -432,25 +398,7 @@ where
     }
 
     async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()> {
-        let mut tx = self
-            .pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        let worker_type = T::NAME;
-        let storage_name = std::any::type_name::<Self>();
-        let query =
-                "INSERT OR REPLACE INTO Workers (id, worker_type, storage_name, layers, last_seen) VALUES (?1, ?2, ?3, ?4, ?5);";
-        sqlx::query(query)
-            .bind(worker_id.to_string())
-            .bind(worker_type)
-            .bind(storage_name)
-            .bind(std::any::type_name::<Service>())
-            .bind(Utc::now().timestamp())
-            .execute(&mut tx)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(())
+        self.keep_alive_at::<Service>(worker_id, Utc::now()).await
     }
 }
 
@@ -471,13 +419,6 @@ pub mod expose {
         for SqliteStorage<J>
     {
         async fn counts(&mut self) -> Result<JobStateCount, JobError> {
-            let mut conn = self
-                .pool
-                .clone()
-                .acquire()
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
-
             let fetch_query = "SELECT
                             COUNT(1) FILTER (WHERE status = 'Pending') AS pending, 
                             COUNT(1) FILTER (WHERE status = 'Running') AS running,
@@ -488,7 +429,7 @@ pub mod expose {
                         FROM Jobs WHERE job_type = ?";
             let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
                 .bind(J::NAME)
-                .fetch_one(&mut conn)
+                .fetch_one(self.pool())
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             let mut inner = HashMap::new();
@@ -507,37 +448,24 @@ pub mod expose {
             page: i32,
         ) -> Result<Vec<JobRequest<J>>, JobError> {
             let status = status.as_ref().to_string();
-
-            let mut conn = self
-                .pool
-                .clone()
-                .acquire()
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
             let fetch_query = "SELECT * FROM Jobs WHERE status = ? AND job_type = ? ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET ?";
             let res: Vec<SqlJobRequest<J>> = sqlx::query_as(fetch_query)
                 .bind(status)
                 .bind(J::NAME)
                 .bind(((page - 1) * 10).to_string())
-                .fetch_all(&mut conn)
+                .fetch_all(self.pool())
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(res.into_iter().map(|j| j.into()).collect())
         }
 
         async fn list_workers(&mut self) -> Result<Vec<ExposedWorker>, JobError> {
-            let mut conn = self
-                .pool
-                .clone()
-                .acquire()
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
             let fetch_query =
             "SELECT id, layers, last_seen FROM Workers WHERE worker_type = ? ORDER BY last_seen DESC LIMIT 20 OFFSET ?";
             let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
                 .bind(J::NAME)
                 .bind("0")
-                .fetch_all(&mut conn)
+                .fetch_all(self.pool())
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(res

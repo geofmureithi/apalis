@@ -18,7 +18,7 @@ macro_rules! define_bench {
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &s| {
                 b.to_async(Runtime::new().unwrap())
                     .iter_custom(|iters| async move {
-                        let mut interval = tokio::time::interval(Duration::from_millis(100));
+                        let mut interval = tokio::time::interval(Duration::from_millis(50));
                         let storage = { $setup };
                         let mut s1 = storage.clone();
                         tokio::spawn(async move {
