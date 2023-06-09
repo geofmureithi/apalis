@@ -4,7 +4,7 @@ on:
   pull_request:
   workflow_call:
 
-name: Continuous integration
+name: CI
 
 jobs:
   check:
@@ -38,85 +38,6 @@ jobs:
           command: test
           args: --features tokio-comp
 
-  test-redis:
-    name: Test Suite Redis
-    runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: redis
-        ports:
-          - 6379:6379
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: cargo test --features tokio-comp -- --test-threads=1
-        working-directory: packages/apalis-redis
-        env:
-          REDIS_URL: redis://127.0.0.1/
-
-  test-mysql:
-    name: Test Suite with MySQL
-    runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8
-        env:
-          MYSQL_DATABASE: test
-          MYSQL_USER: test
-          MYSQL_PASSWORD: test
-          MYSQL_ROOT_PASSWORD: root
-        ports:
-          - 3306:3306
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: cargo test --no-default-features --features mysql,migrate,tokio-comp -- --test-threads=1
-        working-directory: packages/apalis-sql
-        env:
-          DATABASE_URL: mysql://test:test@localhost/test
-
-  test-postgres:
-    name: Test Suite with Postgres
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-    env:
-      DATABASE_URL: postgres://postgres:postgres@localhost/postgres
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: cargo test --no-default-features --features postgres,migrate,tokio-comp -- --test-threads=1
-        working-directory: packages/apalis-sql
-
-  test-sqlite:
-    name: Test Suite with Sqlite
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: cargo test --no-default-features --features sqlite,migrate,tokio-comp -- --test-threads=1
-        working-directory: packages/apalis-sql
 
   fmt:
     name: Rustfmt

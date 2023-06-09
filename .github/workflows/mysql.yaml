@@ -1,0 +1,44 @@
+on:
+  push:
+    paths:
+      - "packages/apalis-sql/src/lib.rs"
+      - "packages/apalis-sql/mysql.rs"
+      - "packages/apalis-sql/src/migrations/mysql/**"
+      - ".github/workflows/mysql.yaml"
+  pull_request:
+    paths:
+      - "packages/apalis-sql/src/lib.rs"
+      - "packages/apalis-sql/src/mysql.rs"
+      - "packages/apalis-sql/src/migrations/mysql/**"
+      - ".github/workflows/mysql.yaml"
+
+name: Mysql CI
+
+jobs:  
+  test-mysql:
+    name: Test Suite with MySQL
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_DATABASE: test
+          MYSQL_USER: test
+          MYSQL_PASSWORD: test
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+    env:
+          DATABASE_URL: mysql://test:test@localhost/test
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: cargo test --no-default-features --features mysql,migrate,tokio-comp -- --test-threads=1
+        working-directory: packages/apalis-sql
+      - run: cargo test --no-default-features --features mysql,migrate,async-std-comp -- --test-threads=1
+        working-directory: packages/apalis-sql
+        

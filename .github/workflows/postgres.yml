@@ -1,0 +1,40 @@
+on:
+  push:
+    paths:
+      - "packages/apalis-sql/src/lib.rs"
+      - "packages/apalis-sql/postgres.rs"
+      - "packages/apalis-sql/src/migrations/postgres/**"
+      - ".github/workflows/postgres.yaml"
+  pull_request:
+    paths:
+      - "packages/apalis-sql/src/lib.rs"
+      - "packages/apalis-sql/src/postgres.rs"
+      - "packages/apalis-sql/src/migrations/postgres/**"
+      - ".github/workflows/postgres.yaml"
+
+name: Postgres CI
+
+jobs:
+  test-sqlite:
+    name: Test Suite Postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost/postgres
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: cargo test --no-default-features --features postgres,migrate,tokio-comp -- --test-threads=1
+        working-directory: packages/apalis-sql
+      - run: cargo test --no-default-features --features postgres,migrate,async-comp -- --test-threads=1
+        working-directory: packages/apalis-sql
