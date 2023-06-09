@@ -4,12 +4,14 @@ on:
       - "packages/apalis-sql/src/lib.rs"
       - "packages/apalis-sql/mysql.rs"
       - "packages/apalis-sql/src/migrations/mysql/**"
+      - "packages/apalis-sql/src/Cargo.toml"
       - ".github/workflows/mysql.yaml"
   pull_request:
     paths:
       - "packages/apalis-sql/src/lib.rs"
       - "packages/apalis-sql/src/mysql.rs"
       - "packages/apalis-sql/src/migrations/mysql/**"
+      - "packages/apalis-sql/src/Cargo.toml"
       - ".github/workflows/mysql.yaml"
 
 name: Mysql CI
