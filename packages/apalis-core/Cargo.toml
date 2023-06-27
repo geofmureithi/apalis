@@ -23,7 +23,7 @@ smol-timeout = { version = "0.6", optional = true }
 thiserror = "1.0.40"
 log = "0.4"
 http = { version = "0.2.9", optional = true }
-strum = { version = "0.24", features = ["derive"] }
+strum = { version = "0.25", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "serde",
