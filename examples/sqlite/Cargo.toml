@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1"
-tokio = { version = "1", features = ["macros"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 apalis = { path = "../../", features = ["sqlite", "limit"] }
 serde = { version = "1", features = ["derive"] }
 tracing-subscriber = "0.3.11"
@@ -20,6 +20,6 @@ default_features = false
 version = "0.1"
 
 [dependencies.sqlx]
-version = "0.6"
+version = "0.7"
 default-features = false
 features = ["sqlite"]

@@ -151,7 +151,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
                     .bind(Utc::now().timestamp())
                     .bind(job_type)
                     .bind(i64::try_from(buffer_size).map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?)
-                    .fetch_all(&mut tx)
+                    .fetch_all(&mut *tx)
                     .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 for job in jobs {
                     yield fetch_next(pool.clone(), &worker_id, job.build_job_request()).await?;
@@ -238,7 +238,7 @@ where
                 sqlx::query(query)
                     .bind(job_type)
                     .bind(count)
-                    .execute(&mut tx)
+                    .execute(&mut *tx)
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
                 Ok(true)
@@ -260,7 +260,7 @@ where
                     .bind(Utc::now().sub(chrono::Duration::minutes(5)).timestamp())
                     .bind(job_type)
                     .bind(count)
-                    .execute(&mut tx)
+                    .execute(&mut *tx)
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
                 Ok(true)
@@ -281,7 +281,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -301,7 +301,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -358,7 +358,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(Utc::now().add(wait).timestamp())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -391,7 +391,7 @@ where
             .bind(lock_at)
             .bind(last_error)
             .bind(job_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
