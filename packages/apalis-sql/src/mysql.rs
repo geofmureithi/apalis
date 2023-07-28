@@ -117,7 +117,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
             .bind(storage_name)
             .bind(std::any::type_name::<Service>())
             .bind(last_seen)
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -237,7 +237,7 @@ where
                     .bind(Utc::now().sub(chrono::Duration::minutes(5)))
                     .bind(job_type)
                     .bind(count)
-                    .execute(&mut tx)
+                    .execute(&mut *tx)
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
                 Ok(true)
@@ -258,7 +258,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -278,7 +278,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -335,7 +335,7 @@ where
         sqlx::query(query)
             .bind(Utc::now().add(wait))
             .bind(job_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -368,7 +368,7 @@ where
             .bind(lock_at)
             .bind(last_error)
             .bind(job_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())

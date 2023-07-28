@@ -232,7 +232,7 @@ where
                 sqlx::query(query)
                     .bind(job_type)
                     .bind(count)
-                    .execute(&mut tx)
+                    .execute(&mut *tx)
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
                 Ok(true)
@@ -253,7 +253,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -273,7 +273,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -329,7 +329,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(Utc::now().add(wait))
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -362,7 +362,7 @@ where
             .bind(lock_at)
             .bind(last_error)
             .bind(job_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -509,12 +509,12 @@ mod tests {
             .expect("failed to get connection");
         sqlx::query("Delete from apalis.jobs where lock_by = $1 or status = 'Pending'")
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .expect("failed to delete jobs");
         sqlx::query("Delete from apalis.workers where id = $1")
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .expect("failed to delete worker");
     }
