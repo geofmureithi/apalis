@@ -229,7 +229,7 @@ where
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
                 let query = r#"Update jobs j
-                        INNER JOIN ( SELECT workers.id as worker_id, job.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
+                        INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.worker_id = workers.worker_id AND jobs.id = workers.job_id
                         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
                 sqlx::query(query)
