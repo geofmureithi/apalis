@@ -410,7 +410,7 @@ pub mod expose {
                         FROM apalis.jobs WHERE job_type = $1";
             let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
                 .bind(J::NAME)
-                .fetch_one(&mut conn)
+                .fetch_one(&mut *conn)
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             let mut counts = HashMap::new();
@@ -441,7 +441,7 @@ pub mod expose {
                 .bind(status)
                 .bind(J::NAME)
                 .bind((page - 1) * 10)
-                .fetch_all(&mut conn)
+                .fetch_all(&mut *conn)
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(res.into_iter().map(|j| j.into()).collect())
@@ -459,7 +459,7 @@ pub mod expose {
             let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
                 .bind(J::NAME)
                 .bind(0_i64)
-                .fetch_all(&mut conn)
+                .fetch_all(&mut *conn)
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(res
