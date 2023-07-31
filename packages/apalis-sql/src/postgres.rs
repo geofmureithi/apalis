@@ -232,7 +232,7 @@ where
                 sqlx::query(query)
                     .bind(job_type)
                     .bind(count)
-                    .execute(&mut tx)
+                    .execute(&mut *tx)
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
                 Ok(true)
@@ -253,7 +253,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -273,7 +273,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -329,7 +329,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(Utc::now().add(wait))
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -362,7 +362,7 @@ where
             .bind(lock_at)
             .bind(last_error)
             .bind(job_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -410,7 +410,7 @@ pub mod expose {
                         FROM apalis.jobs WHERE job_type = $1";
             let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
                 .bind(J::NAME)
-                .fetch_one(&mut conn)
+                .fetch_one(&mut *conn)
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             let mut counts = HashMap::new();
@@ -441,7 +441,7 @@ pub mod expose {
                 .bind(status)
                 .bind(J::NAME)
                 .bind((page - 1) * 10)
-                .fetch_all(&mut conn)
+                .fetch_all(&mut *conn)
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(res.into_iter().map(|j| j.into()).collect())
@@ -459,7 +459,7 @@ pub mod expose {
             let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
                 .bind(J::NAME)
                 .bind(0_i64)
-                .fetch_all(&mut conn)
+                .fetch_all(&mut *conn)
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(res
@@ -509,12 +509,12 @@ mod tests {
             .expect("failed to get connection");
         sqlx::query("Delete from apalis.jobs where lock_by = $1 or status = 'Pending'")
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .expect("failed to delete jobs");
         sqlx::query("Delete from apalis.workers where id = $1")
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .expect("failed to delete worker");
     }

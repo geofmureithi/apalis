@@ -81,6 +81,15 @@ impl Job for Email {
     const NAME: &'static str = "apalis::Email";
 }
 
+/// A function that will be converted into a service.
+/// The following signatures are accepted
+/// ```rust
+/// async fn job(email: Email, ctx: JobContext)
+/// async fn job(email: Email, ctx: JobContext) -> anyhow::Result<anyhow::Error>
+/// async fn job(email: Email, ctx: JobContext) -> Result<(), my::Error>
+/// async fn job(email: Email, ctx: JobContext) -> primitive //eg str
+/// async fn job(email: Email, ctx: JobContext) -> impl IntoJobResponse
+/// ```
 async fn email_service(job: Email, ctx: JobContext) {
     info!("Do something");
 }
@@ -163,6 +172,8 @@ sequenceDiagram
     end
     Worker->>+Producer: Update job status to 'completed' via Layer
 ```
+
+
 
 
 ### Web UI

@@ -117,7 +117,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
             .bind(storage_name)
             .bind(std::any::type_name::<Service>())
             .bind(last_seen)
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -228,16 +228,15 @@ where
                     .acquire()
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
-                let query = r#"Update jobs 
-                        INNER JOIN workers ON jobs.lock_by = workers.id
-                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
-                        WHERE status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
-                        ORDER BY lock_at ASC LIMIT ?;"#;
+                let query = r#"Update jobs
+                        INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
+                            ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
+                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
                 sqlx::query(query)
                     .bind(Utc::now().sub(chrono::Duration::minutes(5)))
                     .bind(job_type)
                     .bind(count)
-                    .execute(&mut tx)
+                    .execute(&mut *tx)
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
                 Ok(true)
@@ -258,7 +257,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -278,7 +277,7 @@ where
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -335,7 +334,7 @@ where
         sqlx::query(query)
             .bind(Utc::now().add(wait))
             .bind(job_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -368,7 +367,7 @@ where
             .bind(lock_at)
             .bind(last_error)
             .bind(job_id.to_string())
-            .execute(&mut tx)
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         Ok(())
@@ -413,7 +412,7 @@ pub mod expose {
         FROM jobs WHERE job_type = ?";
             let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
                 .bind(J::NAME)
-                .fetch_one(&mut conn)
+                .fetch_one(&mut *conn)
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             let mut inner = HashMap::new();
@@ -444,7 +443,7 @@ pub mod expose {
                 .bind(status)
                 .bind(J::NAME)
                 .bind((page - 1) * 10)
-                .fetch_all(&mut conn)
+                .fetch_all(&mut *conn)
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(res.into_iter().map(|j| j.into()).collect())
@@ -462,7 +461,7 @@ pub mod expose {
             let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
                 .bind(J::NAME)
                 .bind(0)
-                .fetch_all(&mut conn)
+                .fetch_all(&mut *conn)
                 .await
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             Ok(res
