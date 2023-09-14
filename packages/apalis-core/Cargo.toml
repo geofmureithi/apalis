@@ -29,7 +29,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "serde",
 ] }
 tracing-futures = { version = "0.2.5", optional = true, default-features = false }
-sentry-core = { version = "0.31.6", optional = true, default-features = false }
+sentry-core = { version = "0.31.7", optional = true, default-features = false }
 metrics = { version = "0.21", optional = true, default-features = false }
 metrics-exporter-prometheus = { version = "0.12", optional = true, default-features = false }
 async-trait = { version = "0.1" }
