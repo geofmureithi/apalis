@@ -48,11 +48,17 @@ impl<T> MysqlStorage<T> {
         Ok(Self::new(pool))
     }
 
-    /// Setup
+    /// Get mysql migrations without running them
+    #[cfg(feature = "migrate")]
+    pub fn migrations() -> sqlx::migrate::Migrator {
+        sqlx::migrate!("migrations/mysql")
+    }
+
+    /// Do migrations for mysql
     #[cfg(feature = "migrate")]
     pub async fn setup(&self) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        sqlx::migrate!("migrations/mysql").run(&pool).await?;
+        Self::migrations().run(&pool).await?;
         Ok(())
     }
 
