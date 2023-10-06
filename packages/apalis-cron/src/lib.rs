@@ -72,7 +72,7 @@
 use apalis_core::job::Job;
 use apalis_core::utils::Timer;
 use apalis_core::{error::JobError, request::JobRequest};
-use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
 use futures::stream::BoxStream;
 use futures::StreamExt;
@@ -82,7 +82,7 @@ use std::marker::PhantomData;
 #[derive(Clone, Debug)]
 pub struct CronStream<J, T>(Schedule, PhantomData<J>, T);
 
-impl<J: From<DateTime<Utc>> + Job + Send + 'static> CronStream<J, ()> {
+impl<J> CronStream<J, ()> {
     /// Build a new cron stream from a schedule
     pub fn new(schedule: Schedule) -> Self {
         Self(schedule, PhantomData, ())
