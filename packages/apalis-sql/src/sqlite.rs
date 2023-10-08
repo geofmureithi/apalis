@@ -73,7 +73,6 @@ impl<T: Job> SqliteStorage<T> {
         sqlx::migrate!("migrations/sqlite")
     }
 
-
     /// Keeps a storage notified that the worker is still alive manually
     pub async fn keep_alive_at<Service>(
         &mut self,
