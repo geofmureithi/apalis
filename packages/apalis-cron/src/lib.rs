@@ -72,7 +72,7 @@
 use apalis_core::job::Job;
 use apalis_core::utils::Timer;
 use apalis_core::{error::JobError, request::JobRequest};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
 use futures::stream::BoxStream;
 use futures::StreamExt;
@@ -82,7 +82,7 @@ use std::marker::PhantomData;
 #[derive(Clone, Debug)]
 pub struct CronStream<J, T>(Schedule, PhantomData<J>, T);
 
-impl<J: From<DateTime<Utc>> + Job + Send + 'static> CronStream<J, ()> {
+impl<J> CronStream<J, ()> {
     /// Build a new cron stream from a schedule
     pub fn new(schedule: Schedule) -> Self {
         Self(schedule, PhantomData, ())
@@ -109,6 +109,39 @@ impl<J: From<DateTime<Utc>> + Job + Send + 'static, T: Timer + Sync + Send + 'st
                         let to_sleep = to_sleep.to_std().map_err(|e| JobError::Failed(e.into()))?;
                         self.2.sleep(to_sleep).await;
                         yield Ok(Some(JobRequest::new(J::from(chrono::Utc::now()))));
+                    },
+                    None => {
+                        yield Ok(None);
+                    }
+                }
+
+            }
+        };
+        stream.boxed()
+    }
+}
+
+impl<J, T> CronStream<J, T> {
+    /// Convert to consumable
+    pub fn to_stream_with_timezone<Tz: TimeZone + Send + Sync + 'static>(
+        self,
+        timezone: Tz,
+    ) -> BoxStream<'static, Result<Option<JobRequest<J>>, JobError>>
+    where
+        J: From<DateTime<Tz>> + Job + Send + 'static,
+        T: Timer + Sync + Send + 'static,
+        <Tz as TimeZone>::Offset: std::marker::Send,
+    {
+        let stream = async_stream::stream! {
+            let mut schedule = self.0.upcoming_owned(timezone.clone());
+            loop {
+                let next = schedule.next();
+                match next {
+                    Some(next) => {
+                        let to_sleep = next - timezone.from_utc_datetime(&Utc::now().naive_utc());
+                        let to_sleep = to_sleep.to_std().map_err(|e| JobError::Failed(e.into()))?;
+                        self.2.sleep(to_sleep).await;
+                        yield Ok(Some(JobRequest::new(J::from(timezone.from_utc_datetime(&Utc::now().naive_utc())))));
                     },
                     None => {
                         yield Ok(None);
