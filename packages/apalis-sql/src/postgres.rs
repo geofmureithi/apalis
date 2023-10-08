@@ -62,11 +62,17 @@ impl<T> PostgresStorage<T> {
         Ok(Self::new(pool))
     }
 
+    /// Get postgres migrations without running them
+    #[cfg(feature = "migrate")]
+    pub fn migrations() -> sqlx::migrate::Migrator {
+        sqlx::migrate!("migrations/postgres")
+    }
+
     /// Do migrations for Postgres
     #[cfg(feature = "migrate")]
     pub async fn setup(&self) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        sqlx::migrate!("migrations/postgres").run(&pool).await?;
+        Self::migrations().run(&pool).await?;
         Ok(())
     }
 

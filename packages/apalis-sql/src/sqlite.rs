@@ -63,8 +63,14 @@ impl<T: Job> SqliteStorage<T> {
         sqlx::query("PRAGMA cache_size = 64000;")
             .execute(&pool)
             .await?;
-        sqlx::migrate!("migrations/sqlite").run(&pool).await?;
+        Self::migrations().run(&pool).await?;
         Ok(())
+    }
+
+    /// Get sqlite migrations without running them
+    #[cfg(feature = "migrate")]
+    pub fn migrations() -> sqlx::migrate::Migrator {
+        sqlx::migrate!("migrations/sqlite")
     }
 
     /// Keeps a storage notified that the worker is still alive manually
