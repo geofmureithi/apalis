@@ -68,7 +68,6 @@ impl<T> PostgresStorage<T> {
         sqlx::migrate!("migrations/postgres")
     }
 
-
     /// Do migrations for Postgres
     #[cfg(feature = "migrate")]
     pub async fn setup(&self) -> Result<(), sqlx::Error> {
