@@ -34,3 +34,11 @@ jobs:
         working-directory: packages/apalis-redis
         env:
           REDIS_URL: redis://127.0.0.1/
+      - run: cargo test --features tokio-comp,time --no-default-features -- --test-threads=1
+        working-directory: packages/apalis-redis
+        env:
+          REDIS_URL: redis://127.0.0.1/
+      - run: cargo test --features async-std-comp,time --no-default-features -- --test-threads=1
+        working-directory: packages/apalis-redis
+        env:
+          REDIS_URL: redis://127.0.0.1/
