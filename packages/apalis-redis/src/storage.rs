@@ -261,12 +261,17 @@ where
             scheduled_jobs_set
         );
 
+        #[cfg(feature = "chrono")]
+        let timestamp = on.timestamp();
+        #[cfg(feature = "time")]
+        let timestamp = on.unix_timestamp();
+
         schedule_job
             .key(job_data_hash)
             .key(scheduled_jobs_set)
             .arg(job_id.to_string())
             .arg(job)
-            .arg(on.timestamp())
+            .arg(timestamp)
             .invoke_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
