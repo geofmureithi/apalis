@@ -4,13 +4,11 @@ pub mod builder;
 mod error;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
-
 use crate::{
     job::{Job, JobId, JobStreamResult},
     layers::ack::{Ack, AckError},
     request::JobRequest,
-    worker::WorkerId,
+    worker::WorkerId, Timestamp,
 };
 
 #[cfg(feature = "storage")]
@@ -31,7 +29,11 @@ pub trait Storage: Clone {
     async fn push(&mut self, job: Self::Output) -> StorageResult<JobId>;
 
     /// Push a job into the scheduled set
-    async fn schedule(&mut self, job: Self::Output, on: DateTime<Utc>) -> StorageResult<JobId>;
+    async fn schedule(
+        &mut self,
+        job: Self::Output,
+        on: Timestamp,
+    ) -> StorageResult<JobId>;
 
     /// Return the number of pending jobs from the queue
     async fn len(&self) -> StorageResult<i64>;

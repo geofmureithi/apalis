@@ -31,10 +31,12 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::sqlite::SqliteR
 {
     fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
         use apalis_core::{context::JobContext, job::JobId, worker::WorkerId};
-        use chrono::{DateTime, Utc};
         use serde_json::Value;
         use sqlx::Row;
         use std::str::FromStr;
+
+        use crate::Timestamp;
+
         let job: Value = row.try_get("job")?;
         let id: JobId =
             JobId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
@@ -52,10 +54,10 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::sqlite::SqliteR
         let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
 
-        let done_at: Option<DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();
+        let done_at: Option<Timestamp> = row.try_get("done_at").unwrap_or_default();
         context.set_done_at(done_at);
 
-        let lock_at: Option<DateTime<Utc>> = row.try_get("lock_at").unwrap_or_default();
+        let lock_at: Option<Timestamp> = row.try_get("lock_at").unwrap_or_default();
         context.set_lock_at(lock_at);
 
         let last_error = row.try_get("last_error").unwrap_or_default();
@@ -87,10 +89,11 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::postgres::PgRow
 {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
         use apalis_core::{context::JobContext, job::JobId, worker::WorkerId};
-        use chrono::{DateTime, Utc};
         use serde_json::Value;
         use sqlx::Row;
         use std::str::FromStr;
+
+        use crate::Timestamp;
         let job: Value = row.try_get("job")?;
         let id: JobId =
             JobId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
@@ -108,10 +111,10 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::postgres::PgRow
         let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
 
-        let done_at: Option<DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();
+        let done_at: Option<Timestamp> = row.try_get("done_at").unwrap_or_default();
         context.set_done_at(done_at);
 
-        let lock_at: Option<DateTime<Utc>> = row.try_get("lock_at").unwrap_or_default();
+        let lock_at: Option<Timestamp> = row.try_get("lock_at").unwrap_or_default();
         context.set_lock_at(lock_at);
 
         let last_error = row.try_get("last_error").unwrap_or_default();
@@ -143,10 +146,12 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::mysql::MySqlRow
 {
     fn from_row(row: &'r sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
         use apalis_core::{context::JobContext, job::JobId, worker::WorkerId};
-        use chrono::{DateTime, Utc};
         use serde_json::Value;
         use sqlx::Row;
         use std::str::FromStr;
+
+        use crate::Timestamp;
+
         let job: Value = row.try_get("job")?;
         let id: JobId =
             JobId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
@@ -164,10 +169,10 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::mysql::MySqlRow
         let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
 
-        let done_at: Option<DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();
+        let done_at: Option<Timestamp> = row.try_get("done_at").unwrap_or_default();
         context.set_done_at(done_at);
 
-        let lock_at: Option<DateTime<Utc>> = row.try_get("lock_at").unwrap_or_default();
+        let lock_at: Option<Timestamp> = row.try_get("lock_at").unwrap_or_default();
         context.set_lock_at(lock_at);
 
         let last_error = row.try_get("last_error").unwrap_or_default();

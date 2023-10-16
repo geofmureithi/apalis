@@ -33,6 +33,7 @@ serde = { version = "1.0", features = ["derive"] }
 default = ["tokio-comp"]
 async-std-comp = ["async-std", "apalis-core/async-std-comp"]
 tokio-comp = ["tokio", "tokio/net", "apalis-core/tokio-comp"]
+time = []
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

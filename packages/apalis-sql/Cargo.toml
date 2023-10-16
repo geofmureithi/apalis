@@ -9,10 +9,12 @@ license = "MIT"
 description = "SQL Storage for apalis. Use sqlite, postgres and mysql for background job processing"
 
 [features]
-default = ["sqlite", "migrate"]
-postgres = ["sqlx/postgres", "sqlx/json", "sqlx/chrono"]
-sqlite = ["sqlx/sqlite", "sqlx/json", "sqlx/chrono"]
-mysql = ["sqlx/mysql", "sqlx/json", "sqlx/chrono", "sqlx/bigdecimal"]
+default = ["sqlite", "migrate", "chrono"]
+chrono = ["sqlx/chrono", "dep:chrono", "apalis-core/chrono"]
+time = ["sqlx/time", "dep:time", "apalis-core/time"]
+postgres = ["sqlx/postgres", "sqlx/json"]
+sqlite = ["sqlx/sqlite", "sqlx/json"]
+mysql = ["sqlx/mysql", "sqlx/json", "sqlx/bigdecimal"]
 migrate = ["sqlx/migrate", "sqlx/macros"]
 async-std-comp = [
     "async-std",
@@ -31,9 +33,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 apalis-core = { path = "../../packages/apalis-core", version = "0.4.5", features = [
     "storage",
+    "tokio-comp",
 ], default-features = false }
-chrono = { version = "0.4", default-features = false, features = [
+chrono = { version = "0.4", default-features = false, optional = true, features = [
     "clock",
+    "serde",
+] }
+time = { version = "0.3", optional = true, features = [
     "serde",
 ] }
 futures = "0.3"

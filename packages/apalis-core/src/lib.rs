@@ -202,3 +202,13 @@ pub mod mock {
         )
     }
 }
+
+#[cfg(feature = "chrono")]
+use chrono::{DateTime, Utc};
+#[cfg(feature = "time")]
+use time::OffsetDateTime;
+
+#[cfg(feature = "chrono")]
+type Timestamp = DateTime<Utc>;
+#[cfg(feature = "time")]
+type Timestamp = OffsetDateTime;

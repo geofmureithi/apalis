@@ -53,3 +53,15 @@ pub mod sqlite;
 #[cfg(feature = "mysql")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;
+
+#[cfg(feature = "chrono")]
+use chrono::{DateTime, Utc};
+#[cfg(feature = "time")]
+use time::OffsetDateTime;
+
+#[cfg(feature = "chrono")]
+#[allow(dead_code)]
+type Timestamp = DateTime<Utc>;
+#[cfg(feature = "time")]
+#[allow(dead_code)]
+type Timestamp = OffsetDateTime;

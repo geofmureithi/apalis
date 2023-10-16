@@ -1,7 +1,6 @@
-use crate::{job::JobId, request::JobState, worker::WorkerId};
-
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::{job::JobId, request::JobState, worker::WorkerId, Timestamp};
 
 #[cfg(feature = "extensions")]
 use crate::error::JobError;
@@ -16,13 +15,13 @@ use std::{any::Any, marker::Send};
 pub struct JobContext {
     pub(crate) id: JobId,
     pub(crate) status: JobState,
-    pub(crate) run_at: DateTime<Utc>,
+    pub(crate) run_at: Timestamp,
     pub(crate) attempts: i32,
     pub(crate) max_attempts: i32,
     pub(crate) last_error: Option<String>,
-    pub(crate) lock_at: Option<DateTime<Utc>>,
+    pub(crate) lock_at: Option<Timestamp>,
     pub(crate) lock_by: Option<WorkerId>,
-    pub(crate) done_at: Option<DateTime<Utc>>,
+    pub(crate) done_at: Option<Timestamp>,
     #[cfg(feature = "extensions")]
     #[serde(skip)]
     pub(crate) data: Data,
@@ -52,7 +51,10 @@ impl JobContext {
         JobContext {
             id,
             status: JobState::Pending,
-            run_at: Utc::now(),
+            #[cfg(feature = "chrono")]
+            run_at: chrono::Utc::now(),
+            #[cfg(feature = "time")]
+            run_at: time::OffsetDateTime::now_utc(),
             lock_at: None,
             done_at: None,
             attempts: 0,
@@ -157,32 +159,32 @@ impl JobContext {
     }
 
     /// Get the time a job was done
-    pub fn done_at(&self) -> &Option<DateTime<Utc>> {
+    pub fn done_at(&self) -> &Option<Timestamp> {
         &self.done_at
     }
 
     /// Set the time a job was done
-    pub fn set_done_at(&mut self, done_at: Option<DateTime<Utc>>) {
+    pub fn set_done_at(&mut self, done_at: Option<Timestamp>) {
         self.done_at = done_at;
     }
 
     /// Get the time a job is supposed to start
-    pub fn run_at(&self) -> &DateTime<Utc> {
+    pub fn run_at(&self) -> &Timestamp {
         &self.run_at
     }
 
     /// Set the time a job should run
-    pub fn set_run_at(&mut self, run_at: DateTime<Utc>) {
+    pub fn set_run_at(&mut self, run_at: Timestamp) {
         self.run_at = run_at;
     }
 
     /// Get the time a job was locked
-    pub fn lock_at(&self) -> &Option<DateTime<Utc>> {
+    pub fn lock_at(&self) -> &Option<Timestamp> {
         &self.lock_at
     }
 
     /// Set the lock_at value
-    pub fn set_lock_at(&mut self, lock_at: Option<DateTime<Utc>>) {
+    pub fn set_lock_at(&mut self, lock_at: Option<Timestamp>) {
         self.lock_at = lock_at;
     }
 

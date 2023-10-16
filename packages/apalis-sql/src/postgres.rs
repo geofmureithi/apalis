@@ -19,7 +19,6 @@ use apalis_core::storage::{Storage, StorageResult};
 use apalis_core::utils::Timer;
 use apalis_core::worker::WorkerId;
 use async_stream::try_stream;
-use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use futures::{FutureExt, Stream};
 use futures_lite::future;
@@ -29,7 +28,10 @@ use sqlx::{PgPool, Pool, Postgres, Row};
 use std::convert::TryInto;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
-use crate::from_row::{IntoJobRequest, SqlJobRequest};
+use crate::{
+    from_row::{IntoJobRequest, SqlJobRequest},
+    Timestamp,
+};
 
 /// Represents a [Storage] that persists to Postgres
 #[derive(Debug)]
@@ -128,7 +130,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
     async fn keep_alive_at<Service>(
         &mut self,
         worker_id: &WorkerId,
-        last_seen: DateTime<Utc>,
+        last_seen: Timestamp,
     ) -> StorageResult<()> {
         let pool = self.pool.clone();
 
@@ -181,11 +183,7 @@ where
         Ok(id)
     }
 
-    async fn schedule(
-        &mut self,
-        job: Self::Output,
-        on: chrono::DateTime<Utc>,
-    ) -> StorageResult<JobId> {
+    async fn schedule(&mut self, job: Self::Output, on: Timestamp) -> StorageResult<JobId> {
         let query =
             "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, 25, $4, NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
@@ -325,16 +323,26 @@ where
             .as_secs()
             .try_into()
             .map_err(|e| StorageError::Database(Box::new(e)))?;
+        #[cfg(feature = "chrono")]
         let wait = chrono::Duration::seconds(wait);
+        #[cfg(feature = "time")]
+        let wait = time::Duration::seconds(wait);
+
         let mut tx = pool
             .acquire()
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         let query =
                 "UPDATE apalis.jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = $2 WHERE id = $1";
+
+        #[cfg(feature = "chrono")]
+        let now = chrono::Utc::now();
+        #[cfg(feature = "time")]
+        let now = time::OffsetDateTime::now_utc();
+
         sqlx::query(query)
             .bind(job_id.to_string())
-            .bind(Utc::now().add(wait))
+            .bind(now.add(wait))
             .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
@@ -375,7 +383,12 @@ where
     }
 
     async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()> {
-        self.keep_alive_at::<Service>(worker_id, Utc::now()).await
+        #[cfg(feature = "chrono")]
+        let now = chrono::Utc::now();
+        #[cfg(feature = "time")]
+        let now = time::OffsetDateTime::now_utc();
+
+        self.keep_alive_at::<Service>(worker_id, now).await
     }
 }
 
@@ -390,8 +403,9 @@ pub mod expose {
     use apalis_core::request::JobState;
     use apalis_core::storage::StorageError;
     use apalis_core::worker::WorkerId;
-    use chrono::{DateTime, Utc};
     use std::collections::HashMap;
+
+    use crate::Timestamp;
 
     #[async_trait::async_trait]
 
@@ -462,7 +476,7 @@ pub mod expose {
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             let fetch_query =
             "SELECT id, layers, last_seen FROM apalis.workers WHERE worker_type = $1 ORDER BY last_seen DESC LIMIT 20 OFFSET $2";
-            let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
+            let res: Vec<(String, String, Timestamp)> = sqlx::query_as(fetch_query)
                 .bind(J::NAME)
                 .bind(0_i64)
                 .fetch_all(&mut *conn)
@@ -480,8 +494,6 @@ pub mod expose {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Sub;
-
     use super::*;
     use apalis_core::context::HasJobContext;
     use apalis_core::request::JobState;
@@ -550,7 +562,7 @@ mod tests {
 
     async fn register_worker_at(
         storage: &mut PostgresStorage<Email>,
-        last_seen: DateTime<Utc>,
+        last_seen: Timestamp,
     ) -> WorkerId {
         let worker_id = WorkerId::new("test-worker");
 
@@ -562,7 +574,12 @@ mod tests {
     }
 
     async fn register_worker(storage: &mut PostgresStorage<Email>) -> WorkerId {
-        register_worker_at(storage, Utc::now()).await
+        #[cfg(feature = "chrono")]
+        let now = chrono::Utc::now();
+        #[cfg(feature = "time")]
+        let now = OffsetDateTime::now_utc();
+
+        register_worker_at(storage, now).await
     }
 
     async fn push_email<S>(storage: &mut S, email: Email)
@@ -650,8 +667,12 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        let worker_id =
-            register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(6))).await;
+        #[cfg(feature = "chrono")]
+        let six_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(6);
+        #[cfg(feature = "time")]
+        let six_minutes_ago = time::OffsetDateTime::utc_now() - time::Duration::minutes(6);
+
+        let worker_id = register_worker_at(&mut storage, six_minutes_ago).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
@@ -681,8 +702,12 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        let worker_id =
-            register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(4))).await;
+        #[cfg(feature = "chrono")]
+        let four_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(4);
+        #[cfg(feature = "time")]
+        let four_minutes_ago = time::OffsetDateTime::utc_now() - time::Duration::minutes(4);
+
+        let worker_id = register_worker_at(&mut storage, four_minutes_ago).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage

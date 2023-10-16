@@ -15,7 +15,7 @@ edition = "2021"
 bench = false
 
 [features]
-default = ["tracing", "tokio-comp"]
+default = ["tracing", "tokio-comp", "chrono"]
 ## Support Tracing 👀
 tracing = ["apalis-core/trace"]
 
@@ -29,6 +29,11 @@ sqlite = ["apalis-sql/sqlite"]
 mysql = ["apalis-sql/mysql"]
 ## Include Cron functionality
 cron = ["apalis-cron"]
+
+## Use chrono library for time representation
+chrono = ["apalis-core/chrono", "apalis-sql/chrono", "apalis-redis/chrono"]
+## Use time library for time representation
+time = ["apalis-core/time", "apalis-sql/time", "apalis-redis/time"]
 
 ## Support for Sentry exception and performance monitoring
 sentry = ["apalis-core/sentry"]
