@@ -82,7 +82,7 @@ impl<T: Job> SqliteStorage<T> {
         let storage_name = std::any::type_name::<Self>();
         let query = "INSERT INTO Workers (id, worker_type, storage_name, layers, last_seen)
                 VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (id) DO 
+                ON CONFLICT (id) DO
                    UPDATE SET last_seen = EXCLUDED.last_seen";
         #[cfg(feature = "chrono")]
         let last_seen = last_seen.timestamp();
@@ -201,11 +201,7 @@ where
         Ok(id)
     }
 
-    async fn schedule(
-        &mut self,
-        job: Self::Output,
-        on: Timestamp,
-    ) -> StorageResult<JobId> {
+    async fn schedule(&mut self, job: Self::Output, on: Timestamp) -> StorageResult<JobId> {
         let query =
             "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, ?4, NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
@@ -251,10 +247,10 @@ where
                     .acquire()
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
-                let query = r#"Update Jobs 
+                let query = r#"Update Jobs
                             SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL
-                            WHERE id in 
-                                (SELECT Jobs.id from Jobs 
+                            WHERE id in
+                                (SELECT Jobs.id from Jobs
                                     WHERE status= "Failed" AND Jobs.attempts < Jobs.max_attempts
                                      ORDER BY lock_at ASC LIMIT ?2);"#;
                 sqlx::query(query)
@@ -272,16 +268,18 @@ where
                     .acquire()
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
-                let query = r#"Update Jobs 
+                let query = r#"Update Jobs
                             SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
-                            WHERE id in 
-                                (SELECT Jobs.id from Jobs INNER join Workers ON lock_by = Workers.id 
+                            WHERE id in
+                                (SELECT Jobs.id from Jobs INNER join Workers ON lock_by = Workers.id
                                     WHERE status= "Running" AND workers.last_seen < ?1
                                     AND Workers.worker_type = ?2 ORDER BY lock_at ASC LIMIT ?3);"#;
                 #[cfg(feature = "chrono")]
-                let five_minutes_ago = (chrono::Utc::now() - chrono::Duration::minutes(5)).timestamp();
+                let five_minutes_ago =
+                    (chrono::Utc::now() - chrono::Duration::minutes(5)).timestamp();
                 #[cfg(feature = "time")]
-                let five_minutes_ago = (time::OffsetDateTime::now_utc() - time::Duration::minutes(5)).unix_timestamp();
+                let five_minutes_ago =
+                    (time::OffsetDateTime::now_utc() - time::Duration::minutes(5)).unix_timestamp();
                 sqlx::query(query)
                     .bind(five_minutes_ago)
                     .bind(job_type)
@@ -463,11 +461,11 @@ pub mod expose {
     {
         async fn counts(&mut self) -> Result<JobStateCount, JobError> {
             let fetch_query = "SELECT
-                            COUNT(1) FILTER (WHERE status = 'Pending') AS pending, 
+                            COUNT(1) FILTER (WHERE status = 'Pending') AS pending,
                             COUNT(1) FILTER (WHERE status = 'Running') AS running,
                             COUNT(1) FILTER (WHERE status = 'Done') AS done,
-                            COUNT(1) FILTER (WHERE status = 'Retry') AS retry, 
-                            COUNT(1) FILTER (WHERE status = 'Failed') AS failed, 
+                            COUNT(1) FILTER (WHERE status = 'Retry') AS retry,
+                            COUNT(1) FILTER (WHERE status = 'Failed') AS failed,
                             COUNT(1) FILTER (WHERE status = 'Killed') AS killed
                         FROM Jobs WHERE job_type = ?";
             let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
@@ -601,7 +599,7 @@ mod tests {
         #[cfg(feature = "chrono")]
         let now = chrono::Utc::now();
         #[cfg(feature = "time")]
-        let now = OffsetDateTime::now_utc();
+        let now = time::OffsetDateTime::now_utc();
 
         register_worker_at(storage, now).await
     }
@@ -688,10 +686,9 @@ mod tests {
         #[cfg(feature = "chrono")]
         let six_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(6);
         #[cfg(feature = "time")]
-        let six_minutes_ago = OffsetDateTime::now_utc() - time::Duration::minutes(6);
+        let six_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(6);
 
-        let worker_id =
-            register_worker_at(&mut storage, six_minutes_ago).await;
+        let worker_id = register_worker_at(&mut storage, six_minutes_ago).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
@@ -722,10 +719,9 @@ mod tests {
         #[cfg(feature = "chrono")]
         let four_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(4);
         #[cfg(feature = "time")]
-        let four_minutes_ago = OffsetDateTime::now_utc() - time::Duration::minutes(4);
+        let four_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(4);
 
-        let worker_id =
-            register_worker_at(&mut storage, four_minutes_ago).await;
+        let worker_id = register_worker_at(&mut storage, four_minutes_ago).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage

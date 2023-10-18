@@ -572,7 +572,7 @@ mod tests {
         #[cfg(feature = "chrono")]
         let now = chrono::Utc::now();
         #[cfg(feature = "time")]
-        let now = OffsetDateTime::now_utc();
+        let now = time::OffsetDateTime::now_utc();
 
         register_worker_at(storage, now).await
     }
@@ -671,7 +671,7 @@ mod tests {
         #[cfg(feature = "chrono")]
         let six_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(6);
         #[cfg(feature = "time")]
-        let six_minutes_ago = OffsetDateTime::now_utc() - time::Duration::minutes(6);
+        let six_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(6);
 
         storage
             .keep_alive_at::<Email>(&worker_id, six_minutes_ago)
@@ -714,7 +714,7 @@ mod tests {
         #[cfg(feature = "chrono")]
         let four_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(4);
         #[cfg(feature = "time")]
-        let four_minutes_ago = OffsetDateTime::now_utc() - time::Duration::minutes(4);
+        let four_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(4);
 
         let worker_id = WorkerId::new("test_worker");
         storage

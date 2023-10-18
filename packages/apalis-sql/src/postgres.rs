@@ -138,7 +138,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> PostgresStorage<T> {
         let storage_name = std::any::type_name::<Self>();
         let query = "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen)
                 VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (id) DO 
+                ON CONFLICT (id) DO
                    UPDATE SET last_seen = EXCLUDED.last_seen";
         sqlx::query(query)
             .bind(worker_id.to_string())
@@ -227,10 +227,10 @@ where
                     .acquire()
                     .await
                     .map_err(|e| StorageError::Database(Box::from(e)))?;
-                let query = "Update apalis.jobs 
+                let query = "Update apalis.jobs
                             SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ='Job was abandoned'
-                            WHERE id in 
-                                (SELECT jobs.id from apalis.jobs INNER join apalis.workers ON lock_by = workers.id 
+                            WHERE id in
+                                (SELECT jobs.id from apalis.jobs INNER join apalis.workers ON lock_by = workers.id
                                     WHERE status= 'Running' AND workers.last_seen < NOW() - INTERVAL '5 minutes'
                                     AND workers.worker_type = $1 ORDER BY lock_at ASC LIMIT $2);";
                 sqlx::query(query)
@@ -421,11 +421,11 @@ pub mod expose {
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
 
             let fetch_query = "SELECT
-                            COUNT(1) FILTER (WHERE status = 'Pending') AS pending, 
+                            COUNT(1) FILTER (WHERE status = 'Pending') AS pending,
                             COUNT(1) FILTER (WHERE status = 'Running') AS running,
                             COUNT(1) FILTER (WHERE status = 'Done') AS done,
-                            COUNT(1) FILTER (WHERE status = 'Retry') AS retry, 
-                            COUNT(1) FILTER (WHERE status = 'Failed') AS failed, 
+                            COUNT(1) FILTER (WHERE status = 'Retry') AS retry,
+                            COUNT(1) FILTER (WHERE status = 'Failed') AS failed,
                             COUNT(1) FILTER (WHERE status = 'Killed') AS killed
                         FROM apalis.jobs WHERE job_type = $1";
             let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
@@ -577,7 +577,7 @@ mod tests {
         #[cfg(feature = "chrono")]
         let now = chrono::Utc::now();
         #[cfg(feature = "time")]
-        let now = OffsetDateTime::now_utc();
+        let now = time::OffsetDateTime::now_utc();
 
         register_worker_at(storage, now).await
     }
@@ -670,7 +670,7 @@ mod tests {
         #[cfg(feature = "chrono")]
         let six_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(6);
         #[cfg(feature = "time")]
-        let six_minutes_ago = time::OffsetDateTime::utc_now() - time::Duration::minutes(6);
+        let six_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(6);
 
         let worker_id = register_worker_at(&mut storage, six_minutes_ago).await;
 
@@ -705,7 +705,7 @@ mod tests {
         #[cfg(feature = "chrono")]
         let four_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(4);
         #[cfg(feature = "time")]
-        let four_minutes_ago = time::OffsetDateTime::utc_now() - time::Duration::minutes(4);
+        let four_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(4);
 
         let worker_id = register_worker_at(&mut storage, four_minutes_ago).await;
 
