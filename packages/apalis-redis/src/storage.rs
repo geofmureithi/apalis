@@ -508,7 +508,8 @@ where
                 #[cfg(feature = "chrono")]
                 let timestamp = (chrono::Utc::now() - chrono::Duration::minutes(5)).timestamp();
                 #[cfg(feature = "time")]
-                let timestamp = (time::OffsetDateTime::now_utc() - time::Duration::minutes(5)).unix_timestamp();
+                let timestamp =
+                    (time::OffsetDateTime::now_utc() - time::Duration::minutes(5)).unix_timestamp();
                 let res: Result<i8, StorageError> = reenqueue_orphaned
                     .key(consumers_set)
                     .key(active_jobs_list)
@@ -973,8 +974,7 @@ mod tests {
         #[cfg(feature = "time")]
         let six_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(6);
 
-        let worker_id =
-            register_worker_at(&mut storage, six_minutes_ago).await;
+        let worker_id = register_worker_at(&mut storage, six_minutes_ago).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
@@ -1006,8 +1006,7 @@ mod tests {
         #[cfg(feature = "time")]
         let four_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(4);
 
-        let worker_id =
-            register_worker_at(&mut storage, four_minutes_ago).await;
+        let worker_id = register_worker_at(&mut storage, four_minutes_ago).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
