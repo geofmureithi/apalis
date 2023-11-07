@@ -70,7 +70,7 @@ where
         let (send, mut recv) = futures::channel::mpsc::channel::<()>(1);
         // Setup any heartbeats by the worker
         for mut beat in self.beats {
-            ctx.spawn(async move {
+            tokio::spawn(async move {
                 #[cfg(feature = "async-std-comp")]
                 #[allow(unused_variables)]
                 let sleeper = crate::utils::timer::AsyncStdTimer;
