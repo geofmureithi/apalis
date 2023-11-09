@@ -85,7 +85,7 @@ impl Job for Email {
 /// The following signatures are accepted
 /// ```rust
 /// async fn job(email: Email, ctx: JobContext)
-/// async fn job(email: Email, ctx: JobContext) -> anyhow::Result<anyhow::Error>
+/// async fn job(email: Email, ctx: JobContext) -> anyhow::Result<()>
 /// async fn job(email: Email, ctx: JobContext) -> Result<(), my::Error>
 /// async fn job(email: Email, ctx: JobContext) -> primitive //eg str
 /// async fn job(email: Email, ctx: JobContext) -> impl IntoJobResponse
@@ -142,6 +142,7 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
 - _limit_ — 💪 Limit the amount of jobs
 - _filter_ — Support filtering jobs based on a predicate
 - _extensions_ — Add a global extensions to jobs
+- _time_ - Use the time crate instead of the default chrono
 
 ## Storage Comparison
 
