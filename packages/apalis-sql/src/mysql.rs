@@ -7,15 +7,16 @@ use apalis_core::storage::{Storage, StorageResult};
 use apalis_core::utils::Timer;
 use apalis_core::worker::WorkerId;
 use async_stream::try_stream;
-use chrono::{DateTime, Utc};
 use futures::Stream;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{MySql, MySqlPool, Pool, Row};
 use std::convert::TryInto;
-use std::ops::Sub;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
-use crate::from_row::{IntoJobRequest, SqlJobRequest};
+use crate::{
+    from_row::{IntoJobRequest, SqlJobRequest},
+    Timestamp,
+};
 
 /// Represents a [Storage] that persists to MySQL
 #[derive(Debug)]
@@ -105,7 +106,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
     async fn keep_alive_at<Service>(
         &mut self,
         worker_id: &WorkerId,
-        last_seen: DateTime<Utc>,
+        last_seen: Timestamp,
     ) -> StorageResult<()> {
         let pool = self.pool.clone();
 
@@ -184,11 +185,7 @@ where
         Ok(id)
     }
 
-    async fn schedule(
-        &mut self,
-        job: Self::Output,
-        on: chrono::DateTime<Utc>,
-    ) -> StorageResult<JobId> {
+    async fn schedule(&mut self, job: Self::Output, on: Timestamp) -> StorageResult<JobId> {
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, ?, NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
@@ -238,8 +235,12 @@ where
                         INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
                         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
+                #[cfg(feature = "chrono")]
+                let five_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(5);
+                #[cfg(feature = "time")]
+                let five_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(5);
                 sqlx::query(query)
-                    .bind(Utc::now().sub(chrono::Duration::minutes(5)))
+                    .bind(five_minutes_ago)
                     .bind(job_type)
                     .bind(count)
                     .execute(&mut *tx)
@@ -330,15 +331,22 @@ where
             .as_secs()
             .try_into()
             .map_err(|e| StorageError::Database(Box::new(e)))?;
+        #[cfg(feature = "chrono")]
         let wait = chrono::Duration::seconds(wait);
+        #[cfg(feature = "time")]
+        let wait = time::Duration::seconds(wait);
         let mut tx = pool
             .acquire()
             .await
             .map_err(|e| StorageError::Connection(Box::from(e)))?;
         let query =
                 "UPDATE jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ? WHERE id = ?";
+        #[cfg(feature = "chrono")]
+        let now = chrono::Utc::now();
+        #[cfg(feature = "time")]
+        let now = time::OffsetDateTime::now_utc();
         sqlx::query(query)
-            .bind(Utc::now().add(wait))
+            .bind(now.add(wait))
             .bind(job_id.to_string())
             .execute(&mut *tx)
             .await
@@ -380,7 +388,12 @@ where
     }
 
     async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()> {
-        self.keep_alive_at::<Service>(worker_id, Utc::now()).await
+        #[cfg(feature = "chrono")]
+        let now = chrono::Utc::now();
+        #[cfg(feature = "time")]
+        let now = time::OffsetDateTime::now_utc();
+
+        self.keep_alive_at::<Service>(worker_id, now).await
     }
 }
 
@@ -392,7 +405,6 @@ pub mod expose {
     use apalis_core::expose::{ExposedWorker, JobStateCount, JobStreamExt};
     use apalis_core::request::JobState;
     use apalis_core::storage::StorageError;
-    use chrono::DateTime;
     use std::collections::HashMap;
 
     use super::*;
@@ -464,7 +476,7 @@ pub mod expose {
                 .map_err(|e| StorageError::Database(Box::from(e)))?;
             let fetch_query =
             "SELECT id, layers, last_seen FROM workers WHERE worker_type = ? ORDER BY last_seen DESC LIMIT 20 OFFSET ?";
-            let res: Vec<(String, String, DateTime<Utc>)> = sqlx::query_as(fetch_query)
+            let res: Vec<(String, String, Timestamp)> = sqlx::query_as(fetch_query)
                 .bind(J::NAME)
                 .bind(0)
                 .fetch_all(&mut *conn)
@@ -545,7 +557,7 @@ mod tests {
 
     async fn register_worker_at(
         storage: &mut MysqlStorage<Email>,
-        last_seen: DateTime<Utc>,
+        last_seen: Timestamp,
     ) -> WorkerId {
         let worker_id = WorkerId::new("test-worker");
 
@@ -557,7 +569,12 @@ mod tests {
     }
 
     async fn register_worker(storage: &mut MysqlStorage<Email>) -> WorkerId {
-        register_worker_at(storage, Utc::now()).await
+        #[cfg(feature = "chrono")]
+        let now = chrono::Utc::now();
+        #[cfg(feature = "time")]
+        let now = time::OffsetDateTime::now_utc();
+
+        register_worker_at(storage, now).await
     }
 
     async fn push_email<S>(storage: &mut S, email: Email)
@@ -651,9 +668,13 @@ mod tests {
 
         // register a worker not responding since 6 minutes ago
         let worker_id = WorkerId::new("test_worker");
-        let last_seen = Utc::now().sub(chrono::Duration::minutes(6));
+        #[cfg(feature = "chrono")]
+        let six_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(6);
+        #[cfg(feature = "time")]
+        let six_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(6);
+
         storage
-            .keep_alive_at::<Email>(&worker_id, last_seen)
+            .keep_alive_at::<Email>(&worker_id, six_minutes_ago)
             .await
             .unwrap();
 
@@ -690,10 +711,14 @@ mod tests {
             .expect("failed to push job");
 
         // register a worker responding at 4 minutes ago
+        #[cfg(feature = "chrono")]
+        let four_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(4);
+        #[cfg(feature = "time")]
+        let four_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(4);
+
         let worker_id = WorkerId::new("test_worker");
-        let last_seen = Utc::now().sub(chrono::Duration::minutes(4));
         storage
-            .keep_alive_at::<Email>(&worker_id, last_seen)
+            .keep_alive_at::<Email>(&worker_id, four_minutes_ago)
             .await
             .unwrap();
 

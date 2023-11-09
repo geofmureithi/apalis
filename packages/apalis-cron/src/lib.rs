@@ -69,6 +69,9 @@
 //! }
 //! ```
 
+#[cfg(feature = "time")]
+compile_error!("`apalis-cron` does not support `time` feature. Please use `chrono` instead.");
+
 use apalis_core::job::Job;
 use apalis_core::utils::Timer;
 use apalis_core::{error::JobError, request::JobRequest};

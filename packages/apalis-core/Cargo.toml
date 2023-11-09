@@ -24,9 +24,12 @@ thiserror = "1.0.50"
 log = "0.4"
 http = { version = "0.2.9", optional = true }
 strum = { version = "0.25", features = ["derive"] }
-chrono = { version = "0.4", default-features = false, features = [
+chrono = { version = "0.4", default-features = false, optional = true, features = [
     "clock",
     "serde",
+] }
+time = { version = "0.3", optional = true, features = [
+    "serde"
 ] }
 tracing-futures = { version = "0.2.5", optional = true, default-features = false }
 sentry-core = { version = "0.31.7", optional = true, default-features = false }
@@ -44,7 +47,9 @@ version = "0.2"
 optional = true
 
 [features]
-default = ["tokio-comp", "extensions"]
+default = ["tokio-comp", "extensions", "chrono"]
+chrono = ["dep:chrono"]
+time = ["dep:time"]
 storage = ["extensions"]
 mq = ["extensions"]
 expose = []

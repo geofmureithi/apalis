@@ -36,5 +36,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: cargo test --no-default-features --features postgres,migrate,tokio-comp -- --test-threads=1
+      - run: cargo test --no-default-features --features postgres,migrate,tokio-comp,chrono -- --test-threads=1
+        working-directory: packages/apalis-sql
+      - run: cargo test --no-default-features --features postgres,migrate,tokio-comp,time -- --test-threads=1
         working-directory: packages/apalis-sql

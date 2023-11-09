@@ -23,3 +23,8 @@
 
 mod storage;
 pub use storage::RedisStorage;
+
+#[cfg(feature = "chrono")]
+type Timestamp = chrono::DateTime<chrono::Utc>;
+#[cfg(feature = "time")]
+type Timestamp = time::OffsetDateTime;

@@ -12,12 +12,13 @@ use apalis_core::{
     worker::WorkerId,
 };
 use async_stream::try_stream;
-use chrono::{DateTime, Utc};
 use futures::{Stream, TryStreamExt};
 use log::*;
 use redis::{aio::ConnectionManager, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt;
+
+use crate::Timestamp;
 
 const ACTIVE_JOBS_LIST: &str = "{queue}:active";
 const CONSUMERS_SET: &str = "{queue}:consumers";
@@ -246,7 +247,7 @@ where
         Ok(job_id.clone())
     }
 
-    async fn schedule(&mut self, job: Self::Output, on: DateTime<Utc>) -> StorageResult<JobId> {
+    async fn schedule(&mut self, job: Self::Output, on: Timestamp) -> StorageResult<JobId> {
         let mut conn = self.conn.clone();
         let schedule_job = self.scripts.schedule_job.clone();
         let job_data_hash = self.queue.job_data_hash.to_string();
@@ -260,12 +261,17 @@ where
             scheduled_jobs_set
         );
 
+        #[cfg(feature = "chrono")]
+        let timestamp = on.timestamp();
+        #[cfg(feature = "time")]
+        let timestamp = on.unix_timestamp();
+
         schedule_job
             .key(job_data_hash)
             .key(scheduled_jobs_set)
             .arg(job_id.to_string())
             .arg(job)
-            .arg(on.timestamp())
+            .arg(timestamp)
             .invoke_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))?;
@@ -302,7 +308,11 @@ where
         let res = fetch_job.await?;
         match res {
             Some(job) => {
-                let now = Utc::now().timestamp();
+                #[cfg(feature = "chrono")]
+                let now = chrono::Utc::now().timestamp();
+                #[cfg(feature = "time")]
+                let now = time::OffsetDateTime::now_utc().unix_timestamp();
+
                 let data =
                     serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
                 kill_job
@@ -366,7 +376,10 @@ where
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let done_jobs_set = &self.queue.done_jobs_set.to_string();
 
-        let now = Utc::now().timestamp();
+        #[cfg(feature = "chrono")]
+        let now = chrono::Utc::now().timestamp();
+        #[cfg(feature = "time")]
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
         ack_job
             .key(inflight_set)
             .key(done_jobs_set)
@@ -387,13 +400,19 @@ where
         let mut storage = self.clone();
 
         let res = job_fut.await?;
+
+        #[cfg(feature = "chrono")]
+        let now = chrono::Utc::now().timestamp();
+        #[cfg(feature = "time")]
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+
         match res {
             Some(job) => {
                 if job.attempts() >= job.max_attempts() {
                     warn!("too many retries: {:?}", job.attempts());
                     let _res = redis::cmd("ZADD")
                         .arg(failed_jobs_set)
-                        .arg(Utc::now().timestamp())
+                        .arg(now)
                         .arg(job_id.to_string())
                         .query_async(&mut conn)
                         .await
@@ -405,7 +424,10 @@ where
                     return Ok(());
                 }
                 let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
-                let now = Utc::now().timestamp();
+                #[cfg(feature = "chrono")]
+                let now = chrono::Utc::now().timestamp();
+                #[cfg(feature = "time")]
+                let now = time::OffsetDateTime::now_utc().unix_timestamp();
                 let res: Result<i32, StorageError> = retry_job
                     .key(inflight_set)
                     .key(scheduled_jobs_set)
@@ -432,7 +454,10 @@ where
         let register_consumer = self.scripts.register_consumer.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let consumers_set = self.queue.consumers_set.to_string();
-        let timestamp = Utc::now().timestamp();
+        #[cfg(feature = "chrono")]
+        let timestamp = chrono::Utc::now().timestamp();
+        #[cfg(feature = "time")]
+        let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
 
         register_consumer
             .key(consumers_set)
@@ -451,7 +476,10 @@ where
                 let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
                 let active_jobs_list = self.queue.active_jobs_list.to_string();
                 let signal_list = self.queue.signal_list.to_string();
-                let timestamp = Utc::now().timestamp();
+                #[cfg(feature = "chrono")]
+                let timestamp = chrono::Utc::now().timestamp();
+                #[cfg(feature = "time")]
+                let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
                 let res: Result<i8, StorageError> = enqueue_jobs
                     .key(scheduled_jobs_set)
                     .key(active_jobs_list)
@@ -477,12 +505,16 @@ where
                 let consumers_set = self.queue.consumers_set.to_string();
                 let active_jobs_list = self.queue.active_jobs_list.to_string();
                 let signal_list = self.queue.signal_list.to_string();
-                let timestamp = Utc::now() - chrono::Duration::minutes(5);
+                #[cfg(feature = "chrono")]
+                let timestamp = (chrono::Utc::now() - chrono::Duration::minutes(5)).timestamp();
+                #[cfg(feature = "time")]
+                let timestamp =
+                    (time::OffsetDateTime::now_utc() - time::Duration::minutes(5)).unix_timestamp();
                 let res: Result<i8, StorageError> = reenqueue_orphaned
                     .key(consumers_set)
                     .key(active_jobs_list)
                     .key(signal_list)
-                    .arg(timestamp.timestamp())
+                    .arg(timestamp)
                     .arg(count)
                     .invoke_async(&mut conn)
                     .await
@@ -529,7 +561,10 @@ where
         let job = serde_json::to_string(job).map_err(|e| StorageError::Parse(e.into()))?;
         let job_data_hash = self.queue.job_data_hash.to_string();
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
-        let on = Utc::now();
+        #[cfg(feature = "chrono")]
+        let on = chrono::Utc::now().timestamp();
+        #[cfg(feature = "time")]
+        let on = time::OffsetDateTime::now_utc().unix_timestamp();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let failed_jobs_set = self.queue.failed_jobs_set.to_string();
         let _cmd = redis::cmd("SREM")
@@ -540,7 +575,7 @@ where
             .map_err(|e| StorageError::Database(Box::from(e)))?;
         let _cmd = redis::cmd("ZADD")
             .arg(failed_jobs_set)
-            .arg(Utc::now().timestamp())
+            .arg(on)
             .arg(job_id.to_string())
             .query_async(&mut conn)
             .await
@@ -550,7 +585,7 @@ where
             .key(scheduled_jobs_set)
             .arg(job_id.to_string())
             .arg(job)
-            .arg(on.timestamp())
+            .arg(on)
             .invoke_async(&mut conn)
             .await
             .map_err(|e| StorageError::Database(Box::from(e)))
@@ -756,12 +791,16 @@ pub mod expose {
             Ok(workers
                 .into_iter()
                 .map(|w| {
+                    #[cfg(feature = "chrono")]
+                    let now = chrono::Utc::now();
+                    #[cfg(feature = "time")]
+                    let now = time::OffsetDateTime::now_utc();
                     ExposedWorker::new::<Self, T>(
                         WorkerId::new(
                             w.replace(&format!("{}:", &self.queue.inflight_jobs_set), ""),
                         ),
                         "".to_string(),
-                        Utc::now(),
+                        now,
                     )
                 })
                 .collect())
@@ -771,8 +810,6 @@ pub mod expose {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Sub;
-
     use super::*;
     use apalis_core::context::HasJobContext;
     use apalis_core::request::JobState;
@@ -826,7 +863,7 @@ mod tests {
 
     async fn register_worker_at(
         storage: &mut RedisStorage<Email>,
-        _last_seen: DateTime<Utc>,
+        _last_seen: Timestamp,
     ) -> WorkerId {
         let worker = WorkerId::new("test-worker");
 
@@ -838,7 +875,11 @@ mod tests {
     }
 
     async fn register_worker(storage: &mut RedisStorage<Email>) -> WorkerId {
-        register_worker_at(storage, Utc::now()).await
+        #[cfg(feature = "chrono")]
+        let now = chrono::Utc::now();
+        #[cfg(feature = "time")]
+        let now = time::OffsetDateTime::now_utc();
+        register_worker_at(storage, now).await
     }
 
     async fn push_email<S>(storage: &mut S, email: Email)
@@ -928,8 +969,12 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        let worker_id =
-            register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(6))).await;
+        #[cfg(feature = "chrono")]
+        let six_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(6);
+        #[cfg(feature = "time")]
+        let six_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(6);
+
+        let worker_id = register_worker_at(&mut storage, six_minutes_ago).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
@@ -956,8 +1001,12 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        let worker_id =
-            register_worker_at(&mut storage, Utc::now().sub(chrono::Duration::minutes(4))).await;
+        #[cfg(feature = "chrono")]
+        let four_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(4);
+        #[cfg(feature = "time")]
+        let four_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(4);
+
+        let worker_id = register_worker_at(&mut storage, four_minutes_ago).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
