@@ -22,7 +22,7 @@ smol = { version = "1.3", optional = true }
 smol-timeout = { version = "0.6", optional = true }
 thiserror = "1.0.50"
 log = "0.4"
-http = { version = "0.2.9", optional = true }
+http = { version = "0.2.10", optional = true }
 strum = { version = "0.25", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, optional = true, features = [
     "clock",
