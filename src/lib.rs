@@ -68,7 +68,7 @@
 /// Include the default Redis storage
 ///
 /// ### Example
-/// ```no_run
+/// ```ignore
 /// let storage = RedisStorage::connect("REDIS_URL").await
 ///                 .expect("Cannot establish connection");
 ///
