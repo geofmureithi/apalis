@@ -53,7 +53,7 @@ impl JobContext {
             status: JobState::Pending,
             #[cfg(feature = "chrono")]
             run_at: chrono::Utc::now(),
-            #[cfg(feature = "time")]
+            #[cfg(all(not(feature = "chrono"), feature = "time"))]
             run_at: time::OffsetDateTime::now_utc(),
             lock_at: None,
             done_at: None,

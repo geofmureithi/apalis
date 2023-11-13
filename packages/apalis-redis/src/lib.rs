@@ -26,5 +26,5 @@ pub use storage::RedisStorage;
 
 #[cfg(feature = "chrono")]
 type Timestamp = chrono::DateTime<chrono::Utc>;
-#[cfg(feature = "time")]
+#[cfg(all(not(feature = "chrono"), feature = "time"))]
 type Timestamp = time::OffsetDateTime;

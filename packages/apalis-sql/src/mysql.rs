@@ -237,7 +237,7 @@ where
                         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
                 #[cfg(feature = "chrono")]
                 let five_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(5);
-                #[cfg(feature = "time")]
+                #[cfg(all(not(feature = "chrono"), feature = "time"))]
                 let five_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(5);
                 sqlx::query(query)
                     .bind(five_minutes_ago)
@@ -333,7 +333,7 @@ where
             .map_err(|e| StorageError::Database(Box::new(e)))?;
         #[cfg(feature = "chrono")]
         let wait = chrono::Duration::seconds(wait);
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let wait = time::Duration::seconds(wait);
         let mut tx = pool
             .acquire()
@@ -343,7 +343,7 @@ where
                 "UPDATE jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ? WHERE id = ?";
         #[cfg(feature = "chrono")]
         let now = chrono::Utc::now();
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let now = time::OffsetDateTime::now_utc();
         sqlx::query(query)
             .bind(now.add(wait))
@@ -390,7 +390,7 @@ where
     async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()> {
         #[cfg(feature = "chrono")]
         let now = chrono::Utc::now();
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let now = time::OffsetDateTime::now_utc();
 
         self.keep_alive_at::<Service>(worker_id, now).await
@@ -571,7 +571,7 @@ mod tests {
     async fn register_worker(storage: &mut MysqlStorage<Email>) -> WorkerId {
         #[cfg(feature = "chrono")]
         let now = chrono::Utc::now();
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let now = time::OffsetDateTime::now_utc();
 
         register_worker_at(storage, now).await
@@ -670,7 +670,7 @@ mod tests {
         let worker_id = WorkerId::new("test_worker");
         #[cfg(feature = "chrono")]
         let six_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(6);
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let six_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(6);
 
         storage
@@ -713,7 +713,7 @@ mod tests {
         // register a worker responding at 4 minutes ago
         #[cfg(feature = "chrono")]
         let four_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(4);
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let four_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(4);
 
         let worker_id = WorkerId::new("test_worker");
