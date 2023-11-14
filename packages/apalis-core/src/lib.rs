@@ -10,7 +10,37 @@
 //! Utilities for building job and message processing tools.
 //! This crate contains traits for working with workers.
 //! ````rust
+//! # use std::time::Duration;
+//! # use apalis_core::builder::WorkerBuilder;
+//! # use apalis_core::monitor::Monitor;
+//! # use apalis_core::layers::tracing::TraceLayer;
+//! # use apalis_core::context::JobContext;
+//! # use apalis_core::storage::builder::WithStorage;
+//! # use apalis_core::builder::WorkerFactoryFn;
+//! # use apalis_core::job::Job;
+//! # use apalis_sql::sqlite::SqliteStorage;
+//! # use serde::{Deserialize, Serialize};
+//! # #[derive(Debug, Deserialize, Serialize)]
+//! # pub struct Email {
+//! #     pub to: String,
+//! #     pub subject: String,
+//! #     pub text: String,
+//! # }
+//! # impl Job for Email {
+//! #     const NAME: &'static str = "apalis::Email";
+//! # }
+//! pub async fn send_email(job: Email, _ctx: JobContext) {
+//!    log::info!("Attempting to send email to {}", job.to);
+//! }
 //! async fn run() {
+//!     let sqlite: SqliteStorage<Email> = SqliteStorage::connect("sqlite::memory:")
+//!         .await
+//!         .expect("unable to connect to sqlite");
+//!     sqlite
+//!         .setup()
+//!         .await
+//!         .expect("unable to run migrations for sqlite");
+//!
 //!     Monitor::new()
 //!         .register_with_count(2, move |c| {
 //!             WorkerBuilder::new(format!("tasty-banana-{c}"))
@@ -19,8 +49,8 @@
 //!                 .build_fn(send_email)
 //!         })
 //!         .shutdown_timeout(Duration::from_secs(1))
-//!         /// Here you could use tokio::ctrl_c etc
-//!         .run_with_signal(async { Ok(()) }).await
+//!         // Here you could use tokio::ctrl_c etc
+//!         .run_with_signal(async { Ok(()) }).await;
 //! }
 //! ````
 //! ## How Workers Run and Monitored
@@ -46,6 +76,9 @@
 //!
 //! First, we need to define a tower service.
 //! ```rust
+//! # use std::task::{Context, Poll};
+//! # use log::info;
+//! # use tower::Service;
 //! // This service implements the Log behavior
 //! pub struct LogService<S> {
 //!    target: &'static str,
@@ -77,6 +110,32 @@
 //! Then we define a layer.
 //!
 //! ```rust
+//! # use std::task::{Context, Poll};
+//! # use log::info;
+//! # use tower::{Layer, Service};
+//! # // This service implements the Log behavior
+//! # pub struct LogService<S> {
+//! #    target: &'static str,
+//! #    service: S,
+//! # }
+//! # impl<S, Request> Service<Request> for LogService<S>
+//! # where
+//! #     S: Service<Request>,
+//! #     Request: std::fmt::Debug,
+//! # {
+//! #    type Response = S::Response;
+//! #    type Error = S::Error;
+//! #    type Future = S::Future;
+//! #    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+//! #        self.service.poll_ready(cx)
+//! #    }
+//! #    fn call(&mut self, request: Request) -> Self::Future {
+//! #        // Use service to apply middleware before or(and) after a request
+//! #        info!("request = {:?}, target = {:?}", request, self.target);
+//! #        self.service.call(request)
+//! #        // Also possible to do something after
+//! #    }
+//! # }
 //! pub struct LogLayer {
 //!     target: &'static str,
 //! }
@@ -100,7 +159,7 @@
 //! ```
 //! Layers are executed sequentially.
 //!
-//! ```rust
+//! ```ignore
 //! .layer(LogLayer::new("log-layer-1"))
 //! .layer(LogLayer::new("log-layer-2"))
 //! ```
