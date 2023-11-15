@@ -87,3 +87,5 @@ all-features = true
 
 [dev-dependencies]
 tokio = { version = "1.34.0", features = ["macros", "rt", "sync"] }
+apalis-core = { path = ".", features = ["storage", "trace"] }
+apalis-sql = { path = "../apalis-sql", features = ["tokio-comp"] }

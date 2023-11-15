@@ -123,7 +123,8 @@ impl JobContext {
     ///
     /// ```
     /// # use apalis_core::context::JobContext;
-    /// let mut ctx = JobContext::new(1.to_string());
+    /// # use apalis_core::job::JobId;
+    /// let mut ctx = JobContext::new(JobId::new());
     /// assert!(ctx.insert(5i32).is_none());
     /// assert!(ctx.insert(4u8).is_none());
     /// assert_eq!(ctx.insert(9i32), Some(5i32));

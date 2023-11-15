@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
                 .layer(Extension(EmailService::new()))
                 .layer(Extension(ValidEmailCache::new()))
                 // WithStorage is a builder trait that also adds some context eg the storage and worker heartbeats.
-                // use .with_storage_config() to configure te storage
+                // use .with_storage_config() to configure the storage
                 .with_storage(sqlite.clone())
                 .build_fn(send_email)
         })
