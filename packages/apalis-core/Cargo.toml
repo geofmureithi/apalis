@@ -65,7 +65,7 @@ layers = [
 ]
 sentry = ["sentry-core", "ulid/uuid", "uuid"]
 prometheus = ["metrics", "metrics-exporter-prometheus"]
-trace = ["tracing-futures/std-future", "tracing-futures/tokio"]
+trace = ["tracing-futures/std-future"]
 retry = ["tower/retry"]
 timeout = ["tower/timeout"]
 limit = ["tower/limit"]
