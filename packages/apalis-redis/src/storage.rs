@@ -263,7 +263,7 @@ where
 
         #[cfg(feature = "chrono")]
         let timestamp = on.timestamp();
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let timestamp = on.unix_timestamp();
 
         schedule_job
@@ -793,7 +793,7 @@ pub mod expose {
                 .map(|w| {
                     #[cfg(feature = "chrono")]
                     let now = chrono::Utc::now();
-                    #[cfg(feature = "time")]
+                    #[cfg(all(not(feature = "chrono"), feature = "time"))]
                     let now = time::OffsetDateTime::now_utc();
                     ExposedWorker::new::<Self, T>(
                         WorkerId::new(

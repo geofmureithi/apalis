@@ -62,6 +62,6 @@ use time::OffsetDateTime;
 #[cfg(feature = "chrono")]
 #[allow(dead_code)]
 type Timestamp = DateTime<Utc>;
-#[cfg(feature = "time")]
+#[cfg(all(not(feature = "chrono"), feature = "time"))]
 #[allow(dead_code)]
 type Timestamp = OffsetDateTime;

@@ -86,7 +86,7 @@ impl<T: Job> SqliteStorage<T> {
                    UPDATE SET last_seen = EXCLUDED.last_seen";
         #[cfg(feature = "chrono")]
         let last_seen = last_seen.timestamp();
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let last_seen = last_seen.unix_timestamp();
         sqlx::query(query)
             .bind(worker_id.to_string())
@@ -119,7 +119,7 @@ where
         Some(job) => {
             #[cfg(feature = "chrono")]
             let now = chrono::Utc::now().timestamp();
-            #[cfg(feature = "time")]
+            #[cfg(all(not(feature = "chrono"), feature = "time"))]
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
 
             let job_id = job.id();
@@ -159,7 +159,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
                 let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 #[cfg(feature = "chrono")]
                 let now = chrono::Utc::now().timestamp();
-                #[cfg(feature = "time")]
+                #[cfg(all(not(feature = "chrono"), feature = "time"))]
                 let now = time::OffsetDateTime::now_utc().unix_timestamp();
                 let job_type = T::NAME;
                 let fetch_query = "SELECT * FROM Jobs
@@ -209,7 +209,7 @@ where
 
         #[cfg(feature = "chrono")]
         let on = on.timestamp();
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let on = on.unix_timestamp();
 
         let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
@@ -277,7 +277,7 @@ where
                 #[cfg(feature = "chrono")]
                 let five_minutes_ago =
                     (chrono::Utc::now() - chrono::Duration::minutes(5)).timestamp();
-                #[cfg(feature = "time")]
+                #[cfg(all(not(feature = "chrono"), feature = "time"))]
                 let five_minutes_ago =
                     (time::OffsetDateTime::now_utc() - time::Duration::minutes(5)).unix_timestamp();
                 sqlx::query(query)
@@ -374,7 +374,7 @@ where
             .map_err(|e| StorageError::Database(Box::new(e)))?;
         #[cfg(feature = "chrono")]
         let wait = chrono::Duration::seconds(wait);
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let wait = time::Duration::seconds(wait);
         let mut tx = pool
             .acquire()
@@ -384,7 +384,7 @@ where
                 "UPDATE Jobs SET status = 'Failed', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ?2 WHERE id = ?1";
         #[cfg(feature = "chrono")]
         let wait_until = chrono::Utc::now().add(wait).timestamp();
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let wait_until = time::OffsetDateTime::now_utc().add(wait).unix_timestamp();
         sqlx::query(query)
             .bind(job_id.to_string())
@@ -405,12 +405,12 @@ where
         let attempts = job.attempts();
         #[cfg(feature = "chrono")]
         let done_at = (*job.done_at()).map(|v| v.timestamp());
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let done_at = (*job.done_at()).map(|v| v.unix_timestamp());
         let lock_by = job.lock_by().clone();
         #[cfg(feature = "chrono")]
         let lock_at = (*job.lock_at()).map(|v| v.timestamp());
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let lock_at = (*job.lock_at()).map(|v| v.unix_timestamp());
         let last_error = job.last_error().clone();
 
@@ -437,7 +437,7 @@ where
     async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()> {
         #[cfg(feature = "chrono")]
         let now = chrono::Utc::now();
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let now = time::OffsetDateTime::now_utc();
 
         self.keep_alive_at::<Service>(worker_id, now).await
@@ -598,7 +598,7 @@ mod tests {
     async fn register_worker(storage: &mut SqliteStorage<Email>) -> WorkerId {
         #[cfg(feature = "chrono")]
         let now = chrono::Utc::now();
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let now = time::OffsetDateTime::now_utc();
 
         register_worker_at(storage, now).await
@@ -685,7 +685,7 @@ mod tests {
 
         #[cfg(feature = "chrono")]
         let six_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(6);
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let six_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(6);
 
         let worker_id = register_worker_at(&mut storage, six_minutes_ago).await;
@@ -718,7 +718,7 @@ mod tests {
 
         #[cfg(feature = "chrono")]
         let four_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(4);
-        #[cfg(feature = "time")]
+        #[cfg(all(not(feature = "chrono"), feature = "time"))]
         let four_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(4);
 
         let worker_id = register_worker_at(&mut storage, four_minutes_ago).await;
