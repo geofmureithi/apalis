@@ -130,7 +130,7 @@ impl JobContext {
     /// assert_eq!(ctx.insert(9i32), Some(5i32));
     /// ```
     #[cfg(feature = "extensions")]
-    pub fn insert<D: Any + Send + Sync>(&mut self, data: D) -> Option<D> {
+    pub fn insert<D: Any + Send + Sync + Clone>(&mut self, data: D) -> Option<D> {
         self.data.0.insert(data)
     }
 
