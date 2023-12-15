@@ -14,7 +14,7 @@ description = "Redis Storage for apalis: use Redis for background jobs and messa
 apalis-core = { path = "../../packages/apalis-core", version = "0.4.7", default-features = false, features = [
     "storage",
 ] }
-redis = { version = "0.23", default-features = false, features = [
+redis = { version = "0.24", default-features = false, features = [
     "script",
     "aio",
     "connection-manager"
