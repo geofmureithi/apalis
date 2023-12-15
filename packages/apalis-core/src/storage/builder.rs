@@ -33,7 +33,7 @@ pub trait WithStorage<NS, ST: Storage<Output = Self::Job>>: Sized {
 pub struct WorkerConfig {
     keep_alive: Duration,
     enqueue_scheduled: Option<(i32, Duration)>,
-    reenqueue_orphaned: Option<(i32, Duration)>,
+    reenqueue_orphaned: Option<(i32, Duration, Duration)>,
     buffer_size: usize,
     fetch_interval: Duration,
 }
@@ -43,7 +43,7 @@ impl Default for WorkerConfig {
         Self {
             keep_alive: Duration::from_secs(30),
             enqueue_scheduled: Some((10, Duration::from_secs(10))),
-            reenqueue_orphaned: Some((10, Duration::from_secs(10))),
+            reenqueue_orphaned: Some((10, Duration::from_secs(10), Duration::from_secs(300))),
             buffer_size: 1,
             fetch_interval: Duration::from_millis(50),
         }
@@ -71,7 +71,7 @@ impl WorkerConfig {
     /// The rate at which orphaned jobs are returned to the queue
     ///
     /// If None then no garbage collection of orphaned jobs
-    pub fn reenqueue_orphaned(mut self, interval: Option<(i32, Duration)>) -> Self {
+    pub fn reenqueue_orphaned(mut self, interval: Option<(i32, Duration, Duration)>) -> Self {
         self.reenqueue_orphaned = interval;
         self
     }
@@ -115,8 +115,9 @@ where
         let keep_alive: KeepAlive<ST, M> =
             KeepAlive::new::<J>(&worker_id, storage.clone(), worker_config.keep_alive);
         self.beats.push(Box::new(keep_alive));
-        if let Some((count, duration)) = worker_config.reenqueue_orphaned {
-            let reenqueue_orphaned = ReenqueueOrphaned::new(storage.clone(), count, duration);
+        if let Some((count, duration, timeout_worker)) = worker_config.reenqueue_orphaned {
+            let reenqueue_orphaned =
+                ReenqueueOrphaned::new(storage.clone(), count, duration, timeout_worker);
             self.beats.push(Box::new(reenqueue_orphaned));
         }
         if let Some((count, duration)) = worker_config.enqueue_scheduled {

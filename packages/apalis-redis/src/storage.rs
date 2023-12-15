@@ -500,16 +500,20 @@ where
                 }
             }
 
-            StorageWorkerPulse::ReenqueueOrphaned { count } => {
+            StorageWorkerPulse::ReenqueueOrphaned {
+                count,
+                timeout_worker,
+            } => {
                 let reenqueue_orphaned = self.scripts.reenqueue_orphaned.clone();
                 let consumers_set = self.queue.consumers_set.to_string();
                 let active_jobs_list = self.queue.active_jobs_list.to_string();
                 let signal_list = self.queue.signal_list.to_string();
                 #[cfg(feature = "chrono")]
-                let timestamp = (chrono::Utc::now() - chrono::Duration::minutes(5)).timestamp();
+                let timestamp = (chrono::Utc::now()
+                    - chrono::Duration::seconds(timeout_worker.as_secs() as i64))
+                .timestamp();
                 #[cfg(feature = "time")]
-                let timestamp =
-                    (time::OffsetDateTime::now_utc() - time::Duration::minutes(5)).unix_timestamp();
+                let timestamp = (time::OffsetDateTime::now_utc() - timeout_worker).unix_timestamp();
                 let res: Result<i8, StorageError> = reenqueue_orphaned
                     .key(consumers_set)
                     .key(active_jobs_list)
@@ -978,7 +982,10 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
+                count: 5,
+                timeout_worker: Duration::from_secs(300),
+            })
             .await
             .expect("failed to heartbeat");
         assert!(result);
@@ -1010,7 +1017,10 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
+                count: 5,
+                timeout_worker: Duration::from_secs(300),
+            })
             .await
             .expect("failed to heartbeat");
         assert!(result);

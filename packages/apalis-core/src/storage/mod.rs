@@ -116,5 +116,8 @@ pub enum StorageWorkerPulse {
     ReenqueueOrphaned {
         /// the count of orphaned jobs
         count: i32,
+        /// the duration before a worker is considered dead
+        /// and its jobs are orphaned
+        timeout_worker: Duration,
     },
 }

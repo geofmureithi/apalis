@@ -225,7 +225,10 @@ where
                 Ok(true)
             }
             // Worker not seen in 5 minutes yet has running jobs
-            StorageWorkerPulse::ReenqueueOrphaned { count } => {
+            StorageWorkerPulse::ReenqueueOrphaned {
+                count,
+                timeout_worker,
+            } => {
                 let job_type = T::NAME;
                 let mut tx = pool
                     .acquire()
@@ -236,11 +239,12 @@ where
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
                         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
                 #[cfg(feature = "chrono")]
-                let five_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(5);
+                let seconds_ago =
+                    chrono::Utc::now() - chrono::Duration::seconds(timeout_worker.as_secs() as _);
                 #[cfg(all(not(feature = "chrono"), feature = "time"))]
-                let five_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(5);
+                let seconds_ago = time::OffsetDateTime::now_utc() - timeout_worker;
                 sqlx::query(query)
-                    .bind(five_minutes_ago)
+                    .bind(seconds_ago)
                     .bind(job_type)
                     .bind(count)
                     .execute(&mut *tx)
@@ -684,7 +688,10 @@ mod tests {
 
         // heartbeat with ReenqueueOrpharned pulse
         storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
+                count: 5,
+                timeout_worker: Duration::from_secs(300),
+            })
             .await
             .unwrap();
 
@@ -728,7 +735,10 @@ mod tests {
 
         // heartbeat with ReenqueueOrpharned pulse
         storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
+                count: 5,
+                timeout_worker: Duration::from_secs(300),
+            })
             .await
             .unwrap();
 
