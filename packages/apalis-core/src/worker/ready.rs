@@ -83,9 +83,9 @@ where
                 }
             });
         }
-        while let Some(res) = futures::select! {
+        while let Some(res) = futures::select_biased! {
+            _ = ctx.shutdown.clone().fuse() => None,
             res = stream.next().fuse() => res,
-            _ = ctx.shutdown.clone().fuse() => None
         } {
             let send_clone = send.clone();
             match res {
@@ -94,10 +94,7 @@ where
                         .ready()
                         .await
                         .map_err(|e| WorkerError::ServiceError(format!("{e:?}")))?;
-                    let fut = svc.call(item);
-                    ctx.spawn(async move {
-                        fut.await;
-                    });
+                    let _fut = svc.call(item).await;
                     drop(send_clone);
                 }
                 Err(e) => {
