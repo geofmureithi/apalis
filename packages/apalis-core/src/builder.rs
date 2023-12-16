@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::{error::Error, fmt::Debug, marker::PhantomData};
 
 use futures::Stream;
@@ -140,6 +141,7 @@ where
             stream: self.source,
             service: self.layer.service(service),
             beats: self.beats,
+            max_concurrent_jobs: NonZeroUsize::new(1000).unwrap(),
         }
     }
 }

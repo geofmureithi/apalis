@@ -17,8 +17,9 @@ use crate::utils::Timer;
 use super::HeartBeat;
 use super::WorkerId;
 use super::{Worker, WorkerContext, WorkerError};
-use futures::future::FutureExt;
+use futures::future::{join_all, FutureExt};
 use std::fmt::Formatter;
+use std::num::NonZeroUsize;
 
 /// A worker that is ready to consume jobs
 pub struct ReadyWorker<Stream, Service> {
@@ -26,6 +27,7 @@ pub struct ReadyWorker<Stream, Service> {
     pub(crate) stream: Stream,
     pub(crate) service: Service,
     pub(crate) beats: Vec<Box<dyn HeartBeat + Send>>,
+    pub(crate) max_concurrent_jobs: NonZeroUsize,
 }
 
 impl<Stream, Service> Debug for ReadyWorker<Stream, Service> {
@@ -56,6 +58,7 @@ where
     fn id(&self) -> WorkerId {
         self.id.clone()
     }
+
     async fn start<Exec: Executor + Send + Sync + 'static>(
         self,
         ctx: WorkerContext<Exec>,
@@ -66,7 +69,10 @@ where
             .service(self.service);
         #[cfg(not(feature = "extensions"))]
         let mut service = self.service;
-        let mut stream = ctx.shutdown.graceful_stream(self.stream);
+        let mut stream = ctx
+            .shutdown
+            .graceful_stream(self.stream)
+            .ready_chunks(self.max_concurrent_jobs.get());
         let (send, mut recv) = futures::channel::mpsc::channel::<()>(1);
         // Setup any heartbeats by the worker
         for mut beat in self.beats {
@@ -87,21 +93,28 @@ where
             _ = ctx.shutdown.clone().fuse() => None,
             res = stream.next().fuse() => res,
         } {
+            let res: Result<Vec<_>, _> = res.into_iter().collect();
             let send_clone = send.clone();
             match res {
-                Ok(Some(item)) => {
-                    let svc = service
-                        .ready()
-                        .await
-                        .map_err(|e| WorkerError::ServiceError(format!("{e:?}")))?;
-                    let _fut = svc.call(item).await;
+                Ok(items) => {
+                    let mut futures = Vec::with_capacity(items.len());
+                    let items = items.into_iter().flatten();
+                    for item in items {
+                        let svc = service
+                            .ready()
+                            .await
+                            .map_err(|e| WorkerError::ServiceError(format!("{e:?}")))?;
+                        let fut = svc.call(item);
+                        let fut = async move {
+                            fut.await;
+                        };
+                        futures.push(fut);
+                    }
+                    join_all(futures).await;
                     drop(send_clone);
                 }
                 Err(e) => {
                     warn!("Error processing stream {e}");
-                    drop(send_clone);
-                }
-                _ => {
                     drop(send_clone);
                 }
             }

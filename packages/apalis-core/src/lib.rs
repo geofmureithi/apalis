@@ -216,6 +216,7 @@ pub mod mq;
 pub mod mock {
     use futures::channel::mpsc::{Receiver, Sender};
     use futures::{Stream, StreamExt};
+    use std::num::NonZeroUsize;
     use tower::Service;
 
     use crate::{
@@ -257,6 +258,7 @@ pub mod mock {
                 stream,
                 id: WorkerId::new("mock-worker"),
                 beats: Vec::new(),
+                max_concurrent_jobs: NonZeroUsize::new(1000).unwrap(),
             },
         )
     }
