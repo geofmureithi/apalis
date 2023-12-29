@@ -19,7 +19,6 @@ use super::WorkerId;
 use super::{Worker, WorkerContext, WorkerError};
 use futures::future::{join_all, FutureExt};
 use std::fmt::Formatter;
-use std::num::NonZeroUsize;
 
 /// A worker that is ready to consume jobs
 pub struct ReadyWorker<Stream, Service> {
@@ -27,7 +26,7 @@ pub struct ReadyWorker<Stream, Service> {
     pub(crate) stream: Stream,
     pub(crate) service: Service,
     pub(crate) beats: Vec<Box<dyn HeartBeat + Send>>,
-    pub(crate) max_concurrent_jobs: NonZeroUsize,
+    pub(crate) max_concurrent_jobs: usize,
 }
 
 impl<Stream, Service> Debug for ReadyWorker<Stream, Service> {
@@ -72,7 +71,7 @@ where
         let mut stream = ctx
             .shutdown
             .graceful_stream(self.stream)
-            .ready_chunks(self.max_concurrent_jobs.get());
+            .ready_chunks(self.max_concurrent_jobs);
         let (send, mut recv) = futures::channel::mpsc::channel::<()>(1);
         // Setup any heartbeats by the worker
         for mut beat in self.beats {

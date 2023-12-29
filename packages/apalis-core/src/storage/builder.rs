@@ -36,6 +36,7 @@ pub struct WorkerConfig {
     reenqueue_orphaned: Option<(i32, Duration)>,
     buffer_size: usize,
     fetch_interval: Duration,
+    max_concurrent_jobs: usize,
 }
 
 impl Default for WorkerConfig {
@@ -46,6 +47,7 @@ impl Default for WorkerConfig {
             reenqueue_orphaned: Some((10, Duration::from_secs(10))),
             buffer_size: 1,
             fetch_interval: Duration::from_millis(50),
+            max_concurrent_jobs: 1000,
         }
     }
 }
@@ -80,6 +82,12 @@ impl WorkerConfig {
     /// This may be ignored if the storage uses pubsub
     pub fn fetch_interval(mut self, interval: Duration) -> Self {
         self.fetch_interval = interval;
+        self
+    }
+
+    /// Maximum number of jobs to run concurrently
+    pub fn max_concurrent_jobs(mut self, max_concurrent_jobs: usize) -> Self {
+        self.max_concurrent_jobs = max_concurrent_jobs;
         self
     }
 }
@@ -129,6 +137,7 @@ where
             source,
             id: worker_id,
             beats: self.beats,
+            max_concurrent_jobs: worker_config.max_concurrent_jobs,
         }
     }
 }
