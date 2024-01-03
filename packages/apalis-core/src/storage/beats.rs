@@ -38,18 +38,19 @@ impl<S: Storage + Send + Sync, Service: Sync + Send> HeartBeat for KeepAlive<S, 
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct ReenqueueOrphaned<ST>(ST, i32, Duration);
+pub(super) struct ReenqueueOrphaned<ST>(ST, i32, Duration, Duration);
 
 impl<ST> ReenqueueOrphaned<ST> {
     pub(super) fn new<J: 'static>(
         storage: ST,
         count: i32,
         interval: Duration,
+        timeout_worker: Duration,
     ) -> ReenqueueOrphaned<ST>
     where
         ST: Storage<Output = J>,
     {
-        ReenqueueOrphaned(storage, count, interval)
+        ReenqueueOrphaned(storage, count, interval, timeout_worker)
     }
 }
 
@@ -58,7 +59,10 @@ impl<S: Storage + Send + Sync> HeartBeat for ReenqueueOrphaned<S> {
     async fn heart_beat(&mut self) {
         match self
             .0
-            .heartbeat(super::StorageWorkerPulse::ReenqueueOrphaned { count: self.1 })
+            .heartbeat(super::StorageWorkerPulse::ReenqueueOrphaned {
+                count: self.1,
+                timeout_worker: self.3,
+            })
             .await
         {
             Err(e) => {

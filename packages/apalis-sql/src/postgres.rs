@@ -220,8 +220,11 @@ where
                 // Idealy jobs are queue via run_at. So this is not necessary
                 Ok(true)
             }
-            // Worker not seen in 5 minutes yet has running jobs
-            StorageWorkerPulse::ReenqueueOrphaned { count } => {
+            // Worker not seen in 'timeout_worker' duration yet has running jobs
+            StorageWorkerPulse::ReenqueueOrphaned {
+                count,
+                timeout_worker,
+            } => {
                 let job_type = T::NAME;
                 let mut tx = pool
                     .acquire()
@@ -231,9 +234,10 @@ where
                             SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ='Job was abandoned'
                             WHERE id in
                                 (SELECT jobs.id from apalis.jobs INNER join apalis.workers ON lock_by = workers.id
-                                    WHERE status= 'Running' AND workers.last_seen < NOW() - INTERVAL '5 minutes'
-                                    AND workers.worker_type = $1 ORDER BY lock_at ASC LIMIT $2);";
+                                    WHERE status= 'Running' AND workers.last_seen < (NOW() - INTERVAL '300 seconds') 
+                                    AND workers.worker_type = $2 ORDER BY lock_at ASC LIMIT $3);";
                 sqlx::query(query)
+                    .bind(timeout_worker.as_secs() as i32) // casting to i64 fails the test, maybe du to sqlx or postgres ?
                     .bind(job_type)
                     .bind(count)
                     .execute(&mut *tx)
@@ -676,7 +680,10 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
+                count: 5,
+                timeout_worker: Duration::from_secs(300),
+            })
             .await
             .expect("failed to heartbeat");
         assert!(result);
@@ -710,8 +717,12 @@ mod tests {
         let worker_id = register_worker_at(&mut storage, four_minutes_ago).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
+        assert_eq!(*job.context().status(), JobState::Running);
         let result = storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
+                count: 5,
+                timeout_worker: Duration::from_secs(300),
+            })
             .await
             .expect("failed to heartbeat");
         assert!(result);

@@ -262,7 +262,10 @@ where
                 Ok(true)
             }
             // Worker not seen in 5 minutes yet has running jobs
-            StorageWorkerPulse::ReenqueueOrphaned { count } => {
+            StorageWorkerPulse::ReenqueueOrphaned {
+                count,
+                timeout_worker,
+            } => {
                 let job_type = T::NAME;
                 let mut tx = pool
                     .acquire()
@@ -275,13 +278,14 @@ where
                                     WHERE status= "Running" AND workers.last_seen < ?1
                                     AND Workers.worker_type = ?2 ORDER BY lock_at ASC LIMIT ?3);"#;
                 #[cfg(feature = "chrono")]
-                let five_minutes_ago =
-                    (chrono::Utc::now() - chrono::Duration::minutes(5)).timestamp();
+                let seconds_ago = (chrono::Utc::now()
+                    - chrono::Duration::seconds(timeout_worker.as_secs() as _))
+                .timestamp();
                 #[cfg(all(not(feature = "chrono"), feature = "time"))]
-                let five_minutes_ago =
-                    (time::OffsetDateTime::now_utc() - time::Duration::minutes(5)).unix_timestamp();
+                let seconds_ago =
+                    (time::OffsetDateTime::now_utc() - timeout_worker).unix_timestamp();
                 sqlx::query(query)
-                    .bind(five_minutes_ago)
+                    .bind(seconds_ago)
                     .bind(job_type)
                     .bind(count)
                     .execute(&mut *tx)
@@ -692,7 +696,10 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
+                count: 5,
+                timeout_worker: Duration::from_secs(300),
+            })
             .await
             .expect("failed to heartbeat");
         assert!(result);
@@ -725,7 +732,10 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned { count: 5 })
+            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
+                count: 5,
+                timeout_worker: Duration::from_secs(300),
+            })
             .await
             .expect("failed to heartbeat");
         assert!(result);
