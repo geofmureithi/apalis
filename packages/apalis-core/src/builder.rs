@@ -22,6 +22,7 @@ pub struct WorkerBuilder<Job, Source, Middleware> {
     pub(crate) layer: ServiceBuilder<Middleware>,
     pub(crate) source: Source,
     pub(crate) beats: Vec<Box<dyn HeartBeat + Send>>,
+    pub(crate) max_concurrent_jobs: usize,
 }
 
 impl<Job, Source, Middleware> std::fmt::Debug for WorkerBuilder<Job, Source, Middleware> {
@@ -46,6 +47,7 @@ impl WorkerBuilder<(), (), Identity> {
             source: (),
             id: WorkerId::new(name),
             beats: Vec::new(),
+            max_concurrent_jobs: 1000,
         }
     }
 }
@@ -62,6 +64,7 @@ impl<J, S, M> WorkerBuilder<J, S, M> {
             source: stream,
             id: self.id,
             beats: self.beats,
+            max_concurrent_jobs: self.max_concurrent_jobs,
         }
     }
 
@@ -82,6 +85,7 @@ impl<J, S, M> WorkerBuilder<J, S, M> {
             source: stream(&self.id),
             id: self.id,
             beats: self.beats,
+            max_concurrent_jobs: self.max_concurrent_jobs,
         }
     }
 }
@@ -101,6 +105,7 @@ impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
             id: self.id,
             source: self.source,
             beats: self.beats,
+            max_concurrent_jobs: self.max_concurrent_jobs,
         }
     }
     /// Shorthand for decoration. Allows adding a single layer [tower] middleware
@@ -114,6 +119,7 @@ impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
             layer: self.layer.layer(layer),
             id: self.id,
             beats: self.beats,
+            max_concurrent_jobs: self.max_concurrent_jobs,
         }
     }
 }
@@ -140,6 +146,7 @@ where
             stream: self.source,
             service: self.layer.service(service),
             beats: self.beats,
+            max_concurrent_jobs: self.max_concurrent_jobs,
         }
     }
 }

@@ -257,6 +257,7 @@ pub mod mock {
                 stream,
                 id: WorkerId::new("mock-worker"),
                 beats: Vec::new(),
+                max_concurrent_jobs: 1000,
             },
         )
     }
