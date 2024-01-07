@@ -40,6 +40,7 @@ where
             source,
             id: worker_id,
             beats: self.beats,
+            max_concurrent_jobs: self.max_concurrent_jobs,
         }
     }
 }
