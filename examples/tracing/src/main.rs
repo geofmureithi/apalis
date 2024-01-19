@@ -7,7 +7,7 @@ use tracing_subscriber::prelude::*;
 
 use apalis::{
     layers::TraceLayer,
-    prelude::{JobContext, Monitor, Storage, WithStorage, WorkerBuilder, WorkerFactoryFn},
+    prelude::{Context, Monitor, Storage, WithStorage, WorkerBuilder, WorkerFactoryFn},
     redis::RedisStorage,
 };
 
@@ -28,7 +28,7 @@ impl fmt::Display for InvalidEmailError {
 
 impl Error for InvalidEmailError {}
 
-async fn email_service(_email: Email, _ctx: JobContext) {
+async fn email_service(_email: Email, _ctx: Context) {
     tracing::info!("Checking if dns configured");
     sleep(Duration::from_millis(1008)).await;
     tracing::info!("Sent in 1 sec");

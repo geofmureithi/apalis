@@ -9,7 +9,13 @@
 //! apalis offers Sqlite, Mysql and Postgres storages for its workers.
 //!
 //! ## Example
-//!  ```rust,ignore
+//!  ```rust,no_run
+//! # use apalis_core::builder::WorkerBuilder;
+//! # use apalis_core::layers::extensions::Data;
+//! # use apalis_core::monitor::Monitor;
+//! # use apalis_core::error::Error;
+//!  use email_service::Email;
+//! 
 //!  #[tokio::main]
 //!  async fn main() -> std::io::Result<()> {
 //!      std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
@@ -17,18 +23,19 @@
 //!
 //!      let pg: PostgresStorage<Email> = PostgresStorage::connect(database_url).await.unwrap();
 //!
-//!      async fn send_email(job: Email, _ctx: JobContext) -> Result<(), JobError> {
-//!          log::info!("Attempting to send email to {}", job.to);
+//!      async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
+//!          /// execute job
 //!          Ok(())
 //!      }
 //!     // This can be even in another program/language
 //!     let query = "Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));";
-//!     db.execute(query).await.unwrap();
+//!     pg.execute(query).await.unwrap();
 //!
 //!      Monitor::new()
-//!          .register_with_count(4, move |index| {
-//!              WorkerBuilder::new(&format!("tasty-avocado-{index}"))
-//!                  .with_storage(pg)
+//!          .register_with_count(4, {
+//!              WorkerBuilder::new(&format!("tasty-avocado"))
+//!                  .layer(Data(0usize))
+//!                  .source(pg)
 //!                  .build_fn(send_email)
 //!          })
 //!          .run()

@@ -1,10 +1,5 @@
 /// Acknowledgement layer for apalis
-#[cfg(feature = "extensions")]
-#[cfg_attr(docsrs, doc(cfg(feature = "extensions")))]
 pub mod ack;
-/// Useful when adding extra context to a [JobRequest]
-#[cfg(feature = "extensions")]
-#[cfg_attr(docsrs, doc(cfg(feature = "extensions")))]
 pub mod extensions;
 /// Prometheus integration for apalis
 #[cfg(feature = "prometheus")]

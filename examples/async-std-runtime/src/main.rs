@@ -1,13 +1,13 @@
-use std::{str::FromStr, time::Duration};
+use std::{future::Future, str::FromStr, time::Duration};
 
 use anyhow::Result;
 use apalis::{
     cron::{CronStream, Schedule},
-    layers::TraceLayer,
-    prelude::{timer::AsyncStdTimer as SleepTimer, Timer, *},
+    layers::Data,
+    prelude::*,
 };
 use chrono::{DateTime, Utc};
-use tracing::debug;
+use tracing::{debug, info};
 
 #[derive(Default, Debug, Clone)]
 struct Reminder(DateTime<Utc>);
@@ -18,20 +18,15 @@ impl From<DateTime<Utc>> for Reminder {
     }
 }
 
-impl Job for Reminder {
-    const NAME: &'static str = "reminder::DailyReminder";
-}
-async fn send_reminder(job: Reminder, _ctx: JobContext) {
-    debug!("Called at {job:?}");
-    let timer = SleepTimer;
-    timer.sleep(Duration::from_secs(3)).await;
+async fn send_reminder(reminder: Reminder) {
+    debug!("Called at {reminder:?}");
 }
 
 #[async_std::main]
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     tracing_subscriber::fmt::init();
-    let (s, ctrl_c) = async_channel::bounded(100);
+    let (s, ctrl_c) = async_channel::bounded(1);
     let handle = move || {
         s.try_send(()).ok();
     };
@@ -39,17 +34,35 @@ async fn main() -> Result<()> {
 
     let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
     let worker = WorkerBuilder::new("daily-cron-worker")
-        .layer(TraceLayer::new())
-        .stream(CronStream::new(schedule).timer(SleepTimer).to_stream())
+        // .layer(TraceLayer::new())
+        .stream(CronStream::new(schedule).into_stream())
         .build_fn(send_reminder);
 
-    Monitor::new()
-        .executor(AsyncStdExecutor::new())
-        .register(worker)
+    Monitor::<AsyncStdExecutor>::new()
+        // .executor(AsyncStdExecutor::new())
+        .register_with_count(3, worker)
+        // .run()
         .run_with_signal(async {
             ctrl_c.recv().await.ok();
+            info!("Shutting down");
             Ok(())
         })
         .await?;
     Ok(())
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AsyncStdExecutor;
+
+impl AsyncStdExecutor {
+    /// A new async-std executor
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Executor for AsyncStdExecutor {
+    fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) {
+        async_std::task::spawn(async { fut.await });
+    }
 }

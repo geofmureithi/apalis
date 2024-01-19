@@ -15,18 +15,18 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! # use apalis_core::context::JobContext;
 //! # use apalis_core::layers::retry::RetryLayer;
 //! # use apalis_core::layers::retry::DefaultRetryPolicy;
-//! # use apalis_core::layers::extensions::Extension;
-//! # use apalis_core::job_fn::job_fn;
-//! # use apalis_core::job::Job;
+//! # use apalis_core::layers::extensions::Data;
+//! # use apalis_core::service_fn::service_fn;
+//! # use apalis_core::storage::job::Job;
 //! use tower::ServiceBuilder;
 //! use apalis_cron::Schedule;
 //! use std::str::FromStr;
 //! # use apalis_core::monitor::Monitor;
 //! # use apalis_core::builder::WorkerBuilder;
-//! # use apalis_core::builder::WorkerFactory;
+//! # use apalis_core::builder::WorkerFactoryFn;
+//! # use apalis_utils::TokioExecutor;
 //! use apalis_cron::CronStream;
 //! use chrono::{DateTime, Utc};
 //!
@@ -46,22 +46,19 @@
 //! impl Job for Reminder {
 //!     const NAME: &'static str = "reminder::DailyReminder";
 //! }
-//! async fn send_reminder(job: Reminder, ctx: JobContext) {
-//!     let svc = ctx.data_opt::<FakeService>().unwrap();
+//! async fn send_reminder(job: Reminder, svc: Data<FakeService>) {
 //!     svc.execute(job);
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     let schedule = Schedule::from_str("@daily").unwrap();
-//!     let service = ServiceBuilder::new()
-//!         .layer(RetryLayer::new(DefaultRetryPolicy))
-//!         .layer(Extension(FakeService))
-//!         .service(job_fn(send_reminder));
 //!     let worker = WorkerBuilder::new("morning-cereal")
-//!         .stream(CronStream::new(schedule).to_stream())
-//!         .build(service);
-//!     Monitor::new()
+//!         .layer(RetryLayer::new(DefaultRetryPolicy))
+//!         .layer(Data(FakeService))
+//!         .stream(CronStream::new(schedule).into_stream())
+//!         .build_fn(send_reminder);
+//!     Monitor::<TokioExecutor>::new()
 //!         .register(worker)
 //!         .run()
 //!         .await
@@ -69,90 +66,76 @@
 //! }
 //! ```
 
-#[cfg(feature = "time")]
-compile_error!("`apalis-cron` does not support `time` feature. Please use `chrono` instead.");
-
-use apalis_core::job::Job;
+use apalis_core::request::RequestStream;
+use apalis_core::storage::job::Job;
 use apalis_core::utils::Timer;
-use apalis_core::{error::JobError, request::JobRequest};
+use apalis_core::{error::Error, request::Request};
 use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
 use futures::stream::BoxStream;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use std::marker::PhantomData;
+use std::pin::Pin;
 
-/// Represents a stream from a cron schedule
+/// Represents a stream from a cron schedule with a timezone
 #[derive(Clone, Debug)]
-pub struct CronStream<J, T>(Schedule, PhantomData<J>, T);
+pub struct CronStream<J, Tz> {
+    schedule: Schedule,
+    timezone: Tz,
+    _marker: PhantomData<J>,
+}
 
-impl<J> CronStream<J, ()> {
-    /// Build a new cron stream from a schedule
+impl<J> CronStream<J, Utc> {
+    /// Build a new cron stream from a schedule using the UTC timezone
     pub fn new(schedule: Schedule) -> Self {
-        Self(schedule, PhantomData, ())
-    }
-
-    /// Set a custom timer
-    pub fn timer<NT: Timer>(self, timer: NT) -> CronStream<J, NT> {
-        CronStream(self.0, PhantomData, timer)
+        Self {
+            schedule,
+            timezone: Utc,
+            _marker: PhantomData,
+        }
     }
 }
 
-impl<J: From<DateTime<Utc>> + Job + Send + 'static, T: Timer + Sync + Send + 'static>
-    CronStream<J, T>
+impl<J, Tz> CronStream<J, Tz>
+where
+    Tz: TimeZone + Send + Sync + 'static,
+{
+    /// Build a new cron stream from a schedule and timezone
+    pub fn new_with_timezone(schedule: Schedule, timezone: Tz) -> Self {
+        Self {
+            schedule,
+            timezone,
+            _marker: PhantomData,
+        }
+    }
+}
+impl<J, Tz> CronStream<J, Tz>
+where
+    J: From<DateTime<Tz>> + Send + Sync + 'static,
+    Tz: TimeZone + Send + Sync + 'static,
+    Tz::Offset: Send + Sync,
 {
     /// Convert to consumable
-    pub fn to_stream(self) -> BoxStream<'static, Result<Option<JobRequest<J>>, JobError>> {
+    pub fn into_stream(self) -> RequestStream<Request<J>> {
+        let timezone = self.timezone.clone();
+        let schedule = self.schedule.clone();
         let stream = async_stream::stream! {
-            let mut schedule = self.0.upcoming_owned(Utc);
-            loop {
-                let next = schedule.next();
-                match next {
-                    Some(next) => {
-                        let to_sleep = next - chrono::Utc::now();
-                        let to_sleep = to_sleep.to_std().map_err(|e| JobError::Failed(e.into()))?;
-                        self.2.sleep(to_sleep).await;
-                        yield Ok(Some(JobRequest::new(J::from(chrono::Utc::now()))));
-                    },
-                    None => {
-                        yield Ok(None);
-                    }
-                }
-
-            }
-        };
-        stream.boxed()
-    }
-}
-
-impl<J, T> CronStream<J, T> {
-    /// Convert to consumable
-    pub fn to_stream_with_timezone<Tz: TimeZone + Send + Sync + 'static>(
-        self,
-        timezone: Tz,
-    ) -> BoxStream<'static, Result<Option<JobRequest<J>>, JobError>>
-    where
-        J: From<DateTime<Tz>> + Job + Send + 'static,
-        T: Timer + Sync + Send + 'static,
-        <Tz as TimeZone>::Offset: std::marker::Send,
-    {
-        let stream = async_stream::stream! {
-            let mut schedule = self.0.upcoming_owned(timezone.clone());
+            let mut schedule = self.schedule.upcoming_owned(timezone.clone());
             loop {
                 let next = schedule.next();
                 match next {
                     Some(next) => {
                         let to_sleep = next - timezone.from_utc_datetime(&Utc::now().naive_utc());
-                        let to_sleep = to_sleep.to_std().map_err(|e| JobError::Failed(e.into()))?;
-                        self.2.sleep(to_sleep).await;
-                        yield Ok(Some(JobRequest::new(J::from(timezone.from_utc_datetime(&Utc::now().naive_utc())))));
+                        let to_sleep = to_sleep.to_std().map_err(|e| Error::Failed(e.into()))?;
+                        apalis_utils::sleep(to_sleep).await;
+                        yield Ok(Some(Request::new(J::from(timezone.from_utc_datetime(&Utc::now().naive_utc())))));
                     },
                     None => {
                         yield Ok(None);
                     }
                 }
-
             }
         };
-        stream.boxed()
+        Box::pin(stream)
     }
 }

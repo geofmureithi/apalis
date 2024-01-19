@@ -1,6 +1,6 @@
 [package]
 name = "apalis"
-version = "0.4.8"
+version = "0.5.0-alpha.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
@@ -15,25 +15,20 @@ edition = "2021"
 bench = false
 
 [features]
-default = ["tracing", "tokio-comp", "chrono"]
+default = ["tracing", "tokio-comp"]
 ## Support Tracing 👀
 tracing = ["apalis-core/trace"]
 
 ## Include redis storage
 redis = ["apalis-redis"]
-## Include Postgres storage
-postgres = ["apalis-sql/postgres"]
+# ## Include Postgres storage
+# postgres = ["apalis-sql/postgres"]
 ## Include SQlite storage
 sqlite = ["apalis-sql/sqlite"]
-## Include MySql storage
-mysql = ["apalis-sql/mysql"]
-## Include Cron functionality
+# ## Include MySql storage
+# mysql = ["apalis-sql/mysql"]
+# ## Include Cron functionality
 cron = ["apalis-cron"]
-
-## Use chrono library for time representation
-chrono = ["apalis-core/chrono", "apalis-sql?/chrono", "apalis-redis?/chrono"]
-## Use time library for time representation
-time = ["apalis-core/time", "apalis-sql?/time", "apalis-redis?/time"]
 
 ## Support for Sentry exception and performance monitoring
 sentry = ["apalis-core/sentry"]
@@ -47,53 +42,53 @@ timeout = ["apalis-core/timeout"]
 limit = ["apalis-core/limit"]
 ## Support filtering jobs based on a predicate
 filter = ["apalis-core/filter"]
-## Add a global extensions to jobs
-extensions = ["apalis-core/extensions"]
 ## Compatibility with async-std and smol runtimes
 async-std-comp = [
-  "apalis-core/async-std-comp",
   "apalis-sql?/async-std-comp",
   "apalis-redis?/async-std-comp",
   "apalis-cron?/async-std-comp",
 ]
 ## Compatibility with tokio and actix runtimes
 tokio-comp = [
-  "apalis-core/tokio-comp",
   "apalis-sql?/tokio-comp",
   "apalis-redis?/tokio-comp",
   "apalis-cron?/tokio-comp",
+  "apalis-utils/tokio-comp",
 ]
 
-## Expose job sources for web and cli purposes
-expose = ["apalis-core/expose", "apalis-sql?/expose", "apalis-redis?/expose"]
 
 docsrs = ["document-features"]
 
 
 [dependencies.apalis-redis]
-version = "0.4.8"
+version = "0.5.0-alpha.0"
 optional = true
 path = "./packages/apalis-redis"
 default-features = false
 
 [dependencies.apalis-sql]
-version = "0.4.8"
+version = "0.5.0-alpha.0"
 features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"
 
 [dependencies.apalis-core]
-version = "0.4.8"
+version = "0.5.0-alpha.0"
 default-features = false
 path = "./packages/apalis-core"
-features = ["storage"]
 
 [dependencies.apalis-cron]
-version = "0.4.8"
+version = "0.5.0-alpha.0"
 optional = true
 default-features = false
 path = "./packages/apalis-cron"
+
+[dependencies.apalis-utils]
+version = "0.1.0"
+default-features = false
+path = "./packages/apalis-utils"
+optional = true
 
 [dependencies.document-features]
 version = "0.2"
@@ -103,22 +98,7 @@ optional = true
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
-features = [
-  "redis",
-  "sqlite",
-  "postgres",
-  "cron",
-  "sentry",
-  "prometheus",
-  "retry",
-  "timeout",
-  "limit",
-  "filter",
-  "extensions",
-  "tokio-comp",
-  "expose",
-  "docsrs",
-]
+all-features = true
 
 
 [dev-dependencies]
@@ -127,9 +107,10 @@ pprof = { version = "0.13", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-apalis-redis = { version = "0.4.8", path = "./packages/apalis-redis" }
-apalis-sql = { version = "0.4.8", path = "./packages/apalis-sql", features = [
-  "sqlite", "postgres", "mysql"
+apalis-redis = { version = "0.5.0-alpha.0", path = "./packages/apalis-redis" }
+apalis-sql = { version = "0.5.0-alpha.0", path = "./packages/apalis-sql", features = [
+  "sqlite",
+  # "postgres", "mysql"
 ] }
 
 [[bench]]
@@ -138,6 +119,7 @@ harness = false
 
 [workspace]
 members = [
+  "packages/apalis-utils",
   "packages/apalis-core",
   "packages/apalis-redis",
   "packages/apalis-sql",
@@ -147,13 +129,13 @@ members = [
   "examples/redis",
   "examples/actix-web",
   "examples/sqlite",
-  "examples/sentry",
-  "examples/mysql",
-  "examples/postgres",
-  "examples/axum",
-  "examples/prometheus",
-  "examples/tracing",
-  "examples/rest-api",
+  # "examples/sentry",
+  # "examples/mysql",
+  # "examples/postgres",
+  # "examples/axum",
+  # "examples/prometheus",
+  # "examples/tracing",
+  # "examples/rest-api",
   "examples/async-std-runtime",
-  "examples/basics",
+  # "examples/basics",
 ]

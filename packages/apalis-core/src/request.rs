@@ -1,91 +1,77 @@
+use futures::{future::BoxFuture, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use std::fmt::Debug;
-use strum::{AsRefStr, EnumString};
+use std::{fmt::Debug, pin::Pin, sync::Arc};
 
 use crate::{
-    context::{HasJobContext, JobContext},
-    job::JobId,
+    data::Extensions,
+    error::{Error, StreamError},
+    notify::Notify,
+    poller::{controller::Control, Ready},
+    worker::Worker,
 };
-
-/// Represents the state of a [JobRequest]
-#[derive(
-    EnumString, Serialize, Deserialize, Debug, Clone, AsRefStr, Hash, PartialEq, std::cmp::Eq,
-)]
-pub enum JobState {
-    /// Job is pending
-    #[serde(alias = "Latest")]
-    Pending,
-    /// Job is running
-    Running,
-    /// Job was done successfully
-    Done,
-    /// Retry Job
-    Retry,
-    /// Job has failed. Check `last_error`
-    Failed,
-    /// Job has been killed
-    Killed,
-}
-
-impl Default for JobState {
-    fn default() -> Self {
-        JobState::Pending
-    }
-}
 
 /// Represents a job which can be serialized and executed
 
 #[derive(Serialize, Debug, Deserialize, Clone)]
-pub struct JobRequest<T> {
-    pub(crate) job: T,
-    pub(crate) context: JobContext,
+pub struct Request<T> {
+    pub req: T,
+    #[serde(skip)]
+    pub(crate) data: Extensions,
 }
 
-impl<T> JobRequest<T> {
-    /// Creates a new [JobRequest]
-    pub fn new(job: T) -> Self {
-        let context = JobContext::new(JobId::new());
-        Self { job, context }
+impl<T> Request<T> {
+    /// Creates a new [Request]
+    pub fn new(req: T) -> Self {
+        Self {
+            req,
+            data: Extensions::new(),
+        }
     }
 
-    /// Creates a Job request with context provided
-    pub fn new_with_context(job: T, ctx: JobContext) -> Self {
-        Self { job, context: ctx }
+    /// Creates a request with context provided
+    pub fn new_with_data(req: T, data: Extensions) -> Self {
+        Self { req, data }
     }
 
-    /// Get the underlying reference of the job
+    /// Get the underlying reference of the request
     pub fn inner(&self) -> &T {
-        &self.job
-    }
-
-    /// Records a job attempt
-    pub fn record_attempt(&mut self) {
-        self.context.set_attempts(self.context.attempts() + 1);
+        &self.req
     }
 }
 
-impl<T> std::ops::Deref for JobRequest<T> {
-    type Target = JobContext;
+impl<T> std::ops::Deref for Request<T> {
+    type Target = Extensions;
     fn deref(&self) -> &Self::Target {
-        &self.context
+        &self.data
     }
 }
 
-impl<T> std::ops::DerefMut for JobRequest<T> {
+impl<T> std::ops::DerefMut for Request<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.context
+        &mut self.data
     }
 }
 
-impl<J> HasJobContext for JobRequest<J> {
-    /// Gets a mutable reference to the job context.
-    fn context_mut(&mut self) -> &mut JobContext {
-        &mut self.context
-    }
+pub type BoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + 'a>>;
 
-    /// Gets a reference to the job context.
-    fn context(&self) -> &JobContext {
-        &self.context
+/// Represents a result for a future that yields T
+pub type RequestFuture<T> = BoxFuture<'static, T>;
+/// Represents a stream for T.
+pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, Error>>;
+
+pub struct RequestStreamPoll<T> {
+    pub stream: RequestStream<T>,
+    pub notify: Notify<Worker<Ready<T>>>,
+    pub controller: Control,
+}
+
+impl<T> RequestStreamPoll<T> {
+    pub fn new(stream: RequestStream<T>) -> Self {
+        Self {
+            stream,
+            notify: Notify::new(),
+            controller: Control::new(),
+        }
     }
 }

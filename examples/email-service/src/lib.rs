@@ -1,3 +1,4 @@
+use apalis::layers::Data;
 use apalis::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +13,7 @@ impl Job for Email {
     const NAME: &'static str = "apalis::Email";
 }
 
-pub async fn send_email(job: Email, _ctx: JobContext) {
+pub async fn send_email(job: Email, ctx: Data<Context>) {
     log::info!("Attempting to send email to {}", job.to);
 }
 

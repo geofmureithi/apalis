@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use futures::{future::BoxFuture, FutureExt};
 use tower::{Layer, Service};
 
-use crate::{context::HasJobContext, error::BoxDynError, request::JobRequest, worker::WorkerId};
+use crate::{error::BoxDynError, request::Request, worker::WorkerId};
 
 /// An error occurred while trying to acknowledge a message.
 #[derive(Debug, thiserror::Error)]
@@ -13,9 +13,9 @@ pub enum AckError {
     NoAck(#[source] BoxDynError),
 }
 
-/// A trait for acknowledging successful job processing
-#[async_trait::async_trait]
-pub trait Ack<J> {
+/// A trait for acknowledging successful processing
+#[trait_variant::make(Ack: Send)]
+pub trait LocalAck<J> {
     /// The data to fetch from context to allow acknowledgement
     type Acknowledger;
     /// Acknowledges successful processing of the given request
@@ -43,7 +43,7 @@ impl<A: Ack<J>, J> AckLayer<A, J> {
 
 impl<A, J, S> Layer<S> for AckLayer<A, J>
 where
-    S: Service<JobRequest<J>> + Send + 'static,
+    S: Service<Request<J>> + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::Future: Send + 'static,
     A: Ack<J> + Clone + Send + Sync + 'static,
@@ -69,14 +69,14 @@ pub struct AckService<SV, A, J> {
     worker_id: WorkerId,
 }
 
-impl<SV, A, J> Service<JobRequest<J>> for AckService<SV, A, J>
+impl<SV, A, J> Service<Request<J>> for AckService<SV, A, J>
 where
-    SV: Service<JobRequest<J>> + Send + Sync + 'static,
+    SV: Service<Request<J>> + Send + Sync + 'static,
     SV::Error: std::error::Error + Send + Sync + 'static,
-    <SV as Service<JobRequest<J>>>::Future: std::marker::Send + 'static,
+    <SV as Service<Request<J>>>::Future: std::marker::Send + 'static,
     A: Ack<J> + Send + 'static + Clone + Send + Sync,
     J: 'static,
-    <SV as Service<JobRequest<J>>>::Response: std::marker::Send,
+    <SV as Service<Request<J>>>::Response: std::marker::Send,
     <A as Ack<J>>::Acknowledger: Sync + Send + Clone,
 {
     type Response = SV::Response;
@@ -90,13 +90,10 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: JobRequest<J>) -> Self::Future {
+    fn call(&mut self, request: Request<J>) -> Self::Future {
         let ack = self.ack.clone();
         let worker_id = self.worker_id.clone();
-        let data = request
-            .context()
-            .data_opt::<<A as Ack<J>>::Acknowledger>()
-            .cloned();
+        let data = request.get::<<A as Ack<J>>::Acknowledger>().cloned();
 
         let fut = self.service.call(request);
         let fut_with_ack = async move {

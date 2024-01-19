@@ -1,4 +1,4 @@
-use crate::error::JobError;
+use crate::error::Error;
 
 use super::{LatencyUnit, DEFAULT_ERROR_LEVEL};
 
@@ -23,19 +23,19 @@ pub trait OnFailure {
     /// [`Span`]: https://docs.rs/tracing/latest/tracing/span/index.html
     /// [record]: https://docs.rs/tracing/latest/tracing/span/struct.Span.html#method.record
     /// [`TraceLayer::make_span_with`]: crate::trace::TraceLayer::make_span_with
-    fn on_failure(&mut self, error: &JobError, latency: Duration, span: &Span);
+    fn on_failure(&mut self, error: &Error, latency: Duration, span: &Span);
 }
 
 impl OnFailure for () {
     #[inline]
-    fn on_failure(&mut self, _: &JobError, _: Duration, _: &Span) {}
+    fn on_failure(&mut self, _: &Error, _: Duration, _: &Span) {}
 }
 
 impl<F> OnFailure for F
 where
-    F: FnMut(&JobError, Duration, &Span),
+    F: FnMut(&Error, Duration, &Span),
 {
-    fn on_failure(&mut self, error: &JobError, latency: Duration, span: &Span) {
+    fn on_failure(&mut self, error: &Error, latency: Duration, span: &Span) {
         self(error, latency, span)
     }
 }
@@ -136,7 +136,7 @@ macro_rules! log_pattern_match {
 }
 
 impl OnFailure for DefaultOnFailure {
-    fn on_failure(&mut self, error: &JobError, latency: Duration, span: &Span) {
+    fn on_failure(&mut self, error: &Error, latency: Duration, span: &Span) {
         log_pattern_match!(
             self,
             span,

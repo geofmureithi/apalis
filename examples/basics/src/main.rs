@@ -15,6 +15,7 @@ use email_service::Email;
 use layer::LogLayer;
 
 use tracing::{log::info, Instrument, Span};
+use tracing_subscriber::registry::Data;
 
 use crate::{cache::ValidEmailCache, service::EmailService};
 
@@ -35,8 +36,8 @@ async fn produce_jobs(storage: &SqliteStorage<Email>) -> Result<()> {
 
 /// Quick solution to prevent spam.
 /// If email in cache, then send email else complete the job but let a validation process run in the background,
-async fn send_email(email: Email, ctx: JobContext) -> anyhow::Result<()> {
-    let email_service = ctx.data::<EmailService>()?.clone();
+async fn send_email(email: Email, srv: Data<EmailService>, worker_ctx: WorkerContext<TokioExecutor>) -> anyhow::Result<()> {
+    let svc = ctx.data::<EmailService>()?.clone();
     let cache = ctx.data::<ValidEmailCache>()?.clone();
     let worker_ctx = ctx.data::<WorkerContext<TokioExecutor>>()?;
     info!("Job started in worker {:?}", worker_ctx.id());
@@ -53,7 +54,7 @@ async fn send_email(email: Email, ctx: JobContext) -> anyhow::Result<()> {
             worker_ctx.spawn(
                 async move {
                     if cache::fetch_validity(email_to, cache_clone.clone()).await {
-                        email_service.send(email).await;
+                        svc.send(email).await;
                         info!("Email added to cache")
                     }
                 }
@@ -62,7 +63,7 @@ async fn send_email(email: Email, ctx: JobContext) -> anyhow::Result<()> {
         }
 
         Some(_) => {
-            email_service.send(email).await;
+            svc.send(email).await;
         }
     }
 
@@ -83,7 +84,7 @@ async fn main() -> Result<()> {
     produce_jobs(&sqlite).await?;
 
     Monitor::new()
-        .register_with_count(2, move |c| {
+        .register_with_count(2, {
             WorkerBuilder::new(format!("tasty-banana-{c}"))
                 .layer(TraceLayer::new())
                 // Middleware are executed sequentially
@@ -94,7 +95,7 @@ async fn main() -> Result<()> {
                 .layer(Extension(ValidEmailCache::new()))
                 // WithStorage is a builder trait that also adds some context eg the storage and worker heartbeats.
                 // use .with_storage_config() to configure the storage
-                .with_storage(sqlite.clone())
+                .source(sqlite.clone())
                 .build_fn(send_email)
         })
         .shutdown_timeout(Duration::from_secs(5))

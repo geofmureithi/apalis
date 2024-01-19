@@ -3,7 +3,7 @@ mod on_failure;
 mod on_request;
 mod on_response;
 
-use crate::{error::JobError, request::JobRequest};
+use crate::{error::Error, request::Request};
 use std::{
     fmt::{self, Debug},
     pin::Pin,
@@ -293,29 +293,26 @@ impl<S, MakeSpan, OnRequest, OnResponse, OnFailure>
     }
 }
 
-impl<J, S, OnRequestT, OnResponseT, OnFailureT, MakeSpanT, F, Res> Service<JobRequest<J>>
+impl<J, S, OnRequestT, OnResponseT, OnFailureT, MakeSpanT, F, Res> Service<Request<J>>
     for Trace<S, MakeSpanT, OnRequestT, OnResponseT, OnFailureT>
 where
-    S: Service<JobRequest<J>, Response = Res, Error = JobError, Future = F>
-        + Unpin
-        + Send
-        + 'static,
+    S: Service<Request<J>, Response = Res, Error = Error, Future = F> + Unpin + Send + 'static,
     S::Error: fmt::Display + 'static,
     MakeSpanT: MakeSpan<J>,
     OnRequestT: OnRequest<J>,
     OnResponseT: OnResponse<Res> + Clone + 'static,
-    F: Future<Output = Result<Res, JobError>> + 'static,
+    F: Future<Output = Result<Res, Error>> + 'static,
     OnFailureT: OnFailure + Clone + 'static,
 {
     type Response = Res;
-    type Error = JobError;
+    type Error = Error;
     type Future = ResponseFuture<F, OnResponseT, OnFailureT>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: JobRequest<J>) -> Self::Future {
+    fn call(&mut self, req: Request<J>) -> Self::Future {
         let span = self.make_span.make_span(&req);
         let start = Instant::now();
         let job = {
@@ -348,12 +345,12 @@ pin_project! {
 
 impl<Fut, OnResponseT, OnFailureT, Res> Future for ResponseFuture<Fut, OnResponseT, OnFailureT>
 where
-    Fut: Future<Output = Result<Res, JobError>>,
+    Fut: Future<Output = Result<Res, Error>>,
 
     OnResponseT: OnResponse<Res>,
     OnFailureT: OnFailure,
 {
-    type Output = Result<Res, JobError>;
+    type Output = Result<Res, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();

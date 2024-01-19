@@ -1,6 +1,6 @@
 [package]
 name = "apalis-sql"
-version = "0.4.8"
+version = "0.5.0-alpha.0"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2021"
 readme = "../../README.md"
@@ -10,19 +10,18 @@ description = "SQL Storage for apalis. Use sqlite, postgres and mysql for backgr
 
 [features]
 default = ["sqlite", "migrate", "chrono"]
-chrono = ["sqlx/chrono", "dep:chrono", "apalis-core/chrono"]
-time = ["sqlx/time", "dep:time", "apalis-core/time"]
+chrono = ["sqlx/chrono", "dep:chrono"]
+time = ["sqlx/time", "dep:time"]
 postgres = ["sqlx/postgres", "sqlx/json"]
 sqlite = ["sqlx/sqlite", "sqlx/json"]
 mysql = ["sqlx/mysql", "sqlx/json", "sqlx/bigdecimal"]
 migrate = ["sqlx/migrate", "sqlx/macros"]
 async-std-comp = [
     "async-std",
-    "apalis-core/async-std-comp",
+    # "apalis-core/async-std-comp",
     "sqlx/runtime-async-std-rustls",
 ]
-tokio-comp = ["tokio", "apalis-core/tokio-comp", "sqlx/runtime-tokio-rustls"]
-expose = ["apalis-core/expose"]
+tokio-comp = ["tokio", "sqlx/runtime-tokio-rustls"]
 
 [dependencies.sqlx]
 version = "0.7.3"
@@ -31,17 +30,15 @@ default-features = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-apalis-core = { path = "../../packages/apalis-core", version = "0.4.8", features = [
-    "storage",
-    "tokio-comp",
-], default-features = false }
+apalis-core = { path = "../../packages/apalis-core", version = "0.5.0-alpha.0", default-features = false }
+apalis-utils = { path = "../../packages/apalis-utils", version = "0.1.0", default-features = false, features = [
+    "sleep",
+] }
 chrono = { version = "0.4", default-features = false, optional = true, features = [
     "clock",
     "serde",
 ] }
-time = { version = "0.3", optional = true, features = [
-    "serde",
-] }
+time = { version = "0.3", optional = true, features = ["serde"] }
 futures = "0.3"
 async-stream = "0.3"
 tokio = { version = "1", features = ["rt", "net"], optional = true }

@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
         .register_with_count(4, move |c| {
             WorkerBuilder::new(format!("tasty-orange-{c}"))
                 // .layer(TraceLayer::new())
-                .layer(BufferLayer::<JobRequest<Email>>::new(250))
+                .layer(BufferLayer::<Request<Email>>::new(250))
                 .with_storage_config(pg.clone(), |cfg| {
                     cfg
                         // Set the buffer size to 100 ( Pick 100 jobs per query)

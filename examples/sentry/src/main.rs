@@ -33,7 +33,7 @@ macro_rules! update_progress {
     };
 }
 
-async fn email_service(email: Email, _ctx: JobContext) -> Result<(), JobError> {
+async fn email_service(email: Email, _ctx: Context) -> Result<(), Error> {
     let parent_span = sentry::configure_scope(|scope| scope.get_span());
 
     let tx_ctx =
@@ -90,7 +90,7 @@ async fn email_service(email: Email, _ctx: JobContext) -> Result<(), JobError> {
 
     tracing::warn!("Failed. Email is not valid");
     transaction.finish();
-    Err(JobError::Failed(Box::new(InvalidEmailError {
+    Err(Error::Failed(Box::new(InvalidEmailError {
         email: email.to,
     })))
 }

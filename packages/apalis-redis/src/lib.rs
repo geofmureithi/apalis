@@ -6,14 +6,20 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //! apalis storage using Redis as a backend
-//! ```rust,ignore
+//! ```rust,no_run
+//! use email_service::send_email;
+//! # use apalis_core::monitor::Monitor;
+//! # use apalis_redis::RedisStorage;
+//! # use apalis_core::builder::WorkerBuilder;
+//! # use apalis_core::builder::WorkerFactoryFn;
+//! # use apalis_utils::TokioExecutor;
 //! #[tokio::main]
 //! async fn main() -> std::io::Result<()> {
-//!     let storage = RedisStorage::connect("REDIS_URL").await.unwrap();
-//!     Monitor::new()
+//!     let storage = RedisStorage::connect("redis://localhost").await.unwrap();
+//!     Monitor::<TokioExecutor>::new()
 //!        .register(
 //!            WorkerBuilder::new("tasty-pear")
-//!                .with_storage(storage.clone())
+//!                .source(storage.clone())
 //!                .build_fn(send_email),
 //!        )
 //!        .run()

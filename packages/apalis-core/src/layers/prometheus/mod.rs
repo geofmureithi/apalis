@@ -8,7 +8,7 @@ use futures::Future;
 use pin_project_lite::pin_project;
 use tower::{Layer, Service};
 
-use crate::{error::JobError, job::Job, request::JobRequest};
+use crate::{error::Error, storage::job::Job, request::Request};
 
 /// A layer to support prometheus metrics
 #[derive(Debug)]
@@ -28,10 +28,10 @@ pub struct PrometheusService<S> {
     service: S,
 }
 
-impl<S, J, F, Res> Service<JobRequest<J>> for PrometheusService<S>
+impl<S, J, F, Res> Service<Request<J>> for PrometheusService<S>
 where
-    S: Service<JobRequest<J>, Response = Res, Error = JobError, Future = F>,
-    F: Future<Output = Result<Res, JobError>> + 'static,
+    S: Service<Request<J>, Response = Res, Error = Error, Future = F>,
+    F: Future<Output = Result<Res, Error>> + 'static,
     J: Job,
 {
     type Response = S::Response;
@@ -42,7 +42,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: JobRequest<J>) -> Self::Future {
+    fn call(&mut self, request: Request<J>) -> Self::Future {
         let start = Instant::now();
         let req = self.service.call(request);
         let job_type = std::any::type_name::<J>().to_string();
@@ -69,9 +69,9 @@ pin_project! {
 
 impl<Fut, Res> Future for ResponseFuture<Fut>
 where
-    Fut: Future<Output = Result<Res, JobError>>,
+    Fut: Future<Output = Result<Res, Error>>,
 {
-    type Output = Result<Res, JobError>;
+    type Output = Result<Res, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -91,8 +91,8 @@ where
             ("status", status),
         ];
 
-        metrics::increment_counter!("job_requests_total", &labels);
-        metrics::histogram!("job_requests_duration_seconds", latency, &labels);
+        // metrics::increment_counter!("job_requests_total", &labels);
+        // metrics::histogram!("job_requests_duration_seconds", latency, &labels);
         Poll::Ready(response)
     }
 }

@@ -1,6 +1,7 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
 use anyhow::Result;
 use apalis::prelude::*;
+use apalis::utils::TokioExecutor;
 use apalis::{layers::TraceLayer, redis::RedisStorage};
 use futures::future;
 
@@ -37,11 +38,11 @@ async fn main() -> Result<()> {
         .await?;
         Ok(())
     };
-    let worker = Monitor::new()
-        .register_with_count(2, move |c| {
-            WorkerBuilder::new(format!("tasty-avocado-{c}"))
+    let worker = Monitor::<TokioExecutor>::new()
+        .register_with_count(2, {
+            WorkerBuilder::new(format!("tasty-avocado"))
                 .layer(TraceLayer::new())
-                .with_storage(storage.clone())
+                .source(storage)
                 .build_fn(send_email)
         })
         .run();

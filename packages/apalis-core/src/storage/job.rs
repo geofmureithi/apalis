@@ -3,15 +3,10 @@ use std::{
     str::FromStr,
 };
 
-use crate::{error::JobStreamError, request::JobRequest};
-use futures::{future::BoxFuture, stream::BoxStream};
 use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use ulid::Ulid;
 
-/// Represents a result for a [Job].
-pub type JobFuture<I> = BoxFuture<'static, I>;
-/// Represents a stream for [Job].
-pub type JobStreamResult<T> = BoxStream<'static, Result<Option<JobRequest<T>>, JobStreamError>>;
+use crate::error::Error;
 
 /// A wrapper type that defines a job id.
 ///
@@ -91,12 +86,52 @@ impl<'de> Visitor<'de> for JobIdVisitor {
     }
 }
 
+/// Represents the state of a [Request]
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
+pub enum State {
+    /// Job is pending
+    #[serde(alias = "Latest")]
+    Pending,
+    /// Job is running
+    Running,
+    /// Job was done successfully
+    Done,
+    /// Retry Job
+    Retry,
+    /// Job has failed. Check `last_error`
+    Failed,
+    /// Job has been killed
+    Killed,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State::Pending
+    }
+}
+
+impl FromStr for State {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Pending" | "Latest" => Ok(State::Pending),
+            "Running" => Ok(State::Running),
+            "Done" => Ok(State::Done),
+            "Retry" => Ok(State::Retry),
+            "Failed" => Ok(State::Failed),
+            "Killed" => Ok(State::Killed),
+            _ => Err(Error::InvalidContext("Invalid Job state".to_string())),
+        }
+    }
+}
+
 /// Trait representing a job.
 ///
 ///
 /// # Example
 /// ```rust
-/// # use apalis_core::job::Job;
+/// # use apalis_core::storage::job::Job;
 /// # struct Email;
 /// impl Job for Email {
 ///     const NAME: &'static str = "apalis::Email";

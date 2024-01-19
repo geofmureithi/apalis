@@ -1,4 +1,4 @@
-use crate::request::JobRequest;
+use crate::{request::Request, storage::context::Context};
 use tracing::{Level, Span};
 
 use super::DEFAULT_MESSAGE_LEVEL;
@@ -10,20 +10,20 @@ use super::DEFAULT_MESSAGE_LEVEL;
 /// [`Trace`]: super::Trace
 pub trait MakeSpan<B> {
     /// Make a span from a request.
-    fn make_span(&mut self, request: &JobRequest<B>) -> Span;
+    fn make_span(&mut self, request: &Request<B>) -> Span;
 }
 
 impl<B> MakeSpan<B> for Span {
-    fn make_span(&mut self, _request: &JobRequest<B>) -> Span {
+    fn make_span(&mut self, _request: &Request<B>) -> Span {
         self.clone()
     }
 }
 
 impl<F, B> MakeSpan<B> for F
 where
-    F: FnMut(&JobRequest<B>) -> Span,
+    F: FnMut(&Request<B>) -> Span,
 {
-    fn make_span(&mut self, request: &JobRequest<B>) -> Span {
+    fn make_span(&mut self, request: &Request<B>) -> Span {
         self(request)
     }
 }
@@ -63,10 +63,11 @@ impl Default for DefaultMakeSpan {
 }
 
 impl<B> MakeSpan<B> for DefaultMakeSpan {
-    fn make_span(&mut self, req: &JobRequest<B>) -> Span {
+    fn make_span(&mut self, req: &Request<B>) -> Span {
         // This ugly macro is needed, unfortunately, because `tracing::span!`
         // required the level argument to be static. Meaning we can't just pass
         // `self.level`.
+        let ctx = req.get::<Context>().unwrap();
         let span = Span::current();
         macro_rules! make_span {
             ($level:expr) => {
@@ -74,8 +75,8 @@ impl<B> MakeSpan<B> for DefaultMakeSpan {
                     parent: span,
                     $level,
                     "job",
-                    job_id = req.id().to_string(),
-                    current_attempt = req.attempts(),
+                    job_id = ctx.id().to_string(),
+                    current_attempt = ctx.attempts(),
                 )
             };
         }

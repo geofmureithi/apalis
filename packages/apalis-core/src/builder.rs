@@ -1,176 +1,174 @@
-use std::{error::Error, fmt::Debug, marker::PhantomData};
+use std::marker::PhantomData;
 
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use tower::{
     layer::util::{Identity, Stack},
+    util::{BoxCloneService, BoxService},
     Layer, Service, ServiceBuilder,
 };
 
 use crate::{
-    context::HasJobContext,
-    job::Job,
-    job_fn::{job_fn, JobFn},
-    request::JobRequest,
-    worker::{ready::ReadyWorker, HeartBeat, Worker, WorkerId},
+    error::Error,
+    poller::stream::BackendStream,
+    request::{Request, RequestStream, RequestStreamPoll},
+    service_fn::service_fn,
+    service_fn::ServiceFn,
+    worker::{ReadyWorker, Worker, WorkerId},
+    Backend,
 };
 
 /// An abstract that allows building a [`Worker`].
-/// Usually the output is [`ReadyWorker`] but you can implement your own via [`WorkerFactory`]
-pub struct WorkerBuilder<Job, Source, Middleware> {
-    pub(crate) id: WorkerId,
-    pub(crate) job: PhantomData<Job>,
-    pub(crate) layer: ServiceBuilder<Middleware>,
-    pub(crate) source: Source,
-    pub(crate) beats: Vec<Box<dyn HeartBeat + Send>>,
-    pub(crate) max_concurrent_jobs: usize,
+/// Usually the output is [`ReadyWorker`]
+pub struct WorkerBuilder<Req, Source, Middleware, Serv> {
+    id: WorkerId,
+    request: PhantomData<Req>,
+    layer: ServiceBuilder<Middleware>,
+    source: Source,
+    service: PhantomData<Serv>,
 }
 
-impl<Job, Source, Middleware> std::fmt::Debug for WorkerBuilder<Job, Source, Middleware> {
+impl<Req, Source, Middleware, Serv> std::fmt::Debug
+    for WorkerBuilder<Req, Source, Middleware, Serv>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WorkerBuilder")
             .field("id", &self.id)
-            .field("job", &std::any::type_name::<Job>())
+            .field("job", &std::any::type_name::<Req>())
             .field("layer", &std::any::type_name::<Middleware>())
             .field("source", &std::any::type_name::<Source>())
-            .field("beats", &self.beats.len())
             .finish()
     }
 }
 
-impl WorkerBuilder<(), (), Identity> {
+impl<Serv> WorkerBuilder<(), (), Identity, Serv> {
     /// Build a new [`WorkerBuilder`] instance with a name for the worker to build
-    pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), Identity> {
+    pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), Identity, Serv> {
         let job: PhantomData<()> = PhantomData;
         WorkerBuilder {
-            job,
+            request: job,
             layer: ServiceBuilder::new(),
             source: (),
             id: WorkerId::new(name),
-            beats: Vec::new(),
-            max_concurrent_jobs: 1000,
+            service: PhantomData,
         }
     }
 }
 
-impl<J, S, M> WorkerBuilder<J, S, M> {
+impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
     /// Consume a stream directly
-    pub fn stream<NS: Stream<Item = Result<Option<JobRequest<NJ>>, E>>, E, NJ>(
+    pub fn stream<NS: Stream<Item = Result<Option<Request<NJ>>, Error>> + Send + 'static, NJ>(
         self,
         stream: NS,
-    ) -> WorkerBuilder<NJ, NS, M> {
+    ) -> WorkerBuilder<NJ, RequestStreamPoll<Request<NJ>>, M, Serv> {
         WorkerBuilder {
-            job: PhantomData,
+            request: PhantomData,
             layer: self.layer,
-            source: stream,
+            source: RequestStreamPoll::new(Box::pin(stream)),
             id: self.id,
-            beats: self.beats,
-            max_concurrent_jobs: self.max_concurrent_jobs,
+            service: self.service,
         }
     }
 
-    /// Get the [`WorkerId`] and build a stream.
-    /// Useful when you want to know what worker is consuming the stream.
-    pub fn with_stream<
-        NS: Fn(&WorkerId) -> ST,
-        NJ,
-        E,
-        ST: Stream<Item = Result<Option<JobRequest<NJ>>, E>>,
-    >(
+    /// Set the source to a backend that implements [Backend]
+    pub fn source<NS: Backend<Request<NJ>>, NJ>(
         self,
-        stream: NS,
-    ) -> WorkerBuilder<NJ, ST, M> {
+        backend: NS,
+    ) -> WorkerBuilder<NJ, NS, M, Serv> {
         WorkerBuilder {
-            job: PhantomData,
+            request: PhantomData,
             layer: self.layer,
-            source: stream(&self.id),
+            source: backend,
             id: self.id,
-            beats: self.beats,
-            max_concurrent_jobs: self.max_concurrent_jobs,
+            service: self.service,
         }
     }
 }
 
-impl<Job, Stream, Serv> WorkerBuilder<Job, Stream, Serv> {
+impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
     /// Allows of decorating the service that consumes jobs.
     /// Allows adding multiple [`tower`] middleware
-    pub fn middleware<NewService>(
+    pub fn chain<NewLayer>(
         self,
-        f: impl Fn(ServiceBuilder<Serv>) -> ServiceBuilder<NewService>,
-    ) -> WorkerBuilder<Job, Stream, NewService> {
+        f: impl Fn(ServiceBuilder<M>) -> ServiceBuilder<NewLayer>,
+    ) -> WorkerBuilder<Request, Stream, NewLayer, Serv> {
         let middleware = f(self.layer);
 
         WorkerBuilder {
-            job: self.job,
+            request: self.request,
             layer: middleware,
             id: self.id,
             source: self.source,
-            beats: self.beats,
-            max_concurrent_jobs: self.max_concurrent_jobs,
+            service: self.service,
         }
     }
     /// Shorthand for decoration. Allows adding a single layer [tower] middleware
-    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Job, Stream, Stack<U, Serv>>
+    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Request, Stream, Stack<U, M>, Serv>
     where
-        Serv: Layer<U>,
+        M: Layer<U>,
     {
         WorkerBuilder {
-            job: self.job,
+            request: self.request,
             source: self.source,
             layer: self.layer.layer(layer),
             id: self.id,
-            beats: self.beats,
-            max_concurrent_jobs: self.max_concurrent_jobs,
+            service: self.service,
         }
     }
 }
 
-impl<J, S, M, Ser, E, Request> WorkerFactory<J, Ser> for WorkerBuilder<J, S, M>
+impl<Req: Send + 'static + Sync, P: Backend<Request<Req>> + 'static, M: 'static, S>
+    WorkerFactory<Req, S> for WorkerBuilder<Req, P, M, S>
 where
-    S: Stream<Item = Result<Option<Request>, E>> + Send + 'static + Unpin,
-    J: Job + Send + 'static,
-    M: Layer<Ser>,
-    <M as Layer<Ser>>::Service: Service<Request> + Send + 'static,
-    E: Sync + Send + 'static + Error,
-    Request: Send + HasJobContext,
-    <<M as Layer<Ser>>::Service as Service<Request>>::Future: std::marker::Send,
-    Ser: Service<Request>,
-    <Ser as Service<Request>>::Error: Debug,
-    <<M as Layer<Ser>>::Service as Service<Request>>::Error: std::fmt::Debug,
-    <<M as Layer<Ser>>::Service as Service<Request>>::Future: 'static,
+    S: Service<Request<Req>> + Send + 'static + Clone,
+    S::Future: Send,
+
+    S::Response: 'static,
+    M: Layer<BoxCloneService<Request<Req>, S::Response, S::Error>>,
+    M::Service: Service<Request<Req>> + Send + Clone,
+
+    <M::Service as Service<Request<Req>>>::Future: Send,
+    <M::Service as Service<Request<Req>>>::Error: Send,
+    S::Error: Send,
 {
-    type Worker = ReadyWorker<S, <M as Layer<Ser>>::Service>;
-    /// Convert a worker builder to a worker ready to consume jobs
-    fn build(self, service: Ser) -> ReadyWorker<S, <M as Layer<Ser>>::Service> {
-        ReadyWorker {
-            id: self.id,
-            stream: self.source,
-            service: self.layer.service(service),
-            beats: self.beats,
-            max_concurrent_jobs: self.max_concurrent_jobs,
-        }
+    type Source = P;
+
+    type Service = M::Service;
+    /// Build a worker, given a tower service
+    fn build(self, service: S) -> Worker<ReadyWorker<Self::Service, P>> {
+        let worker_id = self.id.clone();
+        let common_layer = self.source.common_layer(&worker_id);
+        let poller = self.source;
+        let middleware = self.layer.layer(common_layer);
+        let service = middleware.service(service);
+
+        Worker::new(worker_id, ReadyWorker::new(service, poller))
     }
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
 pub trait WorkerFactory<J, S> {
-    /// The worker to build
-    type Worker: Worker<J>;
+    /// The request source for the worker
+    type Source;
+
+    type Service;
     /// Builds a [`WorkerFactory`] using a [`tower`] service
-    /// that can be used to generate new [`Worker`] actors using the `build` method
+    /// that can be used to generate a new [`Worker`] using the `build` method
     /// # Arguments
     ///
     /// * `service` - A tower service
     ///
     /// # Examples
     ///
-    fn build(self, service: S) -> Self::Worker;
+    fn build(self, service: S) -> Worker<ReadyWorker<Self::Service, Self::Source>>;
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
 
-pub trait WorkerFactoryFn<J, F> {
-    /// The worker build
-    type Worker: Worker<J>;
+pub trait WorkerFactoryFn<J, F, K> {
+    /// The request source for the worker
+    type Source;
+
+    type Service;
     /// Builds a [`WorkerFactoryFn`] using a [`crate::job_fn::JobFn`] service
     /// that can be used to generate new [`Worker`] actors using the `build` method
     /// # Arguments
@@ -179,16 +177,18 @@ pub trait WorkerFactoryFn<J, F> {
     ///
     /// # Examples
     ///
-    fn build_fn(self, f: F) -> Self::Worker;
+    fn build_fn(self, f: F) -> Worker<ReadyWorker<Self::Service, Self::Source>>;
 }
 
-impl<J, W, F> WorkerFactoryFn<J, F> for W
+impl<J, W, F, K> WorkerFactoryFn<J, F, K> for W
 where
-    W: WorkerFactory<J, JobFn<F>>,
+    W: WorkerFactory<J, ServiceFn<F, K>>,
 {
-    type Worker = W::Worker;
+    type Source = W::Source;
 
-    fn build_fn(self, f: F) -> Self::Worker {
-        self.build(job_fn(f))
+    type Service = W::Service;
+
+    fn build_fn(self, f: F) -> Worker<ReadyWorker<Self::Service, Self::Source>> {
+        self.build(service_fn(f))
     }
 }

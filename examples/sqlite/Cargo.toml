@@ -7,8 +7,11 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1"
-tokio = { version = "1", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
 apalis = { path = "../../", features = ["sqlite", "limit"] }
+apalis-utils = { path = "../../packages/apalis-utils", features = [
+    "tokio-comp",
+] }
 serde = { version = "1", features = ["derive"] }
 tracing-subscriber = "0.3.11"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

@@ -1,44 +1,50 @@
-use std::task::{Context, Poll};
+use std::{
+    ops::Deref,
+    task::{Context, Poll},
+};
 use tower::Service;
 
-use crate::context::HasJobContext;
+use crate::request::Request;
 
 /// Extension data for jobs.
+/// This is commonly used to share state across jobs. or across layers within the same job
 ///
-/// forked from [`http::Extensions`]
-/// # In Context
-///
-/// This is commonly used to share state across jobs.
-///
-/// ```rust,ignore
-/// use apalis::{
-///     Extension,
-///     WorkerBuilder,
-///     JobContext
-/// };
-/// use std::sync::Arc;
-///
+/// ```rust
+/// # use std::sync::Arc;
+/// # struct Email;
+/// # use apalis_core::layers::extensions::Data;
+/// # use apalis_core::service_fn::service_fn;
+/// # use crate::apalis_core::builder::WorkerFactory;
+/// # use apalis_core::builder::WorkerBuilder;
+/// # use apalis_core::memory::MemoryStorage;
 /// // Some shared state used throughout our application
 /// struct State {
 ///     // ...
 /// }
 ///
-/// async fn email_service(email: Email, ctx: JobContext) {
-///     let state: &Arc<State> = ctx.data_opt().unwrap();
+/// async fn email_service(email: Email, state: Data<Arc<State>>) {
+///     
 /// }
 ///
 /// let state = Arc::new(State { /* ... */ });
 ///
 /// let worker = WorkerBuilder::new("tasty-avocado")
-///     .layer(Extension(state))
-///     .with_storage(storage.clone())
-///     .build_fn(email_service);
+///     .layer(Data(state))
+///     .source(MemoryStorage::new())
+///     .build(service_fn(email_service));
 /// ```
 
 #[derive(Debug, Clone, Copy)]
-pub struct Extension<T>(pub T);
+pub struct Data<T>(pub T);
 
-impl<S, T> tower::Layer<S> for Extension<T>
+impl<T> Deref for Data<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<S, T> tower::Layer<S> for Data<T>
 where
     T: Clone + Send + Sync + 'static,
 {
@@ -64,11 +70,10 @@ pub struct AddExtension<S, T> {
     pub(crate) value: T,
 }
 
-impl<S, T, Req> Service<Req> for AddExtension<S, T>
+impl<S, T, Req> Service<Request<Req>> for AddExtension<S, T>
 where
-    S: Service<Req>,
+    S: Service<Request<Req>>,
     T: Clone + Send + Sync + 'static,
-    Req: HasJobContext,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -79,8 +84,8 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: Req) -> Self::Future {
-        req.context_mut().insert(self.value.clone());
+    fn call(&mut self, mut req: Request<Req>) -> Self::Future {
+        req.data.insert(self.value.clone());
         self.inner.call(req)
     }
 }

@@ -1,7 +1,8 @@
 mod job;
 
 use anyhow::Result;
-use apalis::{layers::TraceLayer, prelude::*, sqlite::SqliteStorage};
+use apalis::{prelude::*, sqlite::SqliteStorage};
+use apalis_utils::TokioExecutor;
 use chrono::Utc;
 
 use email_service::{send_email, Email};
@@ -10,7 +11,7 @@ use sqlx::SqlitePool;
 
 async fn produce_emails(storage: &SqliteStorage<Email>) -> Result<()> {
     let mut storage = storage.clone();
-    for i in 0..2 {
+    for i in 0..1 {
         storage
             .schedule(
                 Email {
@@ -18,7 +19,7 @@ async fn produce_emails(storage: &SqliteStorage<Email>) -> Result<()> {
                     text: "Test background job from apalis".to_string(),
                     subject: "Background email job".to_string(),
                 },
-                Utc::now() + chrono::Duration::seconds(i),
+                (Utc::now() + chrono::Duration::seconds(i)).timestamp(),
             )
             .await?;
     }
@@ -27,15 +28,12 @@ async fn produce_emails(storage: &SqliteStorage<Email>) -> Result<()> {
 
 async fn produce_notifications(storage: &SqliteStorage<Notification>) -> Result<()> {
     let mut storage = storage.clone();
-    for i in 0..2 {
+    for i in 0..20 {
         storage
-            .schedule(
-                Notification {
-                    to: format!("notify:{i}@example.com"),
-                    text: "Test background job from apalis".to_string(),
-                },
-                Utc::now() + chrono::Duration::seconds(i),
-            )
+            .push(Notification {
+                to: format!("notify:{i}@example.com"),
+                text: "Test background job from apalis".to_string(),
+            })
             .await?;
     }
     Ok(())
@@ -43,17 +41,16 @@ async fn produce_notifications(storage: &SqliteStorage<Notification>) -> Result<
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
+    std::env::set_var("RUST_LOG", "debug,sqlx::query=debug");
     tracing_subscriber::fmt::init();
 
     let pool = SqlitePool::connect("sqlite::memory:").await?;
-
-    let email_storage: SqliteStorage<Email> = SqliteStorage::new(pool.clone());
     // Do migrations: Mainly for "sqlite::memory:"
-    email_storage
-        .setup()
+    SqliteStorage::setup(pool.clone())
         .await
         .expect("unable to run migrations for sqlite");
+
+    let email_storage: SqliteStorage<Email> = SqliteStorage::new(pool.clone());
 
     produce_emails(&email_storage).await?;
 
@@ -61,17 +58,17 @@ async fn main() -> Result<()> {
 
     produce_notifications(&notification_storage).await?;
 
-    Monitor::new()
-        .register_with_count(2, move |c| {
-            WorkerBuilder::new(format!("tasty-banana-{c}"))
-                .layer(TraceLayer::new())
-                .with_storage(email_storage.clone())
+    Monitor::<TokioExecutor>::new()
+        .register_with_count(2, {
+            WorkerBuilder::new(format!("tasty-banana"))
+                // .layer(TraceLayer::new())
+                .source(email_storage)
                 .build_fn(send_email)
         })
-        .register_with_count(2, move |c| {
-            WorkerBuilder::new(format!("tasty-mango-{c}"))
-                .layer(TraceLayer::new())
-                .with_storage(notification_storage.clone())
+        .register_with_count(10, {
+            WorkerBuilder::new(format!("tasty-mango"))
+                // .layer(TraceLayer::new())
+                .source(notification_storage)
                 .build_fn(job::notify)
         })
         .run()

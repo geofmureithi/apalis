@@ -7,9 +7,9 @@ use sentry_core::protocol;
 use tower::Layer;
 use tower::Service;
 
-use crate::error::JobError;
-use crate::job::{Job, JobId};
-use crate::request::JobRequest;
+use crate::error::Error;
+use crate::request::Request;
+use crate::storage::job::{Job, JobId};
 
 /// Tower Layer that logs Job Details.
 ///
@@ -72,7 +72,7 @@ pin_project_lite::pin_project! {
 
 impl<F, Res> Future for SentryHttpFuture<F>
 where
-    F: Future<Output = Result<Res, JobError>> + 'static,
+    F: Future<Output = Result<Res, Error>> + 'static,
 {
     type Output = F::Output;
 
@@ -127,10 +127,10 @@ where
     }
 }
 
-impl<S, J, F, Res> Service<JobRequest<J>> for SentryJobService<S>
+impl<S, J, F, Res> Service<Request<J>> for SentryJobService<S>
 where
-    S: Service<JobRequest<J>, Response = Res, Error = JobError, Future = F>,
-    F: Future<Output = Result<Res, JobError>> + 'static,
+    S: Service<Request<J>, Response = Res, Error = Error, Future = F>,
+    F: Future<Output = Result<Res, Error>> + 'static,
     J: Job,
 {
     type Response = S::Response;
@@ -141,13 +141,14 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: JobRequest<J>) -> Self::Future {
+    fn call(&mut self, request: Request<J>) -> Self::Future {
         let op = J::NAME;
         let trx_ctx = sentry_core::TransactionContext::new(op, "apalis.job");
         let job_type = std::any::type_name::<J>().to_string();
+        let ctx = request.get::<crate::storage::context::Context>().expect("Missing context");
         let job_details = JobDetails {
-            job_id: request.id().clone(),
-            current_attempt: request.attempts(),
+            job_id: ctx.id().clone(),
+            current_attempt: ctx.attempts(),
             job_type,
         };
 

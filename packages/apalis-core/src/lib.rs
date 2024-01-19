@@ -3,192 +3,50 @@
     missing_debug_implementations,
     missing_docs,
     rust_2018_idioms,
-    unreachable_pub
+    unreachable_pub,
+    bad_style,
+    dead_code,
+    improper_ctypes,
+    non_shorthand_field_patterns,
+    no_mangle_generic_items,
+    overflowing_literals,
+    path_statements,
+    patterns_in_fns_without_body,
+    unconditional_recursion,
+    unused,
+    unused_allocation,
+    unused_comparisons,
+    unused_parens,
+    while_true
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //! # apalis-core
 //! Utilities for building job and message processing tools.
-//! This crate contains traits for working with workers.
-//! ````rust
-//! # use std::time::Duration;
-//! # use apalis_core::builder::WorkerBuilder;
-//! # use apalis_core::monitor::Monitor;
-//! # use apalis_core::layers::tracing::TraceLayer;
-//! # use apalis_core::context::JobContext;
-//! # use apalis_core::storage::builder::WithStorage;
-//! # use apalis_core::builder::WorkerFactoryFn;
-//! # use apalis_core::job::Job;
-//! # use apalis_sql::sqlite::SqliteStorage;
-//! # use serde::{Deserialize, Serialize};
-//! # #[derive(Debug, Deserialize, Serialize)]
-//! # pub struct Email {
-//! #     pub to: String,
-//! #     pub subject: String,
-//! #     pub text: String,
-//! # }
-//! # impl Job for Email {
-//! #     const NAME: &'static str = "apalis::Email";
-//! # }
-//! pub async fn send_email(job: Email, _ctx: JobContext) {
-//!    log::info!("Attempting to send email to {}", job.to);
-//! }
-//! async fn run() {
-//!     let sqlite: SqliteStorage<Email> = SqliteStorage::connect("sqlite::memory:")
-//!         .await
-//!         .expect("unable to connect to sqlite");
-//!     sqlite
-//!         .setup()
-//!         .await
-//!         .expect("unable to run migrations for sqlite");
-//!
-//!     Monitor::new()
-//!         .register_with_count(2, move |c| {
-//!             WorkerBuilder::new(format!("tasty-banana-{c}"))
-//!                 .layer(TraceLayer::new())
-//!                 .with_storage(sqlite.clone())
-//!                 .build_fn(send_email)
-//!         })
-//!         .shutdown_timeout(Duration::from_secs(1))
-//!         // Here you could use tokio::ctrl_c etc
-//!         .run_with_signal(async { Ok(()) }).await;
-//! }
-//! ````
-//! ## How Workers Run and Monitored
-//! `apalis` employs a robust system for running and monitoring workers, ensuring efficient and reliable execution of tasks. This section provides an overview of the underlying mechanism and how it can be utilized effectively.
-//! 1. Worker Initialization.
-//! To begin, the `Monitor::new()` function is called to create a new instance of the worker monitor. The monitor acts as a central control unit for managing and supervising the worker threads.
-//! 2. Worker Registration.
-//! Once the monitor is instantiated, workers can be registered using `register()` and `.register_with_count()` methods. The former takes in a single worker while the former method takes two parameters: the desired number of workers (count) and a closure `(move |_| { ... })` that specifies the worker logic.
-//! Within the closure, a WorkerBuilder is utilized to construct individual worker instances. The WorkerBuilder provides a flexible and configurable way to set up worker-specific configurations, such as providing dependencies or applying additional layers to the worker.
-//! 3. Worker Configuration
-//! In the example code snippet, the WorkerBuilder is configured with a job source (like storage, message queue or stream) eg `SqliteStorage` and a TraceLayer to enable tracing capabilities. These configurations are specific to the needs of the workers being created.
-//! 4. Worker Construction.
-//! The `.build_fn(fn)` and `.build(service)` methods of the WorkerBuilder can then be invoked, eg specifying the function (send_email) that the worker will execute. This function represents the actual work to be performed by each worker. It can be a custom-defined function or a predefined function provided by the library.
-//! 5. Worker Execution.
-//! Upon completing the worker configuration, the worker is ready to be executed. The worker instance is added to the internal thread pool managed by the monitor. The monitor will ensure that the specified number of worker threads (count) are created and available for processing tasks.
-//! 6. Worker Monitoring.
-//! The monitor continuously monitors the worker threads to ensure their smooth operation. It keeps track of the workers' status, manages their lifecycle, and restarts any workers that may have encountered errors or terminated unexpectedly.
-//! 7. Asynchronous Execution.
-//! To facilitate asynchronous execution, the `.run().await` method is invoked on the monitor. This call suspends the current task until all workers have completed their execution. This is particularly useful when integrating the library into asynchronous Rust applications or frameworks.
-//!
-//! ## Middleware aka Layering
-//! `apalis` prefers a functional approach to job handling and uses `tower::Layer` to model services as jobs.
-//!
-//! First, we need to define a tower service.
-//! ```rust
-//! # use std::task::{Context, Poll};
-//! # use log::info;
-//! # use tower::Service;
-//! // This service implements the Log behavior
-//! pub struct LogService<S> {
-//!    target: &'static str,
-//!    service: S,
-//! }
-//!
-//! impl<S, Request> Service<Request> for LogService<S>
-//! where
-//!     S: Service<Request>,
-//!     Request: std::fmt::Debug,
-//! {
-//!    type Response = S::Response;
-//!    type Error = S::Error;
-//!    type Future = S::Future;
-//!
-//!    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-//!        self.service.poll_ready(cx)
-//!    }
-//!
-//!    fn call(&mut self, request: Request) -> Self::Future {
-//!        // Use service to apply middleware before or(and) after a request
-//!        info!("request = {:?}, target = {:?}", request, self.target);
-//!        self.service.call(request)
-//!        // Also possible to do something after
-//!    }
-//!}
-//! ```
-//!
-//! Then we define a layer.
-//!
-//! ```rust
-//! # use std::task::{Context, Poll};
-//! # use log::info;
-//! # use tower::{Layer, Service};
-//! # // This service implements the Log behavior
-//! # pub struct LogService<S> {
-//! #    target: &'static str,
-//! #    service: S,
-//! # }
-//! # impl<S, Request> Service<Request> for LogService<S>
-//! # where
-//! #     S: Service<Request>,
-//! #     Request: std::fmt::Debug,
-//! # {
-//! #    type Response = S::Response;
-//! #    type Error = S::Error;
-//! #    type Future = S::Future;
-//! #    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-//! #        self.service.poll_ready(cx)
-//! #    }
-//! #    fn call(&mut self, request: Request) -> Self::Future {
-//! #        // Use service to apply middleware before or(and) after a request
-//! #        info!("request = {:?}, target = {:?}", request, self.target);
-//! #        self.service.call(request)
-//! #        // Also possible to do something after
-//! #    }
-//! # }
-//! pub struct LogLayer {
-//!     target: &'static str,
-//! }
-//!
-//! impl LogLayer {
-//!    pub fn new(target: &'static str) -> Self {
-//!        Self { target }
-//!    }
-//! }
-//!
-//! impl<S> Layer<S> for LogLayer {
-//!     type Service = LogService<S>;
-//!
-//!     fn layer(&self, service: S) -> Self::Service {
-//!         LogService {
-//!             target: self.target,
-//!             service,
-//!         }
-//!     }
-//! }
-//! ```
-//! Layers are executed sequentially.
-//!
-//! ```ignore
-//! .layer(LogLayer::new("log-layer-1"))
-//! .layer(LogLayer::new("log-layer-2"))
-//! ```
-//! `log-layer-1` would be logged before `log-layer-2`.
-//! This the means you should put your general layers first eg, `TraceLayer` and `CatchPanicLayer` should be before something like `AckLayer`
-//! This also can affect how other layers behave. Eg Any layer before `TraceLayer` may do some tracing, but those traces would not appear in that job's tracing span.
-//!
-//! ## Graceful Shutdown
-//! `apalis` allows optional opt-in to graceful shutdown. This can be added to `Monitor::run_with_signal` and this can be any future. We highly recommend using `tokio::signal::ctrl_c` or something similar.  
+use executor::Executor;
+use futures::{Future, StreamExt};
+use monitor::shutdown::Shutdown;
+use notify::Notify;
+use poller::{controller::Control, stream::BackendStream, Ready};
+use request::{Request, RequestStream, RequestStreamPoll};
+use std::fmt;
+use std::sync::Arc;
+pub use tower::{layer::layer_fn, util::BoxCloneService, Layer, Service, ServiceBuilder};
+use worker::{Worker, WorkerId};
 
 /// Represent utilities for creating worker instances.
 pub mod builder;
-/// Represents the [`JobContext`].
-pub mod context;
 /// Includes all possible error types.
 pub mod error;
-/// Includes the utilities for a job.
-pub mod job;
-/// Represents a service that is created from a function.
-pub mod job_fn;
+
 /// Represents middleware offered through [`tower::Layer`]
 pub mod layers;
 /// Represents the job bytes.
 pub mod request;
 /// Represents different possible responses.
 pub mod response;
+/// Represents a service that is created from a function.
+pub mod service_fn;
 
-#[cfg(feature = "storage")]
-#[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
 /// Represents ability to persist and consume jobs from storages.
 pub mod storage;
 
@@ -201,74 +59,284 @@ pub mod utils;
 /// Represents the utils for building workers.
 pub mod worker;
 
-#[cfg(feature = "expose")]
-#[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
-/// Utilities to expose workers and jobs to external tools eg web frameworks and cli tools
-pub mod expose;
-
-#[cfg(feature = "mq")]
-#[cfg_attr(docsrs, doc(cfg(feature = "mq")))]
+/// Represents the utils needed to extend a task's context.
+pub mod data;
 /// Message queuing utilities
 pub mod mq;
+/// Controlled polling and streaming
+pub mod poller;
 
-/// apalis mocking utilities
-#[cfg(feature = "tokio-comp")]
-pub mod mock {
-    use futures::channel::mpsc::{Receiver, Sender};
-    use futures::{Stream, StreamExt};
-    use tower::Service;
+/// Allows async listening in a mpsc style.
+pub mod notify;
 
-    use crate::{
-        job::Job,
-        worker::{ready::ReadyWorker, WorkerId},
-    };
+/// A generic layer that has been stripped off types.
+/// This is returned by a [Backend] and can be used to customize the middleware of the service consuming tasks
+pub struct CommonLayer<In, T, U, E> {
+    boxed: Arc<dyn Layer<In, Service = BoxCloneService<T, U, E>> + Send + Sync + 'static>,
+}
 
-    fn build_stream<Req: Send + 'static>(mut rx: Receiver<Req>) -> impl Stream<Item = Req> {
-        let stream = async_stream::stream! {
-            while let Some(item) = rx.next().await {
-                yield item;
-            }
-        };
-        stream.boxed()
-    }
-
-    /// Useful for mocking a worker usually for testing purposes
-    ///
-    /// # Example
-    /// ```rust
-    /// #[tokio::test(flavor = "current_thread")]
-    /// async fn test_worker() {
-    ///     let (handle, mut worker) = mock_worker(job_fn(job2));
-    ///     handle.send(TestJob(Utc::now())).await.unwrap();
-    ///     let res = worker.consume_next().await;
-    /// }
-    /// ```
-    pub fn mock_worker<S, Req>(service: S) -> (Sender<Req>, ReadyWorker<impl Stream<Item = Req>, S>)
+impl<In, T, U, E> CommonLayer<In, T, U, E> {
+    /// Create a new [`CommonLayer`].
+    pub fn new<L>(inner_layer: L) -> Self
     where
-        S: Service<Req>,
-        Req: Job + Send + 'static,
+        L: Layer<In> + Send + Sync + 'static,
+        L::Service: Service<T, Response = U, Error = E> + Send + 'static + Clone,
+        <L::Service as Service<T>>::Future: Send + 'static,
     {
-        let (tx, rx) = futures::channel::mpsc::channel(10);
-        let stream = build_stream(rx);
-        (
-            tx,
-            ReadyWorker {
-                service,
-                stream,
-                id: WorkerId::new("mock-worker"),
-                beats: Vec::new(),
-                max_concurrent_jobs: 1000,
-            },
-        )
+        let layer = layer_fn(move |inner: In| {
+            let out = inner_layer.layer(inner);
+            BoxCloneService::new(out)
+        });
+
+        Self {
+            boxed: Arc::new(layer),
+        }
     }
 }
 
-#[cfg(feature = "chrono")]
-use chrono::{DateTime, Utc};
-#[cfg(feature = "time")]
-use time::OffsetDateTime;
+impl<In, T, U, E> Layer<In> for CommonLayer<In, T, U, E> {
+    type Service = BoxCloneService<T, U, E>;
 
-#[cfg(feature = "chrono")]
-type Timestamp = DateTime<Utc>;
-#[cfg(all(not(feature = "chrono"), feature = "time"))]
-type Timestamp = OffsetDateTime;
+    fn layer(&self, inner: In) -> Self::Service {
+        self.boxed.layer(inner)
+    }
+}
+
+impl<In, T, U, E> Clone for CommonLayer<In, T, U, E> {
+    fn clone(&self) -> Self {
+        Self {
+            boxed: Arc::clone(&self.boxed),
+        }
+    }
+}
+
+impl<In, T, U, E> fmt::Debug for CommonLayer<In, T, U, E> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.debug_struct("CommonLayer").finish()
+    }
+}
+/// A backend represents a task source
+/// Both [crate::storage::Storage] and [crate::mq::MessageQueue] need to implement it for workers to be able to consume tasks
+pub trait Backend<Req> {
+    /// The type in which the backend stores its requests
+    /// Usually it can be [`Vec<u8>`], a row type in sql.
+    type Compact;
+    /// Adds the ability for the backend to define a [Codec]
+    type Codec;
+
+    type Notifier: Clone;
+
+    type Controller;
+
+    fn notifier(&self) -> &Self::Notifier;
+
+    fn controller(&self) -> &Self::Controller;
+
+    /// The codec for the backend
+    fn codec(&self) -> &Self::Codec;
+    /// Allows the backend to decorate the service with [Layer]
+    fn common_layer<S>(&self, worker: &WorkerId) -> CommonLayer<S, Req, S::Response, S::Error>
+    where
+        S: Service<Req> + Send + 'static + Clone,
+        S::Future: Send + 'static,
+    {
+        let builder = ServiceBuilder::new();
+        CommonLayer::new(builder)
+    }
+
+    fn poll(self, worker: WorkerId) -> impl std::future::Future<Output = ()> + Send;
+}
+
+impl<Req: Sync + Send + 'static> Backend<Request<Req>> for RequestStreamPoll<Request<Req>> {
+    fn codec(&self) -> &Self::Codec {
+        &()
+    }
+    type Compact = ();
+    type Codec = ();
+    type Controller = Control;
+    type Notifier = Notify<Worker<Ready<Request<Req>>>>;
+    fn notifier(&self) -> &Self::Notifier {
+        &self.notify
+    }
+    fn controller(&self) -> &Self::Controller {
+        &self.controller
+    }
+
+    fn poll(self, worker: WorkerId) -> impl std::future::Future<Output = ()> + Send {
+        let mut notify = self.notifier().clone();
+        let mut stream = BackendStream::new(self.stream, self.controller);
+
+        async move {
+            while let Some(mut poll) = notify.next().await {
+                let fut = stream.next();
+                poll.send(fut.await.unwrap().unwrap().unwrap()).unwrap();
+            }
+        }
+    }
+}
+
+/// In-Memory utilities
+pub mod memory {
+    use crate::{
+        mq::MessageQueue,
+        notify::Notify,
+        poller::{controller::Control, stream::BackendStream, Ready},
+        request::{Request, RequestStream},
+        worker::{Worker, WorkerId},
+        Backend,
+    };
+    use futures::{
+        channel::mpsc::{channel, Receiver, Sender},
+        Stream, StreamExt,
+    };
+    use std::{
+        pin::Pin,
+        sync::Arc,
+        task::{Context, Poll},
+    };
+
+    #[derive(Debug)]
+    /// An example of the basics of a backend
+    pub struct MemoryStorage<T> {
+        /// Required for workers to inform the backend they are ready to consume
+        notifier: Notify<Worker<Ready<T>>>,
+        /// Required for [Poller] to control polling.
+        controller: Control,
+        /// This would be the backend you are targeting, eg a connection poll
+        inner: MemoryWrapper<T>,
+    }
+    impl<T> MemoryStorage<Request<T>> {
+        /// Create a new in-memory storage
+        pub fn new() -> Self {
+            Self {
+                notifier: Notify::new(),
+                controller: Control::new(),
+                inner: MemoryWrapper::new(),
+            }
+        }
+    }
+
+    impl<T> Default for MemoryStorage<Request<T>> {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl<T> Clone for MemoryStorage<T> {
+        fn clone(&self) -> Self {
+            Self {
+                controller: self.controller.clone(),
+                notifier: self.notifier.clone(),
+                inner: self.inner.clone(),
+            }
+        }
+    }
+
+    /// In-memory queue that implements [Stream]
+    #[derive(Debug)]
+    pub struct MemoryWrapper<T> {
+        sender: Sender<T>,
+        receiver: Arc<futures::lock::Mutex<Receiver<T>>>,
+    }
+
+    impl<T> Clone for MemoryWrapper<T> {
+        fn clone(&self) -> Self {
+            Self {
+                receiver: self.receiver.clone(),
+                sender: self.sender.clone(),
+            }
+        }
+    }
+
+    impl<T> MemoryWrapper<T> {
+        /// Build a new basic queue channel
+        pub fn new() -> Self {
+            let (sender, receiver) = channel(100);
+
+            Self {
+                sender,
+                receiver: Arc::new(futures::lock::Mutex::new(receiver)),
+            }
+        }
+    }
+
+    impl<T> Default for MemoryWrapper<T> {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl<T> Stream for MemoryWrapper<T> {
+        type Item = T;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            if let Some(mut receiver) = self.receiver.try_lock() {
+                receiver.poll_next_unpin(cx)
+            } else {
+                Poll::Pending
+            }
+        }
+    }
+
+    // MemoryStorage as a Backend
+    impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<Request<T>> {
+        type Compact = ();
+        type Codec = ();
+        type Controller = Control;
+
+        type Notifier = Notify<Worker<Ready<Request<T>>>>;
+        fn codec(&self) -> &Self::Codec {
+            todo!()
+        }
+        fn controller(&self) -> &Self::Controller {
+            &self.controller
+        }
+        fn notifier(&self) -> &Self::Notifier {
+            &self.notifier
+        }
+
+        fn poll(self, worker: WorkerId) -> impl std::future::Future<Output = ()> + Send {
+            let mut notify = self.notifier().clone();
+            let mut stream = BackendStream::new(self.inner, self.controller);
+
+            async move {
+                while let Some(mut poll) = notify.next().await {
+                    let fut = stream.next();
+                    poll.send(fut.await.unwrap()).unwrap();
+                }
+            }
+        }
+    }
+
+    impl<Message: Send + 'static + Sync> MessageQueue<Message> for MemoryStorage<Request<Message>> {
+        type Error = ();
+        async fn enqueue(&self, message: Message) -> Result<(), Self::Error> {
+            self.inner
+                .sender
+                .clone()
+                .try_send(Request::new(message))
+                .unwrap();
+            Ok(())
+        }
+
+        async fn dequeue(&self) -> Result<Option<Message>, ()> {
+            Ok(Some(
+                self.inner.receiver.lock().await.next().await.unwrap().req,
+            ))
+        }
+
+        async fn size(&self) -> Result<usize, ()> {
+            Ok(self.inner.clone().count().await)
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TokioTestExecutor;
+
+impl Executor for TokioTestExecutor {
+    fn spawn(&self, _future: impl Future<Output = ()> + Send + 'static) {
+        #[cfg(test)]
+        tokio::spawn(_future);
+    }
+}

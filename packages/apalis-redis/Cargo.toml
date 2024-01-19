@@ -1,6 +1,6 @@
 [package]
 name = "apalis-redis"
-version = "0.4.8"
+version = "0.5.0-alpha.0"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2021"
 readme = "../../README.md"
@@ -11,17 +11,15 @@ description = "Redis Storage for apalis: use Redis for background jobs and messa
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.4.8", default-features = false, features = [
-    "storage",
-] }
+apalis-core = { path = "../../packages/apalis-core", version = "0.5.0-alpha.0", default-features = false }
 redis = { version = "0.24", default-features = false, features = [
     "script",
     "aio",
-    "connection-manager"
+    "connection-manager",
 ] }
 serde = "1"
 log = "0.4"
-chrono = { version = "0.4", default-features = false, optional = true, features = [
+chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "serde",
 ] }
@@ -37,20 +35,9 @@ async-trait = "0.1.77"
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
 email-service = { path = "../../examples/email-service" }
+apalis-utils = { path = "../apalis-utils" }
 
 [features]
-default = ["tokio-comp", "chrono"]
-async-std-comp = [
-    "async-std",
-    "redis/async-std-comp",
-    "apalis-core/async-std-comp",
-]
-tokio-comp = [
-    "tokio",
-    "tokio/net",
-    "redis/tokio-comp",
-    "apalis-core/tokio-comp",
-]
-expose = ["apalis-core/expose"]
-chrono = ["apalis-core/chrono", "dep:chrono"]
-time = ["apalis-core/time", "dep:time"]
+default = ["tokio-comp"]
+async-std-comp = ["async-std", "redis/async-std-comp"]
+tokio-comp = ["tokio", "tokio/net", "redis/tokio-comp"]
