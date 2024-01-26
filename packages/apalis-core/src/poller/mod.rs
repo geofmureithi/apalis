@@ -6,7 +6,7 @@ use crate::notify::Notify;
 use crate::request::RequestStream;
 use crate::worker::{Worker, WorkerId};
 
-use self::controller::Control;
+use self::controller::Controller;
 use self::stream::BackendStream;
 
 /// Util for controlling pollers

@@ -14,6 +14,7 @@
 //! # use apalis_core::layers::extensions::Data;
 //! # use apalis_core::monitor::Monitor;
 //! # use apalis_core::error::Error;
+//! # use apalis_sql::postgres::PostgresStorage;
 //!  use email_service::Email;
 //! 
 //!  #[tokio::main]
@@ -28,8 +29,8 @@
 //!          Ok(())
 //!      }
 //!     // This can be even in another program/language
-//!     let query = "Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));";
-//!     pg.execute(query).await.unwrap();
+//!     // let query = "Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));";
+//!     // pg.execute(query).await.unwrap();
 //!
 //!      Monitor::new()
 //!          .register_with_count(4, {
@@ -61,14 +62,3 @@ pub mod sqlite;
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;
 
-#[cfg(feature = "chrono")]
-use chrono::{DateTime, Utc};
-#[cfg(feature = "time")]
-use time::OffsetDateTime;
-
-#[cfg(feature = "chrono")]
-#[allow(dead_code)]
-type Timestamp = DateTime<Utc>;
-#[cfg(all(not(feature = "chrono"), feature = "time"))]
-#[allow(dead_code)]
-type Timestamp = OffsetDateTime;

@@ -5,7 +5,7 @@ use std::{
 };
 
 use futures::{
-    channel::mpsc::{channel, Receiver, Sender},
+    channel::mpsc::{channel, Receiver, Sender, TrySendError},
     Stream, StreamExt,
 };
 
@@ -29,9 +29,9 @@ impl<T> Clone for Notify<T> {
 
 impl<T> Notify<T> {
     /// Creates a new instance of `Notify`.
-    /// It initializes a channel with a buffer size of 10 and wraps the receiver in an `Arc<Mutex>`.
+    /// It initializes a channel with a buffer size of 1 and wraps the receiver in an `Arc<Mutex>`.
     pub fn new() -> Self {
-        let (sender, receiver) = channel(10);
+        let (sender, receiver) = channel(1);
 
         Self {
             sender,
@@ -41,8 +41,8 @@ impl<T> Notify<T> {
 
     /// Sends a notification of type `T` to the receiver.
     /// If the channel is full, the notification is silently dropped.
-    pub fn notify(&self, value: T) {
-        let _ = self.sender.clone().try_send(value);
+    pub fn notify(&self, value: T) -> Result<(), TrySendError<T>>{
+        self.sender.clone().try_send(value)
     }
 
     /// Waits for and retrieves the next notification.
@@ -73,16 +73,5 @@ impl<T> Stream for Notify<T> {
         } else {
             Poll::Pending
         }
-    }
-}
-
-pub trait Notifier<T> {
-    fn notify(&self, msg: T) -> Result<(), ()>;
-}
-
-impl<T> Notifier<T> for Notify<T> {
-    fn notify(&self, msg: T) -> Result<(), ()> {
-        self.notify(msg);
-        Ok(())
     }
 }

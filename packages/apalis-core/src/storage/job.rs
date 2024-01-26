@@ -1,5 +1,5 @@
 use std::{
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display},
     str::FromStr,
 };
 
@@ -122,6 +122,19 @@ impl FromStr for State {
             "Failed" => Ok(State::Failed),
             "Killed" => Ok(State::Killed),
             _ => Err(Error::InvalidContext("Invalid Job state".to_string())),
+        }
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            State::Pending => write!(f, "Pending"),
+            State::Running => write!(f, "Running"),
+            State::Done => write!(f, "Done"),
+            State::Retry => write!(f, "Retry"),
+            State::Failed => write!(f, "Failed"),
+            State::Killed => write!(f, "Killed"),
         }
     }
 }

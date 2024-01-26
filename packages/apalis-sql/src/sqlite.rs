@@ -1,7 +1,7 @@
 use crate::from_row::IntoRequest;
 use apalis_core::error::{Error, StreamError};
 use apalis_core::notify::Notify;
-use apalis_core::poller::controller::Control;
+use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Ready;
 use apalis_core::request::{Request, RequestStream};
@@ -11,9 +11,9 @@ use apalis_core::storage::StorageError;
 use apalis_core::storage::{Storage, StorageResult};
 use apalis_core::utils::Timer;
 use apalis_core::worker::{Worker, WorkerId};
-use apalis_core::Backend;
+use apalis_core::{Backend, Poller};
 use async_stream::try_stream;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{Pool, Row, Sqlite, SqlitePool};
 use std::convert::TryInto;
@@ -27,8 +27,7 @@ use crate::from_row::SqlRequest;
 pub struct SqliteStorage<T> {
     pool: Pool<Sqlite>,
     job_type: PhantomData<T>,
-    notify: Notify<Worker<Ready<Request<T>>>>,
-    controller: Control,
+    controller: Controller,
 }
 
 impl<T> Clone for SqliteStorage<T> {
@@ -37,7 +36,6 @@ impl<T> Clone for SqliteStorage<T> {
         SqliteStorage {
             pool,
             job_type: PhantomData,
-            notify: self.notify.clone(),
             controller: self.controller.clone(),
         }
     }
@@ -74,8 +72,7 @@ impl<T: Job> SqliteStorage<T> {
         Self {
             pool,
             job_type: PhantomData,
-            controller: Control::new(),
-            notify: Notify::new(),
+            controller: Controller::new(),
         }
     }
     /// Connect to a database given a url
@@ -456,25 +453,16 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
 {
     type Compact = Vec<u8>;
     type Codec = JsonCodec;
-    type Controller = Control;
-    type Notifier = Notify<Worker<Ready<Request<T>>>>;
+
+    type Stream = BackendStream<RequestStream<Request<T>>>;
+
     fn codec(&self) -> &Self::Codec {
         &JsonCodec
     }
 
-    fn notifier(&self) -> &Self::Notifier {
-        &self.notify
-    }
-
-    fn controller(&self) -> &Self::Controller {
-        &self.controller
-    }
-
-    async fn poll(mut self, worker: WorkerId) {
-        let mut storage = self.clone();
-        let mut notify = self.notifier().clone();
+    fn poll(mut self, worker: WorkerId) -> Poller<Self::Stream> {
         let stream = self.clone().consume(&worker, Duration::from_millis(50), 10);
-        let mut stream = BackendStream::new(stream, self.controller().clone());
+        let stream = BackendStream::new(stream, self.controller.clone());
         let heartbeat = async move {
             loop {
                 let now: i64 = SystemTime::now()
@@ -487,14 +475,9 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
                 self.keep_alive_at::<T>(&worker, now).await.unwrap();
                 apalis_utils::sleep(Duration::from_secs(30)).await;
             }
-        };
-        let poll = async move {
-            while let Some(mut poll) = notify.next().await {
-                let fut = stream.next();
-                poll.send(fut.await.unwrap().unwrap().unwrap()).unwrap();
-            }
-        };
-        futures::join!(heartbeat, poll);
+        }
+        .boxed();
+        Poller { stream, heartbeat }
     }
 }
 

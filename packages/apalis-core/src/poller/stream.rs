@@ -1,62 +1,61 @@
 use std::{
+    marker::PhantomData,
     pin::Pin,
     sync::{atomic::Ordering, Arc},
     task::{Context, Poll},
 };
 
-use futures::{stream::FusedStream, Stream, StreamExt};
+use futures::{
+    future::BoxFuture,
+    stream::{FusedStream, FuturesOrdered},
+    Stream, StreamExt,
+};
 use pin_project_lite::pin_project;
 
-use super::{controller::Control, STOPPED};
+use crate::{notify::Notify, request::Request, worker::Worker};
+
+use super::{controller::Controller, Ready, STOPPED};
 
 // Macro for pin projection used in `BackendStream`.
 pin_project! {
     /// `BackendStream` is a wrapper around another stream `S`.
     /// It controls the flow of the stream based on the `Controller` state.
-    #[derive(Debug, Clone)]
+    #[derive(Debug)]
     pub struct BackendStream<S> {
         #[pin]
-        state: State<S>,
-        controller: Control,
-    }
-}
-
-pin_project! {
-    /// `State` is a part of `BackendStream` that holds the actual stream `S`.
-    #[project = StateProj]
-    #[derive(Debug, Clone)]
-    pub(crate) struct State<S> {
-        #[pin]
-        pub stream: S,
+        stream: S,
+        controller: Controller,
     }
 }
 
 impl<S> BackendStream<S> {
     /// Creates a new `BackendStream` from a given stream and a shared `Controller`.
-    pub fn new(stream: S, controller: Control) -> Self {
-        BackendStream {
-            state: State { stream },
-            controller,
-        }
+    pub fn new(stream: S, controller: Controller) -> Self {
+        Self { stream, controller }
     }
 }
-impl<S: Stream + Unpin> Stream for BackendStream<S> {
-    type Item = S::Item;
+impl<S: Stream<Item = T> + Unpin, T> Stream for BackendStream<S> {
+    type Item = T;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.controller.is_plugged() {
-            self.state.stream.poll_next_unpin(cx)
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        if this.controller.is_plugged() {
+            match this.stream.poll_next_unpin(cx) {
+                Poll::Ready(Some(item)) => Poll::Ready(Some(item)),
+                Poll::Ready(None) => Poll::Ready(None), // Inner stream is exhausted
+                Poll::Pending => Poll::Pending,
+            }
         } else {
             Poll::Pending
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.state.stream.size_hint()
+        self.stream.size_hint()
     }
 }
 
-impl<S: Stream + Unpin> FusedStream for BackendStream<S> {
+impl<S: Unpin + Stream> FusedStream for BackendStream<S> {
     fn is_terminated(&self) -> bool {
         self.controller.state.load(Ordering::SeqCst) == STOPPED
     }
@@ -81,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_backend_stream_plugged() {
-        let controller = Control::new();
+        let controller = Controller::new();
         controller.plug();
         let mut backend_stream = BackendStream::new(mock_stream(), controller);
 
@@ -94,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_backend_stream_unplugged() {
-        let controller = Control::new();
+        let controller = Controller::new();
         controller.unplug();
         let mut backend_stream = BackendStream::new(mock_stream(), controller);
 
@@ -107,7 +106,7 @@ mod tests {
 
     #[test]
     fn test_backend_stream_plug_unplug() {
-        let controller = Control::new();
+        let controller = Controller::new();
         controller.unplug();
         let mut backend_stream = BackendStream::new(mock_stream(), controller.clone());
 
@@ -138,7 +137,7 @@ mod tests {
     // Test that BackendStream polls items from an interval stream when plugged
     #[tokio::test]
     async fn test_backend_stream_with_interval_plugged() {
-        let controller = Control::new();
+        let controller = Controller::new();
         controller.plug();
         let mut backend_stream =
             BackendStream::new(interval_stream(Duration::from_millis(100)), controller);
@@ -152,7 +151,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_backend_stream_with_interval_unplugged() {
-        let controller = Control::new();
+        let controller = Controller::new();
         controller.unplug();
         let mut backend_stream =
             BackendStream::new(interval_stream(Duration::from_millis(100)), controller);
@@ -166,7 +165,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_backend_stream_interval_plug_unplug() {
-        let controller = Control::new();
+        let controller = Controller::new();
         controller.unplug();
         let mut backend_stream = BackendStream::new(
             interval_stream(Duration::from_millis(100)),

@@ -8,13 +8,7 @@ use tower::{
 };
 
 use crate::{
-    error::Error,
-    poller::stream::BackendStream,
-    request::{Request, RequestStream, RequestStreamPoll},
-    service_fn::service_fn,
-    service_fn::ServiceFn,
-    worker::{ReadyWorker, Worker, WorkerId},
-    Backend,
+    error::Error, layers::extensions::Data, poller::{controller::Controller, stream::BackendStream}, request::Request, service_fn::service_fn, service_fn::ServiceFn, worker::{ReadyWorker, Worker, WorkerId}, Backend
 };
 
 /// An abstract that allows building a [`Worker`].
@@ -59,11 +53,11 @@ impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
     pub fn stream<NS: Stream<Item = Result<Option<Request<NJ>>, Error>> + Send + 'static, NJ>(
         self,
         stream: NS,
-    ) -> WorkerBuilder<NJ, RequestStreamPoll<Request<NJ>>, M, Serv> {
+    ) -> WorkerBuilder<NJ, NS, M, Serv> {
         WorkerBuilder {
             request: PhantomData,
             layer: self.layer,
-            source: RequestStreamPoll::new(Box::pin(stream)),
+            source: stream,
             id: self.id,
             service: self.service,
         }
@@ -135,8 +129,8 @@ where
     type Service = M::Service;
     /// Build a worker, given a tower service
     fn build(self, service: S) -> Worker<ReadyWorker<Self::Service, P>> {
-        let worker_id = self.id.clone();
-        let common_layer = self.source.common_layer(&worker_id);
+        let worker_id = self.id;
+        let common_layer = self.source.common_layer(worker_id.clone());
         let poller = self.source;
         let middleware = self.layer.layer(common_layer);
         let service = middleware.service(service);

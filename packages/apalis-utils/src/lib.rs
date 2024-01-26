@@ -1,6 +1,6 @@
 use std::{future::Future, time::Duration};
 
-use apalis_core::executor::Executor;
+
 
 #[cfg(feature = "sleep")]
 pub async fn sleep(duration: Duration) {
@@ -13,7 +13,7 @@ pub async fn sleep(duration: Duration) {
 pub struct TokioExecutor;
 
 #[cfg(feature = "tokio-comp")]
-impl Executor for TokioExecutor {
+impl apalis_core::executor::Executor for TokioExecutor {
     fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
         tokio::spawn(future);
     }

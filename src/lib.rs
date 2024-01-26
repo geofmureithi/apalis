@@ -157,7 +157,7 @@ pub mod prelude {
         storage::job::{Job, JobId, State},
         storage::Storage,
         utils::*,
-        worker::{WorkerContext, WorkerId},
+        worker::{WorkerContext, WorkerId, Worker},
     };
-    pub use apalis_utils::*;
+    pub use crate::utils::*;
 }

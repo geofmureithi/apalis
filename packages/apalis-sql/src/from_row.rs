@@ -91,19 +91,20 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::postgres::PgRow
     for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
-        use apalis_core::{context::JobContext, job::JobId, worker::WorkerId};
+        use apalis_core::storage::job::JobId;
+        use apalis_core::worker::WorkerId;
         use serde_json::Value;
         use sqlx::Row;
         use std::str::FromStr;
+        type Timestamp = i64;
 
-        use crate::Timestamp;
         let job: Value = row.try_get("job")?;
         let id: JobId =
             JobId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut context = JobContext::new(id);
+        let mut context = Context::new(id);
 
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
@@ -131,13 +132,14 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::postgres::PgRow
 
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
         context.set_lock_by(lock_by.map(WorkerId::new));
-
-        Ok(SqlRequest(Request::new_with_context(
+        let mut data = Extensions::new();
+        data.insert(context);
+        Ok(SqlRequest(Request::new_with_data(
             serde_json::from_value(job).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "job".to_string(),
                 source: Box::new(e),
             })?,
-            context,
+            data,
         )))
     }
 }

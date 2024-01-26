@@ -1,11 +1,13 @@
 use crate::error::{BoxDynError, Error};
 use crate::executor::Executor;
+use crate::layers::extensions::Data;
 use crate::monitor::{Monitor, MonitorContext};
-use crate::notify::{Notifier, Notify};
+use crate::notify::Notify;
 use crate::poller::Ready;
 use crate::Backend;
 use crate::Request;
-use futures::{Future, FutureExt};
+use futures::future::Shared;
+use futures::{Future, FutureExt, StreamExt};
 use pin_project_lite::pin_project;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -17,10 +19,15 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use thiserror::Error;
-use tower::{Service, ServiceExt};
+use tower::{Service, ServiceBuilder, ServiceExt};
 
-// By default a worker starts 2 futures, one for polling and the other for consuming.
-const WORKER_FUTURES: usize = 2;
+use self::stream::WorkerStream;
+
+mod stream;
+// By default a worker starts 3 futures, one for polling, one for worker stream and the other for consuming.
+const WORKER_FUTURES: usize = 3;
+
+type WorkerNotify<T> = Notify<Worker<Ready<T>>>;
 
 /// A worker name wrapper usually used by Worker builder
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,13 +59,14 @@ impl WorkerId {
 pub enum WorkerEvent {
     /// Worker started
     Start,
+    /// Worker got a job
+    Engage,
+    /// Worker is idle, stream has no new request for now
+    Idle,
     /// Worker encountered an error
     Error(BoxDynError),
-    /// Worker is idle
-    Idle,
     /// Worker stopped
     Stop,
-
     /// Worker completed all pending tasks
     Exit,
 }
@@ -124,72 +132,75 @@ impl<E: Executor + Clone + Send + 'static> Worker<WorkerContext<E>> {
     /// Start a worker
     pub async fn run(self) {
         let monitor = self.inner.context.clone();
+        self.inner.running.store(true, Ordering::SeqCst);
         self.inner.await;
         if let Some(ctx) = monitor.as_ref() {
-            ctx.events().notify(Worker {
+            ctx.notify(Worker {
                 inner: WorkerEvent::Exit,
                 id: self.id.clone(),
-            })
+            });
         };
     }
 }
 
 impl<S, P> Worker<ReadyWorker<S, P>> {
     /// Start a worker
-    pub fn run_with<E: Executor + Clone + Send + 'static, J>(
-        self,
-        executor: E,
-    ) -> Worker<WorkerContext<E>>
+    pub fn run_with<E, J>(self, executor: E) -> Worker<WorkerContext<E>>
     where
-        S: Service<J> + Send + 'static + Clone,
-        P: Backend<J> + 'static,
+        S: Service<Request<J>> + Send + 'static + Clone,
+        P: Backend<Request<J>> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
         S::Response: 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P::Notifier: Notifier<Worker<Ready<J>>> + Send,
+        S::Error: Send + Sync + 'static + Into<BoxDynError>,
+        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        E: Executor + Clone + Send + 'static + Sync,
     {
         let instances: Vec<Worker<WorkerContext<E>>> = self.run_instances_with(1, executor);
         instances.into_iter().nth(0).unwrap()
     }
 
-    pub fn run_monitored<E: Executor + Clone + Send + 'static, J>(
-        self,
-        monitor: &Monitor<E>,
-    ) -> Worker<WorkerContext<E>>
+    pub fn run_monitored<E, J>(self, monitor: &Monitor<E>) -> Worker<WorkerContext<E>>
     where
-        S: Service<J> + Send + 'static + Clone,
-        P: Backend<J> + 'static,
+        S: Service<Request<J>> + Send + 'static + Clone,
+        P: Backend<Request<J>> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
         S::Response: 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P::Notifier: Notifier<Worker<Ready<J>>> + Send,
+        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        E: Executor + Clone + Send + 'static + Sync,
     {
         let instances: Vec<Worker<WorkerContext<E>>> = self.run_instances_monitored(1, monitor);
         instances.into_iter().nth(0).unwrap()
     }
 
-    pub fn run_instances_monitored<E: Executor + Clone + Send + 'static, J>(
+    pub fn run_instances_monitored<E, J>(
         self,
         instances: usize,
         monitor: &Monitor<E>,
     ) -> Vec<Worker<WorkerContext<E>>>
     where
-        S: Service<J> + Send + 'static + Clone,
-        P: Backend<J> + 'static,
+        S: Service<Request<J>> + Send + 'static + Clone,
+        P: Backend<Request<J>> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
         S::Response: 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P::Notifier: Notifier<Worker<Ready<J>>> + Send,
+        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        E: Executor + Clone + Send + 'static + Sync,
     {
+        let notifier = Notify::new();
         let service = self.inner.service;
         let backend = self.inner.backend;
         let executor = monitor.executor.clone();
         let context = monitor.context.clone();
-        let notifier = backend.notifier().clone();
-        let polling = backend.poll(self.id.clone()).shared();
+        let poller = backend.poll(self.id.clone());
+        let polling = poller.heartbeat.shared();
+        let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
+            .to_future()
+            .shared();
         let mut workers = Vec::new();
         for instance in 0..instances {
             let ctx = WorkerContext {
@@ -213,30 +224,39 @@ impl<S, P> Worker<ReadyWorker<S, P>> {
 
             worker.spawn(fut);
             worker.spawn(polling.clone());
+            worker.spawn(worker_stream.clone());
             workers.push(worker);
         }
 
         workers
     }
 
-    pub fn run_instances_with<E: Executor + Clone + Send + 'static, J>(
+    pub fn run_instances_with<E, J>(
         self,
         instances: usize,
         executor: E,
     ) -> Vec<Worker<WorkerContext<E>>>
     where
-        S: Service<J> + Send + 'static + Clone,
-        P: Backend<J> + 'static,
+        S: Service<Request<J>> + Send + 'static + Clone,
+        P: Backend<Request<J>> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
         S::Response: 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P::Notifier: Notifier<Worker<Ready<J>>> + Send,
+        S::Error: Send + Sync + 'static + Into<BoxDynError>,
+        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        E: Executor + Clone + Send + 'static + Sync,
     {
+        let worker_id = self.id.clone();
+        let notifier = Notify::new();
         let service = self.inner.service;
         let backend = self.inner.backend;
-        let notifier = backend.notifier().clone();
-        let polling = backend.poll(self.id.clone()).shared();
+        let poller = backend.poll(worker_id.clone());
+        let polling = poller.heartbeat.shared();
+        let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
+            .to_future()
+            .shared();
+
         let mut workers = Vec::new();
         for instance in 0..instances {
             let ctx = WorkerContext {
@@ -251,6 +271,7 @@ impl<S, P> Worker<ReadyWorker<S, P>> {
                 id: self.id.clone(),
                 inner: ctx.clone(),
             };
+
             let fut = Self::build_worker_instance(
                 instance,
                 service.clone(),
@@ -260,6 +281,7 @@ impl<S, P> Worker<ReadyWorker<S, P>> {
 
             worker.spawn(fut);
             worker.spawn(polling.clone());
+            worker.spawn(worker_stream.clone());
             workers.push(worker);
         }
         workers
@@ -267,66 +289,82 @@ impl<S, P> Worker<ReadyWorker<S, P>> {
 
     pub(crate) async fn build_worker_instance<LS, J, E>(
         instance: usize,
-        mut service: LS,
+        service: LS,
         worker: Worker<WorkerContext<E>>,
-        notifier: P::Notifier,
+        notifier: WorkerNotify<Result<Option<Request<J>>, Error>>,
     ) where
-        LS: Service<J> + Send + 'static + Clone,
+        LS: Service<Request<J>> + Send + 'static + Clone,
         LS::Future: Send + 'static,
         LS::Response: 'static,
         LS::Error: Send + Sync + Into<BoxDynError> + 'static,
-        P: Backend<J>,
-        P::Notifier: Notifier<Worker<Ready<J>>> + Send,
-        E: Executor + Send + Clone + 'static,
+        P: Backend<Request<J>>,
+        E: Executor + Send + Clone + 'static + Sync,
     {
-        worker.running.store(true, Ordering::SeqCst);
         if let Some(ctx) = worker.inner.context.as_ref() {
-            ctx.events().notify(Worker {
-                inner: WorkerEvent::Start,
-                id: worker.id.clone(),
-            })
+            ctx
+                .notify(Worker {
+                    inner: WorkerEvent::Start,
+                    id: worker.id.clone(),
+                });
         };
+        let worker_layers = ServiceBuilder::new().layer(Data(worker.clone()));
+        let mut service = worker_layers.service(service);
+        worker.running.store(true, Ordering::SeqCst);
+
         loop {
             if worker.is_shutting_down() {
                 if let Some(ctx) = worker.inner.context.as_ref() {
-                    ctx.events().notify(Worker {
-                        inner: WorkerEvent::Stop,
-                        id: worker.id.clone(),
-                    })
+                    ctx
+                        .notify(Worker {
+                            inner: WorkerEvent::Stop,
+                            id: worker.id.clone(),
+                        })
+                       ;
                 };
                 break;
             }
             match service.ready().await {
                 Ok(service) => {
                     let (sender, receiver) = async_oneshot::oneshot();
-                    notifier.notify(Worker {
-                        id: worker.id.clone(),
-                        inner: Ready::new(sender, instance),
-                    });
+                    notifier
+                        .notify(Worker {
+                            id: worker.id.clone(),
+                            inner: Ready::new(sender, instance),
+                        });
+                        
                     match receiver.await {
-                        Ok(req) => {
+                        Ok(Ok(Some(req))) => {
                             let fut = service.call(req);
                             worker.spawn(fut.map(|_| ()));
                         }
-                        Err(_) => {
+                        Ok(Err(e)) => {
                             if let Some(ctx) = worker.inner.context.as_ref() {
-                                ctx.events().notify(Worker {
-                                    inner: WorkerEvent::Error(Box::new(Error::Io(io::Error::new(
-                                        io::ErrorKind::Interrupted,
-                                        "Notifier was closed",
-                                    )))),
-                                    id: worker.id.clone(),
-                                })
+                                ctx
+                                    .notify(Worker {
+                                        inner: WorkerEvent::Error(Box::new(e)),
+                                        id: worker.id.clone(),
+                                    });
+                                    
+                            };
+                        }
+                        Ok(Ok(None)) | Err(_) => {
+                            if let Some(ctx) = worker.inner.context.as_ref() {
+                                ctx.
+                                    notify(Worker {
+                                        inner: WorkerEvent::Idle,
+                                        id: worker.id.clone(),
+                                    });
                             };
                         }
                     }
                 }
                 Err(e) => {
                     if let Some(ctx) = worker.inner.context.as_ref() {
-                        ctx.events().notify(Worker {
-                            inner: WorkerEvent::Error(e.into()),
-                            id: worker.id.clone(),
-                        })
+                        ctx
+                            .notify(Worker {
+                                inner: WorkerEvent::Error(e.into()),
+                                id: worker.id.clone(),
+                            });
                     };
                 }
             }

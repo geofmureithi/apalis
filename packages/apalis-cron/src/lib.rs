@@ -66,8 +66,10 @@
 //! }
 //! ```
 
+use apalis_core::data::Extensions;
 use apalis_core::request::RequestStream;
-use apalis_core::storage::job::Job;
+use apalis_core::storage::context::Context;
+use apalis_core::storage::job::{Job, JobId};
 use apalis_core::utils::Timer;
 use apalis_core::{error::Error, request::Request};
 use chrono::{DateTime, TimeZone, Utc};
@@ -118,7 +120,6 @@ where
     /// Convert to consumable
     pub fn into_stream(self) -> RequestStream<Request<J>> {
         let timezone = self.timezone.clone();
-        let schedule = self.schedule.clone();
         let stream = async_stream::stream! {
             let mut schedule = self.schedule.upcoming_owned(timezone.clone());
             loop {
@@ -128,7 +129,9 @@ where
                         let to_sleep = next - timezone.from_utc_datetime(&Utc::now().naive_utc());
                         let to_sleep = to_sleep.to_std().map_err(|e| Error::Failed(e.into()))?;
                         apalis_utils::sleep(to_sleep).await;
-                        yield Ok(Some(Request::new(J::from(timezone.from_utc_datetime(&Utc::now().naive_utc())))));
+                        let mut data = Extensions::new();
+                        data.insert(Context::new(JobId::new()));
+                        yield Ok(Some(Request::new_with_data(J::from(timezone.from_utc_datetime(&Utc::now().naive_utc())), data)));
                     },
                     None => {
                         yield Ok(None);

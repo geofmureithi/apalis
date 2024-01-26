@@ -7,7 +7,7 @@ use crate::{
     data::Extensions,
     error::{Error, StreamError},
     notify::Notify,
-    poller::{controller::Control, Ready},
+    poller::{controller::Controller, Ready},
     worker::Worker,
 };
 
@@ -60,18 +60,5 @@ pub type RequestFuture<T> = BoxFuture<'static, T>;
 /// Represents a stream for T.
 pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, Error>>;
 
-pub struct RequestStreamPoll<T> {
-    pub stream: RequestStream<T>,
-    pub notify: Notify<Worker<Ready<T>>>,
-    pub controller: Control,
-}
-
-impl<T> RequestStreamPoll<T> {
-    pub fn new(stream: RequestStream<T>) -> Self {
-        Self {
-            stream,
-            notify: Notify::new(),
-            controller: Control::new(),
-        }
-    }
-}
+#[doc(hidden)]
+pub type Req<T> = Result<Option<Request<T>>, Error>;

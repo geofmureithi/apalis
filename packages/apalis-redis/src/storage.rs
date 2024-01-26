@@ -8,16 +8,16 @@ use apalis_core::{
     error::StreamError,
     notify::Notify,
     poller::stream::BackendStream,
-    poller::{controller::Control, Ready},
-    request::{Request, RequestStream},
+    poller::{controller::Controller, Ready},
+    request::{BoxStream, Request, RequestStream},
     storage::job::{Job, JobId},
     storage::{context::Context, Storage, StorageError, StorageResult},
     utils::Timer,
     worker::{Worker, WorkerId},
-    Backend, CommonLayer, Layer, Service, ServiceBuilder,
+    Backend, CommonLayer, Layer, Poller, Service, ServiceBuilder,
 };
 use async_stream::try_stream;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use log::*;
 use redis::{aio::ConnectionManager, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -72,8 +72,7 @@ pub struct RedisStorage<T> {
     job_type: PhantomData<T>,
     queue: RedisQueueInfo,
     scripts: RedisScript,
-    notify: Notify<Worker<Ready<Request<T>>>>,
-    controller: Control,
+    controller: Controller,
 }
 
 impl<T> fmt::Debug for RedisStorage<T> {
@@ -95,7 +94,6 @@ impl<T> Clone for RedisStorage<T> {
             queue: self.queue.clone(),
             scripts: self.scripts.clone(),
             controller: self.controller.clone(),
-            notify: self.notify.clone(),
         }
     }
 }
@@ -107,8 +105,7 @@ impl<T: Job> RedisStorage<T> {
         RedisStorage {
             conn,
             job_type: PhantomData,
-            controller: Control::new(),
-            notify: Notify::new(),
+            controller: Controller::new(),
             queue: RedisQueueInfo {
                 active_jobs_list: ACTIVE_JOBS_LIST.replace("{queue}", name),
                 consumers_set: CONSUMERS_SET.replace("{queue}", name),
@@ -162,24 +159,12 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
 {
     type Compact = Vec<u8>;
     type Codec = JsonCodec;
-    type Controller = Control;
-    type Notifier = Notify<Worker<Ready<Request<T>>>>;
+    type Stream = BackendStream<RequestStream<Request<T>>>;
     fn codec(&self) -> &Self::Codec {
         &JsonCodec
     }
 
-    fn notifier(&self) -> &Self::Notifier {
-        &self.notify
-    }
-
-    fn controller(&self) -> &Self::Controller {
-        &self.controller
-    }
-
-    fn common_layer<S>(
-        &self,
-        worker: &WorkerId,
-    ) -> CommonLayer<S, Request<T>, S::Response, S::Error>
+    fn common_layer<S>(&self, worker: WorkerId) -> CommonLayer<S, Request<T>, S::Response, S::Error>
     where
         S: Service<Request<T>> + Send + 'static + Clone,
         S::Future: Send + 'static,
@@ -188,26 +173,21 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
         CommonLayer::new(builder)
     }
 
-    async fn poll(self, worker: WorkerId) {
+    fn poll(mut self, worker: WorkerId) -> Poller<Self::Stream> {
         let mut storage = self.clone();
-        let mut notify = self.notifier().clone();
         let stream = self
-            .clone()
             .consume(&worker, Duration::from_millis(100), 10);
-        let mut stream = BackendStream::new(stream, self.controller().clone());
         let heartbeat = async move {
             loop {
                 storage.keep_alive(&worker).await.unwrap();
-                tokio::time::sleep(Duration::from_secs(30)).await;
+                apalis_utils::sleep(Duration::from_secs(30)).await;
             }
-        };
-        let poll = async move {
-            while let Some(mut poll) = notify.next().await {
-                let fut = stream.next();
-                poll.send(fut.await.unwrap().unwrap().unwrap()).unwrap();
-            }
-        };
-        futures::join!(heartbeat, poll);
+        }
+        .boxed();
+        Poller {
+            stream: BackendStream::new(stream, self.controller),
+            heartbeat,
+        }
     }
 }
 
@@ -225,13 +205,10 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
         let job_data_hash = self.queue.job_data_hash.to_string();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let signal_list = self.queue.signal_list.to_string();
-        // #[cfg(feature = "async-std-comp")]
-        // #[allow(unused_variables)]
-        // let sleeper = apalis_core::utils::timer::AsyncStdTimer;
-        // #[cfg(feature = "tokio-comp")]
-        // let sleeper = apalis_core::utils::timer::TokioTimer;
+
         Box::pin(try_stream! {
             loop {
+
                 tokio::time::sleep_until((Instant::now() + interval).into()).await;
                 // sleeper.sleep_until(Instant::now() + interval).await;
                 let result = fetch_jobs

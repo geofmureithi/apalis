@@ -23,11 +23,11 @@
 //! # apalis-core
 //! Utilities for building job and message processing tools.
 use executor::Executor;
-use futures::{Future, StreamExt};
+use futures::{future::BoxFuture, stream::FuturesOrdered, Future, Stream, StreamExt};
 use monitor::shutdown::Shutdown;
 use notify::Notify;
-use poller::{controller::Control, stream::BackendStream, Ready};
-use request::{Request, RequestStream, RequestStreamPoll};
+use poller::{controller::Controller, stream::BackendStream, Ready};
+use request::{Request, RequestStream};
 use std::fmt;
 use std::sync::Arc;
 pub use tower::{layer::layer_fn, util::BoxCloneService, Layer, Service, ServiceBuilder};
@@ -124,18 +124,12 @@ pub trait Backend<Req> {
     /// Adds the ability for the backend to define a [Codec]
     type Codec;
 
-    type Notifier: Clone;
-
-    type Controller;
-
-    fn notifier(&self) -> &Self::Notifier;
-
-    fn controller(&self) -> &Self::Controller;
+    type Stream: Stream<Item = Result<Option<Req>, crate::error::Error>>;
 
     /// The codec for the backend
     fn codec(&self) -> &Self::Codec;
     /// Allows the backend to decorate the service with [Layer]
-    fn common_layer<S>(&self, worker: &WorkerId) -> CommonLayer<S, Req, S::Response, S::Error>
+    fn common_layer<S>(&self, worker: WorkerId) -> CommonLayer<S, Req, S::Response, S::Error>
     where
         S: Service<Req> + Send + 'static + Clone,
         S::Future: Send + 'static,
@@ -144,46 +138,37 @@ pub trait Backend<Req> {
         CommonLayer::new(builder)
     }
 
-    fn poll(self, worker: WorkerId) -> impl std::future::Future<Output = ()> + Send;
+    fn poll(self, worker: WorkerId) -> Poller<Self::Stream>;
 }
 
-impl<Req: Sync + Send + 'static> Backend<Request<Req>> for RequestStreamPoll<Request<Req>> {
+impl<T> Backend<Request<T>> for RequestStream<Request<T>> {
+    type Codec = ();
+    type Compact = ();
+    type Stream = Self;
     fn codec(&self) -> &Self::Codec {
         &()
     }
-    type Compact = ();
-    type Codec = ();
-    type Controller = Control;
-    type Notifier = Notify<Worker<Ready<Request<Req>>>>;
-    fn notifier(&self) -> &Self::Notifier {
-        &self.notify
-    }
-    fn controller(&self) -> &Self::Controller {
-        &self.controller
-    }
-
-    fn poll(self, worker: WorkerId) -> impl std::future::Future<Output = ()> + Send {
-        let mut notify = self.notifier().clone();
-        let mut stream = BackendStream::new(self.stream, self.controller);
-
-        async move {
-            while let Some(mut poll) = notify.next().await {
-                let fut = stream.next();
-                poll.send(fut.await.unwrap().unwrap().unwrap()).unwrap();
-            }
+    fn poll(self, worker: WorkerId) -> Poller<Self::Stream> {
+        Poller {
+            stream: self,
+            heartbeat: Box::pin(async {}),
         }
     }
+}
+
+pub struct Poller<S> {
+    pub stream: S,
+    pub heartbeat: BoxFuture<'static, ()>,
 }
 
 /// In-Memory utilities
 pub mod memory {
     use crate::{
         mq::MessageQueue,
-        notify::Notify,
-        poller::{controller::Control, stream::BackendStream, Ready},
-        request::{Request, RequestStream},
-        worker::{Worker, WorkerId},
-        Backend,
+        poller::{controller::Controller, stream::BackendStream},
+        request::{Req, Request, RequestStream},
+        worker::WorkerId,
+        Backend, Poller,
     };
     use futures::{
         channel::mpsc::{channel, Receiver, Sender},
@@ -198,25 +183,22 @@ pub mod memory {
     #[derive(Debug)]
     /// An example of the basics of a backend
     pub struct MemoryStorage<T> {
-        /// Required for workers to inform the backend they are ready to consume
-        notifier: Notify<Worker<Ready<T>>>,
         /// Required for [Poller] to control polling.
-        controller: Control,
+        controller: Controller,
         /// This would be the backend you are targeting, eg a connection poll
         inner: MemoryWrapper<T>,
     }
-    impl<T> MemoryStorage<Request<T>> {
+    impl<T> MemoryStorage<T> {
         /// Create a new in-memory storage
         pub fn new() -> Self {
             Self {
-                notifier: Notify::new(),
-                controller: Control::new(),
+                controller: Controller::new(),
                 inner: MemoryWrapper::new(),
             }
         }
     }
 
-    impl<T> Default for MemoryStorage<Request<T>> {
+    impl<T> Default for MemoryStorage<T> {
         fn default() -> Self {
             Self::new()
         }
@@ -226,7 +208,6 @@ pub mod memory {
         fn clone(&self) -> Self {
             Self {
                 controller: self.controller.clone(),
-                notifier: self.notifier.clone(),
                 inner: self.inner.clone(),
             }
         }
@@ -279,50 +260,33 @@ pub mod memory {
     }
 
     // MemoryStorage as a Backend
-    impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<Request<T>> {
+    impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<T> {
+        fn codec(&self) -> &Self::Codec {
+            &()
+        }
         type Compact = ();
         type Codec = ();
-        type Controller = Control;
+        type Stream = BackendStream<RequestStream<Request<T>>>;
 
-        type Notifier = Notify<Worker<Ready<Request<T>>>>;
-        fn codec(&self) -> &Self::Codec {
-            todo!()
-        }
-        fn controller(&self) -> &Self::Controller {
-            &self.controller
-        }
-        fn notifier(&self) -> &Self::Notifier {
-            &self.notifier
-        }
-
-        fn poll(self, worker: WorkerId) -> impl std::future::Future<Output = ()> + Send {
-            let mut notify = self.notifier().clone();
-            let mut stream = BackendStream::new(self.inner, self.controller);
-
-            async move {
-                while let Some(mut poll) = notify.next().await {
-                    let fut = stream.next();
-                    poll.send(fut.await.unwrap()).unwrap();
-                }
+        fn poll(self, _worker: WorkerId) -> Poller<Self::Stream> {
+            let stream = self.inner.map(|r| Ok(Some(Request::new(r)))).boxed();
+            Poller {
+                stream: BackendStream::new(stream, self.controller),
+                heartbeat: Box::pin(async {}),
             }
         }
     }
 
-    impl<Message: Send + 'static + Sync> MessageQueue<Message> for MemoryStorage<Request<Message>> {
+    impl<Message: Send + 'static + Sync> MessageQueue<Message> for MemoryStorage<Message> {
         type Error = ();
         async fn enqueue(&self, message: Message) -> Result<(), Self::Error> {
-            self.inner
-                .sender
-                .clone()
-                .try_send(Request::new(message))
-                .unwrap();
+            self.inner.sender.clone().try_send(message).unwrap();
             Ok(())
         }
 
         async fn dequeue(&self) -> Result<Option<Message>, ()> {
-            Ok(Some(
-                self.inner.receiver.lock().await.next().await.unwrap().req,
-            ))
+            Err(())
+            // self.inner.receiver.lock().await.next().await
         }
 
         async fn size(&self) -> Result<usize, ()> {

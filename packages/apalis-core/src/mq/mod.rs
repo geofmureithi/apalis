@@ -1,7 +1,7 @@
 //! # Message queue
 //!
 //! The `mq` module provides an abstraction for representing a message queue that supports pushing and consuming messages. It defines the MessageQueue trait, which can be implemented by different types of message queues.
-use crate::Backend;
+use crate::{request::Req, Backend};
 
 /// Represents a message queue that can be pushed and consumed.
 #[trait_variant::make(MessageQueue: Send)]

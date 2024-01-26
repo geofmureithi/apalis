@@ -6,7 +6,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{Future, FutureExt};
+use futures::{Future, FutureExt, StreamExt};
 use pin_project_lite::pin_project;
 use tower::Service;
 pub mod shutdown;
@@ -14,8 +14,8 @@ pub mod shutdown;
 use crate::{
     error::BoxDynError,
     executor::Executor,
-    notify::{Notify, Notifier},
-    poller::{Ready},
+    notify::Notify,
+    poller::Ready,
     request::Request,
     worker::{ReadyWorker, Worker, WorkerContext, WorkerEvent},
     Backend,
@@ -34,14 +34,14 @@ pub struct Monitor<E> {
 /// Usually shared with multiple workers
 #[derive(Clone)]
 pub struct MonitorContext {
-    events: Notify<Worker<WorkerEvent>>,
+    event_handler: Option<Arc<Box<dyn Fn(Worker<WorkerEvent>) + Send + Sync>>>,
     shutdown: Shutdown,
 }
 
 impl fmt::Debug for MonitorContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MonitorContext")
-            .field("events", &self.events.type_id())
+            .field("events", &self.event_handler.type_id())
             .field("shutdown", &"[Shutdown]")
             .finish()
     }
@@ -50,7 +50,7 @@ impl fmt::Debug for MonitorContext {
 impl MonitorContext {
     fn new() -> MonitorContext {
         Self {
-            events: Notify::new(),
+            event_handler: None,
             shutdown: Shutdown::new(),
         }
     }
@@ -60,8 +60,8 @@ impl MonitorContext {
         &self.shutdown
     }
     /// Get the events handle
-    pub fn events(&self) -> &Notify<Worker<WorkerEvent>> {
-        &self.events
+    pub fn notify(&self, event: Worker<WorkerEvent>) {
+        self.event_handler.as_ref().map(|caller| caller(event));
     }
 }
 
@@ -75,12 +75,12 @@ impl<E> Debug for Monitor<E> {
     }
 }
 
-impl<E: Executor + Clone + Send + 'static> Monitor<E> {
+impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     /// Registers a single instance of a [Worker]
     pub fn register<
         J: Send + Sync + 'static,
-        S: Service<J> + Send + 'static + Clone,
-        P: Backend<J> + 'static,
+        S: Service<Request<J>> + Send + 'static + Clone,
+        P: Backend<Request<J>> + 'static,
     >(
         mut self,
         worker: Worker<ReadyWorker<S, P>>,
@@ -89,7 +89,7 @@ impl<E: Executor + Clone + Send + 'static> Monitor<E> {
         S::Future: Send,
         S::Response: 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P::Notifier: Notifier<Worker<Ready<J>>> + Send,
+        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
     {
         self.workers.push(worker.run_monitored(&self));
 
@@ -98,8 +98,8 @@ impl<E: Executor + Clone + Send + 'static> Monitor<E> {
 
     pub fn register_with_count<
         J: Send + Sync + 'static,
-        S: Service<J> + Send + 'static + Clone,
-        P: Backend<J> + 'static,
+        S: Service<Request<J>> + Send + 'static + Clone,
+        P: Backend<Request<J>> + 'static,
     >(
         mut self,
         count: usize,
@@ -109,7 +109,7 @@ impl<E: Executor + Clone + Send + 'static> Monitor<E> {
         S::Future: Send,
         S::Response: 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P::Notifier: Notifier<Worker<Ready<J>>> + Send,
+        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
     {
         let workers = worker.run_instances_monitored(count, &self);
         self.workers.extend(workers);
@@ -224,7 +224,7 @@ impl<E: Executor + Clone + Send + 'static> Monitor<E> {
     /// will wait for all workers to complete up to the timeout duration before exiting.
     /// If the timeout is reached and workers have not completed, the monitor will log a warning
     /// message and exit forcefully.
-    pub async fn run(self) -> std::io::Result<()>
+    pub async fn run(mut self) -> std::io::Result<()>
     where
         E: Executor + Clone + Send + 'static,
     {
@@ -232,27 +232,41 @@ impl<E: Executor + Clone + Send + 'static> Monitor<E> {
         for worker in self.workers {
             futures.push(worker.run().boxed());
         }
-        let shutdown = self.context.shutdown.boxed();
-        futures::join!(futures::future::join_all(futures).map(|_| ()), shutdown);
+        let shutdown_future = self.context.shutdown.boxed();
+
+        futures::join!(
+            futures::future::join_all(futures).map(|_| ()),
+            shutdown_future,
+        );
         Ok(())
+    }
+
+    pub fn on_event<F: Fn(Worker<WorkerEvent>) + Send + Sync + 'static>(mut self, f: F) -> Self {
+        if self.workers.len() > 0 {
+            panic!("To listen to workers, please add the listener before registering");
+        }
+        self.context.event_handler = Some(Arc::new(Box::new(f)));
+        self
     }
 }
 
 pin_project! {
-    struct WorkersFuture<F> {
+    struct EventHandlerFuture<F, N> {
         #[pin]
         fut: F,
-        shutdown: Shutdown
+        shutdown: Shutdown,
+        #[pin]
+        notified: N
     }
 }
-impl<F: Future<Output = ()>> Future for WorkersFuture<F> {
+impl<F: Future<Output = ()>, N: Future<Output = ()>> Future for EventHandlerFuture<F, N> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let this = self.project();
         let shutdown = this.shutdown;
         if shutdown.is_shutting_down() {
-            Poll::Ready(())
+            this.notified.poll(cx)
         } else {
             this.fut.poll(cx)
         }
@@ -297,11 +311,6 @@ impl<E: Default> Monitor<E> {
     }
 }
 
-// pub struct ErrorReporter<E> {
-//     sender: Sender<(WorkerId, usize, E)>,
-//     receiver: Arc<futures::lock::Mutex<Receiver<(WorkerId, usize, E)>>>,
-// }
-
 #[cfg(test)]
 mod tests {
     use std::{io, time::Duration};
@@ -314,6 +323,7 @@ mod tests {
         monitor::Monitor,
         mq::MessageQueue,
         request::Request,
+        worker::{Worker, WorkerEvent},
         TokioTestExecutor,
     };
 
@@ -349,12 +359,12 @@ mod tests {
         let handle = backend.clone();
 
         tokio::spawn(async move {
-            for i in 0..10 {
+            for i in 0..1000 {
                 handle.enqueue(i).await.unwrap();
             }
         });
         let service = tower::service_fn(|request: Request<u32>| async {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            // tokio::time::sleep(Duration::from_secs(1)).await;
             println!("{request:?}");
             Ok::<_, io::Error>(request)
         });
@@ -362,15 +372,19 @@ mod tests {
             .source(backend)
             .build(service);
         let monitor: Monitor<TokioTestExecutor> = Monitor::new();
+        let monitor = monitor.on_event(|e: Worker<WorkerEvent>| {
+            println!("{e:?}");
+        });
         let monitor = monitor.register_with_count(5, worker);
         assert_eq!(monitor.workers.len(), 5);
         let shutdown = monitor.context.shutdown.clone();
         tokio::spawn(async move {
-            sleep(Duration::from_millis(1200)).await;
+            sleep(Duration::from_millis(1000)).await;
             shutdown.shutdown();
         });
 
         let result = monitor.run().await;
+        sleep(Duration::from_millis(1000)).await;
         assert!(result.is_ok());
     }
 }
