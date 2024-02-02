@@ -2,22 +2,20 @@ use std::{
     any::Any,
     fmt::{self, Debug, Formatter},
     pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
+    sync::{Arc, RwLock},
+    task::{Context as TaskCtx, Poll},
 };
 
-use futures::{Future, FutureExt, StreamExt};
+use futures::{Future, FutureExt};
 use pin_project_lite::pin_project;
 use tower::Service;
-pub mod shutdown;
+mod shutdown;
 
 use crate::{
     error::BoxDynError,
     executor::Executor,
-    notify::Notify,
-    poller::Ready,
     request::Request,
-    worker::{ReadyWorker, Worker, WorkerContext, WorkerEvent},
+    worker::{Context, Event, Ready, Worker},
     Backend,
 };
 
@@ -25,16 +23,17 @@ use self::shutdown::Shutdown;
 
 /// A monitor for coordinating and managing a collection of workers.
 pub struct Monitor<E> {
-    workers: Vec<Worker<WorkerContext<E>>>,
-    pub(crate) executor: E,
-    pub(crate) context: MonitorContext,
+    workers: Vec<Worker<Context<E>>>,
+    executor: E,
+    context: MonitorContext,
 }
 
 /// The internal context of a [Monitor]
 /// Usually shared with multiple workers
 #[derive(Clone)]
 pub struct MonitorContext {
-    event_handler: Option<Arc<Box<dyn Fn(Worker<WorkerEvent>) + Send + Sync>>>,
+    #[allow(clippy::type_complexity)]
+    event_handler: Arc<RwLock<Option<Box<dyn Fn(Worker<Event>) + Send + Sync>>>>,
     shutdown: Shutdown,
 }
 
@@ -50,7 +49,7 @@ impl fmt::Debug for MonitorContext {
 impl MonitorContext {
     fn new() -> MonitorContext {
         Self {
-            event_handler: None,
+            event_handler: Arc::default(),
             shutdown: Shutdown::new(),
         }
     }
@@ -60,8 +59,12 @@ impl MonitorContext {
         &self.shutdown
     }
     /// Get the events handle
-    pub fn notify(&self, event: Worker<WorkerEvent>) {
-        self.event_handler.as_ref().map(|caller| caller(event));
+    pub fn notify(&self, event: Worker<Event>) {
+        let _ = self
+            .event_handler
+            .as_ref()
+            .read()
+            .map(|caller| caller.as_ref().map(|caller| caller(event)));
     }
 }
 
@@ -83,7 +86,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         P: Backend<Request<J>> + 'static,
     >(
         mut self,
-        worker: Worker<ReadyWorker<S, P>>,
+        worker: Worker<Ready<S, P>>,
     ) -> Self
     where
         S::Future: Send,
@@ -96,6 +99,16 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         self
     }
 
+    /// Registers multiple workers with the monitor.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - The number of workers to register.
+    /// * `worker` - A Worker that is ready for running.
+    ///
+    /// # Returns
+    ///
+    /// The monitor instance, with all workers added to the collection.
     pub fn register_with_count<
         J: Send + Sync + 'static,
         S: Service<Request<J>> + Send + 'static + Clone,
@@ -103,7 +116,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     >(
         mut self,
         count: usize,
-        worker: Worker<ReadyWorker<S, P>>,
+        worker: Worker<Ready<S, P>>,
     ) -> Self
     where
         S::Future: Send,
@@ -115,77 +128,6 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         self.workers.extend(workers);
         self
     }
-
-    // /// Registers a worker with the monitor.
-    // ///
-    // /// # Arguments
-    // ///
-    // /// * `worker` - The worker to register.
-    // ///
-    // /// # Returns
-    // ///
-    // /// The monitor instance, with the worker added to the collection.
-    // pub fn register<
-    //     Strm,
-    //     Serv: Service<Request<J>>,
-    //     J: Job + 'static,
-    //     W: Worker<J, Service = Serv, Source = Strm> + 'static,
-    // >(
-    //     mut self,
-    //     worker: W,
-    // ) -> Self
-    // where
-    //     <Serv as Service<Request<J>>>::Future: std::marker::Send,
-    // {
-    //     let shutdown = self.shutdown.clone();
-    //     let worker_id = worker.id();
-    //     // self.executor.spawn(
-    //     //     self.shutdown.graceful(
-    //     //         worker
-    //     //             .start(WorkerContext {
-    //     //                 shutdown,
-    //     //                 executor: self.executor.clone(),
-    //     //                 worker_id: worker_id.clone(),
-    //     //             })
-    //     //             .map(|_| ()),
-    //     //     ),
-    //     // );
-    //     // self.workers.push(worker_id);
-    //     self
-    // }
-
-    // /// Registers multiple workers with the monitor.
-    // ///
-    // /// # Arguments
-    // ///
-    // /// * `count` - The number of workers to register.
-    // /// * `caller` - A function that returns a new worker instance for each index.
-    // ///
-    // /// # Returns
-    // ///
-    // /// The monitor instance, with all workers added to the collection.
-    // ///
-    // pub fn register_with_count<
-    //     Strm,
-    //     Serv: Service<Request<J>>,
-    //     J: Job + 'static,
-    //     W: Worker<J, Service = Serv, Source = Strm> + 'static,
-    //     Call: Fn(u16) -> W,
-    // >(
-    //     mut self,
-    //     count: u16,
-    //     caller: Call,
-    // ) -> Self
-    // where
-    //     <Serv as Service<Request<J>>>::Future: std::marker::Send,
-    // {
-    //     for index in 0..count {
-    //         let worker = caller(index);
-    //         self = self.register(worker);
-    //     }
-
-    //     self
-    // }
 
     /// Runs the monitor and all its registered workers until they have all completed or a shutdown signal is received.
     ///
@@ -224,7 +166,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     /// will wait for all workers to complete up to the timeout duration before exiting.
     /// If the timeout is reached and workers have not completed, the monitor will log a warning
     /// message and exit forcefully.
-    pub async fn run(mut self) -> std::io::Result<()>
+    pub async fn run(self) -> std::io::Result<()>
     where
         E: Executor + Clone + Send + 'static,
     {
@@ -241,12 +183,20 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         Ok(())
     }
 
-    pub fn on_event<F: Fn(Worker<WorkerEvent>) + Send + Sync + 'static>(mut self, f: F) -> Self {
-        if self.workers.len() > 0 {
-            panic!("To listen to workers, please add the listener before registering");
-        }
-        self.context.event_handler = Some(Arc::new(Box::new(f)));
+    /// Handles events emitted
+    pub fn on_event<F: Fn(Worker<Event>) + Send + Sync + 'static>(self, f: F) -> Self {
+        let _ = self.context.event_handler.write().map(|mut res| {
+            let _ = res.insert(Box::new(f));
+        });
         self
+    }
+    /// Get the current executor
+    pub fn executor(&self) -> &E {
+        &self.executor
+    }
+
+    pub(crate) fn context(&self) -> &MonitorContext {
+        &self.context
     }
 }
 
@@ -262,7 +212,7 @@ pin_project! {
 impl<F: Future<Output = ()>, N: Future<Output = ()>> Future for EventHandlerFuture<F, N> {
     type Output = ();
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(self: Pin<&mut Self>, cx: &mut TaskCtx<'_>) -> Poll<()> {
         let this = self.project();
         let shutdown = this.shutdown;
         if shutdown.is_shutting_down() {
@@ -283,24 +233,35 @@ impl<E: Default> Default for Monitor<E> {
     }
 }
 
-impl<E: Default> Monitor<E> {
+impl<E> Monitor<E> {
     /// Creates a new monitor instance.
     ///
     /// # Returns
     ///
     /// A new monitor instance, with an empty collection of workers.
-    pub fn new() -> Self {
+    pub fn new() -> Self
+    where
+        E: Default,
+    {
+        Self::new_with_executor(E::default())
+    }
+    /// Creates a new monitor instance with an executor
+    ///
+    /// # Returns
+    ///
+    /// A new monitor instance, with an empty collection of workers.
+    pub fn new_with_executor(executor: E) -> Self {
         Self {
             context: MonitorContext::new(),
             workers: Vec::new(),
-            executor: E::default(),
+            executor,
         }
     }
 
     /// Sets a custom executor for the monitor, allowing the usage of another runtime apart from Tokio.
     /// The executor must implement the `Executor` trait.
-    pub fn executor<NE: Executor>(self, executor: NE) -> Monitor<NE> {
-        if self.workers.len() > 0 {
+    pub fn set_executor<NE: Executor>(self, executor: NE) -> Monitor<NE> {
+        if !self.workers.is_empty() {
             panic!("Tried changing executor when already loaded some workers");
         }
         Monitor {
@@ -323,8 +284,7 @@ mod tests {
         monitor::Monitor,
         mq::MessageQueue,
         request::Request,
-        worker::{Worker, WorkerEvent},
-        TokioTestExecutor,
+        TestExecutor,
     };
 
     #[tokio::test]
@@ -344,7 +304,7 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .source(backend)
             .build(service);
-        let monitor: Monitor<TokioTestExecutor> = Monitor::new();
+        let monitor: Monitor<TestExecutor> = Monitor::new();
         let monitor = monitor.register(worker);
         let shutdown = monitor.context.shutdown.clone();
         tokio::spawn(async move {
@@ -364,15 +324,14 @@ mod tests {
             }
         });
         let service = tower::service_fn(|request: Request<u32>| async {
-            // tokio::time::sleep(Duration::from_secs(1)).await;
-            println!("{request:?}");
+            tokio::time::sleep(Duration::from_secs(1)).await;
             Ok::<_, io::Error>(request)
         });
         let worker = WorkerBuilder::new("rango-tango")
             .source(backend)
             .build(service);
-        let monitor: Monitor<TokioTestExecutor> = Monitor::new();
-        let monitor = monitor.on_event(|e: Worker<WorkerEvent>| {
+        let monitor: Monitor<TestExecutor> = Monitor::new();
+        let monitor = monitor.on_event(|e| {
             println!("{e:?}");
         });
         let monitor = monitor.register_with_count(5, worker);

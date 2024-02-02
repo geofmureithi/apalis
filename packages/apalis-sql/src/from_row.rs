@@ -1,54 +1,45 @@
-use apalis_core::{
-    data::Extensions,
-    request::Request,
-    storage::{context::Context, job::Job},
-};
+use apalis_core::{data::Extensions, request::Request, storage::Job};
+use apalis_utils::task_id::TaskId;
+use sqlx::{types::chrono::DateTime, Decode, Type};
+
+use crate::context::SqlContext;
 /// Wrapper for [Request]
-pub(crate) struct SqlRequest<T>(Request<T>);
-
-pub(crate) trait IntoRequest<T> {
-    fn build_job_request(self) -> Option<Request<T>>;
+pub struct SqlRequest<T> {
+    pub req: T,
+    pub context: SqlContext,
 }
 
-impl<T> IntoRequest<T> for Option<SqlRequest<T>> {
-    fn build_job_request(self) -> Option<Request<T>> {
-        self.map(|j| j.0)
-    }
-}
+impl<T> Into<Request<T>> for SqlRequest<T> {
+    fn into(self) -> Request<T> {
+        let mut data = Extensions::new();
+        data.insert(self.context.id().clone());
+        data.insert(self.context.attempts().clone());
+        data.insert(self.context);
 
-impl<T> IntoRequest<T> for SqlRequest<T> {
-    fn build_job_request(self) -> Option<Request<T>> {
-        Some(self.0)
-    }
-}
-
-impl<T> From<SqlRequest<T>> for Request<T> {
-    fn from(val: SqlRequest<T>) -> Self {
-        val.0
+        Request::new_with_data(self.req, data)
     }
 }
 
 #[cfg(feature = "sqlite")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
-impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow>
-    for SqlRequest<T>
+impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
+    sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
-        use apalis_core::{storage::job::JobId, worker::WorkerId};
-        use serde_json::Value;
+        use apalis_core::worker::WorkerId;
         use sqlx::Row;
         use std::str::FromStr;
 
-        let job: Value = row.try_get("job")?;
-        let id: JobId =
-            JobId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
+        let job: T = row.try_get("job")?;
+        let id: TaskId =
+            TaskId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut context = Context::new(id);
+        let mut context = crate::context::SqlContext::new(id);
 
         let run_at: i64 = row.try_get("run_at")?;
-        context.set_run_at(run_at.into());
+        context.set_run_at(DateTime::from_timestamp(run_at, 0).unwrap());
 
         let attempts = row.try_get("attempts").unwrap_or(0);
         context.set_attempts(attempts);
@@ -73,38 +64,29 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::sqlite::SqliteR
 
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
         context.set_lock_by(lock_by.map(WorkerId::new));
-        let mut data = Extensions::new();
-        data.insert(context);
-        Ok(SqlRequest(Request::new_with_data(
-            serde_json::from_value(job).map_err(|e| sqlx::Error::ColumnDecode {
-                index: "job".to_string(),
-                source: Box::new(e),
-            })?,
-            data,
-        )))
+
+        Ok(SqlRequest { context, req: job })
     }
 }
 
 #[cfg(feature = "postgres")]
 #[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
-impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::postgres::PgRow>
-    for SqlRequest<T>
+impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
+    sqlx::FromRow<'r, sqlx::postgres::PgRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
-        use apalis_core::storage::job::JobId;
         use apalis_core::worker::WorkerId;
-        use serde_json::Value;
         use sqlx::Row;
         use std::str::FromStr;
         type Timestamp = i64;
 
-        let job: Value = row.try_get("job")?;
-        let id: JobId =
-            JobId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
+        let job: T = row.try_get("job")?;
+        let id: TaskId =
+            TaskId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut context = Context::new(id);
+        let mut context = SqlContext::new(id);
 
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
@@ -132,15 +114,7 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::postgres::PgRow
 
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
         context.set_lock_by(lock_by.map(WorkerId::new));
-        let mut data = Extensions::new();
-        data.insert(context);
-        Ok(SqlRequest(Request::new_with_data(
-            serde_json::from_value(job).map_err(|e| sqlx::Error::ColumnDecode {
-                index: "job".to_string(),
-                source: Box::new(e),
-            })?,
-            data,
-        )))
+        Ok(SqlRequest { context, req: job })
     }
 }
 
@@ -151,13 +125,12 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::mysql::MySqlRow
 {
     fn from_row(row: &'r sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
         use apalis_core::{context::JobContext, job::JobId, worker::WorkerId};
-        use serde_json::Value;
         use sqlx::Row;
         use std::str::FromStr;
 
         use crate::Timestamp;
 
-        let job: Value = row.try_get("job")?;
+        let job: T = row.try_get("job")?;
         let id: JobId =
             JobId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
@@ -192,12 +165,6 @@ impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::mysql::MySqlRow
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
         context.set_lock_by(lock_by.map(WorkerId::new));
 
-        Ok(SqlRequest(Request::new_with_context(
-            serde_json::from_value(job).map_err(|e| sqlx::Error::ColumnDecode {
-                index: "job".to_string(),
-                source: Box::new(e),
-            })?,
-            context,
-        )))
+        Ok(SqlRequest { context, req: job })
     }
 }

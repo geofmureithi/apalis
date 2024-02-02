@@ -1,4 +1,4 @@
-use crate::request::Request;
+use apalis_core::request::Request;
 
 use super::DEFAULT_MESSAGE_LEVEL;
 use tracing::Level;
@@ -19,7 +19,7 @@ pub trait OnRequest<B> {
     ///
     /// [`Span`]: https://docs.rs/tracing/latest/tracing/span/index.html
     /// [record]: https://docs.rs/tracing/latest/tracing/span/struct.Span.html#method.record
-    /// [`TraceLayer::make_span_with`]: crate::trace::TraceLayer::make_span_with
+    /// [`TraceLayer::make_span_with`]: crate::layers::tracing::TraceLayer::make_span_with
     fn on_request(&mut self, request: &Request<B>, span: &Span);
 }
 
@@ -69,7 +69,7 @@ impl DefaultOnRequest {
     /// Defaults to [`Level::DEBUG`].
     ///
     /// [tracing events]: https://docs.rs/tracing/latest/tracing/#events
-    /// [`DefaultMakeSpan::level`]: crate::trace::DefaultMakeSpan::level
+    /// [`DefaultMakeSpan::level`]: crate::layers::tracing::DefaultMakeSpan::level
     pub fn level(mut self, level: Level) -> Self {
         self.level = level;
         self

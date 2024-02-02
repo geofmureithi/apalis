@@ -4,14 +4,13 @@ use std::{
     time::Instant,
 };
 
+use apalis_core::{error::Error, request::Request, storage::Job};
 use futures::Future;
 use pin_project_lite::pin_project;
 use tower::{Layer, Service};
 
-use crate::{error::Error, storage::job::Job, request::Request};
-
 /// A layer to support prometheus metrics
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct PrometheusLayer;
 
 impl<S> Layer<S> for PrometheusLayer {
@@ -23,7 +22,7 @@ impl<S> Layer<S> for PrometheusLayer {
 }
 
 /// This service implements the metric collection behavior
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PrometheusService<S> {
     service: S,
 }
@@ -87,12 +86,12 @@ where
 
         let labels = [
             ("name", this.operation.to_string()),
-            ("job_type", this.job_type.to_string()),
+            ("namespace", this.job_type.to_string()),
             ("status", status),
+            ("latency", latency.to_string()),
         ];
-
-        // metrics::increment_counter!("job_requests_total", &labels);
-        // metrics::histogram!("job_requests_duration_seconds", latency, &labels);
+        metrics::counter!("requests_total", &labels);
+        metrics::histogram!("request_duration_seconds", &labels);
         Poll::Ready(response)
     }
 }

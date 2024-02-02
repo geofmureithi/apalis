@@ -50,8 +50,8 @@ async fn main() -> Result<()> {
 
     let worker = WorkerBuilder::new("rango-tango")
         .chain(|svc| svc.timeout(Duration::from_millis(500)))
-        .layer(Data(Count::default()))
-        .source(storage)
+        .layer(Data::new(Count::default()))
+        .with_storage(storage)
         .build_fn(send_email);
 
     Monitor::<TokioExecutor>::new()
@@ -64,5 +64,3 @@ async fn main() -> Result<()> {
         .await?;
     Ok(())
 }
-
-

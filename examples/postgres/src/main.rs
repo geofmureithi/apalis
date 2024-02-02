@@ -1,15 +1,17 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use apalis::layers::RetryPolicy;
 use apalis::prelude::*;
 use apalis::{layers::TraceLayer, postgres::PostgresStorage};
 use email_service::{send_email, Email};
-use tower::buffer::BufferLayer;
+use tower::retry::RetryLayer;
+use tracing::{debug, info};
 
 async fn produce_jobs(storage: &PostgresStorage<Email>) -> Result<()> {
     // The programmatic way
     let mut storage = storage.clone();
-    for index in 0..10000 {
+    for index in 0..10 {
         storage
             .push(Email {
                 to: format!("test{}@example.com", index),
@@ -29,28 +31,28 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let database_url = std::env::var("DATABASE_URL").expect("Must specify path to db");
 
-    let pg: PostgresStorage<Email> = PostgresStorage::connect(database_url).await?;
-    pg.setup()
+    let pool = PostgresStorage::connect(database_url).await?;
+    PostgresStorage::setup(&pool)
         .await
         .expect("unable to run migrations for postgres");
 
+    let pg = PostgresStorage::new(pool);
     produce_jobs(&pg).await?;
 
-    Monitor::new()
-        .register_with_count(4, move |c| {
-            WorkerBuilder::new(format!("tasty-orange-{c}"))
-                // .layer(TraceLayer::new())
-                .layer(BufferLayer::<Request<Email>>::new(250))
-                .with_storage_config(pg.clone(), |cfg| {
-                    cfg
-                        // Set the buffer size to 100 ( Pick 100 jobs per query)
-                        .buffer_size(250)
-                        // Lower the fetch interval because postgres is waiting for notifications
-                        .fetch_interval(Duration::from_millis(200))
-                })
+    Monitor::<TokioExecutor>::new()
+        .register_with_count(4, {
+            WorkerBuilder::new(format!("tasty-orange"))
+                .layer(TraceLayer::new())
+                .layer(RetryLayer::new(RetryPolicy::retries(5)))
+                .with_storage(pg.clone())
                 .build_fn(send_email)
         })
-        .run()
+        .on_event(|e| debug!("{e:?}"))
+        .run_with_signal(async {
+            tokio::signal::ctrl_c().await?;
+            info!("Shutting down the system");
+            Ok(())
+        })
         .await?;
     Ok(())
 }

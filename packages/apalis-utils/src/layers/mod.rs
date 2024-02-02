@@ -1,6 +1,5 @@
 /// Acknowledgement layer for apalis
 pub mod ack;
-pub mod extensions;
 /// Prometheus integration for apalis
 #[cfg(feature = "prometheus")]
 #[cfg_attr(docsrs, doc(cfg(feature = "prometheus")))]

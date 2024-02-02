@@ -101,36 +101,36 @@ pub mod cron {
     pub use apalis_cron::*;
 }
 
-/// apalis jobs fully support middleware via [`Layer`]
-/// [`Layer`]: https://docs.rs/tower/latest/tower/trait.Layer.html
+/// apalis fully supports middleware via [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html)
 pub mod layers {
     #[cfg(feature = "retry")]
     #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
-    pub use apalis_core::layers::retry::RetryLayer;
+    pub use apalis_utils::layers::retry::RetryLayer;
 
     #[cfg(feature = "retry")]
     #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
-    pub use apalis_core::layers::retry::DefaultRetryPolicy;
+    pub use apalis_utils::layers::retry::RetryPolicy;
 
     #[cfg(feature = "tracing")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tracing")))]
-    pub use apalis_core::layers::tracing::{Trace, TraceLayer};
+    pub use apalis_utils::layers::tracing::{Trace, TraceLayer};
 
     #[cfg(feature = "limit")]
     #[cfg_attr(docsrs, doc(cfg(feature = "limit")))]
-    pub use apalis_core::layers::limit::RateLimitLayer;
+    pub use apalis_utils::layers::limit::RateLimitLayer;
 
     pub use apalis_core::layers::extensions::Data;
 
     #[cfg(feature = "sentry")]
     #[cfg_attr(docsrs, doc(cfg(feature = "sentry")))]
-    pub use apalis_core::layers::sentry::SentryJobLayer;
+    pub use apalis_utils::layers::sentry::SentryLayer;
 
     #[cfg(feature = "prometheus")]
     #[cfg_attr(docsrs, doc(cfg(feature = "prometheus")))]
-    pub use apalis_core::layers::prometheus::PrometheusLayer;
+    pub use apalis_utils::layers::prometheus::PrometheusLayer;
 }
 
+/// Utilities for working with apalis
 pub mod utils {
     #[cfg(feature = "tokio-comp")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tokio-comp")))]
@@ -139,10 +139,8 @@ pub mod utils {
 
 /// Common imports
 pub mod prelude {
-    #[cfg(feature = "expose")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
-    pub use apalis_core::expose::*;
 
+    pub use apalis_utils::*;
     pub use apalis_core::{
         builder::*,
         error::Error,
@@ -152,12 +150,7 @@ pub mod prelude {
         request::Request,
         response::IntoResponse,
         service_fn::service_fn,
-        storage::context::Context,
-        storage::error::StorageError,
-        storage::job::{Job, JobId, State},
-        storage::Storage,
-        utils::*,
-        worker::{WorkerContext, WorkerId, Worker},
+        storage::*,
+        worker::{Worker, Context, WorkerId},
     };
-    pub use crate::utils::*;
 }

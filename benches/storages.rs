@@ -1,14 +1,14 @@
-use apalis::{
-    layers::Data,
-    prelude::*,
-};
+use apalis::{layers::Data, prelude::*};
 use apalis_core::storage::{context::Context, job::Job, Storage};
 use apalis_redis::RedisStorage;
 // use apalis_sql::{mysql::MysqlStorage, postgres::PostgresStorage, sqlite::SqliteStorage};
 use criterion::*;
 use paste::paste;
 use serde::{Deserialize, Serialize};
-use std::{time::{Duration, Instant}, future::Future};
+use std::{
+    future::Future,
+    time::{Duration, Instant},
+};
 use tokio::runtime::Runtime;
 macro_rules! define_bench {
     ($name:expr, $setup:expr ) => {

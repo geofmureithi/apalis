@@ -3,7 +3,7 @@ mod on_failure;
 mod on_request;
 mod on_response;
 
-use crate::{error::Error, request::Request};
+use apalis_core::{error::Error, request::Request};
 use std::{
     fmt::{self, Debug},
     pin::Pin,
@@ -42,13 +42,13 @@ pub enum LatencyUnit {
     Nanos,
 }
 
-/// [`Layer`] that adds high level [tracing] to a [`Job`].
+/// [`Layer`] that adds high level [tracing] to a [`Service`].
 ///
-/// See the [module docs](crate::trace) for more details.
+/// See the [module docs](crate::layers::tracing) for more details.
 ///
 /// [`Layer`]: tower::Layer
 /// [tracing]: https://crates.io/crates/tracing
-/// [`Job`]: crate::job::Job
+/// [`Service`]: apalis_core::service_fn
 #[derive(Debug, Copy, Clone)]
 pub struct TraceLayer<
     MakeSpan = DefaultMakeSpan,
@@ -168,11 +168,7 @@ where
     }
 }
 
-/// Middleware that adds high level [`tracing`] to an apalis [`Job`].
-///
-///
-/// [`tracing`]: https://crates.io/crates/tracing
-/// [`Job`]: crate::job::Job
+/// Middleware that adds high level [`tracing`](https://crates.io/crates/tracing) to an apalis service.
 #[derive(Debug, Clone, Copy)]
 pub struct Trace<
     S,

@@ -71,20 +71,18 @@ async fn main() -> Result<()> {
             .map_err(|e| Error::new(std::io::ErrorKind::Interrupted, e))
     };
     let monitor = async {
-        let monitor = Monitor::new()
-            .register_with_count(2, move |index| {
-                WorkerBuilder::new(format!("tasty-pear-{index}"))
+        let monitor = Monitor::<TokioExecutor>::new()
+            .register_with_count(2, {
+                WorkerBuilder::new(format!("tasty-pear"))
                     .layer(TraceLayer::new())
-                    .with_storage_config(storage.clone(), |cfg| {
-                        cfg.fetch_interval(Duration::from_millis(10))
-                    })
+                    .with_storage(storage.clone())
                     .build_fn(send_email)
             })
             .run()
             .await;
         Ok(monitor)
     };
-    let _res = futures::future::try_join(http, monitor)
+    let _res = futures::future::join!(http, monitor)
         .await
         .expect("Could not start services");
     Ok(())

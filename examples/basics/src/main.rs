@@ -4,9 +4,8 @@ mod service;
 
 use std::time::Duration;
 
-use anyhow::Result;
 use apalis::{
-    layers::{Extension, TraceLayer},
+    layers::{Data, TraceLayer},
     prelude::*,
     sqlite::SqliteStorage,
 };
@@ -15,11 +14,12 @@ use email_service::Email;
 use layer::LogLayer;
 
 use tracing::{log::info, Instrument, Span};
-use tracing_subscriber::registry::Data;
+
+type WorkerCtx = Context<TokioExecutor>;
 
 use crate::{cache::ValidEmailCache, service::EmailService};
 
-async fn produce_jobs(storage: &SqliteStorage<Email>) -> Result<()> {
+async fn produce_jobs(storage: &SqliteStorage<Email>) {
     let mut storage = storage.clone();
     for i in 0..5 {
         storage
@@ -28,19 +28,34 @@ async fn produce_jobs(storage: &SqliteStorage<Email>) -> Result<()> {
                 text: "Test background job from apalis".to_string(),
                 subject: "Background email job".to_string(),
             })
-            .await?;
+            .await
+            .unwrap();
         tokio::time::sleep(Duration::from_secs(i)).await;
     }
-    Ok(())
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("data store disconnected")]
+    Disconnect(#[from] std::io::Error),
+    #[error("the data for key `{0}` is not available")]
+    Redaction(String),
+    #[error("invalid header (expected {expected:?}, found {found:?})")]
+    InvalidHeader { expected: String, found: String },
+    #[error("unknown data store error")]
+    Unknown,
 }
 
 /// Quick solution to prevent spam.
 /// If email in cache, then send email else complete the job but let a validation process run in the background,
-async fn send_email(email: Email, srv: Data<EmailService>, worker_ctx: WorkerContext<TokioExecutor>) -> anyhow::Result<()> {
-    let svc = ctx.data::<EmailService>()?.clone();
-    let cache = ctx.data::<ValidEmailCache>()?.clone();
-    let worker_ctx = ctx.data::<WorkerContext<TokioExecutor>>()?;
-    info!("Job started in worker {:?}", worker_ctx.id());
+async fn send_email(
+    email: Email,
+    svc: Data<EmailService>,
+    worker_ctx: Data<WorkerCtx>,
+    worker_id: WorkerId,
+    cache: Data<ValidEmailCache>,
+) -> Result<(), Error> {
+    info!("Job started in worker {:?}", worker_id);
     let cache_clone = cache.clone();
     let email_to = email.to.clone();
     let res = cache.get(&email_to);
@@ -53,7 +68,7 @@ async fn send_email(email: Email, srv: Data<EmailService>, worker_ctx: WorkerCon
             // They will also be gracefully shutdown if [`Monitor`] has a shutdown signal
             worker_ctx.spawn(
                 async move {
-                    if cache::fetch_validity(email_to, cache_clone.clone()).await {
+                    if cache::fetch_validity(email_to, &cache_clone).await {
                         svc.send(email).await;
                         info!("Email added to cache")
                     }
@@ -71,34 +86,28 @@ async fn send_email(email: Email, srv: Data<EmailService>, worker_ctx: WorkerCon
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), std::io::Error> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
 
-    let sqlite: SqliteStorage<Email> = SqliteStorage::connect("sqlite::memory:").await?;
-    sqlite
-        .setup()
+    let sqlite: SqliteStorage<Email> = SqliteStorage::connect("sqlite::memory:").await.unwrap();
+    SqliteStorage::setup(sqlite.pool().clone())
         .await
         .expect("unable to run migrations for sqlite");
 
-    produce_jobs(&sqlite).await?;
+    produce_jobs(&sqlite).await;
 
-    Monitor::new()
+    Monitor::<TokioExecutor>::new()
         .register_with_count(2, {
-            WorkerBuilder::new(format!("tasty-banana-{c}"))
+            WorkerBuilder::new(format!("tasty-banana"))
                 .layer(TraceLayer::new())
-                // Middleware are executed sequentially
-                .layer(LogLayer::new("log-layer-1"))
-                .layer(LogLayer::new("log-layer-2"))
                 // Add shared context to all jobs executed by this worker
-                .layer(Extension(EmailService::new()))
-                .layer(Extension(ValidEmailCache::new()))
-                // WithStorage is a builder trait that also adds some context eg the storage and worker heartbeats.
-                // use .with_storage_config() to configure the storage
-                .source(sqlite.clone())
+                .data(EmailService::new())
+                .data(ValidEmailCache::new())
+                .with_storage(sqlite)
                 .build_fn(send_email)
         })
-        .shutdown_timeout(Duration::from_secs(5))
+        // .shutdown_timeout(Duration::from_secs(5))
         // Use .run() if you don't want without signals
         .run_with_signal(tokio::signal::ctrl_c()) // This will wait for ctrl+c then gracefully shutdown
         .await?;

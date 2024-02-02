@@ -18,7 +18,7 @@ impl ValidEmailCache {
     }
 }
 
-pub async fn fetch_validity(email_to: String, cache: ValidEmailCache) -> bool {
+pub async fn fetch_validity(email_to: String, cache: &ValidEmailCache) -> bool {
     cache.0.try_lock().unwrap().insert(email_to, true);
     tokio::time::sleep(Duration::from_secs(1)).await;
     true

@@ -1,28 +1,31 @@
-use apalis_core::error::JobStreamError;
-use apalis_core::job::{Job, JobId, JobStreamResult};
-use apalis_core::request::JobRequest;
-use apalis_core::storage::StorageError;
-use apalis_core::storage::StorageWorkerPulse;
-use apalis_core::storage::{Storage, StorageResult};
-use apalis_core::utils::Timer;
+use apalis_core::error::Error;
+use apalis_core::poller::controller::Controller;
+use apalis_core::request::Request;
+use apalis_core::storage::{Job, Storage};
 use apalis_core::worker::WorkerId;
+use apalis_core::Codec;
+use apalis_utils::codec::json::JsonCodec;
+use apalis_utils::task_id::TaskId;
 use async_stream::try_stream;
 use futures::Stream;
 use serde::{de::DeserializeOwned, Serialize};
+use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::{MySql, MySqlPool, Pool, Row};
 use std::convert::TryInto;
+use std::sync::Arc;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
-use crate::{
-    from_row::{IntoJobRequest, SqlJobRequest},
-    Timestamp,
-};
+use crate::from_row::SqlRequest;
+use crate::Config;
 
 /// Represents a [Storage] that persists to MySQL
 #[derive(Debug)]
 pub struct MysqlStorage<T> {
     pool: Pool<MySql>,
     job_type: PhantomData<T>,
+    controller: Controller,
+    config: Config,
+    codec: Arc<Box<dyn Codec<T, String, Error = Error> + Sync + Send + 'static>>,
 }
 
 impl<T> Clone for MysqlStorage<T> {
@@ -31,6 +34,9 @@ impl<T> Clone for MysqlStorage<T> {
         MysqlStorage {
             pool,
             job_type: PhantomData,
+            controller: self.controller.clone(),
+            config: self.config.clone(),
+            codec: self.codec.clone(),
         }
     }
 }
@@ -41,6 +47,9 @@ impl<T> MysqlStorage<T> {
         Self {
             pool,
             job_type: PhantomData,
+            controller: Controller::new(),
+            config: Config::default(),
+            codec: Arc::new(Box::new(JsonCodec)),
         }
     }
     /// Create a Mysql Connection and start a Storage
@@ -75,27 +84,22 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
         worker_id: &WorkerId,
         interval: Duration,
         buffer_size: usize,
-    ) -> impl Stream<Item = Result<Option<JobRequest<T>>, JobStreamError>> {
+    ) -> impl Stream<Item = Result<Option<Request<T>>, sqlx::Error>> {
         let pool = self.pool.clone();
-        #[cfg(feature = "async-std-comp")]
-        #[allow(unused_variables)]
-        let sleeper = apalis_core::utils::timer::AsyncStdTimer;
-        #[cfg(feature = "tokio-comp")]
-        let sleeper = apalis_core::utils::timer::TokioTimer;
+
         let worker_id = worker_id.clone();
         try_stream! {
             loop {
-                sleeper.sleep(interval).await;
+                apalis_utils::sleep(interval).await;
                 let pool = pool.clone();
                 // let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 let job_type = T::NAME;
                 let fetch_query = "SELECT * FROM jobs
                 WHERE status = 'Pending' AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE";
-                let jobs: Vec<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
+                let jobs: Vec<SqlRequest<T>> = sqlx::query_as(fetch_query)
                     .bind(job_type)
-                    .bind(i64::try_from(buffer_size).map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?)
-                    .fetch_all(&pool)
-                    .await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
+                    .bind(i64::try_from(buffer_size).unwrap())
+                    .fetch_all(&pool).await?;
                 for job in jobs {
                     yield fetch_next(pool.clone(), &worker_id, job.build_job_request()).await?;
                 }
@@ -106,14 +110,11 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
     async fn keep_alive_at<Service>(
         &mut self,
         worker_id: &WorkerId,
-        last_seen: Timestamp,
-    ) -> StorageResult<()> {
+        last_seen: i64,
+    ) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
 
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Connection(Box::from(e)))?;
+        let mut tx = pool.acquire().await?;
         let worker_type = T::NAME;
         let storage_name = std::any::type_name::<Self>();
         let query =
@@ -125,8 +126,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
             .bind(std::any::type_name::<Service>())
             .bind(last_seen)
             .execute(&mut *tx)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
+            .await?;
         Ok(())
     }
 }
@@ -134,8 +134,8 @@ impl<T: DeserializeOwned + Send + Unpin + Job> MysqlStorage<T> {
 async fn fetch_next<T>(
     pool: Pool<MySql>,
     worker_id: &WorkerId,
-    job: Option<JobRequest<T>>,
-) -> Result<Option<JobRequest<T>>, JobStreamError>
+    job: Option<SqlRequest<T>>,
+) -> Result<Option<SqlRequest<T>>, sqlx::Error>
 where
     T: Send + Unpin + DeserializeOwned,
 {
@@ -148,48 +148,48 @@ where
                 .bind(worker_id.to_string())
                 .bind(job_id.to_string())
                 .execute(&pool)
-                .await
-                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-            let job: Option<SqlJobRequest<T>> = sqlx::query_as("Select * from jobs where id = ?")
+                .await?;
+            let job: Option<SqlRequest<T>> = sqlx::query_as("Select * from jobs where id = ?")
                 .bind(job_id.to_string())
                 .fetch_optional(&pool)
-                .await
-                .map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
-            Ok(job.build_job_request())
+                .await?;
+            Ok(job)
         }
     }
 }
 
-#[async_trait::async_trait]
 impl<T> Storage for MysqlStorage<T>
 where
     T: Job + Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
 {
-    type Output = T;
+    type Job = T;
 
-    async fn push(&mut self, job: Self::Output) -> StorageResult<JobId> {
-        let id = JobId::new();
+    type Error = sqlx::Error;
+
+    type Identifier = TaskId;
+
+    async fn push(&mut self, job: Self::Job) -> Result<TaskId, sqlx::Error> {
+        let id = TaskId::new();
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, now(), NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
 
-        let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
+        let job = serde_json::to_string(&job).unwrap();
         let job_type = T::NAME;
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
             .bind(job_type.to_string())
             .execute(&pool)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
+            .await?;
         Ok(id)
     }
 
-    async fn schedule(&mut self, job: Self::Output, on: Timestamp) -> StorageResult<JobId> {
+    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<TaskId, sqlx::Error> {
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, ?, NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
-        let id = JobId::new();
+        let id = TaskId::new();
 
         let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
 
@@ -200,169 +200,126 @@ where
             .bind(job_type)
             .bind(on)
             .execute(&pool)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
+            .await?;
         Ok(id)
     }
 
-    async fn fetch_by_id(&self, job_id: &JobId) -> StorageResult<Option<JobRequest<Self::Output>>> {
+    async fn fetch_by_id(
+        &self,
+        job_id: &TaskId,
+    ) -> Result<Option<Request<Self::Job>>, sqlx::Error> {
         let pool = self.pool.clone();
         let fetch_query = "SELECT * FROM jobs WHERE id = ?";
-        let res: Option<SqlJobRequest<T>> = sqlx::query_as(fetch_query)
+        let res: Option<SqlRequest<T>> = sqlx::query_as(fetch_query)
             .bind(job_id.to_string())
             .fetch_optional(&pool)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(res.build_job_request())
+            .await?;
+        Ok(res)
     }
 
-    async fn heartbeat(&mut self, pulse: StorageWorkerPulse) -> StorageResult<bool> {
-        let pool = self.pool.clone();
+    // async fn heartbeat(&mut self, pulse: StorageWorkerPulse) -> Result<bool, sqlx::Error> {
+    //     let pool = self.pool.clone();
 
-        match pulse {
-            StorageWorkerPulse::EnqueueScheduled { count: _ } => {
-                // Ideally jobs are queue via run_at. So this is not necessary
-                Ok(true)
-            }
-            // Worker not seen in 5 minutes yet has running jobs
-            StorageWorkerPulse::ReenqueueOrphaned {
-                count,
-                timeout_worker,
-            } => {
-                let job_type = T::NAME;
-                let mut tx = pool
-                    .acquire()
-                    .await
-                    .map_err(|e| StorageError::Database(Box::from(e)))?;
-                let query = r#"Update jobs
-                        INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
-                            ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
-                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
-                #[cfg(feature = "chrono")]
-                let seconds_ago =
-                    chrono::Utc::now() - chrono::Duration::seconds(timeout_worker.as_secs() as _);
-                #[cfg(all(not(feature = "chrono"), feature = "time"))]
-                let seconds_ago = time::OffsetDateTime::now_utc() - timeout_worker;
-                sqlx::query(query)
-                    .bind(seconds_ago)
-                    .bind(job_type)
-                    .bind(count)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| StorageError::Database(Box::from(e)))?;
-                Ok(true)
-            }
-            _ => todo!(),
-        }
-    }
+    //     match pulse {
+    //         StorageWorkerPulse::EnqueueScheduled { count: _ } => {
+    //             // Ideally jobs are queue via run_at. So this is not necessary
+    //             Ok(true)
+    //         }
+    //         // Worker not seen in 5 minutes yet has running jobs
+    //         StorageWorkerPulse::ReenqueueOrphaned {
+    //             count,
+    //             timeout_worker,
+    //         } => {
+    //             let job_type = T::NAME;
+    //             let mut tx = pool.acquire().await?;
+    //             let query = r#"Update jobs
+    //                     INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
+    //                         ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
+    //                     SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
+    //             #[cfg(feature = "chrono")]
+    //             let seconds_ago =
+    //                 chrono::Utc::now() - chrono::Duration::seconds(timeout_worker.as_secs() as _);
+    //             #[cfg(all(not(feature = "chrono"), feature = "time"))]
+    //             let seconds_ago = time::OffsetDateTime::now_utc() - timeout_worker;
+    //             sqlx::query(query)
+    //                 .bind(seconds_ago)
+    //                 .bind(job_type)
+    //                 .bind(count)
+    //                 .execute(&mut *tx)
+    //                 .await?;
+    //             Ok(true)
+    //         }
+    //         _ => todo!(),
+    //     }
+    // }
 
-    async fn kill(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
-        let pool = self.pool.clone();
+    // async fn kill(&mut self, worker_id: &WorkerId, job_id: &TaskId) -> Result<(), sqlx::Error> {
+    //     let pool = self.pool.clone();
 
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Connection(Box::from(e)))?;
-        let query =
-            "UPDATE jobs SET status = 'Killed', done_at = NOW() WHERE id = ? AND lock_by = ?";
-        sqlx::query(query)
-            .bind(job_id.to_string())
-            .bind(worker_id.to_string())
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(())
-    }
+    //     let mut tx = pool.acquire().await?;
+    //     let query =
+    //         "UPDATE jobs SET status = 'Killed', done_at = NOW() WHERE id = ? AND lock_by = ?";
+    //     sqlx::query(query)
+    //         .bind(job_id.to_string())
+    //         .bind(worker_id.to_string())
+    //         .execute(&mut *tx)
+    //         .await?;
+    //     Ok(())
+    // }
 
     /// Puts the job instantly back into the queue
     /// Another [Worker] may consume
-    async fn retry(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
-        let pool = self.pool.clone();
+    // async fn retry(&mut self, worker_id: &WorkerId, job_id: &TaskId) -> Result<(), sqlx::Error> {
+    //     let pool = self.pool.clone();
 
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        let query =
-                "UPDATE jobs SET status = 'Pending', done_at = NULL, lock_by = NULL WHERE id = ? AND lock_by = ?";
-        sqlx::query(query)
-            .bind(job_id.to_string())
-            .bind(worker_id.to_string())
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(())
-    }
+    //     let mut tx = pool.acquire().await?;
+    //     let query =
+    //             "UPDATE jobs SET status = 'Pending', done_at = NULL, lock_by = NULL WHERE id = ? AND lock_by = ?";
+    //     sqlx::query(query)
+    //         .bind(job_id.to_string())
+    //         .bind(worker_id.to_string())
+    //         .execute(&mut *tx)
+    //         .await?;
+    //     Ok(())
+    // }
 
-    fn consume(
-        &mut self,
-        worker_id: &WorkerId,
-        interval: Duration,
-        buffer_size: usize,
-    ) -> JobStreamResult<T> {
-        Box::pin(self.stream_jobs(worker_id, interval, buffer_size))
-    }
-    async fn len(&self) -> StorageResult<i64> {
+    async fn len(&self) -> Result<i64, sqlx::Error> {
         let pool = self.pool.clone();
 
         let query = "Select Count(*) as count from jobs where status='Pending'";
-        let record = sqlx::query(query)
-            .fetch_one(&pool)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(record
-            .try_get("count")
-            .map_err(|e| StorageError::Database(Box::from(e)))?)
+        let record = sqlx::query(query).fetch_one(&pool).await?;
+        Ok(record.try_get("count")?)
     }
-    async fn ack(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
-        let pool = self.pool.clone();
+    // async fn ack(&mut self, worker_id: &WorkerId, task_id: &TaskId) -> Result<(), sqlx::Error> {
+    //     let pool = self.pool.clone();
 
-        let query = "UPDATE jobs SET status = 'Done', done_at = now() WHERE id = ? AND lock_by = ?";
-        sqlx::query(query)
-            .bind(job_id.to_string())
-            .bind(worker_id.to_string())
-            .execute(&pool)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
-        Ok(())
-    }
+    //     let query = "UPDATE jobs SET status = 'Done', done_at = now() WHERE id = ? AND lock_by = ?";
+    //     sqlx::query(query)
+    //         .bind(job_id.to_string())
+    //         .bind(worker_id.to_string())
+    //         .execute(&pool)
+    //         .await?;
+    //     Ok(())
+    // }
 
-    async fn reschedule(&mut self, job: &JobRequest<T>, wait: Duration) -> StorageResult<()> {
+    async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let job_id = job.id();
 
-        let wait: i64 = wait
-            .as_secs()
-            .try_into()
-            .map_err(|e| StorageError::Database(Box::new(e)))?;
-        #[cfg(feature = "chrono")]
-        let wait = chrono::Duration::seconds(wait);
-        #[cfg(all(not(feature = "chrono"), feature = "time"))]
-        let wait = time::Duration::seconds(wait);
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Connection(Box::from(e)))?;
+        let wait: i64 = wait.as_secs().try_into().unwrap();
+        let mut tx = pool.acquire().await?;
         let query =
                 "UPDATE jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ? WHERE id = ?";
-        #[cfg(feature = "chrono")]
-        let now = chrono::Utc::now();
-        #[cfg(all(not(feature = "chrono"), feature = "time"))]
-        let now = time::OffsetDateTime::now_utc();
+
         sqlx::query(query)
-            .bind(now.add(wait))
+            .bind(Utc::now().timestamp().add(wait))
             .bind(job_id.to_string())
             .execute(&mut *tx)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
+            .await?;
         Ok(())
     }
 
-    async fn update_by_id(
-        &self,
-        job_id: &JobId,
-        job: &JobRequest<Self::Output>,
-    ) -> StorageResult<()> {
+    async fn update(&self, job: Request<Self::Job>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let status = job.status().as_ref().to_string();
         let attempts = job.attempts();
@@ -371,10 +328,7 @@ where
         let lock_at = *job.lock_at();
         let last_error = job.last_error().clone();
 
-        let mut tx = pool
-            .acquire()
-            .await
-            .map_err(|e| StorageError::Connection(Box::from(e)))?;
+        let mut tx = pool.acquire().await?;
         let query =
                 "UPDATE jobs SET status = ?, attempts = ?, done_at = ?, lock_by = ?, lock_at = ?, last_error = ? WHERE id = ?";
         sqlx::query(query)
@@ -386,115 +340,20 @@ where
             .bind(last_error)
             .bind(job_id.to_string())
             .execute(&mut *tx)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
+            .await?;
         Ok(())
     }
 
-    async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> StorageResult<()> {
-        #[cfg(feature = "chrono")]
-        let now = chrono::Utc::now();
-        #[cfg(all(not(feature = "chrono"), feature = "time"))]
-        let now = time::OffsetDateTime::now_utc();
-
-        self.keep_alive_at::<Service>(worker_id, now).await
+    fn is_empty(&self) -> impl futures::prelude::Future<Output = Result<bool, Self::Error>> + Send {
+        todo!()
     }
+
+    // async fn keep_alive<Service>(&mut self, worker_id: &WorkerId) -> Result<(), sqlx::Error> {
+    //     self.keep_alive_at::<Service>(worker_id, Utc::now().timestamp())
+    //         .await
+    // }
 }
 
-#[cfg(feature = "expose")]
-#[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
-/// Expose an [`MysqlStorage`] for web and cli management tools
-pub mod expose {
-    use apalis_core::error::JobError;
-    use apalis_core::expose::{ExposedWorker, JobStateCount, JobStreamExt};
-    use apalis_core::request::JobState;
-    use apalis_core::storage::StorageError;
-    use std::collections::HashMap;
-
-    use super::*;
-    #[async_trait::async_trait]
-    impl<J: 'static + Job + Serialize + DeserializeOwned + Send + Sync + Unpin> JobStreamExt<J>
-        for MysqlStorage<J>
-    {
-        async fn counts(&mut self) -> Result<JobStateCount, JobError> {
-            let mut conn = self
-                .pool
-                .clone()
-                .acquire()
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
-
-            let fetch_query = "SELECT
-            COUNT(CASE WHEN status = 'Pending' THEN 1 END) AS pending,
-            COUNT(CASE WHEN status = 'Running' THEN 1 END) AS running,
-            COUNT(CASE WHEN status = 'Done' THEN 1 END) AS done,
-            COUNT(CASE WHEN status = 'Retry' THEN 1 END) AS retry,
-            COUNT(CASE WHEN status = 'Failed' THEN 1 END) AS failed,
-            COUNT(CASE WHEN status = 'Killed' THEN 1 END) AS killed
-        FROM jobs WHERE job_type = ?";
-            let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
-                .bind(J::NAME)
-                .fetch_one(&mut *conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
-            let mut inner = HashMap::new();
-            inner.insert(JobState::Pending, res.0.try_into()?);
-            inner.insert(JobState::Running, res.1.try_into()?);
-            inner.insert(JobState::Done, res.2.try_into()?);
-            inner.insert(JobState::Retry, res.3.try_into()?);
-            inner.insert(JobState::Failed, res.4.try_into()?);
-            inner.insert(JobState::Killed, res.5.try_into()?);
-            Ok(JobStateCount::new(inner))
-        }
-
-        async fn list_jobs(
-            &mut self,
-            status: &JobState,
-            page: i32,
-        ) -> Result<Vec<JobRequest<J>>, JobError> {
-            let status = status.as_ref().to_string();
-
-            let mut conn = self
-                .pool
-                .clone()
-                .acquire()
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
-            let fetch_query = "SELECT * FROM jobs WHERE status = ? AND job_type = ? ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET ?";
-            let res: Vec<SqlJobRequest<J>> = sqlx::query_as(fetch_query)
-                .bind(status)
-                .bind(J::NAME)
-                .bind((page - 1) * 10)
-                .fetch_all(&mut *conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
-            Ok(res.into_iter().map(|j| j.into()).collect())
-        }
-
-        async fn list_workers(&mut self) -> Result<Vec<ExposedWorker>, JobError> {
-            let mut conn = self
-                .pool
-                .clone()
-                .acquire()
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
-            let fetch_query =
-            "SELECT id, layers, last_seen FROM workers WHERE worker_type = ? ORDER BY last_seen DESC LIMIT 20 OFFSET ?";
-            let res: Vec<(String, String, Timestamp)> = sqlx::query_as(fetch_query)
-                .bind(J::NAME)
-                .bind(0)
-                .fetch_all(&mut *conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::from(e)))?;
-            Ok(res
-                .into_iter()
-                .map(|(worker_id, layers, last_seen)| {
-                    ExposedWorker::new::<Self, J>(WorkerId::new(worker_id), layers, last_seen)
-                })
-                .collect())
-        }
-    }
-}
 #[cfg(test)]
 mod tests {
 
@@ -588,7 +447,7 @@ mod tests {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job<S>(storage: &mut S, job_id: &JobId) -> JobRequest<Email>
+    async fn get_job<S>(storage: &mut S, job_id: &TaskId) -> JobRequest<Email>
     where
         S: Storage<Output = Email>,
     {

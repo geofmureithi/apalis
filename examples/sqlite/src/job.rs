@@ -1,4 +1,4 @@
-use apalis::{prelude::*, layers::Data};
+use apalis::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -11,6 +11,6 @@ impl Job for Notification {
     const NAME: &'static str = "apalis::Notification";
 }
 
-pub async fn notify(job: Notification, _ctx: Data<Context>) {
+pub async fn notify(job: Notification) {
     tracing::info!("Attempting to send notification to {}", job.to);
 }

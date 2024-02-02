@@ -16,7 +16,7 @@
 //! # use apalis_core::error::Error;
 //! # use apalis_sql::postgres::PostgresStorage;
 //!  use email_service::Email;
-//! 
+//!
 //!  #[tokio::main]
 //!  async fn main() -> std::io::Result<()> {
 //!      std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
@@ -44,6 +44,9 @@
 //!  }
 //! ```
 
+use std::time::Duration;
+
+pub mod context;
 mod from_row;
 
 /// Postgres storage for apalis. Uses `NOTIFY` and `SKIP LOCKED`
@@ -62,3 +65,19 @@ pub mod sqlite;
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;
 
+#[derive(Debug, Clone)]
+pub struct Config {
+    keep_alive: Duration,
+    buffer_size: usize,
+    poll_interval: Duration,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            keep_alive: Duration::from_secs(30),
+            buffer_size: 10,
+            poll_interval: Duration::from_millis(50),
+        }
+    }
+}

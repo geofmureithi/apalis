@@ -1,42 +1,41 @@
-use std::time::SystemTime;
-
+use apalis_core::error::Error;
+use apalis_core::worker::WorkerId;
+use apalis_utils::{attempt::Attempt, task_id::TaskId};
 use serde::{Deserialize, Serialize};
-
-use crate::worker::WorkerId;
-
-use super::job::{JobId, State};
+use sqlx::types::chrono::{DateTime, Utc};
+use std::{fmt, str::FromStr, time::SystemTime};
 
 /// The context for a job is represented here
 /// Used to provide a context when a job is defined through the [Job] trait
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Context {
-    pub(crate) id: JobId,
-    pub(crate) status: State,
-    pub(crate) run_at: i64,
-    pub(crate) attempts: i32,
-    pub(crate) max_attempts: i32,
-    pub(crate) last_error: Option<String>,
-    pub(crate) lock_at: Option<i64>,
-    pub(crate) lock_by: Option<WorkerId>,
-    pub(crate) done_at: Option<i64>,
+#[derive(Debug, Clone)]
+pub struct SqlContext {
+    id: TaskId,
+    status: State,
+    run_at: DateTime<Utc>,
+    attempts: Attempt,
+    max_attempts: i32,
+    last_error: Option<String>,
+    lock_at: Option<i64>,
+    lock_by: Option<WorkerId>,
+    done_at: Option<i64>,
 }
 
-impl Context {
+impl SqlContext {
     /// Build a new context with defaults given an ID.
-    pub fn new(id: JobId) -> Self {
+    pub fn new(id: TaskId) -> Self {
         let now: i64 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_secs()
             .try_into()
             .unwrap();
-        Context {
+        SqlContext {
             id,
             status: State::Pending,
-            run_at: now,
+            run_at: Utc::now(),
             lock_at: None,
             done_at: None,
-            attempts: 0,
+            attempts: Default::default(),
             max_attempts: 25,
             last_error: None,
             lock_by: None,
@@ -54,18 +53,18 @@ impl Context {
     }
 
     /// Get the id for a job
-    pub fn id(&self) -> &JobId {
+    pub fn id(&self) -> &TaskId {
         &self.id
     }
 
     /// Gets the current attempts for a job. Default 0
-    pub fn attempts(&self) -> i32 {
-        self.attempts
+    pub fn attempts(&self) -> &Attempt {
+        &self.attempts
     }
 
     /// Set the number of attempts
     pub fn set_attempts(&mut self, attempts: i32) {
-        self.attempts = attempts;
+        self.attempts = Attempt::new_with_value(attempts.try_into().unwrap());
     }
 
     /// Get the time a job was done
@@ -79,12 +78,12 @@ impl Context {
     }
 
     /// Get the time a job is supposed to start
-    pub fn run_at(&self) -> i64 {
-        self.run_at
+    pub fn run_at(&self) -> &DateTime<Utc> {
+        &self.run_at
     }
 
     /// Set the time a job should run
-    pub fn set_run_at(&mut self, run_at: i64) {
+    pub fn set_run_at(&mut self, run_at: DateTime<Utc>) {
         self.run_at = run_at;
     }
 
@@ -128,7 +127,61 @@ impl Context {
         self.last_error = Some(error);
     }
 
+    /// Record an attempt to execute the request
     pub fn record_attempt(&mut self) {
-        self.attempts += 1;
+        self.attempts.increment();
+    }
+}
+
+/// Represents the state of a [Request]
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
+pub enum State {
+    /// Job is pending
+    #[serde(alias = "Latest")]
+    Pending,
+    /// Job is running
+    Running,
+    /// Job was done successfully
+    Done,
+    /// Retry Job
+    Retry,
+    /// Job has failed. Check `last_error`
+    Failed,
+    /// Job has been killed
+    Killed,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State::Pending
+    }
+}
+
+impl FromStr for State {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Pending" | "Latest" => Ok(State::Pending),
+            "Running" => Ok(State::Running),
+            "Done" => Ok(State::Done),
+            "Retry" => Ok(State::Retry),
+            "Failed" => Ok(State::Failed),
+            "Killed" => Ok(State::Killed),
+            _ => Err(Error::InvalidContext("Invalid Job state".to_string())),
+        }
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            State::Pending => write!(f, "Pending"),
+            State::Running => write!(f, "Running"),
+            State::Done => write!(f, "Done"),
+            State::Retry => write!(f, "Retry"),
+            State::Failed => write!(f, "Failed"),
+            State::Killed => write!(f, "Killed"),
+        }
     }
 }

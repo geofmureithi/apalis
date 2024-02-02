@@ -1,27 +1,29 @@
-use std::{
-    marker::PhantomData,
-    sync::Arc,
-    time::{Duration, Instant, SystemTime},
-};
-
-use apalis_core::{
-    error::StreamError,
-    notify::Notify,
-    poller::stream::BackendStream,
-    poller::{controller::Controller, Ready},
-    request::{BoxStream, Request, RequestStream},
-    storage::job::{Job, JobId},
-    storage::{context::Context, Storage, StorageError, StorageResult},
-    utils::Timer,
-    worker::{Worker, WorkerId},
-    Backend, CommonLayer, Layer, Poller, Service, ServiceBuilder,
-};
+use apalis_core::data::Extensions;
+use apalis_core::error::Error;
+use apalis_core::layers::{CommonLayer, Service, ServiceBuilder};
+use apalis_core::poller::controller::Controller;
+use apalis_core::poller::stream::BackendStream;
+use apalis_core::poller::Poller;
+use apalis_core::request::{Request, RequestStream};
+use apalis_core::storage::{Job, Storage};
+use apalis_core::worker::WorkerId;
+use apalis_core::{Backend, Codec};
+use apalis_utils::attempt::Attempt;
+use apalis_utils::codec::json::JsonCodec;
+use apalis_utils::layers::ack::{Ack, AckLayer};
+use apalis_utils::task_id::TaskId;
 use async_stream::try_stream;
-use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
+use futures::{FutureExt, TryStreamExt};
 use log::*;
+use redis::ErrorKind;
 use redis::{aio::ConnectionManager, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
+use std::{
+    marker::PhantomData,
+    time::{Duration, Instant, SystemTime},
+};
 
 const ACTIVE_JOBS_LIST: &str = "{queue}:active";
 const CONSUMERS_SET: &str = "{queue}:consumers";
@@ -66,6 +68,98 @@ struct RedisJob<J> {
     job: J,
 }
 
+impl<T> Into<Request<T>> for RedisJob<T> {
+    fn into(self) -> Request<T> {
+        let mut data = Extensions::new();
+        data.insert(self.ctx.id);
+        data.insert(Attempt::new_with_value(self.ctx.attempts));
+        Request::new_with_data(self.job, data)
+    }
+}
+
+impl<T> Into<RedisJob<T>> for Request<T> {
+    fn into(self) -> RedisJob<T> {
+        let task_id = self.get::<TaskId>().cloned().unwrap();
+        let attempts = self.get::<Attempt>().cloned().unwrap_or_default();
+        RedisJob {
+            job: self.take(),
+            ctx: Context {
+                attempts: attempts.current(),
+                id: task_id,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Context {
+    id: TaskId,
+    attempts: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct Config {
+    fetch_interval: Duration,
+    buffer_size: usize,
+    max_retries: usize,
+    keep_alive: Duration,
+    enqueue_scheduled: Duration,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            fetch_interval: Duration::from_millis(100),
+            buffer_size: 10,
+            max_retries: 5,
+            keep_alive: Duration::from_secs(30),
+            enqueue_scheduled: Duration::from_secs(30),
+        }
+    }
+}
+
+impl Config {
+    pub fn get_fetch_interval(&self) -> &Duration {
+        &self.fetch_interval
+    }
+
+    pub fn get_buffer_size(&self) -> usize {
+        self.buffer_size
+    }
+
+    pub fn get_max_retries(&self) -> usize {
+        self.max_retries
+    }
+
+    pub fn get_keep_alive(&self) -> &Duration {
+        &self.keep_alive
+    }
+
+    pub fn get_enqueue_scheduled(&self) -> &Duration {
+        &self.enqueue_scheduled
+    }
+
+    pub fn set_fetch_interval(&mut self, fetch_interval: Duration) {
+        self.fetch_interval = fetch_interval;
+    }
+
+    pub fn set_buffer_size(&mut self, buffer_size: usize) {
+        self.buffer_size = buffer_size;
+    }
+
+    pub fn set_max_retries(&mut self, max_retries: usize) {
+        self.max_retries = max_retries;
+    }
+
+    pub fn set_keep_alive(&mut self, keep_alive: Duration) {
+        self.keep_alive = keep_alive;
+    }
+
+    pub fn set_enqueue_scheduled(&mut self, enqueue_scheduled: Duration) {
+        self.enqueue_scheduled = enqueue_scheduled;
+    }
+}
+
 /// Represents a [Storage] that uses Redis for storage.
 pub struct RedisStorage<T> {
     conn: ConnectionManager,
@@ -73,6 +167,15 @@ pub struct RedisStorage<T> {
     queue: RedisQueueInfo,
     scripts: RedisScript,
     controller: Controller,
+    config: Config,
+    codec: Arc<
+        Box<
+            dyn Codec<RedisJob<T>, Vec<u8>, Error = apalis_core::error::Error>
+                + Sync
+                + Send
+                + 'static,
+        >,
+    >,
 }
 
 impl<T> fmt::Debug for RedisStorage<T> {
@@ -82,6 +185,7 @@ impl<T> fmt::Debug for RedisStorage<T> {
             .field("job_type", &std::any::type_name::<T>())
             .field("queue", &self.queue)
             .field("scripts", &self.scripts)
+            .field("config", &self.config)
             .finish()
     }
 }
@@ -94,11 +198,13 @@ impl<T> Clone for RedisStorage<T> {
             queue: self.queue.clone(),
             scripts: self.scripts.clone(),
             controller: self.controller.clone(),
+            config: self.config.clone(),
+            codec: self.codec.clone(),
         }
     }
 }
 
-impl<T: Job> RedisStorage<T> {
+impl<T: Job + Serialize + DeserializeOwned> RedisStorage<T> {
     /// Start a new connection
     pub fn new(conn: ConnectionManager) -> Self {
         let name = T::NAME;
@@ -106,6 +212,8 @@ impl<T: Job> RedisStorage<T> {
             conn,
             job_type: PhantomData,
             controller: Controller::new(),
+            config: Config::default(),
+            codec: Arc::new(Box::new(JsonCodec)),
             queue: RedisQueueInfo {
                 active_jobs_list: ACTIVE_JOBS_LIST.replace("{queue}", name),
                 consumers_set: CONSUMERS_SET.replace("{queue}", name),
@@ -138,7 +246,7 @@ impl<T: Job> RedisStorage<T> {
         }
     }
 
-    /// Connect to a redis url
+    /// Shorthand to create a client and connect
     pub async fn connect<S: IntoConnectionInfo>(redis: S) -> Result<Self, RedisError> {
         let client = Client::open(redis.into_connection_info()?)?;
         let conn = client.get_connection_manager().await?;
@@ -151,43 +259,79 @@ impl<T: Job> RedisStorage<T> {
     }
 }
 
-#[derive(Debug)]
-pub struct JsonCodec;
-
 impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
     for RedisStorage<T>
 {
-    type Compact = Vec<u8>;
-    type Codec = JsonCodec;
     type Stream = BackendStream<RequestStream<Request<T>>>;
-    fn codec(&self) -> &Self::Codec {
-        &JsonCodec
+
+    type Layer = AckLayer<RedisStorage<T>, T>;
+
+    fn common_layer(&self, worker_id: WorkerId) -> Self::Layer {
+        AckLayer::new(self.clone(), worker_id)
     }
 
-    fn common_layer<S>(&self, worker: WorkerId) -> CommonLayer<S, Request<T>, S::Response, S::Error>
-    where
-        S: Service<Request<T>> + Send + 'static + Clone,
-        S::Future: Send + 'static,
-    {
-        let builder = ServiceBuilder::new();
-        CommonLayer::new(builder)
-    }
-
-    fn poll(mut self, worker: WorkerId) -> Poller<Self::Stream> {
+    fn poll(self, worker: WorkerId) -> Poller<Self::Stream> {
         let mut storage = self.clone();
-        let stream = self
-            .consume(&worker, Duration::from_millis(100), 10);
-        let heartbeat = async move {
+        let controller = self.controller.clone();
+        let config = self.config.clone();
+        let stream: RequestStream<Request<T>> = Box::pin(
+            self.stream_jobs(&worker, config.fetch_interval, config.buffer_size)
+                .map_ok(|job| match job {
+                    Some(res) => Some(res.into()),
+                    None => None,
+                })
+                .map_err(|e| Error::SourceError(e.into())),
+        );
+
+        let keep_alive = async move {
             loop {
                 storage.keep_alive(&worker).await.unwrap();
-                apalis_utils::sleep(Duration::from_secs(30)).await;
+                apalis_utils::sleep(config.keep_alive).await;
             }
         }
         .boxed();
-        Poller {
-            stream: BackendStream::new(stream, self.controller),
-            heartbeat,
+        let mut storage = self.clone();
+        let enqueue_scheduled = async move {
+            loop {
+                storage.enqueue_scheduled(config.buffer_size).await.unwrap();
+                apalis_utils::sleep(config.enqueue_scheduled).await;
+            }
         }
+        .boxed();
+        let heartbeat = async move {
+            futures::join!(enqueue_scheduled, keep_alive);
+        };
+        Poller::new(BackendStream::new(stream, controller), heartbeat.boxed())
+    }
+}
+
+impl<T: Sync> Ack<T> for RedisStorage<T> {
+    type Acknowledger = TaskId;
+    type Error = RedisError;
+    async fn ack(
+        &self,
+        worker_id: &WorkerId,
+        task_id: &Self::Acknowledger,
+    ) -> Result<(), RedisError> {
+        let mut conn = self.conn.clone();
+        let ack_job = self.scripts.ack_job.clone();
+        let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
+        let done_jobs_set = &self.queue.done_jobs_set.to_string();
+
+        let now: i64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .try_into()
+            .unwrap();
+
+        ack_job
+            .key(inflight_set)
+            .key(done_jobs_set)
+            .arg(task_id.to_string())
+            .arg(now)
+            .invoke_async(&mut conn)
+            .await
     }
 }
 
@@ -197,7 +341,7 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
         worker_id: &WorkerId,
         interval: Duration,
         buffer_size: usize,
-    ) -> RequestStream<Request<RedisJob<T>>> {
+    ) -> RequestStream<RedisJob<T>> {
         let mut conn = self.conn.clone();
         let fetch_jobs = self.scripts.get_jobs.clone();
         let consumers_set = self.queue.consumers_set.to_string();
@@ -205,12 +349,10 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
         let job_data_hash = self.queue.job_data_hash.to_string();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let signal_list = self.queue.signal_list.to_string();
-
+        let codec = self.codec.clone();
         Box::pin(try_stream! {
             loop {
-
-                tokio::time::sleep_until((Instant::now() + interval).into()).await;
-                // sleeper.sleep_until(Instant::now() + interval).await;
+                apalis_utils::sleep(interval).await;
                 let result = fetch_jobs
                     .key(&consumers_set)
                     .key(&active_jobs_list)
@@ -223,7 +365,7 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
                 match result {
                     Ok(jobs) => {
                         for job in jobs {
-                            yield deserialize_job::<Request<RedisJob<T>>>(&job)
+                            yield deserialize_job(&job).map(|res| codec.decode(&res)).map(|res| res.unwrap().into())
                         }
                     },
                     Err(e) => {
@@ -237,10 +379,7 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
     }
 }
 
-fn deserialize_job<T>(job: &Value) -> Option<T>
-where
-    T: DeserializeOwned,
-{
+fn deserialize_job(job: &Value) -> Option<&Vec<u8>> {
     let job = match job {
         job @ Value::Data(_) => Some(job),
         Value::Bulk(val) => val.get(0),
@@ -254,7 +393,7 @@ where
     };
 
     match job {
-        Some(Value::Data(v)) => serde_json::from_slice(v).ok(),
+        Some(Value::Data(v)) => Some(v),
         None => None,
         _ => {
             error!("Decoding Message Failed: {:?}", "Expected Data(&Vec<u8>)");
@@ -264,7 +403,7 @@ where
 }
 
 impl<T> RedisStorage<T> {
-    async fn keep_alive(&mut self, worker_id: &WorkerId) -> StorageResult<()> {
+    async fn keep_alive(&mut self, worker_id: &WorkerId) -> Result<(), RedisError> {
         let mut conn = self.conn.clone();
         let register_consumer = self.scripts.register_consumer.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
@@ -283,7 +422,6 @@ impl<T> RedisStorage<T> {
             .arg(inflight_set)
             .invoke_async(&mut conn)
             .await
-            .map_err(|e| StorageError::Connection(Box::from(e)))
     }
 }
 
@@ -291,24 +429,22 @@ impl<T> Storage for RedisStorage<T>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Job + Sync,
 {
-    type Output = T;
+    type Job = T;
+    type Error = RedisError;
+    type Identifier = TaskId;
 
-    async fn push(&mut self, job: Self::Output) -> StorageResult<JobId> {
+    async fn push(&mut self, job: Self::Job) -> Result<TaskId, RedisError> {
         let mut conn = self.conn.clone();
         let push_job = self.scripts.push_job.clone();
         let job_data_hash = self.queue.job_data_hash.to_string();
         let active_jobs_list = self.queue.active_jobs_list.to_string();
         let signal_list = self.queue.signal_list.to_string();
-        let job_id = JobId::new();
-        let ctx = Context::new(job_id.clone());
-        let job = Request::new(RedisJob { job, ctx });
-        let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
-        log::debug!(
-            "Received new job with id: {} to list: {}",
-            job_id,
-            active_jobs_list
-        );
-
+        let job_id = TaskId::new();
+        let ctx = Context {
+            attempts: 0,
+            id: job_id.clone(),
+        };
+        let job = self.codec.encode(&RedisJob { ctx, job }).unwrap();
         push_job
             .key(job_data_hash)
             .key(active_jobs_list)
@@ -316,20 +452,22 @@ where
             .arg(job_id.to_string())
             .arg(job)
             .invoke_async(&mut conn)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
+            .await?;
         Ok(job_id.clone())
     }
 
-    async fn schedule(&mut self, job: Self::Output, on: i64) -> StorageResult<JobId> {
+    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<TaskId, RedisError> {
         let mut conn = self.conn.clone();
         let schedule_job = self.scripts.schedule_job.clone();
         let job_data_hash = self.queue.job_data_hash.to_string();
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
-        let job_id = JobId::new();
-        let ctx = Context::new(job_id.clone());
-        let job = Request::new(RedisJob { job, ctx });
-        let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
+        let job_id = TaskId::new();
+        let ctx = Context {
+            attempts: 0,
+            id: job_id.clone(),
+        };
+        let job = RedisJob { job, ctx };
+        let job = self.codec.encode(&job).unwrap();
         schedule_job
             .key(job_data_hash)
             .key(scheduled_jobs_set)
@@ -337,283 +475,63 @@ where
             .arg(job)
             .arg(on)
             .invoke_async(&mut conn)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
+            .await?;
         Ok(job_id.clone())
     }
 
-    fn consume(
-        &mut self,
-        worker_id: &WorkerId,
-        interval: Duration,
-        buffer_size: usize,
-    ) -> RequestStream<Request<T>> {
-        let stream: RequestStream<Request<T>> = Box::pin(
-            self.stream_jobs(worker_id, interval, buffer_size)
-                .map_ok(|job| match job {
-                    Some(job) => {
-                        let ctx = job.req.ctx;
-                        let mut req = Request::new(job.req.job);
-                        req.insert(ctx);
-                        Some(req)
-                    }
-                    None => None,
-                })
-                .map_err(|e| apalis_core::error::Error::Failed(e.into())),
-        );
-        stream
-    }
-
-    // async fn kill(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
-    //     let mut conn = self.conn.clone();
-    //     let kill_job = self.scripts.kill_job.clone();
-    //     let current_worker_id = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
-    //     let job_data_hash = self.queue.job_data_hash.to_string();
-    //     let dead_jobs_set = self.queue.dead_jobs_set.to_string();
-    //     let fetch_job = self.fetch_by_id(job_id);
-
-    //     let res = fetch_job.await?;
-    //     match res {
-    //         Some(job) => {
-    //             #[cfg(feature = "chrono")]
-    //             let now = chrono::Utc::now().timestamp();
-    //             #[cfg(feature = "time")]
-    //             let now = time::OffsetDateTime::now_utc().unix_timestamp();
-
-    //             let data =
-    //                 serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
-    //             kill_job
-    //                 .key(current_worker_id)
-    //                 .key(dead_jobs_set)
-    //                 .key(job_data_hash)
-    //                 .arg(job_id.to_string())
-    //                 .arg(now)
-    //                 .arg(data)
-    //                 .invoke_async(&mut conn)
-    //                 .await
-    //                 .map_err(|e| StorageError::Database(Box::from(e)))
-    //         }
-    //         None => Err(StorageError::NotFound),
-    //     }
-    // }
-
-    async fn len(&self) -> StorageResult<i64> {
+    async fn len(&self) -> Result<i64, RedisError> {
         let mut conn = self.conn.clone();
         let all_jobs: i64 = redis::cmd("HLEN")
             .arg(&self.queue.job_data_hash.to_string())
             .query_async(&mut conn)
-            .await
-            .map_err(|e| StorageError::Database(Box::new(e)))?;
+            .await?;
         let done_jobs: i64 = redis::cmd("ZCOUNT")
             .arg(self.queue.done_jobs_set.to_owned())
             .arg("-inf")
             .arg("+inf")
             .query_async(&mut conn)
-            .await
-            .map_err(|e| StorageError::Database(Box::new(e)))?;
+            .await?;
         Ok(all_jobs - done_jobs)
     }
 
-    async fn fetch_by_id(&self, job_id: &JobId) -> StorageResult<Option<Request<Self::Output>>> {
+    async fn fetch_by_id(&self, job_id: &TaskId) -> Result<Option<Request<Self::Job>>, RedisError> {
         let mut conn = self.conn.clone();
         let data: Value = redis::cmd("HMGET")
             .arg(&self.queue.job_data_hash.to_string())
             .arg(job_id.to_string())
             .query_async(&mut conn)
-            .await
-            .map_err(|e| StorageError::Database(Box::new(e)))?;
-        Ok(deserialize_job(&data))
+            .await?;
+        let job = deserialize_job(&data);
+        match job {
+            None => Err(RedisError::from((
+                ErrorKind::ResponseError,
+                "Invalid data returned by storage",
+            ))),
+            Some(bytes) => {
+                let inner = self.codec.decode(&bytes).unwrap();
+                Ok(Some(inner.into()))
+            }
+        }
     }
-    async fn update(&self, job: &Request<T>) -> StorageResult<()> {
-        let job_id = job.get::<Context>().unwrap().id();
+    async fn update(&self, job: Request<T>) -> Result<(), RedisError> {
+        let job = job.into();
         let mut conn = self.conn.clone();
-        let job = serde_json::to_string(job).map_err(|e| StorageError::Parse(e.into()))?;
-        let res: Result<i64, RedisError> = redis::cmd("HSET")
+        let bytes = self.codec.encode(&job).unwrap();
+        let _: i64 = redis::cmd("HSET")
             .arg(&self.queue.job_data_hash.to_string())
-            .arg(job_id.to_string())
-            .arg(job)
+            .arg(job.ctx.id.to_string())
+            .arg(bytes)
             .query_async(&mut conn)
-            .await;
-        let _res = res.map_err(|e| StorageError::Database(Box::new(e)))?;
+            .await?;
         Ok(())
     }
 
-    // async fn ack(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
-    //     let mut conn = self.conn.clone();
-    //     let ack_job = self.scripts.ack_job.clone();
-    //     let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
-    //     let done_jobs_set = &self.queue.done_jobs_set.to_string();
-
-    //     #[cfg(feature = "chrono")]
-    //     let now = chrono::Utc::now().timestamp();
-    //     #[cfg(feature = "time")]
-    //     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    //     ack_job
-    //         .key(inflight_set)
-    //         .key(done_jobs_set)
-    //         .arg(job_id.to_string())
-    //         .arg(now)
-    //         .invoke_async(&mut conn)
-    //         .await
-    //         .map_err(|e| StorageError::Database(Box::new(e)))
-    // }
-    // async fn retry(&mut self, worker_id: &WorkerId, job_id: &JobId) -> StorageResult<()> {
-    //     let mut conn = self.conn.clone();
-    //     let retry_job = self.scripts.retry_job.clone();
-    //     let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
-    //     let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
-    //     let job_data_hash = self.queue.job_data_hash.to_string();
-    //     let job_fut = self.fetch_by_id(job_id);
-    //     let failed_jobs_set = self.queue.failed_jobs_set.to_string();
-    //     let mut storage = self.clone();
-
-    //     let res = job_fut.await?;
-
-    //     #[cfg(feature = "chrono")]
-    //     let now = chrono::Utc::now().timestamp();
-    //     #[cfg(feature = "time")]
-    //     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-
-    //     match res {
-    //         Some(job) => {
-    //             if job.attempts() >= job.max_attempts() {
-    //                 warn!("too many retries: {:?}", job.attempts());
-    //                 let _res = redis::cmd("ZADD")
-    //                     .arg(failed_jobs_set)
-    //                     .arg(now)
-    //                     .arg(job_id.to_string())
-    //                     .query_async(&mut conn)
-    //                     .await
-    //                     .map_err(|e| StorageError::Database(Box::new(e)))?;
-    //                 storage
-    //                     .kill(worker_id, job_id)
-    //                     .await
-    //                     .map_err(|e| StorageError::Database(Box::new(e)))?;
-    //                 return Ok(());
-    //             }
-    //             let job = serde_json::to_string(&job).map_err(|e| StorageError::Parse(e.into()))?;
-    //             #[cfg(feature = "chrono")]
-    //             let now = chrono::Utc::now().timestamp();
-    //             #[cfg(feature = "time")]
-    //             let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    //             let res: Result<i32, StorageError> = retry_job
-    //                 .key(inflight_set)
-    //                 .key(scheduled_jobs_set)
-    //                 .key(job_data_hash)
-    //                 .arg(job_id.to_string())
-    //                 .arg(now)
-    //                 .arg(job)
-    //                 .invoke_async(&mut conn)
-    //                 .await
-    //                 .map_err(|e| StorageError::Database(Box::new(e)));
-    //             match res {
-    //                 Ok(count) => {
-    //                     trace!("Jobs to remove: {:?}", count);
-    //                     Ok(())
-    //                 }
-    //                 Err(e) => Err(e),
-    //             }
-    //         }
-    //         None => Err(StorageError::NotFound),
-    //     }
-    // }
-
-    // async fn heartbeat(&mut self, beat: StorageWorkerPulse) -> StorageResult<bool> {
-    //     let mut conn = self.conn.clone();
-    //     match beat {
-    //         StorageWorkerPulse::EnqueueScheduled { count } => {
-    //             let enqueue_jobs = self.scripts.enqueue_scheduled.clone();
-    //             let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
-    //             let active_jobs_list = self.queue.active_jobs_list.to_string();
-    //             let signal_list = self.queue.signal_list.to_string();
-    //             #[cfg(feature = "chrono")]
-    //             let timestamp = chrono::Utc::now().timestamp();
-    //             #[cfg(feature = "time")]
-    //             let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
-    //             let res: Result<i8, StorageError> = enqueue_jobs
-    //                 .key(scheduled_jobs_set)
-    //                 .key(active_jobs_list)
-    //                 .key(signal_list)
-    //                 .arg(timestamp)
-    //                 .arg(count)
-    //                 .invoke_async(&mut conn)
-    //                 .await
-    //                 .map_err(|e| StorageError::Database(Box::from(e)));
-    //             match res {
-    //                 Ok(count) => {
-    //                     if count > 0 {
-    //                         trace!("Jobs to enqueue: {:?}", count);
-    //                     }
-    //                     Ok(true)
-    //                 }
-    //                 Err(e) => Err(e),
-    //             }
-    //         }
-
-    //         StorageWorkerPulse::ReenqueueOrphaned {
-    //             count,
-    //             timeout_worker,
-    //         } => {
-    //             let reenqueue_orphaned = self.scripts.reenqueue_orphaned.clone();
-    //             let consumers_set = self.queue.consumers_set.to_string();
-    //             let active_jobs_list = self.queue.active_jobs_list.to_string();
-    //             let signal_list = self.queue.signal_list.to_string();
-    //             #[cfg(feature = "chrono")]
-    //             let timestamp = (chrono::Utc::now()
-    //                 - chrono::Duration::seconds(timeout_worker.as_secs() as i64))
-    //             .timestamp();
-    //             #[cfg(feature = "time")]
-    //             let timestamp = (time::OffsetDateTime::now_utc() - timeout_worker).unix_timestamp();
-    //             let res: Result<i8, StorageError> = reenqueue_orphaned
-    //                 .key(consumers_set)
-    //                 .key(active_jobs_list)
-    //                 .key(signal_list)
-    //                 .arg(timestamp)
-    //                 .arg(count)
-    //                 .invoke_async(&mut conn)
-    //                 .await
-    //                 .map_err(|e| StorageError::Database(Box::from(e)));
-    //             match res {
-    //                 Ok(count) => {
-    //                     if count > 0 {
-    //                         debug!("{} jobs to reenqueue", count);
-    //                     }
-    //                     Ok(true)
-    //                 }
-    //                 Err(e) => Err(e),
-    //             }
-    //         }
-    //         _ => todo!(),
-    //     }
-    // }
-    // async fn reenqueue_active(&mut self, job_ids: Vec<&JobId>) -> StorageResult<()> {
-    //     let mut conn = self.conn.clone();
-    //     let reenqueue_active = self.scripts.reenqueue_active.clone();
-    //     let inflight_set = self.queue.inflight_jobs_set.to_string();
-    //     let active_jobs_list = self.queue.active_jobs_list.to_string();
-    //     let signal_list = self.queue.signal_list.to_string();
-
-    //     reenqueue_active
-    //         .key(inflight_set)
-    //         .key(active_jobs_list)
-    //         .key(signal_list)
-    //         .arg(
-    //             job_ids
-    //                 .into_iter()
-    //                 .map(|j| j.to_string())
-    //                 .collect::<Vec<String>>(),
-    //         )
-    //         .invoke_async(&mut conn)
-    //         .await
-    //         .map_err(|e| StorageError::Connection(Box::from(e)))
-    // }
-    async fn reschedule(&mut self, job: &Request<T>, _wait: Duration) -> StorageResult<()> {
+    async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), RedisError> {
         let mut conn = self.conn.clone();
         let schedule_job = self.scripts.schedule_job.clone();
-        let ctx = job.get::<Context>().unwrap();
-        let job_id = ctx.id();
-        let worker_id = ctx.lock_by().as_ref().ok_or(StorageError::NotFound)?;
-        let job = serde_json::to_string(job).map_err(|e| StorageError::Parse(e.into()))?;
+        let job_id = job.get::<TaskId>().cloned().unwrap();
+        let worker_id = job.get::<WorkerId>().cloned().unwrap();
+        let job = self.codec.encode(&(job.into())).unwrap();
         let job_data_hash = self.queue.job_data_hash.to_string();
         let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
         let on: i64 = SystemTime::now()
@@ -622,240 +540,192 @@ where
             .as_secs()
             .try_into()
             .unwrap();
+        let wait: i64 = wait.as_secs().try_into().unwrap();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let failed_jobs_set = self.queue.failed_jobs_set.to_string();
         let _cmd = redis::cmd("SREM")
             .arg(inflight_set)
             .arg(job_id.to_string())
             .query_async(&mut conn)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
+            .await?;
         let _cmd = redis::cmd("ZADD")
             .arg(failed_jobs_set)
             .arg(on)
             .arg(job_id.to_string())
             .query_async(&mut conn)
-            .await
-            .map_err(|e| StorageError::Database(Box::from(e)))?;
+            .await?;
         schedule_job
             .key(job_data_hash)
             .key(scheduled_jobs_set)
             .arg(job_id.to_string())
             .arg(job)
-            .arg(on)
+            .arg(on + wait)
             .invoke_async(&mut conn)
             .await
-            .map_err(|e| StorageError::Database(Box::from(e)))
     }
-    async fn is_empty(&self) -> StorageResult<bool> {
+    async fn is_empty(&self) -> Result<bool, RedisError> {
         todo!()
     }
 }
 
-#[cfg(feature = "expose")]
-#[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
-/// Expose an [`SqliteStorage`] for web and cli management tools
-pub mod expose {
-    use apalis_core::error::Error;
-    use apalis_core::expose::{ExposedWorker, JobStreamExt};
-    use apalis_core::request::State;
-    use apalis_core::storage::StorageError;
-
-    use super::*;
-
-    fn deserialize_multiple_jobs<T>(job: Option<&Value>) -> Option<Vec<T>>
+impl<T> RedisStorage<T> {
+    /// Attempt to retry a job
+    pub async fn retry(&mut self, worker_id: &WorkerId, task_id: &TaskId) -> Result<i32, RedisError>
     where
-        T: DeserializeOwned,
+        T: Send + DeserializeOwned + Serialize + Job + Unpin + Sync + 'static,
     {
-        let job = match job {
-            None => None,
-            Some(Value::Bulk(val)) => Some(val),
-            _ => {
-                error!(
-                    "Decoding Message Failed: {:?}",
-                    "unknown result type for next message"
-                );
-                None
-            }
-        };
+        let mut conn = self.conn.clone();
+        let retry_job = self.scripts.retry_job.clone();
+        let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
+        let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
+        let job_data_hash = self.queue.job_data_hash.to_string();
+        let job_fut = self.fetch_by_id(task_id);
+        let failed_jobs_set = self.queue.failed_jobs_set.to_string();
+        let mut storage = self.clone();
+        let now: i64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .try_into()
+            .unwrap();
+        let res = job_fut.await?;
+        match res {
+            Some(job) => {
+                let attempt = job.get::<Attempt>().cloned().unwrap_or_default();
+                if attempt.current() >= self.config.max_retries {
+                    let _res = redis::cmd("ZADD")
+                        .arg(failed_jobs_set)
+                        .arg(now)
+                        .arg(task_id.to_string())
+                        .query_async(&mut conn)
+                        .await?;
+                    storage.kill(worker_id, task_id).await?;
+                    return Ok(1);
+                }
+                let job = self.codec.encode(&(job.into())).unwrap();
 
-        job.map(|values| {
-            values
-                .iter()
-                .filter_map(|v| match v {
-                    Value::Data(data) => serde_json::from_slice(data).ok(),
-                    _ => None,
-                })
-                .collect()
-        })
+                let res: Result<i32, RedisError> = retry_job
+                    .key(inflight_set)
+                    .key(scheduled_jobs_set)
+                    .key(job_data_hash)
+                    .arg(task_id.to_string())
+                    .arg(now)
+                    .arg(job)
+                    .invoke_async(&mut conn)
+                    .await;
+                match res {
+                    Ok(count) => Ok(count),
+                    Err(e) => Err(e),
+                }
+            }
+            None => Err(RedisError::from((ErrorKind::ResponseError, "Id not found"))),
+        }
     }
 
-    #[async_trait::async_trait]
-    impl<T> JobStreamExt<T> for RedisStorage<T>
+    /// Attempt to kill a job
+    pub async fn kill(&mut self, worker_id: &WorkerId, task_id: &TaskId) -> Result<(), RedisError>
     where
-        T: 'static + Job + Serialize + DeserializeOwned + Send + Unpin + Sync,
+        T: Send + DeserializeOwned + Serialize + Job + Unpin + Sync + 'static,
     {
-        async fn list_jobs(&mut self, status: &State, page: i32) -> Result<Vec<Request<T>>, Error> {
-            match status {
-                State::Pending => {
-                    let mut conn = self.conn.clone();
-                    let active_jobs_list = &self.queue.active_jobs_list;
-                    let job_data_hash = &self.queue.job_data_hash;
-                    let ids: Vec<String> = redis::cmd("LRANGE")
-                        .arg(active_jobs_list)
-                        .arg(((page - 1) * 10).to_string())
-                        .arg((page * 10).to_string())
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if ids.is_empty() {
-                        return Ok(Vec::new());
-                    }
-                    let data: Option<Value> = redis::cmd("HMGET")
-                        .arg(job_data_hash)
-                        .arg(&ids)
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    let jobs: Vec<Request<T>> = deserialize_multiple_jobs(data.as_ref()).unwrap();
-                    Ok(jobs)
-                }
-                State::Running => {
-                    let mut conn = self.conn.clone();
-                    let consumers_set = &self.queue.consumers_set;
-                    let job_data_hash = &self.queue.job_data_hash;
-                    let workers: Vec<String> = redis::cmd("ZRANGE")
-                        .arg(consumers_set)
-                        .arg("0")
-                        .arg("-1")
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if workers.is_empty() {
-                        return Ok(Vec::new());
-                    }
-                    let mut all_jobs = Vec::new();
-                    for worker in workers {
-                        let ids: Vec<String> = redis::cmd("SMEMBERS")
-                            .arg(&worker)
-                            .query_async(&mut conn)
-                            .await
-                            .map_err(|e| StorageError::Database(Box::new(e)))?;
-                        if ids.is_empty() {
-                            continue;
-                        };
-                        let data: Option<Value> = redis::cmd("HMGET")
-                            .arg(job_data_hash.clone())
-                            .arg(&ids)
-                            .query_async(&mut conn)
-                            .await
-                            .map_err(|e| StorageError::Database(Box::new(e)))?;
-                        let jobs: Vec<Request<T>> =
-                            deserialize_multiple_jobs(data.as_ref()).unwrap();
-                        all_jobs.extend(jobs);
-                    }
-
-                    Ok(all_jobs)
-                }
-                State::Done => {
-                    let mut conn = self.conn.clone();
-                    let done_jobs_set = &self.queue.done_jobs_set;
-                    let job_data_hash = &self.queue.job_data_hash;
-                    let ids: Vec<String> = redis::cmd("ZRANGE")
-                        .arg(done_jobs_set)
-                        .arg(((page - 1) * 10).to_string())
-                        .arg((page * 10).to_string())
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if ids.is_empty() {
-                        return Ok(Vec::new());
-                    }
-                    let data: Option<Value> = redis::cmd("HMGET")
-                        .arg(job_data_hash)
-                        .arg(&ids)
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    let jobs: Vec<Request<T>> = deserialize_multiple_jobs(data.as_ref()).unwrap();
-                    Ok(jobs)
-                }
-                State::Retry => Ok(Vec::new()),
-                State::Failed => {
-                    let mut conn = self.conn.clone();
-                    let failed_jobs_set = &self.queue.failed_jobs_set;
-                    let job_data_hash = &self.queue.job_data_hash;
-                    let ids: Vec<String> = redis::cmd("ZRANGE")
-                        .arg(failed_jobs_set)
-                        .arg(((page - 1) * 10).to_string())
-                        .arg((page * 10).to_string())
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if ids.is_empty() {
-                        return Ok(Vec::new());
-                    }
-                    let data: Option<Value> = redis::cmd("HMGET")
-                        .arg(job_data_hash)
-                        .arg(&ids)
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    let jobs: Vec<Request<T>> = deserialize_multiple_jobs(data.as_ref()).unwrap();
-                    Ok(jobs)
-                }
-                State::Killed => {
-                    let mut conn = self.conn.clone();
-                    let dead_jobs_set = &self.queue.dead_jobs_set;
-                    let job_data_hash = &self.queue.job_data_hash;
-                    let ids: Vec<String> = redis::cmd("ZRANGE")
-                        .arg(dead_jobs_set)
-                        .arg(((page - 1) * 10).to_string())
-                        .arg((page * 10).to_string())
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    if ids.is_empty() {
-                        return Ok(Vec::new());
-                    }
-                    let data: Option<Value> = redis::cmd("HMGET")
-                        .arg(job_data_hash)
-                        .arg(&ids)
-                        .query_async(&mut conn)
-                        .await
-                        .map_err(|e| StorageError::Database(Box::new(e)))?;
-                    let jobs: Vec<Request<T>> = deserialize_multiple_jobs(data.as_ref()).unwrap();
-                    Ok(jobs)
-                }
+        let mut conn = self.conn.clone();
+        let kill_job = self.scripts.kill_job.clone();
+        let current_worker_id = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
+        let job_data_hash = self.queue.job_data_hash.to_string();
+        let dead_jobs_set = self.queue.dead_jobs_set.to_string();
+        let fetch_job = self.fetch_by_id(task_id);
+        let now: i64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .try_into()
+            .unwrap();
+        let res = fetch_job.await?;
+        match res {
+            Some(job) => {
+                let data = self.codec.encode(&job.into()).unwrap();
+                kill_job
+                    .key(current_worker_id)
+                    .key(dead_jobs_set)
+                    .key(job_data_hash)
+                    .arg(task_id.to_string())
+                    .arg(now)
+                    .arg(data)
+                    .invoke_async(&mut conn)
+                    .await
             }
+            None => Err(RedisError::from((ErrorKind::ResponseError, "Id not found"))),
         }
-        async fn list_workers(&mut self) -> Result<Vec<ExposedWorker>, Error> {
-            let consumers_set = &self.queue.consumers_set;
+    }
 
-            let mut conn = self.conn.clone();
-            let workers: Vec<String> = redis::cmd("ZRANGE")
-                .arg(consumers_set)
-                .arg("0")
-                .arg("-1")
-                .query_async(&mut conn)
-                .await
-                .map_err(|e| StorageError::Database(Box::new(e)))?;
-            Ok(workers
-                .into_iter()
-                .map(|w| {
-                    #[cfg(feature = "chrono")]
-                    let now = chrono::Utc::now();
-                    #[cfg(all(not(feature = "chrono"), feature = "time"))]
-                    let now = time::OffsetDateTime::now_utc();
-                    ExposedWorker::new::<Self, T>(
-                        WorkerId::new(
-                            w.replace(&format!("{}:", &self.queue.inflight_jobs_set), ""),
-                        ),
-                        "".to_string(),
-                        now,
-                    )
-                })
-                .collect())
+    /// Required to add scheduled jobs to the active set
+    pub async fn enqueue_scheduled(&mut self, count: usize) -> Result<usize, RedisError> {
+        let enqueue_jobs = self.scripts.enqueue_scheduled.clone();
+        let scheduled_jobs_set = self.queue.scheduled_jobs_set.to_string();
+        let active_jobs_list = self.queue.active_jobs_list.to_string();
+        let signal_list = self.queue.signal_list.to_string();
+        let now: i64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .try_into()
+            .unwrap();
+        let res: Result<usize, _> = enqueue_jobs
+            .key(scheduled_jobs_set)
+            .key(active_jobs_list)
+            .key(signal_list)
+            .arg(now)
+            .arg(count)
+            .invoke_async(&mut self.conn)
+            .await;
+        match res {
+            Ok(count) => Ok(count),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Re-enqueue some jobs that might be abandoned.
+    pub async fn reenqueue_active(&mut self, job_ids: Vec<&TaskId>) -> Result<(), RedisError> {
+        let mut conn = self.conn.clone();
+        let reenqueue_active = self.scripts.reenqueue_active.clone();
+        let inflight_set = self.queue.inflight_jobs_set.to_string();
+        let active_jobs_list = self.queue.active_jobs_list.to_string();
+        let signal_list = self.queue.signal_list.to_string();
+
+        reenqueue_active
+            .key(inflight_set)
+            .key(active_jobs_list)
+            .key(signal_list)
+            .arg(
+                job_ids
+                    .into_iter()
+                    .map(|j| j.to_string())
+                    .collect::<Vec<String>>(),
+            )
+            .invoke_async(&mut conn)
+            .await
+    }
+    /// Re-enqueue some jobs that might be orphaned.
+    pub async fn reenqueue_orphaned(
+        &mut self,
+        count: usize,
+        dead_since: i64,
+    ) -> Result<usize, RedisError> {
+        let reenqueue_orphaned = self.scripts.reenqueue_orphaned.clone();
+        let consumers_set = self.queue.consumers_set.to_string();
+        let active_jobs_list = self.queue.active_jobs_list.to_string();
+        let signal_list = self.queue.signal_list.to_string();
+
+        let res: Result<usize, RedisError> = reenqueue_orphaned
+            .key(consumers_set)
+            .key(active_jobs_list)
+            .key(signal_list)
+            .arg(dead_since)
+            .arg(count)
+            .invoke_async(&mut self.conn)
+            .await;
+        match res {
+            Ok(count) => Ok(count),
+            Err(e) => Err(e),
         }
     }
 }
@@ -902,7 +772,7 @@ mod tests {
 
     async fn consume_one<S, T>(storage: &mut S, worker_id: &WorkerId) -> Request<T>
     where
-        S: Storage<Output = T>,
+        S: Storage<Job = T>,
     {
         let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10), 1);
         stream
@@ -913,10 +783,7 @@ mod tests {
             .expect("no job is pending")
     }
 
-    async fn register_worker_at(
-        storage: &mut RedisStorage<Email>,
-        _last_seen: Timestamp,
-    ) -> WorkerId {
+    async fn register_worker_at(storage: &mut RedisStorage<Email>, _last_seen: i64) -> WorkerId {
         let worker = WorkerId::new("test-worker");
 
         storage
@@ -927,23 +794,25 @@ mod tests {
     }
 
     async fn register_worker(storage: &mut RedisStorage<Email>) -> WorkerId {
-        #[cfg(feature = "chrono")]
-        let now = chrono::Utc::now();
-        #[cfg(feature = "time")]
-        let now = time::OffsetDateTime::now_utc();
+        let now: i64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .try_into()
+            .unwrap();
         register_worker_at(storage, now).await
     }
 
     async fn push_email<S>(storage: &mut S, email: Email)
     where
-        S: Storage<Output = Email>,
+        S: Storage<Job = Email>,
     {
         storage.push(email).await.expect("failed to push a job");
     }
 
     async fn get_job<S>(storage: &mut S, job_id: &JobId) -> Request<Email>
     where
-        S: Storage<Output = Email>,
+        S: Storage<Job = Email>,
     {
         storage
             .fetch_by_id(job_id)
@@ -1021,10 +890,14 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        #[cfg(feature = "chrono")]
-        let six_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(6);
-        #[cfg(feature = "time")]
-        let six_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(6);
+        let now: i64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .try_into()
+            .unwrap();
+
+        let six_minutes_ago = now - Duration::from_secs(6).as_secs().try_into().unwrap();
 
         let worker_id = register_worker_at(&mut storage, six_minutes_ago).await;
 

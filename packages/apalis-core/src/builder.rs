@@ -1,18 +1,25 @@
 use std::marker::PhantomData;
 
-use futures::{Stream, StreamExt};
+use futures::Stream;
 use tower::{
     layer::util::{Identity, Stack},
-    util::{BoxCloneService, BoxService},
     Layer, Service, ServiceBuilder,
 };
 
 use crate::{
-    error::Error, layers::extensions::Data, poller::{controller::Controller, stream::BackendStream}, request::Request, service_fn::service_fn, service_fn::ServiceFn, worker::{ReadyWorker, Worker, WorkerId}, Backend
+    error::Error,
+    layers::extensions::Data,
+    mq::MessageQueue,
+    request::Request,
+    service_fn::service_fn,
+    service_fn::ServiceFn,
+    storage::Storage,
+    worker::{Ready, Worker, WorkerId},
+    Backend,
 };
 
-/// An abstract that allows building a [`Worker`].
-/// Usually the output is [`ReadyWorker`]
+/// Allows building a [`Worker`].
+/// Usually the output is [`Worker<Ready>`]
 pub struct WorkerBuilder<Req, Source, Middleware, Serv> {
     id: WorkerId,
     request: PhantomData<Req>,
@@ -63,7 +70,35 @@ impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
         }
     }
 
-    /// Set the source to a backend that implements [Backend]
+    /// Set the source to a [Storage]
+    pub fn with_storage<NS: Storage<Job = NJ>, NJ>(
+        self,
+        storage: NS,
+    ) -> WorkerBuilder<NJ, NS, M, Serv> {
+        WorkerBuilder {
+            request: PhantomData,
+            layer: self.layer,
+            source: storage,
+            id: self.id,
+            service: self.service,
+        }
+    }
+
+    /// Set the source to a [MessageQueue]
+    pub fn with_mq<NS: MessageQueue<NJ>, NJ>(
+        self,
+        message_queue: NS,
+    ) -> WorkerBuilder<NJ, NS, M, Serv> {
+        WorkerBuilder {
+            request: PhantomData,
+            layer: self.layer,
+            source: message_queue,
+            id: self.id,
+            service: self.service,
+        }
+    }
+
+    /// Set the source to a generic backend that implements only [Backend]
     pub fn source<NS: Backend<Request<NJ>>, NJ>(
         self,
         backend: NS,
@@ -95,7 +130,7 @@ impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
             service: self.service,
         }
     }
-    /// Shorthand for decoration. Allows adding a single layer [tower] middleware
+    /// Allows adding a single layer [tower] middleware
     pub fn layer<U>(self, layer: U) -> WorkerBuilder<Request, Stream, Stack<U, M>, Serv>
     where
         M: Layer<U>,
@@ -108,34 +143,45 @@ impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
             service: self.service,
         }
     }
+
+    /// Adds data to the context
+    /// This will be shared by all requests
+    pub fn data<D>(self, data: D) -> WorkerBuilder<Request, Stream, Stack<Data<D>, M>, Serv>
+    where
+        M: Layer<Data<D>>,
+    {
+        WorkerBuilder {
+            request: self.request,
+            source: self.source,
+            layer: self.layer.layer(Data::new(data)),
+            id: self.id,
+            service: self.service,
+        }
+    }
 }
 
 impl<Req: Send + 'static + Sync, P: Backend<Request<Req>> + 'static, M: 'static, S>
     WorkerFactory<Req, S> for WorkerBuilder<Req, P, M, S>
 where
-    S: Service<Request<Req>> + Send + 'static + Clone,
+    S: Service<Request<Req>> + Send + 'static + Clone + Sync,
     S::Future: Send,
 
     S::Response: 'static,
-    M: Layer<BoxCloneService<Request<Req>, S::Response, S::Error>>,
-    M::Service: Service<Request<Req>> + Send + Clone,
-
-    <M::Service as Service<Request<Req>>>::Future: Send,
-    <M::Service as Service<Request<Req>>>::Error: Send,
-    S::Error: Send,
+    P::Layer: Layer<S>,
+    M: Layer<<P::Layer as Layer<S>>::Service>,
 {
     type Source = P;
 
     type Service = M::Service;
     /// Build a worker, given a tower service
-    fn build(self, service: S) -> Worker<ReadyWorker<Self::Service, P>> {
+    fn build(self, service: S) -> Worker<Ready<Self::Service, P>> {
         let worker_id = self.id;
         let common_layer = self.source.common_layer(worker_id.clone());
         let poller = self.source;
         let middleware = self.layer.layer(common_layer);
         let service = middleware.service(service);
 
-        Worker::new(worker_id, ReadyWorker::new(service, poller))
+        Worker::new(worker_id, Ready::new(service, poller))
     }
 }
 
@@ -144,6 +190,7 @@ pub trait WorkerFactory<J, S> {
     /// The request source for the worker
     type Source;
 
+    /// The service that the worker will run jobs against
     type Service;
     /// Builds a [`WorkerFactory`] using a [`tower`] service
     /// that can be used to generate a new [`Worker`] using the `build` method
@@ -153,25 +200,55 @@ pub trait WorkerFactory<J, S> {
     ///
     /// # Examples
     ///
-    fn build(self, service: S) -> Worker<ReadyWorker<Self::Service, Self::Source>>;
+    fn build(self, service: S) -> Worker<Ready<Self::Service, Self::Source>>;
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
 
 pub trait WorkerFactoryFn<J, F, K> {
-    /// The request source for the worker
+    /// The request source for the [`Worker`]
     type Source;
 
+    /// The service that the worker will run jobs against
     type Service;
-    /// Builds a [`WorkerFactoryFn`] using a [`crate::job_fn::JobFn`] service
-    /// that can be used to generate new [`Worker`] actors using the `build` method
+    /// Builds a [`WorkerFactoryFn`] using [`ServiceFn`]
+    /// that can be used to generate new [`Worker`] using the `build_fn` method
     /// # Arguments
     ///
-    /// * `f` - A tower functional service
+    /// * `f` - A functional service.
     ///
     /// # Examples
     ///
-    fn build_fn(self, f: F) -> Worker<ReadyWorker<Self::Service, Self::Source>>;
+    /// A function can take many forms to allow flexibility
+    /// - An async function with a single argument of the item being processed
+    /// - An async function with an argument of the item being processed plus up-to 16 arguments that are extracted from the request [`Data`]
+    ///
+    /// A function can return:
+    /// - Unit
+    /// - primitive
+    /// - Result<T, E: Error>
+    /// - impl IntoResponse
+    ///
+    /// ```rust
+    /// #[derive(Debug)]
+    /// struct Email;
+    /// #[derive(Debug)]
+    /// struct PgPool;
+    /// # struct PgError;
+    ///
+    /// async fn send_email(email: Email) {
+    ///     // Implementation of the job function
+    ///     // ...
+    /// }
+    ///
+    /// async fn send_email(email: Email, data: Data<PgPool>) -> Result<(), PgError> {
+    ///     // Implementation of the job function?
+    ///     // ...
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    fn build_fn(self, f: F) -> Worker<Ready<Self::Service, Self::Source>>;
 }
 
 impl<J, W, F, K> WorkerFactoryFn<J, F, K> for W
@@ -182,7 +259,7 @@ where
 
     type Service = W::Service;
 
-    fn build_fn(self, f: F) -> Worker<ReadyWorker<Self::Service, Self::Source>> {
+    fn build_fn(self, f: F) -> Worker<Ready<Self::Service, Self::Source>> {
         self.build(service_fn(f))
     }
 }

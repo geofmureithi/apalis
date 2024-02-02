@@ -14,21 +14,11 @@ readme = "../../README.md"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 futures = { version = "0.3", features = ["async-await"] }
-tower = { version = "0.4", features = ["util", "retry", "timeout"] }
+tower = { version = "0.4", features = ["util"], default-features = false }
 pin-project-lite = "0.2.13"
-trait-variant = "0.1.1"
-# tokio = { version = "1", features = ["full"], optional = true }
-async-std = { version = "1", optional = true }
 async-oneshot = "0.5.9"
 thiserror = "1.0.56"
-tracing-futures = { version = "0.2.5", optional = true, default-features = false }
-sentry-core = { version = "0.32.1", optional = true, default-features = false }
-metrics = { version = "0.22", optional = true, default-features = false }
-metrics-exporter-prometheus = { version = "0.13", optional = true, default-features = false }
-ulid = "1.1.0"
-# Needed only for sentry reporting
-uuid = { version = "1.6", optional = true }
-async-stream = "0.3"
+
 
 [dependencies.document-features]
 version = "0.2"
@@ -36,27 +26,7 @@ optional = true
 
 [features]
 default = []
-layers = [
-    "sentry",
-    "prometheus",
-    "trace",
-    "retry",
-    "timeout",
-    "limit",
-    "filter",
-]
-sentry = ["sentry-core", "ulid/uuid", "uuid"]
-prometheus = ["metrics", "metrics-exporter-prometheus"]
-trace = ["tracing-futures/std-future"]
-retry = ["tower/retry"]
-timeout = ["tower/timeout"]
-limit = ["tower/limit"]
-filter = ["tower/filter"]
 docsrs = ["document-features"]
-
-[dependencies.tracing]
-default_features = false
-version = "0.1"
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
@@ -67,5 +37,4 @@ all-features = true
 [dev-dependencies]
 tokio = { version = "1.35.1", features = ["macros", "rt", "sync"] }
 tokio-stream = "0.1.14"
-apalis-core = { path = ".", features = ["trace"] }
 # apalis-sql = { path = "../apalis-sql", features = ["tokio-comp"] }

@@ -25,7 +25,7 @@ impl Job for Notification {
     const NAME: &'static str = "sqlite::Notification";
 }
 
-async fn notification_service(notif: Notification, _ctx: Context) -> Result<(), Error> {
+async fn notification_service(notif: Notification) -> Result<(), Error> {
     println!("Attempting to send notification {}", notif.text);
     tokio::time::sleep(Duration::from_millis(1)).await;
     Ok(())
@@ -40,7 +40,7 @@ impl Job for Document {
     const NAME: &'static str = "postgres::Document";
 }
 
-async fn document_service(doc: Document, _ctx: Context) -> Result<(), Error> {
+async fn document_service(doc: Document) -> Result<(), Error> {
     println!("Attempting to convert {} to pdf", doc.text);
     tokio::time::sleep(Duration::from_millis(1)).await;
     Ok(())
@@ -55,7 +55,7 @@ impl Job for Upload {
     const NAME: &'static str = "mysql::Upload";
 }
 
-async fn upload_service(upload: Upload, _ctx: Context) -> Result<(), Error> {
+async fn upload_service(upload: Upload) -> Result<(), Error> {
     println!("Attempting to upload {} to cloud", upload.url);
     tokio::time::sleep(Duration::from_millis(1)).await;
     Ok(())

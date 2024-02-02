@@ -1,10 +1,12 @@
 use std::error::Error as StdError;
 use thiserror::Error;
 
-/// Convenience type alias
-pub(crate) type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
+use crate::worker::WorkerError;
 
-/// Represents an error that is returned from an job.
+/// Convenience type alias
+pub type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
+
+/// Represents a general error returned by a task or by internals of the platform
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -23,13 +25,20 @@ pub enum Error {
     /// Execution was aborted
     #[error("Execution was aborted")]
     Abort,
-}
 
-/// Represents a [JobStream] error.
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum StreamError {
-    /// An error occurred during streaming.
-    #[error("Broken Pipe: {0}")]
-    BrokenPipe(#[source] BoxDynError),
+    /// Encountered an error during worker execution
+    #[error("Encountered an error during worker execution")]
+    WorkerError(WorkerError),
+
+    #[doc(hidden)]
+    /// Encountered an error during service execution
+    /// This should not be used inside a task function
+    #[error("Encountered an error during service execution")]
+    ServiceError(#[source] BoxDynError),
+
+    #[doc(hidden)]
+    /// Encountered an error during service execution
+    /// This should not be used inside a task function
+    #[error("Encountered an error during streaming")]
+    SourceError(#[source] BoxDynError),
 }

@@ -1,4 +1,4 @@
-use crate::{request::Request, storage::context::Context};
+use apalis_core::request::Request;
 use tracing::{Level, Span};
 
 use super::DEFAULT_MESSAGE_LEVEL;
@@ -63,11 +63,10 @@ impl Default for DefaultMakeSpan {
 }
 
 impl<B> MakeSpan<B> for DefaultMakeSpan {
-    fn make_span(&mut self, req: &Request<B>) -> Span {
+    fn make_span(&mut self, _req: &Request<B>) -> Span {
         // This ugly macro is needed, unfortunately, because `tracing::span!`
         // required the level argument to be static. Meaning we can't just pass
         // `self.level`.
-        let ctx = req.get::<Context>().unwrap();
         let span = Span::current();
         macro_rules! make_span {
             ($level:expr) => {
@@ -75,8 +74,6 @@ impl<B> MakeSpan<B> for DefaultMakeSpan {
                     parent: span,
                     $level,
                     "job",
-                    job_id = ctx.id().to_string(),
-                    current_attempt = ctx.attempts(),
                 )
             };
         }

@@ -40,8 +40,7 @@ impl<T> Notify<T> {
     }
 
     /// Sends a notification of type `T` to the receiver.
-    /// If the channel is full, the notification is silently dropped.
-    pub fn notify(&self, value: T) -> Result<(), TrySendError<T>>{
+    pub fn notify(&self, value: T) -> Result<(), TrySendError<T>> {
         self.sender.clone().try_send(value)
     }
 

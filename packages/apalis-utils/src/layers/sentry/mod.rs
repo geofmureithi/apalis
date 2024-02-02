@@ -7,9 +7,13 @@ use sentry_core::protocol;
 use tower::Layer;
 use tower::Service;
 
-use crate::error::Error;
-use crate::request::Request;
-use crate::storage::job::{Job, JobId};
+use apalis_core::error::Error;
+use apalis_core::request::Request;
+use apalis_core::storage::Job;
+
+use crate::task_id::TaskId;
+
+use crate::attempt::Attempt;
 
 /// Tower Layer that logs Job Details.
 ///
@@ -22,9 +26,9 @@ use crate::storage::job::{Job, JobId};
 /// in the request handler using the [`Scope::set_transaction`](sentry_core::Scope::set_transaction)
 /// method.
 #[derive(Clone, Default, Debug)]
-pub struct SentryJobLayer;
+pub struct SentryLayer;
 
-impl SentryJobLayer {
+impl SentryLayer {
     /// Creates a new Layer that only logs Job details.
     pub fn new() -> Self {
         Self::default()
@@ -40,7 +44,7 @@ pub struct SentryJobService<S> {
     service: S,
 }
 
-impl<S> Layer<S> for SentryJobLayer {
+impl<S> Layer<S> for SentryLayer {
     type Service = SentryJobService<S>;
 
     fn layer(&self, service: S) -> Self::Service {
@@ -48,17 +52,17 @@ impl<S> Layer<S> for SentryJobLayer {
     }
 }
 
-struct JobDetails {
-    job_id: JobId,
+struct Task {
+    id: TaskId,
     current_attempt: i32,
-    job_type: String,
+    namespace: String,
 }
 
 pin_project_lite::pin_project! {
     /// The Future returned from [`SentryJobService`].
     pub struct SentryHttpFuture<F> {
         on_first_poll: Option<(
-            JobDetails,
+            Task,
             sentry_core::TransactionContext
         )>,
         transaction: Option<(
@@ -79,23 +83,20 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let slf = self.project();
         if let Some((job_details, trx_ctx)) = slf.on_first_poll.take() {
-            let jid = job_details.job_id.clone();
+            let jid = job_details.id.clone();
             sentry_core::configure_scope(|scope| {
                 scope.add_event_processor(move |mut event| {
                     event.event_id = uuid::Uuid::from_u128(jid.inner().0);
                     Some(event)
                 });
-                scope.set_tag("job_type", job_details.job_type.to_string());
+                scope.set_tag("namespace", job_details.namespace.to_string());
                 let mut details = std::collections::BTreeMap::new();
-                details.insert(
-                    String::from("job_id"),
-                    job_details.job_id.to_string().into(),
-                );
+                details.insert(String::from("task_id"), job_details.id.to_string().into());
                 details.insert(
                     String::from("current_attempt"),
                     job_details.current_attempt.into(),
                 );
-                scope.set_context("job", sentry_core::protocol::Context::Other(details));
+                scope.set_context("task", sentry_core::protocol::Context::Other(details));
 
                 let transaction: sentry_core::TransactionOrSpan =
                     sentry_core::start_transaction(trx_ctx).into();
@@ -145,11 +146,12 @@ where
         let op = J::NAME;
         let trx_ctx = sentry_core::TransactionContext::new(op, "apalis.job");
         let job_type = std::any::type_name::<J>().to_string();
-        let ctx = request.get::<crate::storage::context::Context>().expect("Missing context");
-        let job_details = JobDetails {
-            job_id: ctx.id().clone(),
-            current_attempt: ctx.attempts(),
-            job_type,
+        let ctx = request.get::<Attempt>().cloned().unwrap_or_default();
+        let task_id = request.get::<TaskId>().unwrap();
+        let job_details = Task {
+            id: task_id.clone(),
+            current_attempt: ctx.current().try_into().unwrap(),
+            namespace: job_type,
         };
 
         SentryHttpFuture {

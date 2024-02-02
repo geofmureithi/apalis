@@ -1,3 +1,4 @@
+use actix_web::rt::signal;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use anyhow::Result;
 use apalis::prelude::*;
@@ -42,10 +43,10 @@ async fn main() -> Result<()> {
         .register_with_count(2, {
             WorkerBuilder::new(format!("tasty-avocado"))
                 .layer(TraceLayer::new())
-                .source(storage)
+                .with_storage(storage)
                 .build_fn(send_email)
         })
-        .run();
+        .run_with_signal(signal::ctrl_c());
 
     future::try_join(http, worker).await?;
     Ok(())

@@ -1,25 +1,22 @@
 use std::marker::PhantomData;
 
-use futures::{future::BoxFuture, FutureExt};
+use futures::{future::BoxFuture, Future, FutureExt};
 use tower::{Layer, Service};
 
-use crate::{error::BoxDynError, request::Request, worker::WorkerId};
-
-/// An error occurred while trying to acknowledge a message.
-#[derive(Debug, thiserror::Error)]
-pub enum AckError {
-    /// Acknowledgement failed
-    #[error("Acknowledgement failed {0}")]
-    NoAck(#[source] BoxDynError),
-}
+use apalis_core::{request::Request, worker::WorkerId};
 
 /// A trait for acknowledging successful processing
-#[trait_variant::make(Ack: Send)]
-pub trait LocalAck<J> {
+pub trait Ack<J> {
     /// The data to fetch from context to allow acknowledgement
     type Acknowledger;
+    /// The error returned by the ack
+    type Error: std::error::Error;
     /// Acknowledges successful processing of the given request
-    async fn ack(&self, worker_id: &WorkerId, data: &Self::Acknowledger) -> Result<(), AckError>;
+    fn ack(
+        &self,
+        worker_id: &WorkerId,
+        data: &Self::Acknowledger,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 /// A layer that acknowledges a job completed successfully
@@ -69,6 +66,17 @@ pub struct AckService<SV, A, J> {
     worker_id: WorkerId,
 }
 
+impl<Sv: Clone, A: Clone, J> Clone for AckService<Sv, A, J> {
+    fn clone(&self) -> Self {
+        Self {
+            ack: self.ack.clone(),
+            job_type: PhantomData,
+            worker_id: self.worker_id.clone(),
+            service: self.service.clone(),
+        }
+    }
+}
+
 impl<SV, A, J> Service<Request<J>> for AckService<SV, A, J>
 where
     SV: Service<Request<J>> + Send + Sync + 'static,
@@ -99,14 +107,15 @@ where
         let fut_with_ack = async move {
             let res = fut.await;
             if let Some(data) = data {
-                if let Err(e) = ack.ack(&worker_id.clone(), &data).await {
-                    tracing::warn!("Acknowledgement Failed: {}", e);
+                if let Err(_e) = ack.ack(&worker_id.clone(), &data).await {
+                    // tracing::warn!("Acknowledgement Failed: {}", e);
+                    // try get monitor, and emit
                 }
             } else {
-                tracing::warn!(
-                    "Acknowledgement could not be called due to missing ack data in context : {}",
-                    &std::any::type_name::<<A as Ack<J>>::Acknowledger>()
-                );
+                // tracing::warn!(
+                //     "Acknowledgement could not be called due to missing ack data in context : {}",
+                //     &std::any::type_name::<<A as Ack<J>>::Acknowledger>()
+                // );
             }
             res
         };

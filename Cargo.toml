@@ -16,32 +16,33 @@ bench = false
 
 [features]
 default = ["tracing", "tokio-comp"]
-## Support Tracing 👀
-tracing = ["apalis-core/trace"]
 
 ## Include redis storage
 redis = ["apalis-redis"]
-# ## Include Postgres storage
-# postgres = ["apalis-sql/postgres"]
+## Include Postgres storage
+postgres = ["apalis-sql/postgres"]
 ## Include SQlite storage
 sqlite = ["apalis-sql/sqlite"]
 # ## Include MySql storage
-# mysql = ["apalis-sql/mysql"]
+mysql = ["apalis-sql/mysql"]
 # ## Include Cron functionality
 cron = ["apalis-cron"]
 
+## Support Tracing 👀
+tracing = ["apalis-utils/trace"]
+
 ## Support for Sentry exception and performance monitoring
-sentry = ["apalis-core/sentry"]
+sentry = ["apalis-utils/sentry"]
 ## Support Prometheus metrics
-prometheus = ["apalis-core/prometheus"]
+prometheus = ["apalis-utils/prometheus"]
 ## Support direct retrying jobs
-retry = ["apalis-core/retry"]
+retry = ["apalis-utils/retry"]
 ## Support timeouts on jobs
-timeout = ["apalis-core/timeout"]
+timeout = ["apalis-utils/timeout"]
 ## 💪 Limit the amount of jobs 
-limit = ["apalis-core/limit"]
+limit = ["apalis-utils/limit"]
 ## Support filtering jobs based on a predicate
-filter = ["apalis-core/filter"]
+filter = ["apalis-utils/filter"]
 ## Compatibility with async-std and smol runtimes
 async-std-comp = [
   "apalis-sql?/async-std-comp",
@@ -110,7 +111,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 apalis-redis = { version = "0.5.0-alpha.0", path = "./packages/apalis-redis" }
 apalis-sql = { version = "0.5.0-alpha.0", path = "./packages/apalis-sql", features = [
   "sqlite",
-  # "postgres", "mysql"
+  "postgres",
+   "mysql"
 ] }
 
 [[bench]]
@@ -129,13 +131,13 @@ members = [
   "examples/redis",
   "examples/actix-web",
   "examples/sqlite",
-  # "examples/sentry",
+  "examples/sentry",
   # "examples/mysql",
-  # "examples/postgres",
-  # "examples/axum",
-  # "examples/prometheus",
-  # "examples/tracing",
+  "examples/postgres",
+  "examples/axum",
+  "examples/prometheus",
+  "examples/tracing",
   # "examples/rest-api",
   "examples/async-std-runtime",
-  # "examples/basics",
+  "examples/basics",
 ]

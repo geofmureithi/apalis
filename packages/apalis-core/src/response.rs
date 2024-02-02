@@ -1,5 +1,6 @@
-use crate::error::Error;
 use std::any::Any;
+
+use crate::error::Error;
 
 /// Helper for Job Responses
 pub trait IntoResponse {
@@ -59,3 +60,4 @@ SIMPLE_JOB_RESULT!(isize);
 SIMPLE_JOB_RESULT!(f32);
 SIMPLE_JOB_RESULT!(f64);
 SIMPLE_JOB_RESULT!(String);
+SIMPLE_JOB_RESULT!(&'static str);

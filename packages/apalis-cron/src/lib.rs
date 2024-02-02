@@ -10,16 +10,15 @@
 //! # apalis-cron
 //! A simple yet extensible library for cron-like job scheduling for rust.
 //! Since `apalis-cron` is build on top of `apalis` which supports tower middlerware, you should be able to easily
-//! add middleware such as tracing, retries, load shed, concurrency etc.
+//! add middleware such as tracing, retries, load-shed, concurrency etc.
 //!
 //! ## Example
 //!
 //! ```rust,no_run
-//! # use apalis_core::layers::retry::RetryLayer;
-//! # use apalis_core::layers::retry::DefaultRetryPolicy;
-//! # use apalis_core::layers::extensions::Data;
+//! # use apalis_utils::layers::retry::RetryLayer;
+//! # use apalis_utils::layers::retry::DefaultRetryPolicy;
+//! # use apalis_core::extensions::Data;
 //! # use apalis_core::service_fn::service_fn;
-//! # use apalis_core::storage::job::Job;
 //! use tower::ServiceBuilder;
 //! use apalis_cron::Schedule;
 //! use std::str::FromStr;
@@ -43,9 +42,6 @@
 //!        Reminder(t)
 //!    }
 //! }
-//! impl Job for Reminder {
-//!     const NAME: &'static str = "reminder::DailyReminder";
-//! }
 //! async fn send_reminder(job: Reminder, svc: Data<FakeService>) {
 //!     svc.execute(job);
 //! }
@@ -55,7 +51,7 @@
 //!     let schedule = Schedule::from_str("@daily").unwrap();
 //!     let worker = WorkerBuilder::new("morning-cereal")
 //!         .layer(RetryLayer::new(DefaultRetryPolicy))
-//!         .layer(Data(FakeService))
+//!         .data(FakeService)
 //!         .stream(CronStream::new(schedule).into_stream())
 //!         .build_fn(send_reminder);
 //!     Monitor::<TokioExecutor>::new()
@@ -68,16 +64,11 @@
 
 use apalis_core::data::Extensions;
 use apalis_core::request::RequestStream;
-use apalis_core::storage::context::Context;
-use apalis_core::storage::job::{Job, JobId};
-use apalis_core::utils::Timer;
 use apalis_core::{error::Error, request::Request};
+use apalis_utils::task_id::TaskId;
 use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
-use futures::stream::BoxStream;
-use futures::{Stream, StreamExt};
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 /// Represents a stream from a cron schedule with a timezone
 #[derive(Clone, Debug)]
@@ -130,7 +121,7 @@ where
                         let to_sleep = to_sleep.to_std().map_err(|e| Error::Failed(e.into()))?;
                         apalis_utils::sleep(to_sleep).await;
                         let mut data = Extensions::new();
-                        data.insert(Context::new(JobId::new()));
+                        data.insert(TaskId::new());
                         yield Ok(Some(Request::new_with_data(J::from(timezone.from_utc_datetime(&Utc::now().naive_utc())), data)));
                     },
                     None => {

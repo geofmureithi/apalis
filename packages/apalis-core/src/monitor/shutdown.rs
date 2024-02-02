@@ -18,7 +18,7 @@ impl Shutdown {
         Shutdown(Arc::new(ShutdownCtx::new()))
     }
 
-    pub(crate) fn shutdown_after<F: Future>(&self, f: F) -> impl Future<Output = F::Output> {
+    pub fn shutdown_after<F: Future>(&self, f: F) -> impl Future<Output = F::Output> {
         let handle = self.clone();
         async move {
             let result = f.await;
@@ -60,11 +60,11 @@ impl ShutdownCtx {
 }
 
 impl Shutdown {
-    pub(crate) fn is_shutting_down(&self) -> bool {
+    pub fn is_shutting_down(&self) -> bool {
         self.0.is_shutting_down()
     }
 
-    pub(crate) fn shutdown(&self) {
+    pub fn shutdown(&self) {
         self.0.shutdown()
     }
 }

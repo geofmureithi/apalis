@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
-apalis = { path = "../../", features = ["sqlite", "limit"] }
+apalis = { path = "../../", features = ["sqlite", "limit", "tracing"] }
 apalis-utils = { path = "../../packages/apalis-utils", features = [
     "tokio-comp",
 ] }

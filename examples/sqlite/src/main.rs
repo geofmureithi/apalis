@@ -1,7 +1,7 @@
 mod job;
 
 use anyhow::Result;
-use apalis::{prelude::*, sqlite::SqliteStorage};
+use apalis::{layers::TraceLayer, prelude::*, sqlite::SqliteStorage};
 use apalis_utils::TokioExecutor;
 use chrono::Utc;
 
@@ -19,7 +19,7 @@ async fn produce_emails(storage: &SqliteStorage<Email>) -> Result<()> {
                     text: "Test background job from apalis".to_string(),
                     subject: "Background email job".to_string(),
                 },
-                (Utc::now() + chrono::Duration::seconds(i)).timestamp(),
+                (Utc::now() + chrono::Duration::seconds(4)).timestamp(),
             )
             .await?;
     }
@@ -41,7 +41,7 @@ async fn produce_notifications(storage: &SqliteStorage<Notification>) -> Result<
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std::env::set_var("RUST_LOG", "debug,sqlx::query=debug");
+    std::env::set_var("RUST_LOG", "debug,sqlx::query=info");
     tracing_subscriber::fmt::init();
 
     let pool = SqlitePool::connect("sqlite::memory:").await?;
@@ -61,14 +61,14 @@ async fn main() -> Result<()> {
     Monitor::<TokioExecutor>::new()
         .register_with_count(2, {
             WorkerBuilder::new(format!("tasty-banana"))
-                // .layer(TraceLayer::new())
-                .source(email_storage)
+                .layer(TraceLayer::new())
+                .with_storage(email_storage)
                 .build_fn(send_email)
         })
         .register_with_count(10, {
             WorkerBuilder::new(format!("tasty-mango"))
-                // .layer(TraceLayer::new())
-                .source(notification_storage)
+                .layer(TraceLayer::new())
+                .with_storage(notification_storage)
                 .build_fn(job::notify)
         })
         .run()

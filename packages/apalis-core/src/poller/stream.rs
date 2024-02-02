@@ -1,20 +1,13 @@
 use std::{
-    marker::PhantomData,
     pin::Pin,
-    sync::{atomic::Ordering, Arc},
+    sync::atomic::Ordering,
     task::{Context, Poll},
 };
 
-use futures::{
-    future::BoxFuture,
-    stream::{FusedStream, FuturesOrdered},
-    Stream, StreamExt,
-};
+use futures::{stream::FusedStream, Stream, StreamExt};
 use pin_project_lite::pin_project;
 
-use crate::{notify::Notify, request::Request, worker::Worker};
-
-use super::{controller::Controller, Ready, STOPPED};
+use super::{controller::Controller, STOPPED};
 
 // Macro for pin projection used in `BackendStream`.
 pin_project! {
@@ -45,6 +38,8 @@ impl<S: Stream<Item = T> + Unpin, T> Stream for BackendStream<S> {
                 Poll::Ready(None) => Poll::Ready(None), // Inner stream is exhausted
                 Poll::Pending => Poll::Pending,
             }
+        } else if this.controller.is_stopped() {
+            Poll::Ready(None)
         } else {
             Poll::Pending
         }
@@ -57,7 +52,7 @@ impl<S: Stream<Item = T> + Unpin, T> Stream for BackendStream<S> {
 
 impl<S: Unpin + Stream> FusedStream for BackendStream<S> {
     fn is_terminated(&self) -> bool {
-        self.controller.state.load(Ordering::SeqCst) == STOPPED
+        self.controller.state.load(Ordering::Relaxed) == STOPPED
     }
 }
 

@@ -1,4 +1,3 @@
-use crate::data::Extensions;
 use crate::layers::extensions::Data;
 use crate::request::Request;
 use crate::response::IntoResponse;
@@ -15,9 +14,9 @@ pub fn service_fn<T, K>(f: T) -> ServiceFn<T, K> {
     ServiceFn { f, k: PhantomData }
 }
 
-/// A [`Job`] implemented by a closure.
+/// An executable service implemented by a closure.
 ///
-/// See [`job_fn`] for more details.
+/// See [`service_fn`] for more details.
 #[derive(Copy, Clone)]
 pub struct ServiceFn<T, K> {
     f: T,
@@ -32,7 +31,7 @@ impl<T, K> fmt::Debug for ServiceFn<T, K> {
     }
 }
 
-/// The Future returned from [`JobFn`] service.
+/// The Future returned from [`ServiceFn`] service.
 pub type FnFuture<F, O, R, E> = Map<F, fn(O) -> std::result::Result<R, E>>;
 
 /// Allows getting some type from the [Request] data
@@ -43,15 +42,9 @@ pub trait FromData: Sized + Clone + Send + Sync + 'static {
     }
 }
 
-impl FromData for Extensions {
-    fn get(data: &crate::data::Extensions) -> Self {
-        data.clone()
-    }
-}
-
 impl<T: Clone + Send + Sync + 'static> FromData for Data<T> {
     fn get(ctx: &crate::data::Extensions) -> Self {
-        Data(ctx.get::<T>().unwrap().clone())
+        Data::new(ctx.get::<T>().unwrap().clone())
     }
 }
 

@@ -22,7 +22,7 @@ pub trait OnResponse<Res> {
     ///
     /// [`Span`]: https://docs.rs/tracing/latest/tracing/span/index.html
     /// [record]: https://docs.rs/tracing/latest/tracing/span/struct.Span.html#method.record
-    /// [`TraceLayer::make_span_with`]: crate::trace::TraceLayer::make_span_with
+    /// [`TraceLayer::make_span_with`]: crate::layers::tracing::TraceLayer::make_span_with
     fn on_response(self, res: &Res, done_in: Duration, span: &Span);
 }
 
@@ -74,7 +74,7 @@ impl DefaultOnResponse {
     /// Defaults to [`Level::DEBUG`].
     ///
     /// [tracing events]: https://docs.rs/tracing/latest/tracing/#events
-    /// [`DefaultMakeSpan::level`]: crate::trace::DefaultMakeSpan::level
+    /// [`DefaultMakeSpan::level`]: crate::layers::tracing::DefaultMakeSpan::level
     pub fn level(mut self, level: Level) -> Self {
         self.level = level;
         self

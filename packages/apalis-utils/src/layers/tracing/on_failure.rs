@@ -1,4 +1,4 @@
-use crate::error::Error;
+use apalis_core::error::Error;
 
 use super::{LatencyUnit, DEFAULT_ERROR_LEVEL};
 
@@ -22,7 +22,7 @@ pub trait OnFailure {
     ///
     /// [`Span`]: https://docs.rs/tracing/latest/tracing/span/index.html
     /// [record]: https://docs.rs/tracing/latest/tracing/span/struct.Span.html#method.record
-    /// [`TraceLayer::make_span_with`]: crate::trace::TraceLayer::make_span_with
+    /// [`TraceLayer::make_span_with`]: crate::layers::tracing::TraceLayer::make_span_with
     fn on_failure(&mut self, error: &Error, latency: Duration, span: &Span);
 }
 
