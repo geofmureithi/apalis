@@ -37,7 +37,7 @@ metrics = { version = "0.22", optional = true, default-features = false }
 metrics-exporter-prometheus = { version = "0.13", optional = true, default-features = false }
 async-trait = { version = "0.1" }
 graceful-shutdown = { version = "0.2", features = ["stream", "tokio-timeout"] }
-ulid = "1.1.0"
+ulid = "1.1.2"
 # Needed only for sentry reporting
 uuid = { version = "1.6", optional = true }
 async-stream = "0.3"
