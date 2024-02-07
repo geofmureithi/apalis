@@ -29,3 +29,4 @@
 
 mod storage;
 pub use storage::RedisStorage;
+pub use storage::connect;

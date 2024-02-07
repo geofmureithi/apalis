@@ -7,6 +7,7 @@ edition = "2021"
 default = ["tokio-comp", "layers", "json"]
 sleep = ["async-timer"]
 tokio-comp = ["tokio"]
+async-std-comp = ["async-std"]
 layers = [
     "sentry",
     "prometheus",
@@ -32,6 +33,7 @@ apalis-core = { version = "0.5.0-alpha.0", path = "../apalis-core" }
 tokio = { version = "1", features = [
     "rt",
 ], default-features = false, optional = true }
+async-std = { version = "1", optional = true }
 tower = { version = "0.4", features = ["util"], default-features = false }
 tracing-futures = { version = "0.2.5", optional = true, default-features = false }
 sentry-core = { version = "0.32.1", optional = true, default-features = false }

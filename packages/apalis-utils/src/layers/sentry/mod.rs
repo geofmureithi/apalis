@@ -31,7 +31,7 @@ pub struct SentryLayer;
 impl SentryLayer {
     /// Creates a new Layer that only logs Job details.
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 }
 

@@ -1,9 +1,10 @@
-use apalis_core::{data::Extensions, request::Request, storage::Job};
+use apalis_core::{data::Extensions, request::Request, storage::Job, worker::WorkerId};
 use apalis_utils::task_id::TaskId;
 use sqlx::{types::chrono::DateTime, Decode, Type};
 
 use crate::context::SqlContext;
 /// Wrapper for [Request]
+#[derive(Debug, Clone)]
 pub struct SqlRequest<T> {
     pub req: T,
     pub context: SqlContext,
@@ -26,7 +27,6 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
     sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
-        use apalis_core::worker::WorkerId;
         use sqlx::Row;
         use std::str::FromStr;
 
@@ -75,7 +75,6 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
     sqlx::FromRow<'r, sqlx::postgres::PgRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
-        use apalis_core::worker::WorkerId;
         use sqlx::Row;
         use std::str::FromStr;
         type Timestamp = i64;
@@ -120,23 +119,22 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
 
 #[cfg(feature = "mysql")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
-impl<'r, T: serde::de::DeserializeOwned> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
+impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx::mysql::MySqlRow>
     for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
-        use apalis_core::{context::JobContext, job::JobId, worker::WorkerId};
         use sqlx::Row;
         use std::str::FromStr;
 
-        use crate::Timestamp;
+        type Timestamp = i64;
 
         let job: T = row.try_get("job")?;
-        let id: JobId =
-            JobId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
+        let id: TaskId =
+            TaskId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut context = JobContext::new(id);
+        let mut context = SqlContext::new(id);
 
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);

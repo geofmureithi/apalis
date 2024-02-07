@@ -94,7 +94,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
     {
-        self.workers.push(worker.run_monitored(&self));
+        self.workers.push(worker.with_monitor(&self));
 
         self
     }
@@ -124,7 +124,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
     {
-        let workers = worker.run_instances_monitored(count, &self);
+        let workers = worker.with_monitor_instances(count, &self);
         self.workers.extend(workers);
         self
     }

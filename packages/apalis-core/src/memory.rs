@@ -9,12 +9,12 @@ use futures::{
     channel::mpsc::{channel, Receiver, Sender},
     Stream, StreamExt,
 };
-use tower::{layer::util::Identity, ServiceBuilder};
 use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+use tower::{layer::util::Identity, ServiceBuilder};
 
 #[derive(Debug)]
 /// An example of the basics of a backend
@@ -106,9 +106,7 @@ impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<T> {
     }
 
     fn poll(self, _worker: WorkerId) -> Poller<Self::Stream> {
-        let stream: Pin<
-            Box<dyn Stream<Item = Result<Option<Request<T>>, crate::error::Error>> + Send>,
-        > = self.inner.map(|r| Ok(Some(Request::new(r)))).boxed();
+        let stream = self.inner.map(|r| Ok(Some(Request::new(r)))).boxed();
         Poller {
             stream: BackendStream::new(stream, self.controller),
             heartbeat: Box::pin(async {}),

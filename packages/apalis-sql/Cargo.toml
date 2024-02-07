@@ -10,26 +10,25 @@ description = "SQL Storage for apalis. Use sqlite, postgres and mysql for backgr
 
 [features]
 default = ["sqlite", "migrate", "postgres"]
-postgres = ["sqlx/postgres", "sqlx/json", "sqlx/chrono"]
+postgres = ["sqlx/postgres", "sqlx/json"]
 sqlite = ["sqlx/sqlite", "sqlx/json"]
 mysql = ["sqlx/mysql", "sqlx/json", "sqlx/bigdecimal"]
 migrate = ["sqlx/migrate", "sqlx/macros"]
-async-std-comp = [
-    "async-std",
-    "sqlx/runtime-async-std-rustls",
-]
+async-std-comp = ["async-std", "sqlx/runtime-async-std-rustls"]
 tokio-comp = ["tokio", "sqlx/runtime-tokio-rustls"]
 
 [dependencies.sqlx]
 version = "0.7.3"
 default-features = false
+features = ["chrono"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 apalis-core = { path = "../../packages/apalis-core", version = "0.5.0-alpha.0", default-features = false }
 apalis-utils = { path = "../../packages/apalis-utils", version = "0.1.0", default-features = false, features = [
-    "sleep", "json"
+    "sleep",
+    "json",
 ] }
 futures = "0.3"
 async-stream = "0.3"

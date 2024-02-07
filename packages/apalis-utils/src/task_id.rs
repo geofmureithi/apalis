@@ -30,7 +30,7 @@ impl Default for TaskId {
 impl FromStr for TaskId {
     type Err = ulid::DecodeError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(TaskId(Ulid::from_str(&s)?))
+        Ok(TaskId(Ulid::from_str(s)?))
     }
 }
 

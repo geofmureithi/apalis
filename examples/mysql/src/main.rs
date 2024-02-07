@@ -1,4 +1,5 @@
 use anyhow::Result;
+use apalis::mysql::MySqlPool;
 use apalis::prelude::*;
 use apalis::{layers::TraceLayer, mysql::MysqlStorage};
 use email_service::{send_email, Email};
@@ -17,25 +18,25 @@ async fn produce_jobs(storage: &MysqlStorage<Email>) -> Result<()> {
     Ok(())
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
     let database_url = std::env::var("DATABASE_URL").expect("Must specify path to db");
+    let pool = MySqlPool::connect(&database_url).await?;
 
-    let mysql: MysqlStorage<Email> = MysqlStorage::connect(database_url).await?;
-    mysql
-        .setup()
-        .await
-        .expect("unable to run migrations for mysql");
+    // Setup migrations
+    MysqlStorage::setup(&pool).await?;
 
+    // Create a storage that consumes `Email`
+    let mysql: MysqlStorage<Email> = MysqlStorage::new(pool);
     produce_jobs(&mysql).await?;
-    Monitor::new()
-        .executor(AsyncStdExecutor::new())
-        .register_with_count(2, move |c| {
-            WorkerBuilder::new(format!("tasty-avocado-{c}"))
+
+    Monitor::new_with_executor(TokioExecutor)
+        .register_with_count(1, {
+            WorkerBuilder::new(format!("tasty-avocado"))
                 .layer(TraceLayer::new())
-                .with_storage(mysql.clone())
+                .with_storage(mysql)
                 .build_fn(send_email)
         })
         .run()

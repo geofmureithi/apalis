@@ -132,7 +132,7 @@ members = [
   "examples/actix-web",
   "examples/sqlite",
   "examples/sentry",
-  # "examples/mysql",
+  "examples/mysql",
   "examples/postgres",
   "examples/axum",
   "examples/prometheus",

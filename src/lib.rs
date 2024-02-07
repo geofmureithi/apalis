@@ -71,6 +71,7 @@
 #[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
 pub mod redis {
     pub use apalis_redis::RedisStorage;
+    pub use apalis_redis::connect;
 }
 
 /// Include the default Sqlite storage
@@ -140,7 +141,6 @@ pub mod utils {
 /// Common imports
 pub mod prelude {
 
-    pub use apalis_utils::*;
     pub use apalis_core::{
         builder::*,
         error::Error,
@@ -151,6 +151,7 @@ pub mod prelude {
         response::IntoResponse,
         service_fn::service_fn,
         storage::*,
-        worker::{Worker, Context, WorkerId},
+        worker::{Context, Worker, WorkerId},
     };
+    pub use apalis_utils::*;
 }

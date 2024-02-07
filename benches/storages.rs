@@ -1,7 +1,11 @@
 use apalis::{layers::Data, prelude::*};
 use apalis_core::storage::{context::Context, job::Job, Storage};
 use apalis_redis::RedisStorage;
-// use apalis_sql::{mysql::MysqlStorage, postgres::PostgresStorage, sqlite::SqliteStorage};
+use apalis_sql::{
+    mysql::{MySqlPool, MysqlStorage},
+    postgres::{PgPool, PostgresStorage},
+    sqlite::{SqlitePool, SqliteStorage},
+};
 use criterion::*;
 use paste::paste;
 use serde::{Deserialize, Serialize};
@@ -75,29 +79,28 @@ async fn handle_test_job(_req: TestJob, _ctx: Data<Context>) -> Result<(), Error
     Ok(())
 }
 
-// define_bench!("sqlite_in_memory", {
-//     let sqlite = SqliteStorage::connect("sqlite::memory:").await.unwrap();
-//     let _ = sqlite.setup().await;
-//     sqlite
-// });
+define_bench!("sqlite_in_memory", {
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    let _ = SqliteStorage::setup(&pool).await;
+    SqliteStorage::new(pool)
+});
 
 define_bench!("redis", {
-    let redis = RedisStorage::connect(env!("REDIS_URL")).await.unwrap();
+    let conn = apalis::redis::connect(env!("REDIS_URL")).await.unwrap();
+    let redis = RedisStorage::new(conn);
     redis
 });
 
-// define_bench!("postgres", {
-//     let pg = PostgresStorage::connect(env!("POSTGRES_URL"))
-//         .await
-//         .unwrap();
-//     let _ = pg.setup().await;
-//     pg
-// });
-// define_bench!("mysql", {
-//     let mysql = MysqlStorage::connect(env!("MYSQL_URL")).await.unwrap();
-//     let _ = mysql.setup().await.unwrap();
-//     mysql
-// });
+define_bench!("postgres", {
+    let pool = PgPool::connect(env!("POSTGRES_URL")).await.unwrap();
+    let _ = PostgresStorage::setup(&pool);
+    PostgresStorage::new(&pool)
+});
+define_bench!("mysql", {
+    let pool = MySqlPool::connect(env!("POSTGRES_URL")).await.unwrap();
+    let _ = MysqlStorage::setup(&pool);
+    MysqlStorage::new(&pool)
+});
 
-criterion_group!(benches, redis);
+criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
 criterion_main!(benches);

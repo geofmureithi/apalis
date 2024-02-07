@@ -33,13 +33,15 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use sqlx::postgres::{PgListener, PgNotification};
 use sqlx::types::chrono::DateTime;
-use sqlx::{PgPool, Pool, Postgres, Row};
+use sqlx::{Pool, Postgres, Row};
 use std::convert::TryInto;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
 type Timestamp = i64;
+
+pub use sqlx::postgres::PgPool;
 
 use crate::from_row::SqlRequest;
 
@@ -149,11 +151,6 @@ impl PostgresStorage<()> {
         Self::migrations().run(pool).await?;
         Ok(())
     }
-
-    /// Create a new [PgPool] instance
-    pub async fn connect<S: Into<String>>(db: S) -> Result<PgPool, sqlx::Error> {
-        PgPool::connect(&db.into()).await
-    }
 }
 
 impl<T: Serialize + DeserializeOwned> PostgresStorage<T> {
@@ -175,6 +172,8 @@ impl<T: Serialize + DeserializeOwned> PostgresStorage<T> {
     }
 }
 
+/// A listener that listens to Postgres notifications
+#[derive(Debug)]
 pub struct PgListen {
     listener: PgListener,
     subscriptions: Vec<(String, PgSubscription)>,
@@ -186,22 +185,25 @@ pub struct PgSubscription {
 }
 
 impl PgListen {
+    /// Build a new listener.
+    ///
+    /// Maintaining a connection can be expensive, its encouraged you only create one [PgListen] and share it with multiple [PostgresStorage]
     pub async fn new(pool: PgPool) -> Result<Self, sqlx::Error> {
-        let mut listener = PgListener::connect_with(&pool).await?;
+        let listener = PgListener::connect_with(&pool).await?;
         Ok(Self {
             listener,
             subscriptions: Vec::new(),
         })
     }
 
-    pub fn subscribe<T: Job>(&mut self) -> PgSubscription {
+    fn subscribe<T: Job>(&mut self) -> PgSubscription {
         let sub = PgSubscription {
             notify: Notify::new(),
         };
         self.subscriptions.push((T::NAME.to_owned(), sub.clone()));
         sub
     }
-
+    /// Start listening to jobs
     pub async fn listen(mut self) -> Result<(), sqlx::Error> {
         let _ = self.listener.listen("apalis::job").await?;
         let mut notification = self.listener.into_stream();
@@ -231,9 +233,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job + 'static> PostgresStorage<T> {
             loop {
                 //  Ideally wait for a job or a tick
                 apalis_utils::sleep(interval).await;
-                // future::race(interval, debounced.next()).await;
                 let tx = pool.clone();
-                // let mut tx = tx.acquire().await.map_err(|e| JobStreamError::BrokenPipe(Box::from(e)))?;
                 let job_type = T::NAME;
                 let fetch_query = "Select * from apalis.get_jobs($1, $2, $3);";
                 let jobs: Vec<SqlRequest<serde_json::Value>> = sqlx::query_as(fetch_query)
@@ -430,6 +430,7 @@ impl<T: Sync> Ack<T> for PostgresStorage<T> {
 }
 
 impl<T> PostgresStorage<T> {
+    /// Kill a job
     pub async fn kill(
         &mut self,
         worker_id: &WorkerId,
@@ -467,6 +468,8 @@ impl<T> PostgresStorage<T> {
             .await?;
         Ok(())
     }
+
+    /// Reenqueue jobs that have been abandoned by their workers
     pub async fn reenqueue_orphaned(&self, count: i32) -> Result<(), sqlx::Error>
     where
         T: Job,

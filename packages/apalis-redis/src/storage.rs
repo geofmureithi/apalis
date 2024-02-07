@@ -1,6 +1,5 @@
 use apalis_core::data::Extensions;
 use apalis_core::error::Error;
-use apalis_core::layers::{CommonLayer, Service, ServiceBuilder};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
@@ -22,8 +21,15 @@ use std::fmt;
 use std::sync::Arc;
 use std::{
     marker::PhantomData,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, SystemTime},
 };
+
+/// Shorthand to create a client and connect
+pub async fn connect<S: IntoConnectionInfo>(redis: S) -> Result<Self, RedisError> {
+    let client = Client::open(redis.into_connection_info()?)?;
+    let conn = client.get_connection_manager().await?;
+    Ok(conn)
+}
 
 const ACTIVE_JOBS_LIST: &str = "{queue}:active";
 const CONSUMERS_SET: &str = "{queue}:consumers";
@@ -68,21 +74,21 @@ struct RedisJob<J> {
     job: J,
 }
 
-impl<T> Into<Request<T>> for RedisJob<T> {
-    fn into(self) -> Request<T> {
+impl<T> From<RedisJob<T>> for Request<T> {
+    fn from(val: RedisJob<T>) -> Self {
         let mut data = Extensions::new();
-        data.insert(self.ctx.id);
-        data.insert(Attempt::new_with_value(self.ctx.attempts));
-        Request::new_with_data(self.job, data)
+        data.insert(val.ctx.id);
+        data.insert(Attempt::new_with_value(val.ctx.attempts));
+        Request::new_with_data(val.job, data)
     }
 }
 
-impl<T> Into<RedisJob<T>> for Request<T> {
-    fn into(self) -> RedisJob<T> {
-        let task_id = self.get::<TaskId>().cloned().unwrap();
-        let attempts = self.get::<Attempt>().cloned().unwrap_or_default();
+impl<T> From<Request<T>> for RedisJob<T> {
+    fn from(val: Request<T>) -> Self {
+        let task_id = val.get::<TaskId>().cloned().unwrap();
+        let attempts = val.get::<Attempt>().cloned().unwrap_or_default();
         RedisJob {
-            job: self.take(),
+            job: val.take(),
             ctx: Context {
                 attempts: attempts.current(),
                 id: task_id,
@@ -98,7 +104,7 @@ struct Context {
 }
 
 #[derive(Clone, Debug)]
-pub struct Config {
+pub(crate) struct Config {
     fetch_interval: Duration,
     buffer_size: usize,
     max_retries: usize,
@@ -119,46 +125,55 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn get_fetch_interval(&self) -> &Duration {
+    /// Get the rate of polling per unit of time
+    pub(crate) fn get_fetch_interval(&self) -> &Duration {
         &self.fetch_interval
     }
 
-    pub fn get_buffer_size(&self) -> usize {
+    /// Get the number of jobs to fetch
+    pub(crate) fn get_buffer_size(&self) -> usize {
         self.buffer_size
     }
 
-    pub fn get_max_retries(&self) -> usize {
+    /// Get the max retries
+    pub(crate) fn get_max_retries(&self) -> usize {
         self.max_retries
     }
 
-    pub fn get_keep_alive(&self) -> &Duration {
+    /// get the keep live rate
+    pub(crate) fn get_keep_alive(&self) -> &Duration {
         &self.keep_alive
     }
 
-    pub fn get_enqueue_scheduled(&self) -> &Duration {
+    ///
+    pub(crate) fn get_enqueue_scheduled(&self) -> &Duration {
         &self.enqueue_scheduled
     }
 
-    pub fn set_fetch_interval(&mut self, fetch_interval: Duration) {
+    pub(crate) fn set_fetch_interval(&mut self, fetch_interval: Duration) {
         self.fetch_interval = fetch_interval;
     }
 
-    pub fn set_buffer_size(&mut self, buffer_size: usize) {
+    pub(crate) fn set_buffer_size(&mut self, buffer_size: usize) {
         self.buffer_size = buffer_size;
     }
 
-    pub fn set_max_retries(&mut self, max_retries: usize) {
+    pub(crate) fn set_max_retries(&mut self, max_retries: usize) {
         self.max_retries = max_retries;
     }
 
-    pub fn set_keep_alive(&mut self, keep_alive: Duration) {
+    pub(crate) fn set_keep_alive(&mut self, keep_alive: Duration) {
         self.keep_alive = keep_alive;
     }
 
-    pub fn set_enqueue_scheduled(&mut self, enqueue_scheduled: Duration) {
+    pub(crate) fn set_enqueue_scheduled(&mut self, enqueue_scheduled: Duration) {
         self.enqueue_scheduled = enqueue_scheduled;
     }
 }
+
+type InnerCodec<T> = Arc<
+    Box<dyn Codec<RedisJob<T>, Vec<u8>, Error = apalis_core::error::Error> + Sync + Send + 'static>,
+>;
 
 /// Represents a [Storage] that uses Redis for storage.
 pub struct RedisStorage<T> {
@@ -168,14 +183,7 @@ pub struct RedisStorage<T> {
     scripts: RedisScript,
     controller: Controller,
     config: Config,
-    codec: Arc<
-        Box<
-            dyn Codec<RedisJob<T>, Vec<u8>, Error = apalis_core::error::Error>
-                + Sync
-                + Send
-                + 'static,
-        >,
-    >,
+    codec: InnerCodec<T>,
 }
 
 impl<T> fmt::Debug for RedisStorage<T> {
@@ -246,13 +254,6 @@ impl<T: Job + Serialize + DeserializeOwned> RedisStorage<T> {
         }
     }
 
-    /// Shorthand to create a client and connect
-    pub async fn connect<S: IntoConnectionInfo>(redis: S) -> Result<Self, RedisError> {
-        let client = Client::open(redis.into_connection_info()?)?;
-        let conn = client.get_connection_manager().await?;
-        Ok(Self::new(conn))
-    }
-
     /// Get current connection
     pub fn get_connection(&self) -> ConnectionManager {
         self.conn.clone()
@@ -276,10 +277,7 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
         let config = self.config.clone();
         let stream: RequestStream<Request<T>> = Box::pin(
             self.stream_jobs(&worker, config.fetch_interval, config.buffer_size)
-                .map_ok(|job| match job {
-                    Some(res) => Some(res.into()),
-                    None => None,
-                })
+                .map_ok(|job| job.map(|res| res.into()))
                 .map_err(|e| Error::SourceError(e.into())),
         );
 
@@ -365,7 +363,7 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
                 match result {
                     Ok(jobs) => {
                         for job in jobs {
-                            yield deserialize_job(&job).map(|res| codec.decode(&res)).map(|res| res.unwrap().into())
+                            yield deserialize_job(&job).map(|res| codec.decode(res)).map(|res| res.unwrap())
                         }
                     },
                     Err(e) => {
@@ -382,7 +380,7 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
 fn deserialize_job(job: &Value) -> Option<&Vec<u8>> {
     let job = match job {
         job @ Value::Data(_) => Some(job),
-        Value::Bulk(val) => val.get(0),
+        Value::Bulk(val) => val.first(),
         _ => {
             error!(
                 "Decoding Message Failed: {:?}",
@@ -508,7 +506,7 @@ where
                 "Invalid data returned by storage",
             ))),
             Some(bytes) => {
-                let inner = self.codec.decode(&bytes).unwrap();
+                let inner = self.codec.decode(bytes).unwrap();
                 Ok(Some(inner.into()))
             }
         }
@@ -543,12 +541,12 @@ where
         let wait: i64 = wait.as_secs().try_into().unwrap();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
         let failed_jobs_set = self.queue.failed_jobs_set.to_string();
-        let _cmd = redis::cmd("SREM")
+        redis::cmd("SREM")
             .arg(inflight_set)
             .arg(job_id.to_string())
             .query_async(&mut conn)
             .await?;
-        let _cmd = redis::cmd("ZADD")
+        redis::cmd("ZADD")
             .arg(failed_jobs_set)
             .arg(on)
             .arg(job_id.to_string())
@@ -593,7 +591,7 @@ impl<T> RedisStorage<T> {
             Some(job) => {
                 let attempt = job.get::<Attempt>().cloned().unwrap_or_default();
                 if attempt.current() >= self.config.max_retries {
-                    let _res = redis::cmd("ZADD")
+                    redis::cmd("ZADD")
                         .arg(failed_jobs_set)
                         .arg(now)
                         .arg(task_id.to_string())

@@ -12,7 +12,6 @@ use pin_project_lite::pin_project;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::fmt::{self, Display};
-use std::io;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -147,7 +146,7 @@ impl<E: Executor + Clone + Send + 'static> Worker<Context<E>> {
 
 impl<S, P> Worker<Ready<S, P>> {
     /// Start a worker with a custom executor
-    pub fn run_with<E, J>(self, executor: E) -> Worker<Context<E>>
+    pub fn with_executor<E, J>(self, executor: E) -> Worker<Context<E>>
     where
         S: Service<Request<J>> + Send + 'static + Clone,
         P: Backend<Request<J>> + 'static,
@@ -159,12 +158,12 @@ impl<S, P> Worker<Ready<S, P>> {
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
     {
-        let instances: Vec<Worker<Context<E>>> = self.run_instances_with(1, executor);
+        let instances: Vec<Worker<Context<E>>> = self.with_executor_instances(1, executor);
         instances.into_iter().nth(0).unwrap()
     }
 
-    /// Run a monitored worker
-    pub fn run_monitored<E, J>(self, monitor: &Monitor<E>) -> Worker<Context<E>>
+    /// Run as a monitored worker
+    pub fn with_monitor<E, J>(self, monitor: &Monitor<E>) -> Worker<Context<E>>
     where
         S: Service<Request<J>> + Send + 'static + Clone,
         P: Backend<Request<J>> + 'static,
@@ -175,12 +174,12 @@ impl<S, P> Worker<Ready<S, P>> {
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
     {
-        let instances: Vec<Worker<Context<E>>> = self.run_instances_monitored(1, monitor);
+        let instances: Vec<Worker<Context<E>>> = self.with_monitor_instances(1, monitor);
         instances.into_iter().nth(0).unwrap()
     }
 
     /// Run a specified amounts of instances
-    pub fn run_instances_monitored<E, J>(
+    pub fn with_monitor_instances<E, J>(
         self,
         instances: usize,
         monitor: &Monitor<E>,
@@ -236,7 +235,11 @@ impl<S, P> Worker<Ready<S, P>> {
     }
 
     /// Run specified worker instances via a specific executor
-    pub fn run_instances_with<E, J>(self, instances: usize, executor: E) -> Vec<Worker<Context<E>>>
+    pub fn with_executor_instances<E, J>(
+        self,
+        instances: usize,
+        executor: E,
+    ) -> Vec<Worker<Context<E>>>
     where
         S: Service<Request<J>> + Send + 'static + Clone,
         P: Backend<Request<J>> + 'static,
@@ -500,7 +503,14 @@ impl<E: Executor + Send + Clone + 'static> Future for Context<E> {
 mod tests {
     use std::{io, ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
-    use apalis_utils::TokioExecutor;
+    #[derive(Debug, Clone)]
+    struct TokioTestExecutor;
+
+    impl Executor for TokioTestExecutor {
+        fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
+            tokio::spawn(future);
+        }
+    }
 
     use crate::{
         builder::{WorkerBuilder, WorkerFactoryFn},
@@ -546,7 +556,7 @@ mod tests {
             .data(Count::default())
             .source(backend);
         let worker = worker.build_fn(task);
-        let worker = worker.run_with(TokioExecutor);
+        let worker = worker.with_executor(TokioTestExecutor);
         let w = worker.clone();
 
         tokio::spawn(async move {

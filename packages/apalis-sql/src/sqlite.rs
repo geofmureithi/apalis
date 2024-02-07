@@ -1,3 +1,4 @@
+use crate::context::SqlContext;
 use crate::Config;
 
 use apalis_core::error::Error;
@@ -15,7 +16,7 @@ use async_stream::try_stream;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::sqlite::SqliteQueryResult;
-use sqlx::{Decode, Pool, Row, Sqlite, SqlitePool, Type};
+use sqlx::{Decode, Pool, Row, Sqlite, Type};
 use std::convert::TryInto;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -23,6 +24,7 @@ use std::{marker::PhantomData, ops::Add, time::Duration};
 
 use crate::from_row::SqlRequest;
 
+pub use sqlx::sqlite::SqlitePool;
 /// Represents a [Storage] that persists to Sqlite
 // #[derive(Debug)]
 pub struct SqliteStorage<T> {
@@ -49,18 +51,18 @@ impl<T> Clone for SqliteStorage<T> {
 impl SqliteStorage<()> {
     /// Perform migrations for storage
     #[cfg(feature = "migrate")]
-    pub async fn setup(pool: Pool<Sqlite>) -> Result<(), sqlx::Error> {
+    pub async fn setup(pool: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
         sqlx::query("PRAGMA journal_mode = 'WAL';")
-            .execute(&pool)
+            .execute(pool)
             .await?;
-        sqlx::query("PRAGMA temp_store = 2;").execute(&pool).await?;
+        sqlx::query("PRAGMA temp_store = 2;").execute(pool).await?;
         sqlx::query("PRAGMA synchronous = NORMAL;")
-            .execute(&pool)
+            .execute(pool)
             .await?;
         sqlx::query("PRAGMA cache_size = 64000;")
-            .execute(&pool)
+            .execute(pool)
             .await?;
-        Self::migrations().run(&pool).await?;
+        Self::migrations().run(pool).await?;
         Ok(())
     }
 
@@ -82,12 +84,6 @@ impl<T: Job + Serialize + DeserializeOwned> SqliteStorage<T> {
             codec: Arc::new(Box::new(JsonCodec)),
         }
     }
-    /// Connect to a database given a url
-    pub async fn connect<S: Into<String>>(db: S) -> Result<Self, sqlx::Error> {
-        let pool = SqlitePool::connect(&db.into()).await?;
-        Ok(Self::new(pool))
-    }
-
     /// Keeps a storage notified that the worker is still alive manually
     pub async fn keep_alive_at<Service>(
         &mut self,
@@ -372,35 +368,28 @@ where
     }
 
     async fn update(&self, job: Request<Self::Job>) -> Result<(), Self::Error> {
-        // let pool = self.pool.clone();
-        // let status = job.status().as_ref().to_string();
-        // let attempts = job.attempts();
-        // let done_at = (*job.done_at()).map(|v| v.timestamp());
-        // let lock_by = job.lock_by().clone();
-        // #[cfg(feature = "chrono")]
-        // let lock_at = (*job.lock_at()).map(|v| v.timestamp());
-        // #[cfg(all(not(feature = "chrono"), feature = "time"))]
-        // let lock_at = (*job.lock_at()).map(|v| v.unix_timestamp());
-        // let last_error = job.last_error().clone();
-
-        // let mut tx = pool
-        //     .acquire()
-        //     .await
-        //     .map_err(|e| StorageError::Database(Box::from(e)))?;
-        // let query =
-        //         "UPDATE Jobs SET status = ?1, attempts = ?2, done_at = ?3, lock_by = ?4, lock_at = ?5, last_error = ?6 WHERE id = ?7";
-        // sqlx::query(query)
-        //     .bind(status.to_owned())
-        //     .bind(attempts)
-        //     .bind(done_at)
-        //     .bind(lock_by.map(|w| w.name().to_string()))
-        //     .bind(lock_at)
-        //     .bind(last_error)
-        //     .bind(job_id.to_string())
-        //     .execute(&mut *tx)
-        //     .await
-        //     .map_err(|e| StorageError::Database(Box::from(e)))?;
-        todo!();
+        let pool = self.pool.clone();
+        let ctx = job.get::<SqlContext>().unwrap();
+        let status = ctx.status().to_string();
+        let attempts = ctx.attempts();
+        let done_at = *ctx.done_at();
+        let lock_by = ctx.lock_by().clone();
+        let lock_at = *ctx.lock_at();
+        let last_error = ctx.last_error().clone();
+        let job_id = ctx.id();
+        let mut tx = pool.acquire().await?;
+        let query =
+                "UPDATE Jobs SET status = ?1, attempts = ?2, done_at = ?3, lock_by = ?4, lock_at = ?5, last_error = ?6 WHERE id = ?7";
+        sqlx::query(query)
+            .bind(status.to_owned())
+            .bind::<i64>(attempts.current().try_into().unwrap())
+            .bind(done_at)
+            .bind(lock_by.map(|w| w.name().to_string()))
+            .bind(lock_at)
+            .bind(last_error)
+            .bind(job_id.to_string())
+            .execute(&mut *tx)
+            .await?;
         Ok(())
     }
 
