@@ -355,7 +355,7 @@ where
 
         let query = "Select Count(*) as count from Jobs where status='Pending'";
         let record = sqlx::query(query).fetch_one(&pool).await?;
-        Ok(record.try_get("count")?)
+        record.try_get("count")
     }
 
     async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), Self::Error> {

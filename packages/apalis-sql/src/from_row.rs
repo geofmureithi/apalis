@@ -10,14 +10,14 @@ pub struct SqlRequest<T> {
     pub (crate) context: SqlContext,
 }
 
-impl<T> Into<Request<T>> for SqlRequest<T> {
-    fn into(self) -> Request<T> {
+impl<T> From<SqlRequest<T>> for Request<T> {
+    fn from(val: SqlRequest<T>) -> Self {
         let mut data = Extensions::new();
-        data.insert(self.context.id().clone());
-        data.insert(self.context.attempts().clone());
-        data.insert(self.context);
+        data.insert(val.context.id().clone());
+        data.insert(val.context.attempts().clone());
+        data.insert(val.context);
 
-        Request::new_with_data(self.req, data)
+        Request::new_with_data(val.req, data)
     }
 }
 
@@ -48,10 +48,10 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
         context.set_max_attempts(max_attempts);
 
         let done_at: Option<i64> = row.try_get("done_at").unwrap_or_default();
-        context.set_done_at(done_at.map(|c| c.into()));
+        context.set_done_at(done_at);
 
         let lock_at: Option<i64> = row.try_get("lock_at").unwrap_or_default();
-        context.set_lock_at(lock_at.map(|c| c.into()));
+        context.set_lock_at(lock_at);
 
         let last_error = row.try_get("last_error").unwrap_or_default();
         context.set_last_error(last_error);

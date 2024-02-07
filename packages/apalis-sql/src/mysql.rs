@@ -127,7 +127,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
                     .bind(job_type)
                     .bind(u32::try_from(buffer_size).unwrap())
                     .fetch_all(&mut *tx).await.unwrap();
-                if task_ids.len() == 0 {
+                if task_ids.is_empty() {
                     tx.rollback().await?;
                     yield None
                 } else {
@@ -257,7 +257,7 @@ where
 
         let query = "Select Count(*) as count from jobs where status='Pending'";
         let record = sqlx::query(query).fetch_one(&pool).await?;
-        Ok(record.try_get("count")?)
+        record.try_get("count")
     }
 
     async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), sqlx::Error> {

@@ -221,7 +221,7 @@ impl PgListen {
     }
     /// Start listening to jobs
     pub async fn listen(mut self) -> Result<(), sqlx::Error> {
-        let _ = self.listener.listen("apalis::job").await?;
+        self.listener.listen("apalis::job").await?;
         let mut notification = self.listener.into_stream();
         while let Some(Ok(res)) = notification.next().await {
             let _: Vec<_> = self
@@ -369,7 +369,7 @@ where
         let pool = self.pool.clone();
         let query = "Select Count(*) as count from apalis.jobs where status='Pending'";
         let record = sqlx::query(query).fetch_one(&pool).await?;
-        Ok(record.try_get("count")?)
+        record.try_get("count")
     }
 
     async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), sqlx::Error> {
