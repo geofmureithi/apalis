@@ -90,7 +90,7 @@ async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
-    let redis = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
+    let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
     let storage = RedisStorage::new(redis).await?;
     Monitor::new()
         .register_with_count(2, {

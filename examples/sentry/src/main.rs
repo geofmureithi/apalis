@@ -136,7 +136,7 @@ async fn main() -> Result<()> {
 
     Monitor::<TokioExecutor>::new()
         .register_with_count(2, {
-            WorkerBuilder::new(format!("tasty-avocado"))
+            WorkerBuilder::new("tasty-avocado")
                 .layer(NewSentryLayer::new_from_top())
                 .layer(SentryLayer::new())
                 .layer(TraceLayer::new())

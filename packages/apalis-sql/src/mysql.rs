@@ -151,10 +151,10 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
                 let jobs: Vec<SqlRequest<Value>> = query.fetch_all(&pool).await.unwrap();
 
                     for job in jobs {
-                        yield Some(SqlRequest {
+                        yield Some(Into::into(SqlRequest {
                             context: job.context,
                             req: self.codec.decode(&job.req).unwrap(),
-                        }).map(Into::into)
+                        }))
     
                     }
                 } 

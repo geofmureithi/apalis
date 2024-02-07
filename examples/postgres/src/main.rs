@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
 
     Monitor::<TokioExecutor>::new()
         .register_with_count(4, {
-            WorkerBuilder::new(format!("tasty-orange"))
+            WorkerBuilder::new("tasty-orange")
                 .layer(TraceLayer::new())
                 .layer(RetryLayer::new(RetryPolicy::retries(5)))
                 .with_storage(pg.clone())

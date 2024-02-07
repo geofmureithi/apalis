@@ -72,13 +72,19 @@ impl AsyncStdExecutor {
 
 impl Executor for AsyncStdExecutor {
     fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) {
-        async_std::task::spawn(async { fut.await });
+        async_std::task::spawn(fut);
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ReminderSpan {
     level: Level,
+}
+
+impl Default for ReminderSpan {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ReminderSpan {

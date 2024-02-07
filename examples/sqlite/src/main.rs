@@ -60,13 +60,13 @@ async fn main() -> Result<()> {
 
     Monitor::<TokioExecutor>::new()
         .register_with_count(2, {
-            WorkerBuilder::new(format!("tasty-banana"))
+            WorkerBuilder::new("tasty-banana")
                 .layer(TraceLayer::new())
                 .with_storage(email_storage)
                 .build_fn(send_email)
         })
         .register_with_count(10, {
-            WorkerBuilder::new(format!("tasty-mango"))
+            WorkerBuilder::new("tasty-mango")
                 .layer(TraceLayer::new())
                 .with_storage(notification_storage)
                 .build_fn(job::notify)

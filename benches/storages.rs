@@ -1,5 +1,5 @@
-use apalis::{layers::Data, prelude::*};
-use apalis_core::storage::{context::Context, job::Job, Storage};
+use apalis::prelude::*;
+use apalis_core::storage::{Job, Storage};
 use apalis_redis::RedisStorage;
 use apalis_sql::{
     mysql::{MySqlPool, MysqlStorage},
@@ -9,10 +9,7 @@ use apalis_sql::{
 use criterion::*;
 use paste::paste;
 use serde::{Deserialize, Serialize};
-use std::{
-    future::Future,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 macro_rules! define_bench {
     ($name:expr, $setup:expr ) => {
@@ -75,7 +72,7 @@ impl Job for TestJob {
     const NAME: &'static str = "TestJob";
 }
 
-async fn handle_test_job(_req: TestJob, _ctx: Data<Context>) -> Result<(), Error> {
+async fn handle_test_job(_req: TestJob) -> Result<(), Error> {
     Ok(())
 }
 
@@ -94,12 +91,12 @@ define_bench!("redis", {
 define_bench!("postgres", {
     let pool = PgPool::connect(env!("POSTGRES_URL")).await.unwrap();
     let _ = PostgresStorage::setup(&pool);
-    PostgresStorage::new(&pool)
+    PostgresStorage::new(pool)
 });
 define_bench!("mysql", {
     let pool = MySqlPool::connect(env!("POSTGRES_URL")).await.unwrap();
     let _ = MysqlStorage::setup(&pool);
-    MysqlStorage::new(&pool)
+    MysqlStorage::new(pool)
 });
 
 criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);

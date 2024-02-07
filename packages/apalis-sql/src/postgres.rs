@@ -261,10 +261,10 @@ impl<T: DeserializeOwned + Send + Unpin + Job + 'static> PostgresStorage<T> {
                     .await?;
                 for job in jobs {
 
-                    yield Some(SqlRequest {
+                    yield Some(Into::into(SqlRequest {
                         context: job.context,
                         req: codec.decode(&job.req).unwrap(),
-                    }).map(Into::into)
+                    }))
                 }
 
             }

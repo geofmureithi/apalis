@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
     let monitor = async {
         Monitor::<TokioExecutor>::new()
             .register_with_count(2, {
-                WorkerBuilder::new(format!("tasty-pear"))
+                WorkerBuilder::new("tasty-pear")
                     .layer(TraceLayer::new())
                     .with_storage(storage.clone())
                     .build_fn(send_email)
