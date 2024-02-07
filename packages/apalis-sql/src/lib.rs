@@ -46,8 +46,10 @@
 
 use std::time::Duration;
 
+/// The context of the sql job
 pub mod context;
-mod from_row;
+/// Util for fetching rows
+pub mod from_row;
 
 /// Postgres storage for apalis. Uses `NOTIFY` and `SKIP LOCKED`
 #[cfg(feature = "postgres")]
@@ -65,6 +67,7 @@ pub mod sqlite;
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;
 
+/// Config for sql storages
 #[derive(Debug, Clone)]
 pub struct Config {
     keep_alive: Duration,

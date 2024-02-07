@@ -15,7 +15,6 @@ use axum::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::io;
-use std::time::Duration;
 use std::{fmt::Debug, io::Error, net::SocketAddr};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 

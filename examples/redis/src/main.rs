@@ -1,10 +1,6 @@
 use std::{
-    future::Future,
     ops::Deref,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::{atomic::AtomicUsize, Arc},
     time::Duration,
 };
 

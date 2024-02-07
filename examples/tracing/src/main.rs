@@ -7,7 +7,7 @@ use tracing_subscriber::prelude::*;
 
 use apalis::{
     layers::tracing::TraceLayer,
-    prelude::{Context, Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
+    prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
     redis::RedisStorage,
     utils::TokioExecutor,
 };

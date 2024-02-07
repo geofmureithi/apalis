@@ -103,8 +103,9 @@ struct Context {
     attempts: usize,
 }
 
+/// Config for a [RedisStorage]
 #[derive(Clone, Debug)]
-pub(crate) struct Config {
+pub struct Config {
     fetch_interval: Duration,
     buffer_size: usize,
     max_retries: usize,
@@ -126,47 +127,52 @@ impl Default for Config {
 
 impl Config {
     /// Get the rate of polling per unit of time
-    pub(crate) fn get_fetch_interval(&self) -> &Duration {
+    pub fn get_fetch_interval(&self) -> &Duration {
         &self.fetch_interval
     }
 
     /// Get the number of jobs to fetch
-    pub(crate) fn get_buffer_size(&self) -> usize {
+    pub fn get_buffer_size(&self) -> usize {
         self.buffer_size
     }
 
     /// Get the max retries
-    pub(crate) fn get_max_retries(&self) -> usize {
+    pub fn get_max_retries(&self) -> usize {
         self.max_retries
     }
 
     /// get the keep live rate
-    pub(crate) fn get_keep_alive(&self) -> &Duration {
+    pub fn get_keep_alive(&self) -> &Duration {
         &self.keep_alive
     }
 
-    ///
-    pub(crate) fn get_enqueue_scheduled(&self) -> &Duration {
+    /// get the enqueued setting
+    pub fn get_enqueue_scheduled(&self) -> &Duration {
         &self.enqueue_scheduled
     }
 
-    pub(crate) fn set_fetch_interval(&mut self, fetch_interval: Duration) {
+    /// get the fetch interval
+    pub fn set_fetch_interval(&mut self, fetch_interval: Duration) {
         self.fetch_interval = fetch_interval;
     }
 
-    pub(crate) fn set_buffer_size(&mut self, buffer_size: usize) {
+    /// set the buffer setting
+    pub fn set_buffer_size(&mut self, buffer_size: usize) {
         self.buffer_size = buffer_size;
     }
 
-    pub(crate) fn set_max_retries(&mut self, max_retries: usize) {
+    /// set the max-retries setting
+    pub fn set_max_retries(&mut self, max_retries: usize) {
         self.max_retries = max_retries;
     }
 
-    pub(crate) fn set_keep_alive(&mut self, keep_alive: Duration) {
+    /// set the keep-alive setting
+    pub fn set_keep_alive(&mut self, keep_alive: Duration) {
         self.keep_alive = keep_alive;
     }
 
-    pub(crate) fn set_enqueue_scheduled(&mut self, enqueue_scheduled: Duration) {
+    /// get the enqueued setting
+    pub fn set_enqueue_scheduled(&mut self, enqueue_scheduled: Duration) {
         self.enqueue_scheduled = enqueue_scheduled;
     }
 }

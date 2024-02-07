@@ -15,11 +15,12 @@ use apalis_core::{Backend, Codec};
 use async_stream::try_stream;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
-use sqlx::{Decode, Pool, Row, Sqlite};
+use sqlx::{Pool, Row, Sqlite};
 use std::convert::TryInto;
+use std::fmt;
 use std::sync::Arc;
 use std::time::SystemTime;
-use std::{marker::PhantomData, ops::Add, time::Duration};
+use std::{marker::PhantomData, time::Duration};
 
 use crate::from_row::SqlRequest;
 
@@ -32,6 +33,22 @@ pub struct SqliteStorage<T> {
     controller: Controller,
     config: Config,
     codec: Arc<Box<dyn Codec<T, String, Error = Error> + Sync + Send + 'static>>,
+}
+
+impl<T> fmt::Debug for SqliteStorage<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MysqlStorage")
+            .field("pool", &self.pool)
+            .field("job_type", &"PhantomData<T>")
+            .field("controller", &self.controller)
+            .field("config", &self.config)
+            .field(
+                "codec",
+                &"Arc<Box<dyn Codec<T, String, Error = Error> + Sync + Send + 'static>>",
+            )
+            // .field("ack_notify", &self.ack_notify)
+            .finish()
+    }
 }
 
 impl<T> Clone for SqliteStorage<T> {

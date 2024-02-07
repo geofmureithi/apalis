@@ -28,6 +28,7 @@ impl<S> Layer<S> for LogLayer {
 
 // Example layer service
 // This service implements the Log behavior
+#[derive(Debug, Clone)]
 pub struct LogService<S> {
     target: &'static str,
     service: S,

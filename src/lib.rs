@@ -108,6 +108,7 @@ pub mod layers;
 
 /// Utilities for working with apalis
 pub mod utils {
+    /// Executor for [`tokio`]
     #[cfg(feature = "tokio-comp")]
     #[derive(Clone, Debug, Default)]
     pub struct TokioExecutor;
@@ -119,6 +120,7 @@ pub mod utils {
         }
     }
 
+    /// Executor for [`async_std`]
     #[cfg(feature = "async-std-comp")]
     #[derive(Clone, Debug, Default)]
     pub struct AsyncStdExecutor;

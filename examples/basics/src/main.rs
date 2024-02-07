@@ -100,6 +100,7 @@ async fn main() -> Result<(), std::io::Error> {
         .register_with_count(2, {
             WorkerBuilder::new(format!("tasty-banana"))
                 .layer(TraceLayer::new())
+                .layer(LogLayer::new("some-log-example"))
                 // Add shared context to all jobs executed by this worker
                 .data(EmailService::new())
                 .data(ValidEmailCache::new())

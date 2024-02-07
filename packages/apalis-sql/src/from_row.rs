@@ -6,8 +6,8 @@ use crate::context::SqlContext;
 /// Wrapper for [Request]
 #[derive(Debug, Clone)]
 pub struct SqlRequest<T> {
-    pub req: T,
-    pub context: SqlContext,
+    pub (crate) req: T,
+    pub (crate) context: SqlContext,
 }
 
 impl<T> Into<Request<T>> for SqlRequest<T> {

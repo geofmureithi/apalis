@@ -3,7 +3,7 @@ use apalis_core::task::{attempt::Attempt, task_id::TaskId};
 use apalis_core::worker::WorkerId;
 use serde::{Deserialize, Serialize};
 use sqlx::types::chrono::{DateTime, Utc};
-use std::{fmt, str::FromStr, time::SystemTime};
+use std::{fmt, str::FromStr};
 
 /// The context for a job is represented here
 /// Used to provide a context when a job is defined through the [Job] trait
@@ -23,12 +23,6 @@ pub struct SqlContext {
 impl SqlContext {
     /// Build a new context with defaults given an ID.
     pub fn new(id: TaskId) -> Self {
-        let now: i64 = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .try_into()
-            .unwrap();
         SqlContext {
             id,
             status: State::Pending,

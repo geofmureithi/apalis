@@ -15,12 +15,11 @@ use crate::Config;
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
 use apalis_core::layers::{Ack, AckLayer};
-use apalis_core::layers::{CommonLayer, Service, ServiceBuilder};
 use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
-use apalis_core::request::{BoxStream, Request, RequestStream};
+use apalis_core::request::{Request, RequestStream};
 use apalis_core::storage::{Job, Storage};
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
@@ -28,13 +27,12 @@ use apalis_core::{Backend, Codec};
 use async_stream::try_stream;
 use futures::{FutureExt, Stream};
 use futures::{StreamExt, TryStreamExt};
-use futures_lite::future;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::Value;
-use sqlx::postgres::{PgListener, PgNotification};
+use sqlx::postgres::{PgListener};
 use sqlx::types::chrono::DateTime;
 use sqlx::{Pool, Postgres, Row};
 use std::convert::TryInto;
+use std::fmt;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::{marker::PhantomData, ops::Add, time::Duration};
@@ -73,6 +71,22 @@ impl<T> Clone for PostgresStorage<T> {
             controller: self.controller.clone(),
             ack_notify: self.ack_notify.clone(),
         }
+    }
+}
+
+impl<T> fmt::Debug for PostgresStorage<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MysqlStorage")
+            .field("pool", &self.pool)
+            .field("job_type", &"PhantomData<T>")
+            .field("controller", &self.controller)
+            .field("config", &self.config)
+            .field(
+                "codec",
+                &"Arc<Box<dyn Codec<T, serde_json::Value, Error = Error> + Sync + Send + 'static>>",
+            )
+            .field("ack_notify", &self.ack_notify)
+            .finish()
     }
 }
 
@@ -179,6 +193,7 @@ pub struct PgListen {
     subscriptions: Vec<(String, PgSubscription)>,
 }
 
+/// A postgres subscription
 #[derive(Debug, Clone)]
 pub struct PgSubscription {
     notify: Notify<()>,
@@ -196,7 +211,8 @@ impl PgListen {
         })
     }
 
-    fn subscribe<T: Job>(&mut self) -> PgSubscription {
+    /// Add a new subscription
+    pub fn subscribe<T: Job>(&mut self) -> PgSubscription {
         let sub = PgSubscription {
             notify: Notify::new(),
         };
@@ -208,7 +224,7 @@ impl PgListen {
         let _ = self.listener.listen("apalis::job").await?;
         let mut notification = self.listener.into_stream();
         while let Some(Ok(res)) = notification.next().await {
-            let subs: Vec<_> = self
+            let _: Vec<_> = self
                 .subscriptions
                 .iter()
                 .filter(|s| s.0 == res.payload())

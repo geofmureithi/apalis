@@ -389,7 +389,7 @@ impl<T: Sync> Ack<T> for MysqlStorage<T> {
 
 impl<T: Job> MysqlStorage<T> {
     /// Kill a job
-    async fn kill(&mut self, worker_id: &WorkerId, job_id: &TaskId) -> Result<(), sqlx::Error> {
+    pub async fn kill(&mut self, worker_id: &WorkerId, job_id: &TaskId) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
 
         let mut tx = pool.acquire().await?;
@@ -404,7 +404,7 @@ impl<T: Job> MysqlStorage<T> {
     }
 
     /// Puts the job instantly back into the queue
-    async fn retry(&mut self, worker_id: &WorkerId, job_id: &TaskId) -> Result<(), sqlx::Error> {
+    pub async fn retry(&mut self, worker_id: &WorkerId, job_id: &TaskId) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
 
         let mut tx = pool.acquire().await?;
@@ -418,7 +418,8 @@ impl<T: Job> MysqlStorage<T> {
         Ok(())
     }
 
-    async fn reenqueue_orphaned(&self, timeout: i64) -> Result<bool, sqlx::Error> {
+    /// Readd jobs that are abandoned to the queue
+    pub async fn reenqueue_orphaned(&self, timeout: i64) -> Result<bool, sqlx::Error> {
         let job_type = T::NAME;
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update jobs

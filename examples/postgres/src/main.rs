@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use anyhow::Result;
 use apalis::layers::retry::RetryPolicy;
 use apalis::postgres::PgPool;
