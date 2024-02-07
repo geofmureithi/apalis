@@ -1,22 +1,21 @@
 use crate::context::SqlContext;
 use crate::Config;
 
+use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
+use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
 use apalis_core::request::{Request, RequestStream};
 use apalis_core::storage::{Job, Storage};
+use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
-use apalis_utils::codec::json::JsonCodec;
-use apalis_utils::layers::ack::{Ack, AckLayer};
-use apalis_utils::task_id::TaskId;
 use async_stream::try_stream;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
-use sqlx::sqlite::SqliteQueryResult;
-use sqlx::{Decode, Pool, Row, Sqlite, Type};
+use sqlx::{Decode, Pool, Row, Sqlite};
 use std::convert::TryInto;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -149,7 +148,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
         let codec = self.codec.clone();
         try_stream! {
             loop {
-                apalis_utils::sleep(interval).await;
+                apalis_core::sleep(interval).await;
                 let tx = pool.clone();
                 let mut tx = tx.acquire().await?;
                 let job_type = T::NAME;
@@ -425,7 +424,7 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
                     .unwrap();
 
                 self.keep_alive_at::<T>(&worker, now).await.unwrap();
-                apalis_utils::sleep(Duration::from_secs(30)).await;
+                apalis_core::sleep(Duration::from_secs(30)).await;
             }
         }
         .boxed();

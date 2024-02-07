@@ -23,26 +23,26 @@ redis = ["apalis-redis"]
 postgres = ["apalis-sql/postgres"]
 ## Include SQlite storage
 sqlite = ["apalis-sql/sqlite"]
-# ## Include MySql storage
+## Include MySql storage
 mysql = ["apalis-sql/mysql"]
-# ## Include Cron functionality
+## Include Cron functionality
 cron = ["apalis-cron"]
 
 ## Support Tracing 👀
-tracing = ["apalis-utils/trace"]
+tracing = ["dep:tracing", "dep:tracing-futures"]
 
 ## Support for Sentry exception and performance monitoring
-sentry = ["apalis-utils/sentry"]
+sentry = ["sentry-core", "ulid?/uuid", "uuid"]
 ## Support Prometheus metrics
-prometheus = ["apalis-utils/prometheus"]
+prometheus = ["metrics", "metrics-exporter-prometheus"]
 ## Support direct retrying jobs
-retry = ["apalis-utils/retry"]
+retry = ["tower/retry"]
 ## Support timeouts on jobs
-timeout = ["apalis-utils/timeout"]
+timeout = ["tower/timeout"]
 ## 💪 Limit the amount of jobs 
-limit = ["apalis-utils/limit"]
+limit = ["tower/limit"]
 ## Support filtering jobs based on a predicate
-filter = ["apalis-utils/filter"]
+filter = ["tower/filter"]
 ## Compatibility with async-std and smol runtimes
 async-std-comp = [
   "apalis-sql?/async-std-comp",
@@ -54,12 +54,18 @@ tokio-comp = [
   "apalis-sql?/tokio-comp",
   "apalis-redis?/tokio-comp",
   "apalis-cron?/tokio-comp",
-  "apalis-utils/tokio-comp",
+  "tokio",
 ]
 
-
-docsrs = ["document-features"]
-
+layers = [
+  "sentry",
+  "prometheus",
+  "tracing",
+  "retry",
+  "timeout",
+  "limit",
+  "filter",
+]
 
 [dependencies.apalis-redis]
 version = "0.5.0-alpha.0"
@@ -85,12 +91,6 @@ optional = true
 default-features = false
 path = "./packages/apalis-cron"
 
-[dependencies.apalis-utils]
-version = "0.1.0"
-default-features = false
-path = "./packages/apalis-utils"
-optional = true
-
 [dependencies.document-features]
 version = "0.2"
 optional = true
@@ -112,7 +112,7 @@ apalis-redis = { version = "0.5.0-alpha.0", path = "./packages/apalis-redis" }
 apalis-sql = { version = "0.5.0-alpha.0", path = "./packages/apalis-sql", features = [
   "sqlite",
   "postgres",
-   "mysql"
+  "mysql",
 ] }
 
 [[bench]]
@@ -121,7 +121,6 @@ harness = false
 
 [workspace]
 members = [
-  "packages/apalis-utils",
   "packages/apalis-core",
   "packages/apalis-redis",
   "packages/apalis-sql",
@@ -141,3 +140,27 @@ members = [
   "examples/async-std-runtime",
   "examples/basics",
 ]
+
+
+[dependencies]
+tokio = { version = "1", features = [
+  "rt",
+], default-features = false, optional = true }
+async-std = { version = "1", optional = true }
+tower = { version = "0.4", features = ["util"], default-features = false }
+tracing-futures = { version = "0.2.5", optional = true, default-features = false }
+sentry-core = { version = "0.32.1", optional = true, default-features = false }
+metrics = { version = "0.22", optional = true, default-features = false }
+metrics-exporter-prometheus = { version = "0.13", optional = true, default-features = false }
+thiserror = "1"
+futures = "0.3"
+pin-project-lite = "0.2.13"
+# Needed only for sentry reporting
+uuid = { version = "1.6", optional = true }
+ulid = { version = "1", optional = true }
+serde = { version = "1.0", features = ["derive"] }
+
+[dependencies.tracing]
+default_features = false
+version = "0.1"
+optional = true

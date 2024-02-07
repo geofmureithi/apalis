@@ -6,7 +6,7 @@ use std::time::Duration;
 use tracing_subscriber::prelude::*;
 
 use apalis::{
-    layers::TraceLayer,
+    layers::tracing::TraceLayer,
     prelude::{Context, Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
     redis::RedisStorage,
     utils::TokioExecutor,
@@ -62,9 +62,10 @@ async fn main() -> Result<()> {
         .with(fmt_layer)
         .init();
 
-    let storage = RedisStorage::connect(redis_url)
+    let conn = apalis::redis::connect(redis_url)
         .await
         .expect("Could not connect to RedisStorage");
+    let storage = RedisStorage::new(conn);
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 

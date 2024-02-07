@@ -3,14 +3,10 @@ use std::{future::Future, str::FromStr, time::Duration};
 use anyhow::Result;
 use apalis::{
     cron::{CronStream, Schedule},
-    layers::{Data, RetryLayer, RetryPolicy, TraceLayer},
+    layers::{retry::RetryLayer, retry::RetryPolicy, tracing::MakeSpan, tracing::TraceLayer},
     prelude::*,
 };
-use apalis_utils::{
-    attempt::Attempt,
-    layers::tracing::{DefaultMakeSpan, MakeSpan},
-    task_id::TaskId,
-};
+
 use chrono::{DateTime, Utc};
 use tracing::{debug, info, Instrument, Level, Span};
 
@@ -26,7 +22,7 @@ impl From<DateTime<Utc>> for Reminder {
 }
 
 async fn send_in_background(reminder: Reminder) {
-    apalis_utils::sleep(Duration::from_secs(2)).await;
+    apalis_core::sleep(Duration::from_secs(2)).await;
     debug!("Called at {reminder:?}");
 }
 async fn send_reminder(reminder: Reminder, worker: WorkerCtx) -> bool {

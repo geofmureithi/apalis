@@ -59,6 +59,12 @@ pub mod poller;
 /// In-memory utilities for testing and mocking
 pub mod memory;
 
+/// Task management utilities
+pub mod task;
+
+/// Codec for handling data
+pub mod codec;
+
 /// A backend represents a task source
 /// Both [`Storage`] and [`MessageQueue`] need to implement it for workers to be able to consume tasks
 ///
@@ -91,6 +97,13 @@ pub trait Codec<T, Compact> {
 
     /// Decode back to our request type
     fn decode(&self, compact: &Compact) -> Result<T, Self::Error>;
+}
+
+/// Sleep utilities
+#[cfg(feature = "sleep")]
+pub async fn sleep(duration: std::time::Duration) {
+    let mut interval = async_timer::Interval::platform_new(duration);
+    interval.wait().await;
 }
 
 #[cfg(test)]

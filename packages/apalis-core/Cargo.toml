@@ -18,15 +18,21 @@ tower = { version = "0.4", features = ["util"], default-features = false }
 pin-project-lite = "0.2.13"
 async-oneshot = "0.5.9"
 thiserror = "1.0.56"
-
+ulid = { version = "1.1.0", default-features = false, features = ["std"] }
+async-timer = { version = "1.0.0-beta.11", optional = true, default-features = false }
+# Needed for the codec
+serde_json = { version = "1", optional = true }
 
 [dependencies.document-features]
 version = "0.2"
 optional = true
 
+
 [features]
 default = []
 docsrs = ["document-features"]
+sleep = ["async-timer"]
+json = ["serde_json"]
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
@@ -37,4 +43,3 @@ all-features = true
 [dev-dependencies]
 tokio = { version = "1.35.1", features = ["macros", "rt", "sync"] }
 tokio-stream = "0.1.14"
-# apalis-sql = { path = "../apalis-sql", features = ["tokio-comp"] }

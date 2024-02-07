@@ -5,9 +5,9 @@ mod service;
 use std::time::Duration;
 
 use apalis::{
-    layers::{Data, TraceLayer},
+    layers::tracing::TraceLayer,
     prelude::*,
-    sqlite::SqliteStorage,
+    sqlite::{SqlitePool, SqliteStorage},
 };
 
 use email_service::Email;
@@ -89,12 +89,11 @@ async fn send_email(
 async fn main() -> Result<(), std::io::Error> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
-
-    let sqlite: SqliteStorage<Email> = SqliteStorage::connect("sqlite::memory:").await.unwrap();
-    SqliteStorage::setup(sqlite.pool().clone())
+    let pool = SqlitePool::connect("sqlite::memory").await.unwrap();
+    SqliteStorage::setup(&pool)
         .await
         .expect("unable to run migrations for sqlite");
-
+    let sqlite: SqliteStorage<Email> = SqliteStorage::new(pool);
     produce_jobs(&sqlite).await;
 
     Monitor::<TokioExecutor>::new()

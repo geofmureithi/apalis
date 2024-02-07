@@ -15,7 +15,8 @@
 //! # use apalis_utils::TokioExecutor;
 //! #[tokio::main]
 //! async fn main() -> std::io::Result<()> {
-//!     let storage = RedisStorage::connect("redis://localhost").await.unwrap();
+//!     let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+//!     let storage = RedisStorage::new(conn);
 //!     Monitor::<TokioExecutor>::new()
 //!        .register(
 //!            WorkerBuilder::new("tasty-pear")

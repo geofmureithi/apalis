@@ -37,7 +37,8 @@
 //! #[tokio::main]
 //! async fn main() {
 //!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
-//!     let storage = RedisStorage::connect(redis).await.expect("Storage failed");
+//!     let conn = apalis::redis::connect(redis).await?;
+//!     let storage = RedisStorage::new(conn);
 //!     Monitor::<TokioExecutor>::new()
 //!         .register_with_count(2, {
 //!             WorkerBuilder::new(&format!("quick-sand"))
@@ -70,8 +71,8 @@
 #[cfg(feature = "redis")]
 #[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
 pub mod redis {
-    pub use apalis_redis::RedisStorage;
     pub use apalis_redis::connect;
+    pub use apalis_redis::RedisStorage;
 }
 
 /// Include the default Sqlite storage
@@ -103,55 +104,55 @@ pub mod cron {
 }
 
 /// apalis fully supports middleware via [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html)
-pub mod layers {
-    #[cfg(feature = "retry")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
-    pub use apalis_utils::layers::retry::RetryLayer;
-
-    #[cfg(feature = "retry")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
-    pub use apalis_utils::layers::retry::RetryPolicy;
-
-    #[cfg(feature = "tracing")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "tracing")))]
-    pub use apalis_utils::layers::tracing::{Trace, TraceLayer};
-
-    #[cfg(feature = "limit")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "limit")))]
-    pub use apalis_utils::layers::limit::RateLimitLayer;
-
-    pub use apalis_core::layers::extensions::Data;
-
-    #[cfg(feature = "sentry")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "sentry")))]
-    pub use apalis_utils::layers::sentry::SentryLayer;
-
-    #[cfg(feature = "prometheus")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "prometheus")))]
-    pub use apalis_utils::layers::prometheus::PrometheusLayer;
-}
+pub mod layers;
 
 /// Utilities for working with apalis
 pub mod utils {
     #[cfg(feature = "tokio-comp")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "tokio-comp")))]
-    pub use apalis_utils::TokioExecutor;
+    #[derive(Clone, Debug, Default)]
+    pub struct TokioExecutor;
+
+    #[cfg(feature = "tokio-comp")]
+    impl apalis_core::executor::Executor for TokioExecutor {
+        fn spawn(&self, future: impl std::future::Future<Output = ()> + Send + 'static) {
+            tokio::spawn(future);
+        }
+    }
+
+    #[cfg(feature = "async-std-comp")]
+    #[derive(Clone, Debug, Default)]
+    pub struct AsyncStdExecutor;
+
+    #[cfg(feature = "async-std-comp")]
+    impl apalis_core::executor::Executor for AsyncStdExecutor {
+        fn spawn(&self, future: impl std::future::Future<Output = ()> + Send + 'static) {
+            async_std::task::spawn(future);
+        }
+    }
 }
 
 /// Common imports
 pub mod prelude {
-
+    pub use crate::utils::TokioExecutor;
     pub use apalis_core::{
-        builder::*,
-        error::Error,
-        executor::*,
-        layers::extensions::Data,
-        monitor::Monitor,
-        request::Request,
+        builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
+        data::Extensions,
+        error::{BoxDynError, Error},
+        executor::Executor,
+        layers::extensions::{AddExtension, Data},
+        memory::{MemoryStorage, MemoryWrapper},
+        monitor::{Monitor, MonitorContext},
+        mq::{Message, MessageQueue},
+        notify::Notify,
+        poller::stream::BackendStream,
+        poller::{controller::Controller, FetchNext, Poller},
+        request::{Request, RequestStream},
         response::IntoResponse,
-        service_fn::service_fn,
-        storage::*,
-        worker::{Context, Worker, WorkerId},
+        service_fn::{service_fn, FromData, ServiceFn},
+        storage::{Job, Storage, StorageStream},
+        task::attempt::Attempt,
+        task::task_id::TaskId,
+        worker::{Context, Event, Ready, Worker, WorkerError, WorkerId},
+        Backend, Codec,
     };
-    pub use apalis_utils::*;
 }

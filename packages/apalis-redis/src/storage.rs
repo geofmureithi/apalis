@@ -1,16 +1,16 @@
+use apalis_core::codec::json::JsonCodec;
 use apalis_core::data::Extensions;
 use apalis_core::error::Error;
+use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
 use apalis_core::request::{Request, RequestStream};
 use apalis_core::storage::{Job, Storage};
+use apalis_core::task::attempt::Attempt;
+use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
-use apalis_utils::attempt::Attempt;
-use apalis_utils::codec::json::JsonCodec;
-use apalis_utils::layers::ack::{Ack, AckLayer};
-use apalis_utils::task_id::TaskId;
 use async_stream::try_stream;
 use futures::{FutureExt, TryStreamExt};
 use log::*;
@@ -25,7 +25,7 @@ use std::{
 };
 
 /// Shorthand to create a client and connect
-pub async fn connect<S: IntoConnectionInfo>(redis: S) -> Result<Self, RedisError> {
+pub async fn connect<S: IntoConnectionInfo>(redis: S) -> Result<ConnectionManager, RedisError> {
     let client = Client::open(redis.into_connection_info()?)?;
     let conn = client.get_connection_manager().await?;
     Ok(conn)
@@ -284,7 +284,7 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
         let keep_alive = async move {
             loop {
                 storage.keep_alive(&worker).await.unwrap();
-                apalis_utils::sleep(config.keep_alive).await;
+                apalis_core::sleep(config.keep_alive).await;
             }
         }
         .boxed();
@@ -292,7 +292,7 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
         let enqueue_scheduled = async move {
             loop {
                 storage.enqueue_scheduled(config.buffer_size).await.unwrap();
-                apalis_utils::sleep(config.enqueue_scheduled).await;
+                apalis_core::sleep(config.enqueue_scheduled).await;
             }
         }
         .boxed();
@@ -350,7 +350,7 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
         let codec = self.codec.clone();
         Box::pin(try_stream! {
             loop {
-                apalis_utils::sleep(interval).await;
+                apalis_core::sleep(interval).await;
                 let result = fetch_jobs
                     .key(&consumers_set)
                     .key(&active_jobs_list)
@@ -730,21 +730,18 @@ impl<T> RedisStorage<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use apalis_core::context::HasJobContext;
-    use apalis_core::request::State;
     use email_service::Email;
-    use futures::StreamExt;
+
+    use super::*;
 
     /// migrate DB and return a storage instance.
     async fn setup() -> RedisStorage<Email> {
-        let redis_url = &std::env::var("REDIS_URL").expect("No REDIS_URL is specified");
+        let redis_url = std::env::var("REDIS_URL").expect("No REDIS_URL is specified");
         // Because connections cannot be shared across async runtime
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
-        let storage = RedisStorage::connect(redis_url.as_str())
-            .await
-            .expect("failed to connect DB server");
+        let conn = connect(redis_url).await.unwrap();
+        let storage = RedisStorage::new(conn);
         storage
     }
 

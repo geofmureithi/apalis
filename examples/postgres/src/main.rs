@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use apalis::layers::RetryPolicy;
+use apalis::layers::retry::RetryPolicy;
+use apalis::postgres::PgPool;
 use apalis::prelude::*;
-use apalis::{layers::TraceLayer, postgres::PostgresStorage};
+use apalis::{layers::tracing::TraceLayer, postgres::PostgresStorage};
 use email_service::{send_email, Email};
 use tower::retry::RetryLayer;
 use tracing::{debug, info};
@@ -31,7 +32,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let database_url = std::env::var("DATABASE_URL").expect("Must specify path to db");
 
-    let pool = PostgresStorage::connect(database_url).await?;
+    let pool = PgPool::connect(&database_url).await?;
     PostgresStorage::setup(&pool)
         .await
         .expect("unable to run migrations for postgres");

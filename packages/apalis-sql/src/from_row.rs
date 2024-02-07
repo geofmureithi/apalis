@@ -1,5 +1,5 @@
-use apalis_core::{data::Extensions, request::Request, storage::Job, worker::WorkerId};
-use apalis_utils::task_id::TaskId;
+use apalis_core::task::task_id::TaskId;
+use apalis_core::{data::Extensions, request::Request, worker::WorkerId};
 use sqlx::{types::chrono::DateTime, Decode, Type};
 
 use crate::context::SqlContext;

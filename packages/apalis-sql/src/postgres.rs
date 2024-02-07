@@ -12,7 +12,9 @@
 
 use crate::context::SqlContext;
 use crate::Config;
+use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
+use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::layers::{CommonLayer, Service, ServiceBuilder};
 use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
@@ -20,11 +22,9 @@ use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
 use apalis_core::request::{BoxStream, Request, RequestStream};
 use apalis_core::storage::{Job, Storage};
+use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
-use apalis_utils::codec::json::JsonCodec;
-use apalis_utils::layers::ack::{Ack, AckLayer};
-use apalis_utils::task_id::TaskId;
 use async_stream::try_stream;
 use futures::{FutureExt, Stream};
 use futures::{StreamExt, TryStreamExt};
@@ -114,7 +114,7 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
                     .execute(&pool)
                     .await
                     .unwrap();
-                apalis_utils::sleep(config.poll_interval).await;
+                apalis_core::sleep(config.poll_interval).await;
             }
         };
         let heartbeat = async move {
@@ -128,7 +128,7 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
                 self.keep_alive_at::<Self::Layer>(&worker, now)
                     .await
                     .unwrap();
-                apalis_utils::sleep(config.keep_alive).await;
+                apalis_core::sleep(config.keep_alive).await;
             }
         }
         .boxed();
@@ -232,7 +232,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job + 'static> PostgresStorage<T> {
         try_stream! {
             loop {
                 //  Ideally wait for a job or a tick
-                apalis_utils::sleep(interval).await;
+                apalis_core::sleep(interval).await;
                 let tx = pool.clone();
                 let job_type = T::NAME;
                 let fetch_query = "Select * from apalis.get_jobs($1, $2, $3);";

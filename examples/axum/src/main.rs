@@ -5,7 +5,7 @@
 //! ```
 use anyhow::Result;
 use apalis::prelude::*;
-use apalis::{layers::TraceLayer, redis::RedisStorage};
+use apalis::{layers::tracing::TraceLayer, redis::RedisStorage};
 use axum::{
     extract::Form,
     http::StatusCode,
@@ -56,7 +56,8 @@ async fn main() -> Result<()> {
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    let storage: RedisStorage<Email> = RedisStorage::connect("redis://127.0.0.1/").await?;
+    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+    let storage = RedisStorage::new(conn);
     // build our application with some routes
     let app = Router::new()
         .route("/", get(show_form).post(add_new_job::<Email>))

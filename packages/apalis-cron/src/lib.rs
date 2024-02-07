@@ -64,8 +64,8 @@
 
 use apalis_core::data::Extensions;
 use apalis_core::request::RequestStream;
+use apalis_core::task::task_id::TaskId;
 use apalis_core::{error::Error, request::Request};
-use apalis_utils::task_id::TaskId;
 use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
 use std::marker::PhantomData;
@@ -119,7 +119,7 @@ where
                     Some(next) => {
                         let to_sleep = next - timezone.from_utc_datetime(&Utc::now().naive_utc());
                         let to_sleep = to_sleep.to_std().map_err(|e| Error::Failed(e.into()))?;
-                        apalis_utils::sleep(to_sleep).await;
+                        apalis_core::sleep(to_sleep).await;
                         let mut data = Extensions::new();
                         data.insert(TaskId::new());
                         yield Ok(Some(Request::new_with_data(J::from(timezone.from_utc_datetime(&Utc::now().naive_utc())), data)));

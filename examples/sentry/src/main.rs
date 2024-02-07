@@ -7,7 +7,7 @@ use tracing_subscriber::prelude::*;
 
 use anyhow::Result;
 use apalis::{
-    layers::{SentryLayer, TraceLayer},
+    layers::{sentry::SentryLayer, tracing::TraceLayer},
     prelude::*,
     redis::RedisStorage,
 };
@@ -129,9 +129,8 @@ async fn main() -> Result<()> {
         .with(sentry_tracing::layer())
         .init();
 
-    let storage = RedisStorage::connect(redis_url)
-        .await
-        .expect("Could not connect to RedisStorage");
+    let conn = apalis::redis::connect(redis_url).await?;
+    let storage = RedisStorage::new(conn);
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 

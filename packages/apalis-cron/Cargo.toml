@@ -9,10 +9,11 @@ description = "A simple yet extensible library for cron-like job scheduling for 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.5.0-alpha.0" }
-apalis-utils = { path = "../../packages/apalis-utils", version = "0.1.0", default-features = false, features = [
+apalis-core = { path = "../../packages/apalis-core", version = "0.5.0-alpha.0", default-features = false, features = [
     "sleep",
+    "json",
 ] }
+
 cron = "0.12.0"
 futures = "0.3"
 tower = { version = "0.4" }
@@ -26,7 +27,7 @@ async-std = { version = "1.12.0", optional = true }
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
 apalis-core = { path = "../../packages/apalis-core" }
-apalis-utils = { path = "../../packages/apalis-utils", features = ["retry"] }
+apalis = { path = "../../", default-features = false, features = ["retry"] }
 serde = { version = "1.0", features = ["derive"] }
 
 [features]

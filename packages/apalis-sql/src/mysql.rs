@@ -7,9 +7,9 @@ use apalis_core::request::{Request, RequestStream};
 use apalis_core::storage::{Job, Storage};
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
-use apalis_utils::codec::json::JsonCodec;
-use apalis_utils::layers::ack::{Ack, AckLayer};
-use apalis_utils::task_id::TaskId;
+use apalis_core::codec::json::JsonCodec;
+use apalis_core::layers::{Ack, AckLayer};
+use apalis_core::task::task_id::TaskId;
 use async_stream::try_stream;
 use futures::{Stream, StreamExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
@@ -117,7 +117,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
         try_stream! {
             let pool = pool.clone();
             loop {
-                apalis_utils::sleep(interval).await;
+                apalis_core::sleep(interval).await;
                 let pool = pool.clone();
                 let job_type = T::NAME;
                 let mut tx = pool.begin().await?;
@@ -351,7 +351,7 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
                     query = query.bind(i);
                 }
                 query.execute(&pool).await.unwrap();
-                apalis_utils::sleep(config.poll_interval).await;
+                apalis_core::sleep(config.poll_interval).await;
             }
         };
 
@@ -362,7 +362,7 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
                     .keep_alive_at::<Self::Layer>(&worker, now)
                     .await
                     .unwrap();
-                apalis_utils::sleep(config.keep_alive).await;
+                apalis_core::sleep(config.keep_alive).await;
             }
         };
         Poller::new(stream, async {

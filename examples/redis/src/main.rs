@@ -9,9 +9,9 @@ use std::{
 };
 
 use anyhow::Result;
-use apalis::{layers::Data, prelude::*};
-use apalis_redis::RedisStorage;
-use apalis_utils::TokioExecutor;
+use apalis::prelude::*;
+use apalis::redis::RedisStorage;
+use apalis::utils::TokioExecutor;
 use email_service::{send_email, Email};
 use tracing::info;
 
@@ -44,13 +44,14 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let storage = RedisStorage::connect("redis://127.0.0.1/").await?;
+    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+    let storage = RedisStorage::new(conn);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
         .chain(|svc| svc.timeout(Duration::from_millis(500)))
-        .layer(Data::new(Count::default()))
+        .data(Count::default())
         .with_storage(storage)
         .build_fn(send_email);
 

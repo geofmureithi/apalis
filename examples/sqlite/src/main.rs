@@ -1,8 +1,8 @@
 mod job;
 
 use anyhow::Result;
-use apalis::{layers::TraceLayer, prelude::*, sqlite::SqliteStorage};
-use apalis_utils::TokioExecutor;
+use apalis::{layers::tracing::TraceLayer, prelude::*, sqlite::SqliteStorage};
+use apalis::utils::TokioExecutor;
 use chrono::Utc;
 
 use email_service::{send_email, Email};
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
 
     let pool = SqlitePool::connect("sqlite::memory:").await?;
     // Do migrations: Mainly for "sqlite::memory:"
-    SqliteStorage::setup(pool.clone())
+    SqliteStorage::setup(&pool)
         .await
         .expect("unable to run migrations for sqlite");
 
