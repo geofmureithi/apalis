@@ -64,7 +64,7 @@ async fn upload_service(upload: Upload) -> Result<(), Error> {
 #[derive(Serialize)]
 struct JobsResult<J> {
     jobs: Vec<Request<J>>,
-    counts: JobStateCount,
+    counts: StateCount,
 }
 #[derive(Deserialize)]
 struct Filter {

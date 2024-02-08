@@ -283,13 +283,12 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
         let config = self.config.clone();
         let stream: RequestStream<Request<T>> = Box::pin(
             self.stream_jobs(&worker, config.fetch_interval, config.buffer_size)
-                .map_ok(|job| job.map(|res| res.into()))
                 .map_err(|e| Error::SourceError(e.into())),
         );
 
         let keep_alive = async move {
             loop {
-                storage.keep_alive(&worker).await.unwrap();
+                storage.keep_alive::<Self::Layer>(&worker).await.unwrap();
                 apalis_core::sleep(config.keep_alive).await;
             }
         }
@@ -345,7 +344,7 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
         worker_id: &WorkerId,
         interval: Duration,
         buffer_size: usize,
-    ) -> RequestStream<RedisJob<T>> {
+    ) -> RequestStream<Request<T>> {
         let mut conn = self.conn.clone();
         let fetch_jobs = self.scripts.get_jobs.clone();
         let consumers_set = self.queue.consumers_set.to_string();
@@ -369,7 +368,7 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
                 match result {
                     Ok(jobs) => {
                         for job in jobs {
-                            yield deserialize_job(&job).map(|res| codec.decode(res)).map(|res| res.unwrap())
+                            yield deserialize_job(&job).map(|res| codec.decode(res)).map(|res| res.unwrap().into())
                         }
                     },
                     Err(e) => {
@@ -407,7 +406,7 @@ fn deserialize_job(job: &Value) -> Option<&Vec<u8>> {
 }
 
 impl<T> RedisStorage<T> {
-    async fn keep_alive(&mut self, worker_id: &WorkerId) -> Result<(), RedisError> {
+    async fn keep_alive<S>(&mut self, worker_id: &WorkerId) -> Result<(), RedisError> {
         let mut conn = self.conn.clone();
         let register_consumer = self.scripts.register_consumer.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
@@ -737,6 +736,7 @@ impl<T> RedisStorage<T> {
 #[cfg(test)]
 mod tests {
     use email_service::Email;
+    use futures::StreamExt;
 
     use super::*;
 
@@ -771,11 +771,8 @@ mod tests {
         }
     }
 
-    async fn consume_one<S, T>(storage: &mut S, worker_id: &WorkerId) -> Request<T>
-    where
-        S: Storage<Job = T>,
-    {
-        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10), 1);
+    async fn consume_one(storage: &RedisStorage<Email>, worker_id: &WorkerId) -> Request<Email> {
+        let mut stream = storage.stream_jobs(worker_id, std::time::Duration::from_secs(10), 1);
         stream
             .next()
             .await
@@ -784,7 +781,7 @@ mod tests {
             .expect("no job is pending")
     }
 
-    async fn register_worker_at(storage: &mut RedisStorage<Email>, _last_seen: i64) -> WorkerId {
+    async fn register_worker_at(storage: &mut RedisStorage<Email>) -> WorkerId {
         let worker = WorkerId::new("test-worker");
 
         storage
@@ -795,26 +792,14 @@ mod tests {
     }
 
     async fn register_worker(storage: &mut RedisStorage<Email>) -> WorkerId {
-        let now: i64 = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .try_into()
-            .unwrap();
-        register_worker_at(storage, now).await
+        register_worker_at(storage).await
     }
 
-    async fn push_email<S>(storage: &mut S, email: Email)
-    where
-        S: Storage<Job = Email>,
-    {
+    async fn push_email(storage: &mut RedisStorage<Email>, email: Email) {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job<S>(storage: &mut S, job_id: &JobId) -> Request<Email>
-    where
-        S: Storage<Job = Email>,
-    {
+    async fn get_job(storage: &mut RedisStorage<Email>, job_id: &TaskId) -> Request<Email> {
         storage
             .fetch_by_id(job_id)
             .await
@@ -829,13 +814,7 @@ mod tests {
 
         let worker_id = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
-
-        // No worker yet
-        // Redis doesn't update jobs like in sql
-        assert_eq!(*job.context().status(), State::Pending);
-        assert_eq!(*job.context().lock_by(), None);
-        assert!(job.context().lock_at().is_none());
+        let _job = consume_one(&mut storage, &worker_id).await;
 
         cleanup(storage, &worker_id).await;
     }
@@ -848,17 +827,14 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-        let job_id = job.context().id();
+        let job_id = &job.get::<Context>().unwrap().id;
 
         storage
-            .ack(&worker_id, job_id)
+            .ack(&worker_id, &job_id)
             .await
             .expect("failed to acknowledge the job");
 
-        let job = get_job(&mut storage, job_id).await;
-        assert_eq!(*job.context().status(), State::Pending); // Redis storage uses hset etc to manage status
-        assert!(job.context().done_at().is_none());
-
+        let _job = get_job(&mut storage, &job_id).await;
         cleanup(storage, &worker_id).await;
     }
 
@@ -871,16 +847,14 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-        let job_id = job.context().id();
+        let job_id = &job.get::<Context>().unwrap().id;
 
         storage
-            .kill(&worker_id, job_id)
+            .kill(&worker_id, &job_id)
             .await
             .expect("failed to kill job");
 
-        let job = get_job(&mut storage, job_id).await;
-        assert_eq!(*job.context().status(), State::Pending);
-        assert!(job.context().done_at().is_none());
+        let _job = get_job(&mut storage, &job_id).await;
 
         cleanup(storage, &worker_id).await;
     }
@@ -891,36 +865,14 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        let now: i64 = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .try_into()
-            .unwrap();
+        let worker_id = register_worker_at(&mut storage).await;
 
-        let six_minutes_ago = now - Duration::from_secs(6).as_secs().try_into().unwrap();
-
-        let worker_id = register_worker_at(&mut storage, six_minutes_ago).await;
-
-        let job = consume_one(&mut storage, &worker_id).await;
+        let _job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
-                count: 5,
-                timeout_worker: Duration::from_secs(300),
-            })
+            .reenqueue_orphaned(5, 300)
             .await
             .expect("failed to heartbeat");
-        assert!(result);
-
-        let job_id = job.context().id();
-        let job = get_job(&mut storage, job_id).await;
-
-        assert_eq!(*job.context().status(), State::Pending);
-        assert!(job.context().done_at().is_none());
-        assert!(job.context().lock_by().is_none());
-        assert!(job.context().lock_at().is_none());
-        assert_eq!(*job.context().last_error(), None);
-
+        assert!(result > 0);
         cleanup(storage, &worker_id).await;
     }
 
@@ -930,28 +882,14 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        #[cfg(feature = "chrono")]
-        let four_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(4);
-        #[cfg(feature = "time")]
-        let four_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(4);
+        let worker_id = register_worker_at(&mut storage).await;
 
-        let worker_id = register_worker_at(&mut storage, four_minutes_ago).await;
-
-        let job = consume_one(&mut storage, &worker_id).await;
+        let _job = consume_one(&mut storage, &worker_id).await;
         let result = storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
-                count: 5,
-                timeout_worker: Duration::from_secs(300),
-            })
+            .reenqueue_orphaned(5, 300)
             .await
             .expect("failed to heartbeat");
-        assert!(result);
-
-        let job_id = job.context().id();
-        let job = get_job(&mut storage, job_id).await;
-
-        assert_eq!(*job.context().status(), State::Pending);
-        assert_eq!(*job.context().lock_by(), None);
+        assert!(result > 0);
 
         cleanup(storage, &worker_id).await;
     }

@@ -1,13 +1,13 @@
 use apalis_core::task::task_id::TaskId;
 use apalis_core::{data::Extensions, request::Request, worker::WorkerId};
-use sqlx::{types::chrono::DateTime, Decode, Type};
+use sqlx::{Decode, Type};
 
 use crate::context::SqlContext;
 /// Wrapper for [Request]
 #[derive(Debug, Clone)]
 pub struct SqlRequest<T> {
-    pub (crate) req: T,
-    pub (crate) context: SqlContext,
+    pub(crate) req: T,
+    pub(crate) context: SqlContext,
 }
 
 impl<T> From<SqlRequest<T>> for Request<T> {
@@ -27,6 +27,7 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
     sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
+        use sqlx::types::chrono::DateTime;
         use sqlx::Row;
         use std::str::FromStr;
 

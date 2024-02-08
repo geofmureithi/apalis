@@ -135,6 +135,7 @@ pub mod utils {
 
 /// Common imports
 pub mod prelude {
+    #[cfg(feature = "tokio-comp")]
     pub use crate::utils::TokioExecutor;
     pub use apalis_core::{
         builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},

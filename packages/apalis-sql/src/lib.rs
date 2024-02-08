@@ -8,21 +8,22 @@
 //! # apalis-sql
 //! apalis offers Sqlite, Mysql and Postgres storages for its workers.
 //!
-//! ## Example
+//! ## Postgres Example
 //!  ```rust,no_run
-//! # use apalis_core::builder::WorkerBuilder;
-//! # use apalis_core::layers::extensions::Data;
-//! # use apalis_core::monitor::Monitor;
-//! # use apalis_core::error::Error;
+//! use apalis::prelude::*;
 //! # use apalis_sql::postgres::PostgresStorage;
+//! # use apalis_sql::postgres::PgPool;
+
 //!  use email_service::Email;
 //!
 //!  #[tokio::main]
 //!  async fn main() -> std::io::Result<()> {
 //!      std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
 //!      let database_url = std::env::var("DATABASE_URL").expect("Must specify url to db");
-//!
-//!      let pg: PostgresStorage<Email> = PostgresStorage::connect(database_url).await.unwrap();
+//!      let pool = PgPool::connect(&database_url).await.unwrap();
+//!      
+//!      PostgresStorage::setup(&pool).await.unwrap();
+//!      let pg: PostgresStorage<Email> = PostgresStorage::new(pool);
 //!
 //!      async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
 //!          /// execute job
@@ -32,10 +33,10 @@
 //!     // let query = "Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));";
 //!     // pg.execute(query).await.unwrap();
 //!
-//!      Monitor::new()
+//!      Monitor::<TokioExecutor>::new()
 //!          .register_with_count(4, {
 //!              WorkerBuilder::new(&format!("tasty-avocado"))
-//!                  .layer(Data(0usize))
+//!                  .data(0usize)
 //!                  .source(pg)
 //!                  .build_fn(send_email)
 //!          })

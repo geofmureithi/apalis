@@ -446,9 +446,9 @@ impl<T: Job> MysqlStorage<T> {
 #[cfg(test)]
 mod tests {
 
+    use crate::context::State;
+
     use super::*;
-    use apalis_core::context::HasJobContext;
-    use apalis_core::request::JobState;
     use email_service::Email;
     use futures::StreamExt;
 
@@ -458,10 +458,10 @@ mod tests {
         // Because connections cannot be shared across async runtime
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
-        let storage = MysqlStorage::connect(db_url)
-            .await
-            .expect("DATABASE_URL is wrong");
-        storage.setup().await.expect("failed to migrate DB");
+        let pool = MySqlPool::connect(db_url).await.unwrap();
+        MysqlStorage::setup(&pool).await.expect("failed to migrate DB");
+        let storage = MysqlStorage::new(pool);
+        
         storage
     }
 
@@ -484,11 +484,10 @@ mod tests {
             .expect("failed to delete worker");
     }
 
-    async fn consume_one<S, T>(storage: &mut S, worker_id: &WorkerId) -> JobRequest<T>
-    where
-        S: Storage<Output = T>,
+    async fn consume_one(storage: &MysqlStorage<Email>, worker_id: &WorkerId) -> Request<Email>
     {
-        let mut stream = storage.consume(worker_id, std::time::Duration::from_secs(10), 1);
+        let storage = storage.clone();
+        let mut stream = storage.stream_jobs(worker_id, std::time::Duration::from_secs(10), 1);
         stream
             .next()
             .await
@@ -507,9 +506,10 @@ mod tests {
 
     struct DummyService {}
 
+
     async fn register_worker_at(
         storage: &mut MysqlStorage<Email>,
-        last_seen: Timestamp,
+        last_seen: DateTime<Utc>,
     ) -> WorkerId {
         let worker_id = WorkerId::new("test-worker");
 
@@ -521,24 +521,22 @@ mod tests {
     }
 
     async fn register_worker(storage: &mut MysqlStorage<Email>) -> WorkerId {
-        #[cfg(feature = "chrono")]
-        let now = chrono::Utc::now();
-        #[cfg(all(not(feature = "chrono"), feature = "time"))]
-        let now = time::OffsetDateTime::now_utc();
+
+        let now = Utc::now();
 
         register_worker_at(storage, now).await
     }
 
     async fn push_email<S>(storage: &mut S, email: Email)
     where
-        S: Storage<Output = Email>,
+        S: Storage<Job = Email, Error = sqlx::Error>,
     {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job<S>(storage: &mut S, job_id: &TaskId) -> JobRequest<Email>
+    async fn get_job<S>(storage: &mut S, job_id: &TaskId) -> Request<Email>
     where
-        S: Storage<Output = Email>,
+        S: Storage<Job = Email, Identifier = TaskId, Error = sqlx::Error>,
     {
         storage
             .fetch_by_id(job_id)
@@ -555,10 +553,10 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-
-        assert_eq!(*job.context().status(), JobState::Running);
-        assert_eq!(*job.context().lock_by(), Some(worker_id.clone()));
-        assert!(job.context().lock_at().is_some());
+        let ctx = job.get::<SqlContext>().unwrap();
+        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
+        assert!(ctx.lock_at().is_some());
 
         cleanup(storage, &worker_id).await;
     }
@@ -571,7 +569,8 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-        let job_id = job.context().id();
+        let ctx = job.get::<SqlContext>().unwrap();
+        let job_id = ctx.id();
 
         storage
             .ack(&worker_id, job_id)
@@ -579,8 +578,10 @@ mod tests {
             .expect("failed to acknowledge the job");
 
         let job = get_job(&mut storage, job_id).await;
-        assert_eq!(*job.context().status(), JobState::Done);
-        assert!(job.context().done_at().is_some());
+        let ctx = job.get::<SqlContext>().unwrap();
+
+        assert_eq!(*ctx.status(), State::Done);
+        assert!(ctx.done_at().is_some());
 
         cleanup(storage, &worker_id).await;
     }
@@ -594,7 +595,9 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-        let job_id = job.context().id();
+        
+        let ctx = job.get::<SqlContext>().unwrap();
+        let job_id = ctx.id();
 
         storage
             .kill(&worker_id, job_id)
@@ -602,8 +605,10 @@ mod tests {
             .expect("failed to kill job");
 
         let job = get_job(&mut storage, job_id).await;
-        assert_eq!(*job.context().status(), JobState::Killed);
-        assert!(job.context().done_at().is_some());
+        let ctx = job.get::<SqlContext>().unwrap();
+
+        assert_eq!(*ctx.status(), State::Killed);
+        assert!(ctx.done_at().is_some());
 
         cleanup(storage, &worker_id).await;
     }
@@ -620,10 +625,9 @@ mod tests {
 
         // register a worker not responding since 6 minutes ago
         let worker_id = WorkerId::new("test_worker");
-        #[cfg(feature = "chrono")]
-        let six_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(6);
-        #[cfg(all(not(feature = "chrono"), feature = "time"))]
-        let six_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(6);
+
+        let six_minutes_ago = Utc::now() - Duration::from_secs(60 * 6);
+
 
         storage
             .keep_alive_at::<Email>(&worker_id, six_minutes_ago)
@@ -632,21 +636,19 @@ mod tests {
 
         // fetch job
         let job = consume_one(&mut storage, &worker_id).await;
-        assert_eq!(*job.context().status(), JobState::Running);
+        let ctx = job.get::<SqlContext>().unwrap();
 
-        // heartbeat with ReenqueueOrpharned pulse
+        assert_eq!(*ctx.status(), State::Running);
+
         storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
-                count: 5,
-                timeout_worker: Duration::from_secs(300),
-            })
+            .reenqueue_orphaned(300)
             .await
             .unwrap();
 
         // then, the job status has changed to Pending
-        let job = storage.fetch_by_id(job.id()).await.unwrap().unwrap();
-        let context = job.context();
-        assert_eq!(*context.status(), JobState::Pending);
+        let job = storage.fetch_by_id(ctx.id()).await.unwrap().unwrap();
+        let context = job.get::<SqlContext>().unwrap();
+        assert_eq!(*context.status(), State::Pending);
         assert!(context.lock_by().is_none());
         assert!(context.lock_at().is_none());
         assert!(context.done_at().is_none());
@@ -666,10 +668,8 @@ mod tests {
             .expect("failed to push job");
 
         // register a worker responding at 4 minutes ago
-        #[cfg(feature = "chrono")]
-        let four_minutes_ago = chrono::Utc::now() - chrono::Duration::minutes(4);
-        #[cfg(all(not(feature = "chrono"), feature = "time"))]
-        let four_minutes_ago = time::OffsetDateTime::now_utc() - time::Duration::minutes(4);
+        let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
+
 
         let worker_id = WorkerId::new("test_worker");
         storage
@@ -679,21 +679,20 @@ mod tests {
 
         // fetch job
         let job = consume_one(&mut storage, &worker_id).await;
-        assert_eq!(*job.context().status(), JobState::Running);
+        let ctx = job.get::<SqlContext>().unwrap();
+
+        assert_eq!(*ctx.status(), State::Running);
 
         // heartbeat with ReenqueueOrpharned pulse
         storage
-            .heartbeat(StorageWorkerPulse::ReenqueueOrphaned {
-                count: 5,
-                timeout_worker: Duration::from_secs(300),
-            })
+            .reenqueue_orphaned(300)
             .await
             .unwrap();
 
         // then, the job status is not changed
-        let job = storage.fetch_by_id(job.id()).await.unwrap().unwrap();
-        let context = job.context();
-        assert_eq!(*context.status(), JobState::Running);
+        let job = storage.fetch_by_id(ctx.id()).await.unwrap().unwrap();
+        let context = job.get::<SqlContext>().unwrap();
+        assert_eq!(*context.status(), State::Running);
         assert_eq!(*context.lock_by(), Some(worker_id.clone()));
 
         cleanup(storage, &worker_id).await;
