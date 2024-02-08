@@ -44,15 +44,7 @@ const UNPLUGGED: usize = 0;
 /// Tells the poller that the worker is ready for a new request
 #[derive(Debug)]
 pub struct FetchNext<T> {
-    instance: usize,
     sender: async_oneshot::Sender<T>,
-}
-
-impl<T> FetchNext<T> {
-    /// Get the specific worker instance
-    pub fn instance(&self) -> usize {
-        self.instance
-    }
 }
 
 impl<T> Deref for FetchNext<T> {
@@ -69,7 +61,7 @@ impl<T> DerefMut for FetchNext<T> {
 }
 impl<T> FetchNext<T> {
     /// Generate a new instance of ready
-    pub fn new(sender: async_oneshot::Sender<T>, instance: usize) -> Self {
-        Self { instance, sender }
+    pub fn new(sender: async_oneshot::Sender<T>) -> Self {
+        Self { sender }
     }
 }

@@ -37,12 +37,12 @@
 //! #[tokio::main]
 //! async fn main() {
 //!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
-//!     let conn = apalis::redis::connect(redis).await?;
+//!     let conn = apalis::redis::connect(redis).await.unwrap();
 //!     let storage = RedisStorage::new(conn);
 //!     Monitor::<TokioExecutor>::new()
 //!         .register_with_count(2, {
 //!             WorkerBuilder::new(&format!("quick-sand"))
-//!                 .layer(Data(0usize))
+//!                 .data(0usize)
 //!                 .source(storage.clone())
 //!                 .build_fn(send_email)
 //!         })

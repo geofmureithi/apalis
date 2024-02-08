@@ -48,6 +48,7 @@ async-std-comp = [
   "apalis-sql?/async-std-comp",
   "apalis-redis?/async-std-comp",
   "apalis-cron?/async-std-comp",
+  "async-std",
 ]
 ## Compatibility with tokio and actix runtimes
 tokio-comp = [

@@ -134,7 +134,6 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
 - _limit_ — 💪 Limit the amount of jobs
 - _filter_ — Support filtering jobs based on a predicate
 - _extensions_ — Add a global extensions to jobs
-- _time_ - Use the time crate instead of the default chrono
 
 ## Storage Comparison
 
@@ -149,21 +148,22 @@ Since we provide a few storage solutions, here is a table comparing them:
 
 ## How apalis works
 
+Here is a basic example of how the core parts integrate
+
 ```mermaid
 sequenceDiagram
     participant App
     participant Worker
-    participant Producer
+    participant Backend
 
-    App->>+Producer: Add job to queue
-    Producer-->>+Worker: Job data
-    Worker->>+Producer: Update job status to 'running' via Layer
-    Producer-->>-Worker: Confirmation
-    Worker->>+App: Notify job started via Layer
+    App->>+Backend: Add job to queue
+    Backend-->>+Worker: Job data
+    Worker->>+Backend: Update job status to 'Running'
+    Worker->>+App: Started job
     loop job execution
-        Worker-->>-App: Report job progress via Layer
+        Worker-->>-App: Report job progress
     end
-    Worker->>+Producer: Update job status to 'completed' via Layer
+    Worker->>+Backend: Update job status to 'completed'
 ```
 
 ### Web UI
@@ -186,9 +186,9 @@ v 0.5
 - [x] Mocking utilities
 - [ ] Support for SurrealDB and Mongo
 - [ ] Lock free for Postgres
-- [ ] Add more utility layers
+- [x] Add more utility layers
 - [x] Use extractors in job fn structure
-- [ ] Polish up documentation
+- [x] Polish up documentation
 - [ ] Improve and standardize apalis Board
 - [ ] Benchmarks
 

@@ -7,9 +7,9 @@ use std::{
 use anyhow::Result;
 use apalis::prelude::*;
 use apalis::redis::RedisStorage;
-use apalis::utils::TokioExecutor;
+
 use email_service::{send_email, Email};
-use tracing::info;
+use tracing::{error, info};
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
     for index in 0..100 {
@@ -52,7 +52,23 @@ async fn main() -> Result<()> {
         .build_fn(send_email);
 
     Monitor::<TokioExecutor>::new()
-        .register_with_count(6, worker)
+        .register_with_count(2, worker)
+        .on_event(|e| {
+            let worker_id = e.id();
+            match e.inner() {
+                Event::Start => {
+                    info!("Worker [{worker_id}] started");
+                }
+                Event::Error(e) => {
+                    error!("Worker [{worker_id}] encountered an error: {e}");
+                }
+
+                Event::Exit => {
+                    info!("Worker [{worker_id}] exited");
+                }
+                _ => {}
+            }
+        })
         .run_with_signal(async {
             tokio::signal::ctrl_c().await?;
             info!("Monitor starting shutdown");

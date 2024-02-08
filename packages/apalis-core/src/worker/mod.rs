@@ -1,3 +1,4 @@
+use self::stream::WorkerStream;
 use crate::error::{BoxDynError, Error};
 use crate::executor::Executor;
 use crate::layers::extensions::Data;
@@ -14,13 +15,12 @@ use std::fmt::Debug;
 use std::fmt::{self, Display};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context as TaskCtx, Poll, Waker};
 use thiserror::Error;
 use tower::{Service, ServiceBuilder, ServiceExt};
-
-use self::stream::WorkerStream;
 
 mod stream;
 // By default a worker starts 3 futures, one for polling, one for worker stream and the other for consuming.
@@ -32,26 +32,68 @@ type WorkerNotify<T> = Notify<Worker<FetchNext<T>>>;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkerId {
     name: String,
+    instance: Option<usize>,
+}
+
+impl FromStr for WorkerId {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.rsplitn(2, '-').collect();
+
+        match parts.len() {
+            1 => Ok(WorkerId {
+                name: parts[0].to_string(),
+                instance: None,
+            }),
+            2 => {
+                let name = parts[1];
+                let instance_str = parts[0];
+                let instance = instance_str.parse().ok();
+                Ok(WorkerId {
+                    name: name.to_string(),
+                    instance,
+                })
+            }
+            _ => Err(()),
+        }
+    }
 }
 
 impl FromData for WorkerId {}
 
 impl Display for WorkerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name())
+        f.write_str(self.name())?;
+        if self.instance.is_some() {
+            f.write_str("-")?;
+            f.write_str(&self.instance.unwrap().to_string())?;
+        }
+        Ok(())
     }
 }
 
 impl WorkerId {
     /// Build a new worker ref
     pub fn new<T: AsRef<str>>(name: T) -> Self {
+        Self::from_str(name.as_ref()).unwrap()
+    }
+
+    /// Build a new worker ref
+    pub fn new_with_instance<T: AsRef<str>>(name: T, instance: usize) -> Self {
         Self {
             name: name.as_ref().to_string(),
+            instance: Some(instance),
         }
     }
     /// Get the name of the worker
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Get the name of the worker
+    pub fn instance(&self) -> &Option<usize> {
+        &self.instance
     }
 }
 
@@ -114,6 +156,16 @@ impl<T> Worker<T> {
     pub fn new(id: WorkerId, state: T) -> Self {
         Self { id, state }
     }
+
+    /// Get the inner state
+    pub fn inner(&self) -> &T {
+        &self.state
+    }
+
+    /// Get the worker id
+    pub fn id(&self) -> &WorkerId {
+        &self.id
+    }
 }
 
 impl<T> Deref for Worker<T> {
@@ -132,13 +184,14 @@ impl<T> DerefMut for Worker<T> {
 impl<E: Executor + Clone + Send + 'static> Worker<Context<E>> {
     /// Start a worker
     pub async fn run(self) {
+        let instance = self.instance;
         let monitor = self.state.context.clone();
         self.state.running.store(true, Ordering::Relaxed);
         self.state.await;
         if let Some(ctx) = monitor.as_ref() {
             ctx.notify(Worker {
                 state: Event::Exit,
-                id: self.id.clone(),
+                id: WorkerId::new_with_instance(self.id.name, instance),
             });
         };
     }
@@ -307,7 +360,7 @@ impl<S, P> Worker<Ready<S, P>> {
         if let Some(ctx) = worker.state.context.as_ref() {
             ctx.notify(Worker {
                 state: Event::Start,
-                id: worker.id.clone(),
+                id: WorkerId::new_with_instance(&worker.id.name(), instance),
             });
         };
         let worker_layers = ServiceBuilder::new()
@@ -321,7 +374,7 @@ impl<S, P> Worker<Ready<S, P>> {
                 if let Some(ctx) = worker.state.context.as_ref() {
                     ctx.notify(Worker {
                         state: Event::Stop,
-                        id: worker.id.clone(),
+                        id: WorkerId::new_with_instance(&worker.id.name(), instance),
                     });
                 };
                 break;
@@ -331,8 +384,8 @@ impl<S, P> Worker<Ready<S, P>> {
                     let (sender, receiver) = async_oneshot::oneshot();
                     notifier
                         .notify(Worker {
-                            id: worker.id.clone(),
-                            state: FetchNext::new(sender, instance),
+                            id: WorkerId::new_with_instance(&worker.id.name(), instance),
+                            state: FetchNext::new(sender),
                         })
                         .unwrap();
 
@@ -345,7 +398,7 @@ impl<S, P> Worker<Ready<S, P>> {
                             if let Some(ctx) = worker.state.context.as_ref() {
                                 ctx.notify(Worker {
                                     state: Event::Error(Box::new(e)),
-                                    id: worker.id.clone(),
+                                    id: WorkerId::new_with_instance(&worker.id.name(), instance),
                                 });
                             };
                         }
@@ -353,7 +406,7 @@ impl<S, P> Worker<Ready<S, P>> {
                             if let Some(ctx) = worker.state.context.as_ref() {
                                 ctx.notify(Worker {
                                     state: Event::Idle,
-                                    id: worker.id.clone(),
+                                    id: WorkerId::new_with_instance(&worker.id.name(), instance),
                                 });
                             };
                         }
@@ -366,7 +419,7 @@ impl<S, P> Worker<Ready<S, P>> {
                     if let Some(ctx) = worker.state.context.as_ref() {
                         ctx.notify(Worker {
                             state: Event::Error(e.into()),
-                            id: worker.id.clone(),
+                            id: WorkerId::new_with_instance(&worker.id.name(), instance),
                         });
                     };
                 }

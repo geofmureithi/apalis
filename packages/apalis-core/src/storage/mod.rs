@@ -16,7 +16,7 @@ pub trait Storage: Backend<Request<Self::Job>> {
     /// The error produced by the storage
     type Error;
 
-    /// Jobs unlike messages must have Ids.
+    /// Jobs must have Ids.
     type Identifier;
 
     /// Pushes a job to a storage
