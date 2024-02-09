@@ -26,8 +26,6 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "serde",
 ] }
-time = { version = "0.3", optional = true, features = ["serde"] }
-
 async-stream = "0.3"
 futures = "0.3"
 tokio = { version = "1", features = ["rt", "net"], optional = true }
