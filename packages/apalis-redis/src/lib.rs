@@ -7,15 +7,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //! apalis storage using Redis as a backend
 //! ```rust,no_run
+//! use apalis::prelude::*;
+//! use apalis::redis::RedisStorage;
 //! use email_service::send_email;
-//! # use apalis_core::monitor::Monitor;
-//! # use apalis_redis::RedisStorage;
-//! # use apalis_core::builder::WorkerBuilder;
-//! # use apalis_core::builder::WorkerFactoryFn;
-//! # use apalis_utils::TokioExecutor;
+//!
 //! #[tokio::main]
-//! async fn main() -> std::io::Result<()> {
-//!     let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+//! async fn main() {
+//!     let conn = apalis::redis::connect("redis://127.0.0.1/").await.unwrap();
 //!     let storage = RedisStorage::new(conn);
 //!     Monitor::<TokioExecutor>::new()
 //!        .register(
@@ -25,10 +23,11 @@
 //!        )
 //!        .run()
 //!        .await
+//!        .unwrap();
 //! }
 //! ```
 
 mod storage;
-pub use storage::RedisStorage;
 pub use storage::connect;
 pub use storage::Config;
+pub use storage::RedisStorage;

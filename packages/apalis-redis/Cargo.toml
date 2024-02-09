@@ -36,8 +36,11 @@ async-trait = "0.1.77"
 
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 email-service = { path = "../../examples/email-service" }
+apalis = { path = "../../", default-features = false, features = [
+    "tokio-comp", "redis"
+] }
 
 [features]
 default = ["tokio-comp"]

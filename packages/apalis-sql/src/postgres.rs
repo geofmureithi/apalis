@@ -1,15 +1,43 @@
-//! Allows persisting jobs on a postgres db.
-//! Comes with helper functions eg:
-//! ## Sql Example:
+//! # apalis-postgres
 //!
-//! ```sql
-//! Select
-//!     apalis.push_job(
-//!             'apalis::Email',
-//!              json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum')
-//!     );
-//! ```
+//! Allows using postgres as a Backend
+//!
+//! ## Postgres Example
+//!  ```rust,no_run
+//! use apalis::prelude::*;
+//! # use apalis_sql::postgres::PostgresStorage;
+//! # use apalis_sql::postgres::PgPool;
 
+//!  use email_service::Email;
+//!
+//!  #[tokio::main]
+//!  async fn main() -> std::io::Result<()> {
+//!      std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
+//!      let database_url = std::env::var("DATABASE_URL").expect("Must specify url to db");
+//!      let pool = PgPool::connect(&database_url).await.unwrap();
+//!      
+//!      PostgresStorage::setup(&pool).await.unwrap();
+//!      let pg: PostgresStorage<Email> = PostgresStorage::new(pool);
+//!
+//!      async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
+//!          /// execute job
+//!          Ok(())
+//!      }
+//!     // This can be even in another program/language
+//!     // let query = "Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));";
+//!     // pg.execute(query).await.unwrap();
+//!
+//!      Monitor::<TokioExecutor>::new()
+//!          .register_with_count(4, {
+//!              WorkerBuilder::new(&format!("tasty-avocado"))
+//!                  .data(0usize)
+//!                  .source(pg)
+//!                  .build_fn(send_email)
+//!          })
+//!          .run()
+//!          .await
+//!  }
+//! ```
 use crate::context::SqlContext;
 use crate::Config;
 use apalis_core::codec::json::JsonCodec;
@@ -664,7 +692,7 @@ mod tests {
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
         assert_eq!(*ctx.status(), State::Killed);
-        // TODO: assert!(ctx.done_at().is_some()); 
+        // TODO: assert!(ctx.done_at().is_some());
 
         cleanup(storage, &worker_id).await;
     }
