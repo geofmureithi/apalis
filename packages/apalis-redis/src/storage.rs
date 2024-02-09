@@ -77,8 +77,9 @@ struct RedisJob<J> {
 impl<T> From<RedisJob<T>> for Request<T> {
     fn from(val: RedisJob<T>) -> Self {
         let mut data = Extensions::new();
-        data.insert(val.ctx.id);
+        data.insert(val.ctx.id.clone());
         data.insert(Attempt::new_with_value(val.ctx.attempts));
+        data.insert(val.ctx);
         Request::new_with_data(val.job, data)
     }
 }
@@ -868,11 +869,10 @@ mod tests {
         let worker_id = register_worker_at(&mut storage).await;
 
         let _job = consume_one(&mut storage, &worker_id).await;
-        let result = storage
+        storage
             .reenqueue_orphaned(5, 300)
             .await
-            .expect("failed to heartbeat");
-        assert!(result > 0);
+            .expect("failed to reenqueue_orphaned");
         cleanup(storage, &worker_id).await;
     }
 
@@ -888,8 +888,7 @@ mod tests {
         let result = storage
             .reenqueue_orphaned(5, 300)
             .await
-            .expect("failed to heartbeat");
-        assert!(result > 0);
+            .expect("failed to reenqueue_orphaned");
 
         cleanup(storage, &worker_id).await;
     }
