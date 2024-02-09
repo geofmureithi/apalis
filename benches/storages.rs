@@ -90,12 +90,12 @@ define_bench!("redis", {
 
 define_bench!("postgres", {
     let pool = PgPool::connect(env!("POSTGRES_URL")).await.unwrap();
-    let _ = PostgresStorage::setup(&pool);
+    let _ = PostgresStorage::setup(&pool).await.unwrap();
     PostgresStorage::new(pool)
 });
 define_bench!("mysql", {
     let pool = MySqlPool::connect(env!("POSTGRES_URL")).await.unwrap();
-    let _ = MysqlStorage::setup(&pool);
+    let _ = MysqlStorage::setup(&pool).await.unwrap();
     MysqlStorage::new(pool)
 });
 
