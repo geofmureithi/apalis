@@ -1,7 +1,7 @@
 use apalis::prelude::*;
-use apalis_core::storage::{Job, Storage};
-use apalis_redis::RedisStorage;
-use apalis_sql::{
+
+use apalis::redis::RedisStorage;
+use apalis::{
     mysql::{MySqlPool, MysqlStorage},
     postgres::{PgPool, PostgresStorage},
     sqlite::{SqlitePool, SqliteStorage},

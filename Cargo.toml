@@ -110,7 +110,7 @@ pprof = { version = "0.13", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-apalis = { version = "0.5.0-alpha.0", path = ".", features = ["redis"] }
+apalis = { version = "0.5.0-alpha.0", path = ".", features = ["redis", "sqlite", "postgres", "mysql"] }
 
 
 [[bench]]
