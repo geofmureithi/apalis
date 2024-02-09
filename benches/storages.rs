@@ -94,7 +94,7 @@ define_bench!("postgres", {
     PostgresStorage::new(pool)
 });
 define_bench!("mysql", {
-    let pool = MySqlPool::connect(env!("POSTGRES_URL")).await.unwrap();
+    let pool = MySqlPool::connect(env!("MYSQL_URL")).await.unwrap();
     let _ = MysqlStorage::setup(&pool).await.unwrap();
     MysqlStorage::new(pool)
 });
