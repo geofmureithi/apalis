@@ -360,7 +360,7 @@ impl<S, P> Worker<Ready<S, P>> {
         if let Some(ctx) = worker.state.context.as_ref() {
             ctx.notify(Worker {
                 state: Event::Start,
-                id: WorkerId::new_with_instance(&worker.id.name(), instance),
+                id: WorkerId::new_with_instance(worker.id.name(), instance),
             });
         };
         let worker_layers = ServiceBuilder::new()
@@ -374,7 +374,7 @@ impl<S, P> Worker<Ready<S, P>> {
                 if let Some(ctx) = worker.state.context.as_ref() {
                     ctx.notify(Worker {
                         state: Event::Stop,
-                        id: WorkerId::new_with_instance(&worker.id.name(), instance),
+                        id: WorkerId::new_with_instance(worker.id.name(), instance),
                     });
                 };
                 break;
@@ -384,7 +384,7 @@ impl<S, P> Worker<Ready<S, P>> {
                     let (sender, receiver) = async_oneshot::oneshot();
                     notifier
                         .notify(Worker {
-                            id: WorkerId::new_with_instance(&worker.id.name(), instance),
+                            id: WorkerId::new_with_instance(worker.id.name(), instance),
                             state: FetchNext::new(sender),
                         })
                         .unwrap();
@@ -398,7 +398,7 @@ impl<S, P> Worker<Ready<S, P>> {
                             if let Some(ctx) = worker.state.context.as_ref() {
                                 ctx.notify(Worker {
                                     state: Event::Error(Box::new(e)),
-                                    id: WorkerId::new_with_instance(&worker.id.name(), instance),
+                                    id: WorkerId::new_with_instance(worker.id.name(), instance),
                                 });
                             };
                         }
@@ -406,7 +406,7 @@ impl<S, P> Worker<Ready<S, P>> {
                             if let Some(ctx) = worker.state.context.as_ref() {
                                 ctx.notify(Worker {
                                     state: Event::Idle,
-                                    id: WorkerId::new_with_instance(&worker.id.name(), instance),
+                                    id: WorkerId::new_with_instance(worker.id.name(), instance),
                                 });
                             };
                         }
@@ -419,7 +419,7 @@ impl<S, P> Worker<Ready<S, P>> {
                     if let Some(ctx) = worker.state.context.as_ref() {
                         ctx.notify(Worker {
                             state: Event::Error(e.into()),
-                            id: WorkerId::new_with_instance(&worker.id.name(), instance),
+                            id: WorkerId::new_with_instance(worker.id.name(), instance),
                         });
                     };
                 }

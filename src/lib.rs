@@ -19,7 +19,7 @@
 //! ```rust, no_run
 //! use apalis::prelude::*;
 //! use serde::{Deserialize, Serialize};
-//! use apalis_redis::RedisStorage;
+//! use apalis::redis::RedisStorage;
 //!
 //! #[derive(Debug, Deserialize, Serialize)]
 //! struct Email {
