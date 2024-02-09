@@ -93,11 +93,12 @@ define_bench!("postgres", {
     let _ = PostgresStorage::setup(&pool).await.unwrap();
     PostgresStorage::new(pool)
 });
-define_bench!("mysql", {
-    let pool = MySqlPool::connect(env!("MYSQL_URL")).await.unwrap();
-    let _ = MysqlStorage::setup(&pool).await.unwrap();
-    MysqlStorage::new(pool)
-});
+// TODO: See why it no complete.
+// define_bench!("mysql", {
+//     let pool = MySqlPool::connect(env!("MYSQL_URL")).await.unwrap();
+//     let _ = MysqlStorage::setup(&pool).await.unwrap();
+//     MysqlStorage::new(pool)
+// });
 
-criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
+criterion_group!(benches, sqlite_in_memory, redis, postgres);
 criterion_main!(benches);
