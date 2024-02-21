@@ -192,7 +192,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
                             .into(),
                         ),
                     }
-                    
+
                     .map(Into::into);
                 }
             }
@@ -309,10 +309,12 @@ where
 
     async fn update(&self, job: Request<Self::Job>) -> Result<(), Self::Error> {
         let pool = self.pool.clone();
-        let ctx = job.get::<SqlContext>().ok_or(sqlx::Error::Io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Missing SqlContext",
-        )))?;
+        let ctx = job
+            .get::<SqlContext>()
+            .ok_or(sqlx::Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Missing SqlContext",
+            )))?;
         let status = ctx.status().to_string();
         let attempts = ctx.attempts();
         let done_at = *ctx.done_at();
@@ -405,7 +407,12 @@ impl<T> SqliteStorage<T> {
                                      ORDER BY lock_at ASC LIMIT ?2);"#;
         sqlx::query(query)
             .bind(job_type)
-            .bind::<u32>(self.config.buffer_size.try_into().map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?)
+            .bind::<u32>(
+                self.config
+                    .buffer_size
+                    .try_into()
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?,
+            )
             .execute(&mut *tx)
             .await?;
         Ok(())

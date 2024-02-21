@@ -307,8 +307,9 @@ impl<T: DeserializeOwned + Send + Unpin + Job + 'static> PostgresStorage<T> {
         last_seen: Timestamp,
     ) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let last_seen = DateTime::from_timestamp(last_seen, 0)
-            .ok_or(sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, "Invalid Timestamp")))?;
+        let last_seen = DateTime::from_timestamp(last_seen, 0).ok_or(sqlx::Error::Io(
+            io::Error::new(io::ErrorKind::InvalidInput, "Invalid Timestamp"),
+        ))?;
         let worker_type = T::NAME;
         let storage_name = std::any::type_name::<Self>();
         let query = "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen)
@@ -416,7 +417,12 @@ where
 
     async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let ctx = job.get::<SqlContext>().ok_or(sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, "Missing SqlContext")))?;
+        let ctx = job
+            .get::<SqlContext>()
+            .ok_or(sqlx::Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Missing SqlContext",
+            )))?;
         let job_id = ctx.id();
 
         let now: i64 = Utc::now().timestamp();
@@ -439,7 +445,12 @@ where
 
     async fn update(&self, job: Request<Self::Job>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let ctx = job.get::<SqlContext>().ok_or(sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, "Missing SqlContext")))?;
+        let ctx = job
+            .get::<SqlContext>()
+            .ok_or(sqlx::Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Missing SqlContext",
+            )))?;
         let job_id = ctx.id();
         let status = ctx.status().to_string();
         let attempts: i32 = ctx

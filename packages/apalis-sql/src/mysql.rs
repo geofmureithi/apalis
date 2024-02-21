@@ -470,8 +470,9 @@ impl<T: Job> MysqlStorage<T> {
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
                         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
         let now = Utc::now().timestamp();
-        let seconds_ago = DateTime::from_timestamp(now - timeout, 0)
-            .ok_or(sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, "Invalid timeout")))?;
+        let seconds_ago = DateTime::from_timestamp(now - timeout, 0).ok_or(sqlx::Error::Io(
+            io::Error::new(io::ErrorKind::InvalidData, "Invalid timeout"),
+        ))?;
 
         sqlx::query(query)
             .bind(seconds_ago)
@@ -670,7 +671,7 @@ mod tests {
             .expect("failed to push job");
 
         // register a worker not responding since 6 minutes ago
-        let worker_id = WorkerId::new("test_worker");
+        let worker_id = WorkerId::new("test-worker");
 
         let six_minutes_ago = Utc::now() - Duration::from_secs(60 * 6);
 
@@ -713,7 +714,7 @@ mod tests {
         // register a worker responding at 4 minutes ago
         let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
 
-        let worker_id = WorkerId::new("test_worker");
+        let worker_id = WorkerId::new("test-worker");
         storage
             .keep_alive_at::<Email>(&worker_id, four_minutes_ago)
             .await

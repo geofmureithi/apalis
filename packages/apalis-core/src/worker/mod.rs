@@ -48,15 +48,27 @@ impl FromStr for WorkerId {
                 instance: None,
             }),
             _ => {
-                let remainder = &mut parts[1..];
-                remainder.reverse();
-                let name = remainder.join("-");
                 let instance_str = parts[0];
-                let instance = instance_str.parse().ok();
-                Ok(WorkerId {
-                    name: name.to_string(),
-                    instance,
-                })
+                match instance_str.parse() {
+                    Ok(instance) => {
+                        let remainder = &mut parts[1..];
+                        remainder.reverse();
+                        let name = remainder.join("-");
+                        Ok(WorkerId {
+                            name: name.to_string(),
+                            instance,
+                        })
+                    }
+                    Err(_) => Ok(WorkerId {
+                        name: {
+                            let all = &mut parts[0..];
+                            all.reverse();
+                            let name = all.join("-");
+                            name
+                        },
+                        instance: None,
+                    }),
+                }
             }
         }
     }
