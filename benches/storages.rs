@@ -7,8 +7,12 @@ use apalis::{
     sqlite::{SqlitePool, SqliteStorage},
 };
 use criterion::*;
+use futures::Future;
 use paste::paste;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 macro_rules! define_bench {
@@ -25,11 +29,14 @@ macro_rules! define_bench {
                         let mut interval = tokio::time::interval(Duration::from_millis(50));
                         let storage = { $setup };
                         let mut s1 = storage.clone();
+                        let counter = Counter::default();
+                        let c = counter.clone();
                         tokio::spawn(async move {
                             Monitor::<TokioExecutor>::new()
-                                .register_with_count(1, {
+                                .register({
                                     let worker =
                                         WorkerBuilder::new(format!("{}-bench", $name))
+                                            .data(c)
                                             .source(storage)
                                             .build_fn(handle_test_job);
                                     worker
@@ -44,11 +51,14 @@ macro_rules! define_bench {
                             for _i in 0..s {
                                 let _ = s1.push(TestJob).await;
                             }
-                            while s1.len().await.unwrap_or(-1) != 0 {
+                            while counter.0.load(Ordering::Relaxed) != (s - 1) {
                                 interval.tick().await;
                             }
+                            counter.0.store(0, Ordering::Relaxed);
                         }
-                        start.elapsed()
+                        let elapsed = start.elapsed();
+                        s1.cleanup().await;
+                        elapsed
                     })
             });
             group.bench_with_input(BenchmarkId::new("push", size), &size, |b, &s| {
@@ -72,8 +82,50 @@ impl Job for TestJob {
     const NAME: &'static str = "TestJob";
 }
 
-async fn handle_test_job(_req: TestJob) -> Result<(), Error> {
+#[derive(Debug, Default, Clone)]
+struct Counter(Arc<AtomicUsize>);
+
+async fn handle_test_job(_req: TestJob, counter: Data<Counter>) -> Result<(), Error> {
+    counter.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Ok(())
+}
+
+trait CleanUp {
+    fn cleanup(&mut self) -> impl Future<Output = ()> + Send;
+}
+
+impl CleanUp for SqliteStorage<TestJob> {
+    async fn cleanup(&mut self) {
+        let pool = self.pool();
+        let query = "DELETE FROM Jobs; DELETE from Workers;";
+        sqlx::query(query).execute(pool).await.unwrap();
+    }
+}
+
+impl CleanUp for PostgresStorage<TestJob> {
+    async fn cleanup(&mut self) {
+        let pool = self.pool();
+        let query = "DELETE FROM apalis.jobs; DELETE from apalis.workers;";
+        sqlx::query(query).execute(pool).await.unwrap();
+    }
+}
+
+impl CleanUp for MysqlStorage<TestJob> {
+    async fn cleanup(&mut self) {
+        let pool = self.pool();
+        let query = "DELETE FROM jobs; DELETE from workers;";
+        sqlx::query(query).execute(pool).await.unwrap();
+    }
+}
+
+impl CleanUp for RedisStorage<TestJob> {
+    async fn cleanup(&mut self) {
+        let mut conn = self.get_connection().clone();
+        let _resp: String = redis::cmd("FLUSHDB")
+            .query_async(&mut conn)
+            .await
+            .expect("failed to Flushdb");
+    }
 }
 
 define_bench!("sqlite_in_memory", {
@@ -93,12 +145,12 @@ define_bench!("postgres", {
     let _ = PostgresStorage::setup(&pool).await.unwrap();
     PostgresStorage::new(pool)
 });
-// TODO: See why it no complete.
-// define_bench!("mysql", {
-//     let pool = MySqlPool::connect(env!("MYSQL_URL")).await.unwrap();
-//     let _ = MysqlStorage::setup(&pool).await.unwrap();
-//     MysqlStorage::new(pool)
-// });
+
+define_bench!("mysql", {
+    let pool = MySqlPool::connect(env!("MYSQL_URL")).await.unwrap();
+    let _ = MysqlStorage::setup(&pool).await.unwrap();
+    MysqlStorage::new(pool)
+});
 
 criterion_group!(benches, sqlite_in_memory, redis, postgres);
 criterion_main!(benches);
