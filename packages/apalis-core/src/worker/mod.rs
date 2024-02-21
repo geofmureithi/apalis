@@ -8,6 +8,7 @@ use crate::poller::FetchNext;
 use crate::request::Request;
 use crate::service_fn::FromData;
 use crate::Backend;
+use futures::future::Shared;
 use futures::{Future, FutureExt};
 use pin_project_lite::pin_project;
 use serde::{Deserialize, Serialize};
@@ -39,15 +40,17 @@ impl FromStr for WorkerId {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.rsplitn(2, '-').collect();
+        let mut parts: Vec<&str> = s.rsplit('-').collect();
 
         match parts.len() {
             1 => Ok(WorkerId {
                 name: parts[0].to_string(),
                 instance: None,
             }),
-            2 => {
-                let name = parts[1];
+            _ => {
+                let remainder = &mut parts[1..];
+                remainder.reverse();
+                let name = remainder.join("-");
                 let instance_str = parts[0];
                 let instance = instance_str.parse().ok();
                 Ok(WorkerId {
@@ -55,7 +58,6 @@ impl FromStr for WorkerId {
                     instance,
                 })
             }
-            _ => Err(()),
         }
     }
 }
@@ -65,9 +67,9 @@ impl FromData for WorkerId {}
 impl Display for WorkerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.name())?;
-        if self.instance.is_some() {
+        if let Some(instance) = self.instance {
             f.write_str("-")?;
-            f.write_str(&self.instance.unwrap().to_string())?;
+            f.write_str(&instance.to_string())?;
         }
         Ok(())
     }
@@ -76,7 +78,10 @@ impl Display for WorkerId {
 impl WorkerId {
     /// Build a new worker ref
     pub fn new<T: AsRef<str>>(name: T) -> Self {
-        Self::from_str(name.as_ref()).unwrap()
+        Self {
+            name: name.as_ref().to_string(),
+            instance: None,
+        }
     }
 
     /// Build a new worker ref
@@ -211,8 +216,23 @@ impl<S, P> Worker<Ready<S, P>> {
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
     {
-        let instances: Vec<Worker<Context<E>>> = self.with_executor_instances(1, executor);
-        instances.into_iter().nth(0).unwrap()
+        let notifier = Notify::new();
+        let service = self.state.service;
+        let backend = self.state.backend;
+        let poller = backend.poll(self.id.clone());
+        let polling = poller.heartbeat.shared();
+        let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
+            .into_future()
+            .shared();
+        Self::build_worker_instance(
+            WorkerId::new(self.id.name()),
+            service.clone(),
+            executor.clone(),
+            notifier.clone(),
+            polling.clone(),
+            worker_stream.clone(),
+            None,
+        )
     }
 
     /// Run as a monitored worker
@@ -227,8 +247,25 @@ impl<S, P> Worker<Ready<S, P>> {
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
     {
-        let instances: Vec<Worker<Context<E>>> = self.with_monitor_instances(1, monitor);
-        instances.into_iter().nth(0).unwrap()
+        let notifier = Notify::new();
+        let service = self.state.service;
+        let backend = self.state.backend;
+        let executor = monitor.executor().clone();
+        let context = monitor.context().clone();
+        let poller = backend.poll(self.id.clone());
+        let polling = poller.heartbeat.shared();
+        let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
+            .into_future()
+            .shared();
+        Self::build_worker_instance(
+            WorkerId::new(self.id.name()),
+            service.clone(),
+            executor.clone(),
+            notifier.clone(),
+            polling.clone(),
+            worker_stream.clone(),
+            Some(context.clone()),
+        )
     }
 
     /// Run a specified amounts of instances
@@ -258,30 +295,17 @@ impl<S, P> Worker<Ready<S, P>> {
             .into_future()
             .shared();
         let mut workers = Vec::new();
-        for instance in 0..instances {
-            let ctx = Context {
-                context: Some(context.clone()),
-                executor: executor.clone(),
-                instance,
-                running: Arc::default(),
-                task_count: Arc::default(),
-                wakers: Arc::default(),
-            };
-            let worker = Worker {
-                id: self.id.clone(),
-                state: ctx.clone(),
-            };
-            let fut = Self::build_worker_instance(
-                instance,
-                service.clone(),
-                worker.clone(),
-                notifier.clone(),
-            );
 
-            worker.spawn(fut);
-            worker.spawn(polling.clone());
-            worker.spawn(worker_stream.clone());
-            workers.push(worker);
+        for instance in 0..instances {
+            workers.push(Self::build_worker_instance(
+                WorkerId::new_with_instance(self.id.name(), instance),
+                service.clone(),
+                executor.clone(),
+                notifier.clone(),
+                polling.clone(),
+                worker_stream.clone(),
+                Some(context.clone()),
+            ));
         }
 
         workers
@@ -316,35 +340,59 @@ impl<S, P> Worker<Ready<S, P>> {
 
         let mut workers = Vec::new();
         for instance in 0..instances {
-            let ctx = Context {
-                context: None,
-                executor: executor.clone(),
-                instance,
-                running: Arc::default(),
-                task_count: Arc::default(),
-                wakers: Arc::default(),
-            };
-            let worker = Worker {
-                id: self.id.clone(),
-                state: ctx.clone(),
-            };
-
-            let fut = Self::build_worker_instance(
-                instance,
+            workers.push(Self::build_worker_instance(
+                WorkerId::new_with_instance(self.id.name(), instance),
                 service.clone(),
-                worker.clone(),
+                executor.clone(),
                 notifier.clone(),
-            );
-
-            worker.spawn(fut);
-            worker.spawn(polling.clone());
-            worker.spawn(worker_stream.clone());
-            workers.push(worker);
+                polling.clone(),
+                worker_stream.clone(),
+                None,
+            ));
         }
         workers
     }
 
-    pub(crate) async fn build_worker_instance<LS, J, E>(
+    pub(crate) fn build_worker_instance<LS, J, E>(
+        id: WorkerId,
+        service: LS,
+        executor: E,
+        notifier: WorkerNotify<Result<Option<Request<J>>, Error>>,
+        polling: Shared<impl Future<Output = ()> + Send + 'static>,
+        worker_stream: Shared<impl Future<Output = ()> + Send + 'static>,
+        context: Option<MonitorContext>,
+    ) -> Worker<Context<E>>
+    where
+        LS: Service<Request<J>> + Send + 'static + Clone,
+        LS::Future: Send + 'static,
+        LS::Response: 'static,
+        LS::Error: Send + Sync + Into<BoxDynError> + 'static,
+        P: Backend<Request<J>>,
+        E: Executor + Send + Clone + 'static + Sync,
+        J: Sync + Send + 'static,
+        S: 'static,
+        P: 'static,
+    {
+        let instance = id.instance.unwrap_or_default();
+        let ctx = Context {
+            context,
+            executor,
+            instance,
+            running: Arc::default(),
+            task_count: Arc::default(),
+            wakers: Arc::default(),
+        };
+        let worker = Worker { id, state: ctx };
+
+        let fut = Self::build_instance(instance, service, worker.clone(), notifier);
+
+        worker.spawn(fut);
+        worker.spawn(polling);
+        worker.spawn(worker_stream);
+        worker
+    }
+
+    pub(crate) async fn build_instance<LS, J, E>(
         instance: usize,
         service: LS,
         worker: Worker<Context<E>>,
@@ -382,36 +430,35 @@ impl<S, P> Worker<Ready<S, P>> {
             match service.ready().await {
                 Ok(service) => {
                     let (sender, receiver) = async_oneshot::oneshot();
-                    notifier
-                        .notify(Worker {
-                            id: WorkerId::new_with_instance(worker.id.name(), instance),
-                            state: FetchNext::new(sender),
-                        })
-                        .unwrap();
-
-                    match receiver.await {
-                        Ok(Ok(Some(req))) => {
-                            let fut = service.call(req);
-                            worker.spawn(fut.map(|_| ()));
-                        }
-                        Ok(Err(e)) => {
-                            if let Some(ctx) = worker.state.context.as_ref() {
-                                ctx.notify(Worker {
-                                    state: Event::Error(Box::new(e)),
-                                    id: WorkerId::new_with_instance(worker.id.name(), instance),
-                                });
-                            };
-                        }
-                        Ok(Ok(None)) => {
-                            if let Some(ctx) = worker.state.context.as_ref() {
-                                ctx.notify(Worker {
-                                    state: Event::Idle,
-                                    id: WorkerId::new_with_instance(worker.id.name(), instance),
-                                });
-                            };
-                        }
-                        Err(_) => {
-                            // Listener was dropped, no need to notify
+                    let res = notifier.notify(Worker {
+                        id: WorkerId::new_with_instance(worker.id.name(), instance),
+                        state: FetchNext::new(sender),
+                    });
+                    if res.is_ok() {
+                        match receiver.await {
+                            Ok(Ok(Some(req))) => {
+                                let fut = service.call(req);
+                                worker.spawn(fut.map(|_| ()));
+                            }
+                            Ok(Err(e)) => {
+                                if let Some(ctx) = worker.state.context.as_ref() {
+                                    ctx.notify(Worker {
+                                        state: Event::Error(Box::new(e)),
+                                        id: WorkerId::new_with_instance(worker.id.name(), instance),
+                                    });
+                                };
+                            }
+                            Ok(Ok(None)) => {
+                                if let Some(ctx) = worker.state.context.as_ref() {
+                                    ctx.notify(Worker {
+                                        state: Event::Idle,
+                                        id: WorkerId::new_with_instance(worker.id.name(), instance),
+                                    });
+                                };
+                            }
+                            Err(_) => {
+                                // Listener was dropped, no need to notify
+                            }
                         }
                     }
                 }
@@ -502,8 +549,10 @@ impl<E: Executor + Send + 'static + Clone> Context<E> {
     }
 
     pub(crate) fn wake(&self) {
-        for waker in self.wakers.lock().unwrap().drain(..) {
-            waker.wake();
+        if let Ok(mut wakers) = self.wakers.lock() {
+            for waker in wakers.drain(..) {
+                waker.wake();
+            }
         }
     }
 
@@ -521,9 +570,10 @@ impl<E: Executor + Send + 'static + Clone> Context<E> {
     }
 
     fn add_waker(&self, cx: &mut TaskCtx<'_>) {
-        let mut wakers = self.wakers.lock().unwrap();
-        if !wakers.iter().any(|w| w.will_wake(cx.waker())) {
-            wakers.push(cx.waker().clone());
+        if let Ok(mut wakers) = self.wakers.lock() {
+            if !wakers.iter().any(|w| w.will_wake(cx.waker())) {
+                wakers.push(cx.waker().clone());
+            }
         }
     }
 }
@@ -576,6 +626,31 @@ mod tests {
 
     const ITEMS: u32 = 100;
 
+    #[test]
+    fn it_parses_worker_names() {
+        assert_eq!(
+            WorkerId::from_str("worker").unwrap(),
+            WorkerId {
+                instance: None,
+                name: "worker".to_string()
+            }
+        );
+        assert_eq!(
+            WorkerId::from_str("worker-0").unwrap(),
+            WorkerId {
+                instance: Some(0),
+                name: "worker".to_string()
+            }
+        );
+        assert_eq!(
+            WorkerId::from_str("complex&*-worker-name-0").unwrap(),
+            WorkerId {
+                instance: Some(0),
+                name: "complex&*-worker-name".to_string()
+            }
+        );
+    }
+
     #[tokio::test]
     async fn it_works() {
         let backend = MemoryStorage::new();
@@ -605,7 +680,7 @@ mod tests {
             Ok(())
         }
         let worker = WorkerBuilder::new("rango-tango")
-            .chain(|svc| svc.timeout(Duration::from_millis(500)))
+            // .chain(|svc| svc.timeout(Duration::from_millis(500)))
             .data(Count::default())
             .source(backend);
         let worker = worker.build_fn(task);

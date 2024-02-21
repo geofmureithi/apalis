@@ -56,6 +56,9 @@ pub trait Storage: Backend<Request<Self::Job>> {
 
     /// Returns true if there is no jobs in the storage
     fn is_empty(&self) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+
+    /// Vacuum the storage, removes done and killed jobs
+    fn vacuum(&self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
 /// Trait representing a job.

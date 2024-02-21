@@ -13,13 +13,13 @@ use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
 use async_stream::try_stream;
-use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
+use sqlx::types::chrono::Utc;
 use sqlx::{Pool, Row, Sqlite};
 use std::convert::TryInto;
-use std::fmt;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::{fmt, io};
 use std::{marker::PhantomData, time::Duration};
 
 use crate::from_row::SqlRequest;
@@ -92,11 +92,16 @@ impl SqliteStorage<()> {
 impl<T: Job + Serialize + DeserializeOwned> SqliteStorage<T> {
     /// Construct a new Storage from a pool
     pub fn new(pool: SqlitePool) -> Self {
+        Self::new_with_config(pool, Config::default())
+    }
+
+    /// Create a new instance with a custom config
+    pub fn new_with_config(pool: SqlitePool, config: Config) -> Self {
         Self {
             pool,
             job_type: PhantomData,
             controller: Controller::new(),
-            config: Config::default(),
+            config,
             codec: Arc::new(Box::new(JsonCodec)),
         }
     }
@@ -135,12 +140,7 @@ async fn fetch_next<T: Job>(
     worker_id: &WorkerId,
     id: String,
 ) -> Result<Option<SqlRequest<String>>, sqlx::Error> {
-    let now: i64 = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        .try_into()
-        .unwrap();
+    let now: i64 = Utc::now().timestamp();
     let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
     let job: Option<SqlRequest<String>> = sqlx::query_as(update_query)
         .bind(id.to_string())
@@ -171,18 +171,28 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
                 let job_type = T::NAME;
                 let fetch_query = "SELECT id FROM Jobs
                     WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at < ?1 AND job_type = ?2 LIMIT ?3";
-                let now: i64 = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs().try_into().unwrap();
+                let now: i64 = Utc::now().timestamp();
                 let ids: Vec<(String,)> = sqlx::query_as(fetch_query)
                     .bind(now)
                     .bind(job_type)
-                    .bind(i64::try_from(buffer_size).unwrap())
+                    .bind(i64::try_from(buffer_size).map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?)
                     .fetch_all(&mut *tx)
                     .await?;
                 for id in ids {
-                    yield fetch_next::<T>(pool.clone(), &worker_id, id.0).await?.map(|c| SqlRequest {
-                        context: c.context,
-                        req: codec.decode(&c.req).unwrap(),
-                    })
+                    let res = fetch_next::<T>(pool.clone(), &worker_id, id.0).await?;
+                    yield match res {
+                        None => None::<Request<T>>,
+                        Some(c) => Some(
+                            SqlRequest {
+                                context: c.context,
+                                req: codec.decode(&c.req).map_err(|e| {
+                                    sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e))
+                                })?,
+                            }
+                            .into(),
+                        ),
+                    }
+                    
                     .map(Into::into);
                 }
             }
@@ -205,7 +215,10 @@ where
         let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, strftime('%s','now'), NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
 
-        let job = serde_json::to_string(&job).unwrap();
+        let job = self
+            .codec
+            .encode(&job)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = T::NAME;
         sqlx::query(query)
             .bind(job)
@@ -221,7 +234,10 @@ where
             "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, ?4, NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
         let id = TaskId::new();
-        let job = serde_json::to_string(&job).unwrap();
+        let job = self
+            .codec
+            .encode(&job)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = T::NAME;
         sqlx::query(query)
             .bind(job)
@@ -243,34 +259,19 @@ where
             .bind(job_id.to_string())
             .fetch_optional(&pool)
             .await?;
-        Ok(res
-            .map(|c| SqlRequest {
-                context: c.context,
-                req: self.codec.decode(&c.req).unwrap(),
-            })
-            .map(Into::into))
+        match res {
+            None => Ok(None),
+            Some(c) => Ok(Some(
+                SqlRequest {
+                    context: c.context,
+                    req: self.codec.decode(&c.req).map_err(|e| {
+                        sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e))
+                    })?,
+                }
+                .into(),
+            )),
+        }
     }
-
-    // /// Used for scheduling jobs via [StorageWorkerPulse] signals
-    // async fn heartbeat(&mut self, pulse: StorageWorkerPulse) -> Result<bool, sqlx::Error> {
-    //     let pool = self.pool.clone();
-
-    //     match pulse {
-    //         StorageWorkerPulse::EnqueueScheduled { count } => {
-
-    //             Ok(true)
-    //         }
-    //         // Worker not seen in 5 minutes yet has running jobs
-    //         StorageWorkerPulse::ReenqueueOrphaned {
-    //             count,
-    //             timeout_worker,
-    //         } => {
-
-    //             Ok(true)
-    //         }
-    //         _ => todo!(),
-    //     }
-    // }
 
     async fn len(&self) -> Result<i64, Self::Error> {
         let pool = self.pool.clone();
@@ -282,19 +283,20 @@ where
 
     async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), Self::Error> {
         let pool = self.pool.clone();
-        let task_id = job.get::<TaskId>().unwrap();
+        let task_id = job.get::<TaskId>().ok_or(sqlx::Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Missing TaskId",
+        )))?;
 
-        let wait: i64 = wait.as_secs().try_into().unwrap();
+        let wait: i64 = wait
+            .as_secs()
+            .try_into()
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
         let mut tx = pool.acquire().await?;
         let query =
                 "UPDATE Jobs SET status = 'Failed', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ?2 WHERE id = ?1";
-        let now: i64 = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .try_into()
-            .unwrap();
+        let now: i64 = Utc::now().timestamp();
         let wait_until = now + wait;
 
         sqlx::query(query)
@@ -307,7 +309,10 @@ where
 
     async fn update(&self, job: Request<Self::Job>) -> Result<(), Self::Error> {
         let pool = self.pool.clone();
-        let ctx = job.get::<SqlContext>().unwrap();
+        let ctx = job.get::<SqlContext>().ok_or(sqlx::Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Missing SqlContext",
+        )))?;
         let status = ctx.status().to_string();
         let attempts = ctx.attempts();
         let done_at = *ctx.done_at();
@@ -320,7 +325,12 @@ where
                 "UPDATE Jobs SET status = ?1, attempts = ?2, done_at = ?3, lock_by = ?4, lock_at = ?5, last_error = ?6 WHERE id = ?7";
         sqlx::query(query)
             .bind(status.to_owned())
-            .bind::<i64>(attempts.current().try_into().unwrap())
+            .bind::<i64>(
+                attempts
+                    .current()
+                    .try_into()
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?,
+            )
             .bind(done_at)
             .bind(lock_by.map(|w| w.name().to_string()))
             .bind(lock_at)
@@ -332,7 +342,14 @@ where
     }
 
     async fn is_empty(&self) -> Result<bool, Self::Error> {
-        todo!()
+        self.len().map_ok(|c| c == 0).await
+    }
+
+    async fn vacuum(&self) -> Result<usize, sqlx::Error> {
+        let pool = self.pool.clone();
+        let query = "Delete from Jobs where status='Done'";
+        let record = sqlx::query(query).execute(&pool).await?;
+        Ok(record.rows_affected().try_into().unwrap_or_default())
     }
 }
 
@@ -388,7 +405,7 @@ impl<T> SqliteStorage<T> {
                                      ORDER BY lock_at ASC LIMIT ?2);"#;
         sqlx::query(query)
             .bind(job_type)
-            .bind::<u32>(self.config.buffer_size.try_into().unwrap())
+            .bind::<u32>(self.config.buffer_size.try_into().map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?)
             .execute(&mut *tx)
             .await?;
         Ok(())
@@ -437,14 +454,10 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
         let stream = BackendStream::new(stream.boxed(), controller);
         let heartbeat = async move {
             loop {
-                let now: i64 = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs()
-                    .try_into()
+                let now: i64 = Utc::now().timestamp();
+                self.keep_alive_at::<Self::Layer>(&worker, now)
+                    .await
                     .unwrap();
-
-                self.keep_alive_at::<T>(&worker, now).await.unwrap();
                 apalis_core::sleep(Duration::from_secs(30)).await;
             }
         }

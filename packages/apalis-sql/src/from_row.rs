@@ -40,7 +40,7 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
         let mut context = crate::context::SqlContext::new(id);
 
         let run_at: i64 = row.try_get("run_at")?;
-        context.set_run_at(DateTime::from_timestamp(run_at, 0).unwrap());
+        context.set_run_at(DateTime::from_timestamp(run_at, 0).unwrap_or_default());
 
         let attempts = row.try_get("attempts").unwrap_or(0);
         context.set_attempts(attempts);
@@ -64,7 +64,16 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
         })?);
 
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
-        context.set_lock_by(lock_by.map(WorkerId::new));
+        context.set_lock_by(
+            lock_by
+                .as_deref()
+                .map(WorkerId::from_str)
+                .transpose()
+                .map_err(|_| sqlx::Error::ColumnDecode {
+                    index: "lock_by".to_string(),
+                    source: "Could not parse lock_by as a WorkerId".into(),
+                })?,
+        );
 
         Ok(SqlRequest { context, req: job })
     }
@@ -113,7 +122,16 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
         })?);
 
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
-        context.set_lock_by(lock_by.map(WorkerId::new));
+        context.set_lock_by(
+            lock_by
+                .as_deref()
+                .map(WorkerId::from_str)
+                .transpose()
+                .map_err(|_| sqlx::Error::ColumnDecode {
+                    index: "lock_by".to_string(),
+                    source: "Could not parse lock_by as a WorkerId".into(),
+                })?,
+        );
         Ok(SqlRequest { context, req: job })
     }
 }
@@ -162,7 +180,16 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
         })?);
 
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
-        context.set_lock_by(lock_by.map(WorkerId::new));
+        context.set_lock_by(
+            lock_by
+                .as_deref()
+                .map(WorkerId::from_str)
+                .transpose()
+                .map_err(|_| sqlx::Error::ColumnDecode {
+                    index: "lock_by".to_string(),
+                    source: "Could not parse lock_by as a WorkerId".into(),
+                })?,
+        );
 
         Ok(SqlRequest { context, req: job })
     }

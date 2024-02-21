@@ -29,7 +29,7 @@ apalis-core = { path = "../../packages/apalis-core", version = "0.5.0-alpha.0", 
     "sleep",
     "json",
 ] }
-
+log = "0.4"
 futures = "0.3"
 async-stream = "0.3"
 tokio = { version = "1", features = ["rt", "net"], optional = true }

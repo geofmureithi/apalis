@@ -12,15 +12,15 @@ use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
 use async_stream::try_stream;
 use futures::{Stream, StreamExt, TryStreamExt};
+use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use sqlx::mysql::MySqlRow;
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::{MySql, Pool, Row};
 use std::convert::TryInto;
-use std::fmt;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::{fmt, io};
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
 use crate::context::SqlContext;
@@ -88,11 +88,16 @@ impl MysqlStorage<()> {
 impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
     /// Create a new instance from a pool
     pub fn new(pool: MySqlPool) -> Self {
+        Self::new_with_config(pool, Config::default())
+    }
+
+    /// Create a new instance from a pool and custom config
+    pub fn new_with_config(pool: MySqlPool, config: Config) -> Self {
         Self {
             pool,
             job_type: PhantomData,
             controller: Controller::new(),
-            config: Config::default(),
+            config,
             codec: Arc::new(Box::new(JsonCodec)),
             ack_notify: Notify::new(),
         }
@@ -116,6 +121,8 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
 
         try_stream! {
             let pool = pool.clone();
+            let buffer_size = u32::try_from(buffer_size)
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
             loop {
                 apalis_core::sleep(interval).await;
                 let pool = pool.clone();
@@ -125,13 +132,13 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
                 WHERE status = 'Pending' AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE SKIP LOCKED";
                 let task_ids: Vec<MySqlRow> = sqlx::query(fetch_query)
                     .bind(job_type)
-                    .bind(u32::try_from(buffer_size).unwrap())
-                    .fetch_all(&mut *tx).await.unwrap();
+                    .bind(buffer_size)
+                    .fetch_all(&mut *tx).await?;
                 if task_ids.is_empty() {
                     tx.rollback().await?;
                     yield None
                 } else {
-                    let task_ids: Vec<String> = task_ids.iter().map(|r| r.try_get("id").unwrap()).collect();
+                    let task_ids: Vec<String> = task_ids.iter().map(|r| r.get_unchecked("id")).collect();
                     let id_params = format!("?{}", ", ?".repeat(task_ids.len() - 1));
                     let query = format!("UPDATE jobs SET status = 'Running', lock_by = ?, lock_at = NOW(), attempts = attempts + 1 WHERE id IN({}) AND status = 'Pending' AND lock_by IS NULL;", id_params);
                     let mut query = sqlx::query(&query).bind(worker_id.clone());
@@ -146,12 +153,12 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
                     for i in task_ids {
                         query = query.bind(i);
                     }
-                    let jobs: Vec<SqlRequest<Value>> = query.fetch_all(&pool).await.unwrap();
+                    let jobs: Vec<SqlRequest<Value>> = query.fetch_all(&pool).await?;
 
                     for job in jobs {
                         yield Some(Into::into(SqlRequest {
                             context: job.context,
-                            req: self.codec.decode(&job.req).unwrap(),
+                            req: self.codec.decode(&job.req).map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?
                         }))
                     }
                 }
@@ -199,7 +206,10 @@ where
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, now(), NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
 
-        let job = self.codec.encode(&job).unwrap();
+        let job = self
+            .codec
+            .encode(&job)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = T::NAME;
         sqlx::query(query)
             .bind(job)
@@ -216,7 +226,10 @@ where
         let pool = self.pool.clone();
         let id = TaskId::new();
 
-        let job = self.codec.encode(&job).unwrap();
+        let job = self
+            .codec
+            .encode(&job)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
         let job_type = T::NAME;
         sqlx::query(query)
@@ -240,12 +253,18 @@ where
             .bind(job_id.to_string())
             .fetch_optional(&pool)
             .await?;
-        Ok(res
-            .map(|c| SqlRequest {
-                context: c.context,
-                req: self.codec.decode(&c.req).unwrap(),
-            })
-            .map(Into::into))
+        match res {
+            None => Ok(None),
+            Some(c) => Ok(Some(
+                SqlRequest {
+                    context: c.context,
+                    req: self.codec.decode(&c.req).map_err(|e| {
+                        sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e))
+                    })?,
+                }
+                .into(),
+            )),
+        }
     }
 
     async fn len(&self) -> Result<i64, sqlx::Error> {
@@ -258,9 +277,15 @@ where
 
     async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let job_id = job.get::<TaskId>().unwrap();
+        let job_id = job.get::<TaskId>().ok_or(sqlx::Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Missing TaskId",
+        )))?;
 
-        let wait: i64 = wait.as_secs().try_into().unwrap();
+        let wait: i64 = wait
+            .as_secs()
+            .try_into()
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
         let mut tx = pool.acquire().await?;
         let query =
                 "UPDATE jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ? WHERE id = ?";
@@ -275,7 +300,12 @@ where
 
     async fn update(&self, job: Request<Self::Job>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let ctx = job.get::<SqlContext>().unwrap();
+        let ctx = job
+            .get::<SqlContext>()
+            .ok_or(sqlx::Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Missing TaskId",
+            )))?;
         let status = ctx.status().to_string();
         let attempts = ctx.attempts();
         let done_at = *ctx.done_at();
@@ -288,7 +318,12 @@ where
                 "UPDATE jobs SET status = ?, attempts = ?, done_at = ?, lock_by = ?, lock_at = ?, last_error = ? WHERE id = ?";
         sqlx::query(query)
             .bind(status.to_owned())
-            .bind::<i64>(attempts.current().try_into().unwrap())
+            .bind::<i64>(
+                attempts
+                    .current()
+                    .try_into()
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?,
+            )
             .bind(done_at)
             .bind(lock_by.map(|w| w.name().to_string()))
             .bind(lock_at)
@@ -301,6 +336,13 @@ where
 
     async fn is_empty(&self) -> Result<bool, Self::Error> {
         Ok(self.len().await? == 0)
+    }
+
+    async fn vacuum(&self) -> Result<usize, sqlx::Error> {
+        let pool = self.pool.clone();
+        let query = "Delete from jobs where status='Done'";
+        let record = sqlx::query(query).execute(&pool).await?;
+        Ok(record.rows_affected().try_into().unwrap_or_default())
     }
 }
 
@@ -346,7 +388,9 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
                 for i in worker_ids {
                     query = query.bind(i);
                 }
-                query.execute(&pool).await.unwrap();
+                if let Err(e) = query.execute(&pool).await {
+                    error!("Ack failed: {e}");
+                }
                 apalis_core::sleep(config.poll_interval).await;
             }
         };
@@ -354,10 +398,9 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
         let heartbeat = async move {
             loop {
                 let now = Utc::now();
-                hb_storage
-                    .keep_alive_at::<Self::Layer>(&worker, now)
-                    .await
-                    .unwrap();
+                if let Err(e) = hb_storage.keep_alive_at::<Self::Layer>(&worker, now).await {
+                    error!("Heartbeat failed: {e}");
+                }
                 apalis_core::sleep(config.keep_alive).await;
             }
         };
@@ -377,7 +420,7 @@ impl<T: Sync> Ack<T> for MysqlStorage<T> {
     ) -> Result<(), sqlx::Error> {
         self.ack_notify
             .notify((worker_id.clone(), task_id.clone()))
-            .unwrap();
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::BrokenPipe, e)))?;
 
         Ok(())
     }
@@ -426,18 +469,19 @@ impl<T: Job> MysqlStorage<T> {
                         INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
                         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
-        let now: i64 = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .try_into()
-            .unwrap();
-        let seconds_ago = DateTime::from_timestamp(now - timeout, 0).unwrap();
+        let now = Utc::now().timestamp();
+        let seconds_ago = DateTime::from_timestamp(now - timeout, 0)
+            .ok_or(sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, "Invalid timeout")))?;
 
         sqlx::query(query)
             .bind(seconds_ago)
             .bind(job_type)
-            .bind::<i64>(self.config.buffer_size.try_into().unwrap())
+            .bind::<i64>(
+                self.config
+                    .buffer_size
+                    .try_into()
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?,
+            )
             .execute(&mut *tx)
             .await?;
         Ok(true)
