@@ -56,7 +56,7 @@ impl FromStr for WorkerId {
                         let name = remainder.join("-");
                         Ok(WorkerId {
                             name: name.to_string(),
-                            instance,
+                            instance: Some(instance),
                         })
                     }
                     Err(_) => Ok(WorkerId {
