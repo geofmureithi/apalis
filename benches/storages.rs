@@ -105,8 +105,11 @@ impl CleanUp for SqliteStorage<TestJob> {
 impl CleanUp for PostgresStorage<TestJob> {
     async fn cleanup(&mut self) {
         let pool = self.pool();
-        let query = "DELETE FROM apalis.jobs; DELETE from apalis.workers;";
+        let query = "DELETE FROM apalis.jobs;";
         sqlx::query(query).execute(pool).await.unwrap();
+        let query = "DELETE from apalis.workers;";
+        sqlx::query(query).execute(pool).await.unwrap();
+
     }
 }
 
