@@ -811,7 +811,7 @@ mod tests {
         let worker = WorkerId::new("test-worker");
 
         storage
-            .keep_alive::<DummyService>(&worker)
+            .keep_alive(&worker)
             .await
             .expect("failed to register worker");
         worker
