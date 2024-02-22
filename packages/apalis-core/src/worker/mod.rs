@@ -63,8 +63,7 @@ impl FromStr for WorkerId {
                         name: {
                             let all = &mut parts[0..];
                             all.reverse();
-                            let name = all.join("-");
-                            name
+                            all.join("-")
                         },
                         instance: None,
                     }),

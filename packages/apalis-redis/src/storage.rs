@@ -299,7 +299,7 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
 
         let keep_alive = async move {
             loop {
-                if let Err(e) = storage.keep_alive::<Self::Layer>(&worker).await {
+                if let Err(e) = storage.keep_alive(&worker).await {
                     error!("Could not call keep_alive for Worker [{worker}]: {e}")
                 }
                 apalis_core::sleep(config.keep_alive).await;
@@ -416,7 +416,7 @@ fn deserialize_job(job: &Value) -> Option<&Vec<u8>> {
 }
 
 impl<T> RedisStorage<T> {
-    async fn keep_alive<S>(&mut self, worker_id: &WorkerId) -> Result<(), RedisError> {
+    async fn keep_alive(&mut self, worker_id: &WorkerId) -> Result<(), RedisError> {
         let mut conn = self.conn.clone();
         let register_consumer = self.scripts.register_consumer.clone();
         let inflight_set = format!("{}:{}", self.queue.inflight_jobs_set, worker_id);
