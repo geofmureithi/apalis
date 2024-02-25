@@ -95,6 +95,7 @@ async fn main() -> Result<()> {
     Monitor::new()
         .register_with_count(2, {
             WorkerBuilder::new(format!("email-worker"))
+                .data(0usize)
                 .with_storage(storage)
                 .build_fn(send_email)
         })
