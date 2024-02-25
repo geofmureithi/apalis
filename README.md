@@ -34,12 +34,12 @@
 
 - Simple and predictable job handling model.
 - Jobs handlers with a macro free API.
-- Take full advantage of the [`tower`] ecosystem of
+- Take full advantage of the [tower] ecosystem of
   middleware, services, and utilities.
 - Runtime agnostic - Use tokio, smol etc.
 - Optional Web interface to help you manage your jobs.
 
-apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] middleware.
+apalis job processing is powered by [`tower::Service`] which means you have access to the [tower] middleware.
 
 apalis has support for:
 
@@ -165,19 +165,20 @@ sequenceDiagram
     end
     Worker->>+Backend: Update job status to 'completed'
 ```
+
 ## External examples
 
 - [Shuttle](https://github.com/shuttle-hq/shuttle-examples/tree/main/shuttle-cron): Using apalis-cron with [shuttle.rs](https://shuttle.rs)
 - [Actix-Web](https://github.com/actix/examples/tree/master/background-jobs): Using apalis-redis with actix-web
 
 ## Projects using apalis
+
 - [Ryot](https://github.com/IgnisDa/ryot): A self hosted platform for tracking various facets of your life - media, fitness etc.
 - [Summarizer](https://github.com/akhildevelops/summarizer): Podcast summarizer
 
 ## Resources
 
 - [Background job processing with rust using actix and redis](https://mureithi.me/blog/background-job-processing-with-rust-actix-redis)
-
 
 ### Web UI
 
@@ -252,5 +253,3 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 [`tower::Service`]: https://docs.rs/tower/latest/tower/trait.Service.html
 [tower]: https://crates.io/crates/tower
 [`actix`]: https://crates.io/crates/actix
-[`tower-http`]: https://crates.io/crates/tower-http
-[`actor`]: https://docs.rs/actix/0.13.0/actix/trait.Actor.html
