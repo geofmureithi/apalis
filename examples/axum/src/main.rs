@@ -5,7 +5,7 @@
 //! ```
 use anyhow::Result;
 use apalis::prelude::*;
-use apalis::{layers::TraceLayer, redis::RedisStorage};
+use apalis::{layers::tracing::TraceLayer, redis::RedisStorage};
 use axum::{
     extract::Form,
     http::StatusCode,
@@ -14,7 +14,7 @@ use axum::{
     Extension, Router,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::time::Duration;
+use std::io;
 use std::{fmt::Debug, io::Error, net::SocketAddr};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -55,7 +55,8 @@ async fn main() -> Result<()> {
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    let storage: RedisStorage<Email> = RedisStorage::connect("redis://127.0.0.1/").await?;
+    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+    let storage = RedisStorage::new(conn);
     // build our application with some routes
     let app = Router::new()
         .route("/", get(show_form).post(add_new_job::<Email>))
@@ -71,21 +72,18 @@ async fn main() -> Result<()> {
             .map_err(|e| Error::new(std::io::ErrorKind::Interrupted, e))
     };
     let monitor = async {
-        let monitor = Monitor::new()
-            .register_with_count(2, move |index| {
-                WorkerBuilder::new(format!("tasty-pear-{index}"))
+        Monitor::<TokioExecutor>::new()
+            .register_with_count(2, {
+                WorkerBuilder::new("tasty-pear")
                     .layer(TraceLayer::new())
-                    .with_storage_config(storage.clone(), |cfg| {
-                        cfg.fetch_interval(Duration::from_millis(10))
-                    })
+                    .with_storage(storage.clone())
                     .build_fn(send_email)
             })
             .run()
-            .await;
-        Ok(monitor)
+            .await
+            .unwrap();
+        Ok::<(), io::Error>(())
     };
-    let _res = futures::future::try_join(http, monitor)
-        .await
-        .expect("Could not start services");
+    let _res = tokio::join!(http, monitor);
     Ok(())
 }

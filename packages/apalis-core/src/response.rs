@@ -1,8 +1,6 @@
 use std::any::Any;
 
-use tower::BoxError;
-
-use crate::error::JobError;
+use crate::error::Error;
 
 /// Helper for Job Responses
 pub trait IntoResponse {
@@ -13,11 +11,11 @@ pub trait IntoResponse {
 }
 
 impl IntoResponse for bool {
-    type Result = std::result::Result<Self, JobError>;
-    fn into_response(self) -> std::result::Result<Self, JobError> {
+    type Result = std::result::Result<Self, Error>;
+    fn into_response(self) -> std::result::Result<Self, Error> {
         match self {
             true => Ok(true),
-            false => Err(JobError::Failed(Box::new(std::io::Error::new(
+            false => Err(Error::Failed(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Job returned false",
             )))),
@@ -25,12 +23,14 @@ impl IntoResponse for bool {
     }
 }
 
-impl<T: Any, E: Into<BoxError> + Send + Sync> IntoResponse for std::result::Result<T, E> {
-    type Result = Result<T, JobError>;
-    fn into_response(self) -> Result<T, JobError> {
+impl<T: Any, E: std::error::Error + Sync + Send + 'static> IntoResponse
+    for std::result::Result<T, E>
+{
+    type Result = Result<T, Error>;
+    fn into_response(self) -> Result<T, Error> {
         match self {
             Ok(value) => Ok(value),
-            Err(e) => Err(JobError::Failed(e.into())),
+            Err(e) => Err(Error::Failed(Box::new(e))),
         }
     }
 }
@@ -38,8 +38,8 @@ impl<T: Any, E: Into<BoxError> + Send + Sync> IntoResponse for std::result::Resu
 macro_rules! SIMPLE_JOB_RESULT {
     ($type:ty) => {
         impl IntoResponse for $type {
-            type Result = std::result::Result<$type, JobError>;
-            fn into_response(self) -> std::result::Result<$type, JobError> {
+            type Result = std::result::Result<$type, Error>;
+            fn into_response(self) -> std::result::Result<$type, Error> {
                 Ok(self)
             }
         }
@@ -60,3 +60,4 @@ SIMPLE_JOB_RESULT!(isize);
 SIMPLE_JOB_RESULT!(f32);
 SIMPLE_JOB_RESULT!(f64);
 SIMPLE_JOB_RESULT!(String);
+SIMPLE_JOB_RESULT!(&'static str);

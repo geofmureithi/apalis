@@ -7,7 +7,7 @@ use tracing_subscriber::prelude::*;
 
 use anyhow::Result;
 use apalis::{
-    layers::{SentryJobLayer, TraceLayer},
+    layers::{sentry::SentryLayer, tracing::TraceLayer},
     prelude::*,
     redis::RedisStorage,
 };
@@ -33,7 +33,7 @@ macro_rules! update_progress {
     };
 }
 
-async fn email_service(email: Email, _ctx: JobContext) -> Result<(), JobError> {
+async fn email_service(email: Email) -> Result<(), InvalidEmailError> {
     let parent_span = sentry::configure_scope(|scope| scope.get_span());
 
     let tx_ctx =
@@ -90,9 +90,7 @@ async fn email_service(email: Email, _ctx: JobContext) -> Result<(), JobError> {
 
     tracing::warn!("Failed. Email is not valid");
     transaction.finish();
-    Err(JobError::Failed(Box::new(InvalidEmailError {
-        email: email.to,
-    })))
+    Err(InvalidEmailError { email: email.to })
 }
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
@@ -131,17 +129,16 @@ async fn main() -> Result<()> {
         .with(sentry_tracing::layer())
         .init();
 
-    let storage = RedisStorage::connect(redis_url)
-        .await
-        .expect("Could not connect to RedisStorage");
+    let conn = apalis::redis::connect(redis_url).await?;
+    let storage = RedisStorage::new(conn);
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
-    Monitor::new()
-        .register_with_count(2, move |c| {
-            WorkerBuilder::new(format!("tasty-avocado-{c}"))
+    Monitor::<TokioExecutor>::new()
+        .register_with_count(2, {
+            WorkerBuilder::new("tasty-avocado")
                 .layer(NewSentryLayer::new_from_top())
-                .layer(SentryJobLayer::new())
+                .layer(SentryLayer::new())
                 .layer(TraceLayer::new())
                 .with_storage(storage.clone())
                 .build_fn(email_service)

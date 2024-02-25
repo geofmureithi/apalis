@@ -1,7 +1,9 @@
+use actix_web::rt::signal;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use anyhow::Result;
 use apalis::prelude::*;
-use apalis::{layers::TraceLayer, redis::RedisStorage};
+use apalis::utils::TokioExecutor;
+use apalis::{layers::tracing::TraceLayer, redis::RedisStorage};
 use futures::future;
 
 use email_service::{send_email, Email};
@@ -24,7 +26,8 @@ async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
 
-    let storage = RedisStorage::connect("redis://127.0.0.1/").await?;
+    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+    let storage = RedisStorage::new(conn);
     let data = web::Data::new(storage.clone());
     let http = async {
         HttpServer::new(move || {
@@ -37,14 +40,14 @@ async fn main() -> Result<()> {
         .await?;
         Ok(())
     };
-    let worker = Monitor::new()
-        .register_with_count(2, move |c| {
-            WorkerBuilder::new(format!("tasty-avocado-{c}"))
+    let worker = Monitor::<TokioExecutor>::new()
+        .register_with_count(2, {
+            WorkerBuilder::new("tasty-avocado")
                 .layer(TraceLayer::new())
-                .with_storage(storage.clone())
+                .with_storage(storage)
                 .build_fn(send_email)
         })
-        .run();
+        .run_with_signal(signal::ctrl_c());
 
     future::try_join(http, worker).await?;
     Ok(())

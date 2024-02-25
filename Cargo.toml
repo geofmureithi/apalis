@@ -1,6 +1,6 @@
 [package]
 name = "apalis"
-version = "0.4.9"
+version = "0.5.0"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
@@ -15,9 +15,7 @@ edition = "2021"
 bench = false
 
 [features]
-default = ["tracing", "tokio-comp", "chrono"]
-## Support Tracing 👀
-tracing = ["apalis-core/trace"]
+default = ["tracing", "tokio-comp"]
 
 ## Include redis storage
 redis = ["apalis-redis"]
@@ -30,67 +28,67 @@ mysql = ["apalis-sql/mysql"]
 ## Include Cron functionality
 cron = ["apalis-cron"]
 
-## Use chrono library for time representation
-chrono = ["apalis-core/chrono", "apalis-sql?/chrono", "apalis-redis?/chrono"]
-## Use time library for time representation
-time = ["apalis-core/time", "apalis-sql?/time", "apalis-redis?/time"]
+## Support Tracing 👀
+tracing = ["dep:tracing", "dep:tracing-futures"]
 
 ## Support for Sentry exception and performance monitoring
-sentry = ["apalis-core/sentry"]
+sentry = ["sentry-core", "ulid?/uuid", "uuid"]
 ## Support Prometheus metrics
-prometheus = ["apalis-core/prometheus"]
+prometheus = ["metrics", "metrics-exporter-prometheus"]
 ## Support direct retrying jobs
-retry = ["apalis-core/retry"]
+retry = ["tower/retry"]
 ## Support timeouts on jobs
-timeout = ["apalis-core/timeout"]
+timeout = ["tower/timeout"]
 ## 💪 Limit the amount of jobs 
-limit = ["apalis-core/limit"]
+limit = ["tower/limit"]
 ## Support filtering jobs based on a predicate
-filter = ["apalis-core/filter"]
-## Add a global extensions to jobs
-extensions = ["apalis-core/extensions"]
+filter = ["tower/filter"]
 ## Compatibility with async-std and smol runtimes
 async-std-comp = [
-  "apalis-core/async-std-comp",
   "apalis-sql?/async-std-comp",
   "apalis-redis?/async-std-comp",
   "apalis-cron?/async-std-comp",
+  "async-std",
 ]
 ## Compatibility with tokio and actix runtimes
 tokio-comp = [
-  "apalis-core/tokio-comp",
   "apalis-sql?/tokio-comp",
   "apalis-redis?/tokio-comp",
   "apalis-cron?/tokio-comp",
+  "tokio",
 ]
 
-## Expose job sources for web and cli purposes
-expose = ["apalis-core/expose", "apalis-sql?/expose", "apalis-redis?/expose"]
-
-docsrs = ["document-features"]
-
+layers = [
+  "sentry",
+  "prometheus",
+  "tracing",
+  "retry",
+  "timeout",
+  "limit",
+  "filter",
+]
 
 [dependencies.apalis-redis]
-version = "0.4.9"
+version = "0.5.0"
 optional = true
 path = "./packages/apalis-redis"
 default-features = false
 
 [dependencies.apalis-sql]
-version = "0.4.9"
+
+version = "0.5.0"
 features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"
 
 [dependencies.apalis-core]
-version = "0.4.9"
+version = "0.5.0"
 default-features = false
 path = "./packages/apalis-core"
-features = ["storage"]
 
 [dependencies.apalis-cron]
-version = "0.4.9"
+version = "0.5.0"
 optional = true
 default-features = false
 path = "./packages/apalis-cron"
@@ -103,22 +101,7 @@ optional = true
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
-features = [
-  "redis",
-  "sqlite",
-  "postgres",
-  "cron",
-  "sentry",
-  "prometheus",
-  "retry",
-  "timeout",
-  "limit",
-  "filter",
-  "extensions",
-  "tokio-comp",
-  "expose",
-  "docsrs",
-]
+all-features = true
 
 
 [dev-dependencies]
@@ -127,10 +110,18 @@ pprof = { version = "0.13", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-apalis-redis = { version = "0.4.9", path = "./packages/apalis-redis" }
-apalis-sql = { version = "0.4.9", path = "./packages/apalis-sql", features = [
-  "sqlite", "postgres", "mysql"
+apalis = { path = ".", features = ["redis", "sqlite", "postgres", "mysql"] }
+redis = { version = "0.24", default-features = false, features = [
+    "script",
+    "aio",
+    "connection-manager",
 ] }
+
+[dev-dependencies.sqlx]
+version = "0.7.3"
+default-features = false
+features = ["chrono", "mysql", "sqlite", "postgres"]
+
 
 [[bench]]
 name = "storages"
@@ -153,7 +144,31 @@ members = [
   "examples/axum",
   "examples/prometheus",
   "examples/tracing",
-  "examples/rest-api",
+  # "examples/rest-api",
   "examples/async-std-runtime",
   "examples/basics",
 ]
+
+
+[dependencies]
+tokio = { version = "1", features = [
+  "rt",
+], default-features = false, optional = true }
+async-std = { version = "1", optional = true }
+tower = { version = "0.4", features = ["util"], default-features = false }
+tracing-futures = { version = "0.2.5", optional = true, default-features = false }
+sentry-core = { version = "0.32.1", optional = true, default-features = false }
+metrics = { version = "0.22", optional = true, default-features = false }
+metrics-exporter-prometheus = { version = "0.13", optional = true, default-features = false }
+thiserror = "1"
+futures = "0.3"
+pin-project-lite = "0.2.13"
+# Needed only for sentry reporting
+uuid = { version = "1.6", optional = true }
+ulid = { version = "1", optional = true }
+serde = { version = "1.0", features = ["derive"] }
+
+[dependencies.tracing]
+default_features = false
+version = "0.1"
+optional = true

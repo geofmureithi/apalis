@@ -6,9 +6,10 @@ use std::time::Duration;
 use tracing_subscriber::prelude::*;
 
 use apalis::{
-    layers::TraceLayer,
-    prelude::{JobContext, Monitor, Storage, WithStorage, WorkerBuilder, WorkerFactoryFn},
+    layers::tracing::TraceLayer,
+    prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
     redis::RedisStorage,
+    utils::TokioExecutor,
 };
 
 use tokio::time::sleep;
@@ -28,7 +29,7 @@ impl fmt::Display for InvalidEmailError {
 
 impl Error for InvalidEmailError {}
 
-async fn email_service(_email: Email, _ctx: JobContext) {
+async fn email_service(_email: Email) {
     tracing::info!("Checking if dns configured");
     sleep(Duration::from_millis(1008)).await;
     tracing::info!("Sent in 1 sec");
@@ -61,16 +62,17 @@ async fn main() -> Result<()> {
         .with(fmt_layer)
         .init();
 
-    let storage = RedisStorage::connect(redis_url)
+    let conn = apalis::redis::connect(redis_url)
         .await
         .expect("Could not connect to RedisStorage");
+    let storage = RedisStorage::new(conn);
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
-    Monitor::new()
+    Monitor::<TokioExecutor>::new()
         .register(
             WorkerBuilder::new("tasty-avocado")
-                .middleware(|srv| srv.layer(TraceLayer::new()))
+                .chain(|srv| srv.layer(TraceLayer::new()))
                 .with_storage(storage)
                 .build_fn(email_service),
         )

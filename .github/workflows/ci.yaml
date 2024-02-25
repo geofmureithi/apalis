@@ -24,12 +24,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --features async-std-comp,chrono --no-default-features
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --features async-std-comp,time --no-default-features
-
+          args: --features async-std-comp --no-default-features
 
   test:
     name: Test Suite

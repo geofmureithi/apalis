@@ -1,6 +1,6 @@
 [package]
 name = "apalis-core"
-version = "0.4.9"
+version = "0.5.0"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2021"
 license = "MIT"
@@ -14,70 +14,25 @@ readme = "../../README.md"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 futures = { version = "0.3", features = ["async-await"] }
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "0.4", features = ["util"], default-features = false }
 pin-project-lite = "0.2.13"
-tokio = { version = "1", features = ["rt", "net"], optional = true }
-async-std = { version = "1", optional = true }
-smol = { version = "2.0", optional = true }
-smol-timeout = { version = "0.6", optional = true }
+async-oneshot = "0.5.9"
 thiserror = "1.0.57"
-log = "0.4"
-http = { version = "1.0.0", optional = true }
-strum = { version = "0.26", features = ["derive"] }
-chrono = { version = "0.4", default-features = false, optional = true, features = [
-    "clock",
-    "serde",
-] }
-time = { version = "0.3", optional = true, features = [
-    "serde"
-] }
-tracing-futures = { version = "0.2.5", optional = true, default-features = false }
-sentry-core = { version = "0.32.2", optional = true, default-features = false }
-metrics = { version = "0.22", optional = true, default-features = false }
-metrics-exporter-prometheus = { version = "0.13", optional = true, default-features = false }
-async-trait = { version = "0.1" }
-graceful-shutdown = { version = "0.2", features = ["stream", "tokio-timeout"] }
-ulid = "1.1.2"
-# Needed only for sentry reporting
-uuid = { version = "1.7", optional = true }
-async-stream = "0.3"
+ulid = { version = "1.1.0", default-features = false, features = ["std"] }
+async-timer = { version = "1.0.0-beta.11", optional = true, default-features = false }
+# Needed for the codec
+serde_json = { version = "1", optional = true }
 
 [dependencies.document-features]
 version = "0.2"
 optional = true
 
-[features]
-default = ["tokio-comp", "extensions", "chrono"]
-chrono = ["dep:chrono"]
-time = ["dep:time"]
-storage = ["extensions"]
-mq = ["extensions"]
-expose = []
-layers = [
-    "sentry",
-    "prometheus",
-    "trace",
-    "retry",
-    "timeout",
-    "limit",
-    "filter",
-    "extensions",
-]
-sentry = ["sentry-core", "ulid/uuid", "uuid"]
-prometheus = ["metrics", "metrics-exporter-prometheus"]
-trace = ["tracing-futures/std-future"]
-retry = ["tower/retry"]
-timeout = ["tower/timeout"]
-limit = ["tower/limit"]
-filter = ["tower/filter"]
-extensions = ["http"]
-async-std-comp = ["async-std", "smol-timeout", "smol"]
-tokio-comp = ["tokio"]
-docsrs = ["document-features"]
 
-[dependencies.tracing]
-default_features = false
-version = "0.1"
+[features]
+default = []
+docsrs = ["document-features"]
+sleep = ["async-timer"]
+json = ["serde_json"]
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
@@ -86,6 +41,6 @@ all-features = true
 
 
 [dev-dependencies]
-tokio = { version = "1.36.0", features = ["macros", "rt", "sync"] }
-apalis-core = { path = ".", features = ["storage", "trace"] }
-apalis-sql = { path = "../apalis-sql", features = ["tokio-comp"] }
+tokio = { version = "1.35.1", features = ["macros", "rt", "sync"] }
+tokio-stream = "0.1.14"
+

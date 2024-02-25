@@ -19,7 +19,7 @@
 //! ```rust, no_run
 //! use apalis::prelude::*;
 //! use serde::{Deserialize, Serialize};
-//! use apalis_redis::RedisStorage;
+//! use apalis::redis::RedisStorage;
 //!
 //! #[derive(Debug, Deserialize, Serialize)]
 //! struct Email {
@@ -30,18 +30,20 @@
 //!     const NAME: &'static str = "apalis::Email";
 //! }
 //!
-//! async fn send_email(job: Email, ctx: JobContext) -> Result<(), JobError> {
+//! async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
 //!     Ok(())
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
-//!     let storage = RedisStorage::connect(redis).await.expect("Storage failed");
-//!     Monitor::new()
-//!         .register_with_count(2, move |index| {
-//!             WorkerBuilder::new(&format!("quick-sand-{index}"))
-//!                 .with_storage(storage.clone())
+//!     let conn = apalis::redis::connect(redis).await.unwrap();
+//!     let storage = RedisStorage::new(conn);
+//!     Monitor::<TokioExecutor>::new()
+//!         .register_with_count(2, {
+//!             WorkerBuilder::new(&format!("quick-sand"))
+//!                 .data(0usize)
+//!                 .source(storage.clone())
 //!                 .build_fn(send_email)
 //!         })
 //!         .run()
@@ -66,24 +68,10 @@
 //! [`Stream`]: https://docs.rs/futures/latest/futures/stream/trait.Stream.html
 
 /// Include the default Redis storage
-///
-/// ### Example
-/// ```ignore
-/// let storage = RedisStorage::connect("REDIS_URL").await
-///                 .expect("Cannot establish connection");
-///
-/// Monitor::new()
-///     .register_with_count(4, move |index| {
-///         WorkerBuilder::new(&format!("quick-sand-{index}"))
-///             .with_storage(storage.clone())
-///             .build_fn(email_service)
-///     })
-///     .run()
-///     .await
-///```
 #[cfg(feature = "redis")]
 #[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
 pub mod redis {
+    pub use apalis_redis::connect;
     pub use apalis_redis::RedisStorage;
 }
 
@@ -115,78 +103,59 @@ pub mod cron {
     pub use apalis_cron::*;
 }
 
-/// apalis jobs fully support tower middleware via [`Layer`]
-///
-/// ## Example
-/// ```ignore
-/// use apalis::{
-///     layers::{Extension, DefaultRetryPolicy, RetryLayer},
-///     WorkerBuilder,
-/// };
-///
-/// fn main() {
-///     let worker = WorkerBuilder::new("tasty-avocado")
-///         .layer(RetryLayer::new(DefaultRetryPolicy))
-///         .layer(Extension(GlobalState {}))
-///         .with_storage(storage.clone())
-///         .build(send_email);
-/// }
+/// apalis fully supports middleware via [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html)
+pub mod layers;
 
-/// ```
-///
-/// [`Layer`]: https://docs.rs/tower/latest/tower/trait.Layer.html
-pub mod layers {
-    #[cfg(feature = "retry")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
-    pub use apalis_core::layers::retry::RetryLayer;
+/// Utilities for working with apalis
+pub mod utils {
+    /// Executor for [`tokio`]
+    #[cfg(feature = "tokio-comp")]
+    #[derive(Clone, Debug, Default)]
+    pub struct TokioExecutor;
 
-    #[cfg(feature = "retry")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
-    pub use apalis_core::layers::retry::DefaultRetryPolicy;
+    #[cfg(feature = "tokio-comp")]
+    impl apalis_core::executor::Executor for TokioExecutor {
+        fn spawn(&self, future: impl std::future::Future<Output = ()> + Send + 'static) {
+            tokio::spawn(future);
+        }
+    }
 
-    #[cfg(feature = "tracing")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "tracing")))]
-    pub use apalis_core::layers::tracing::{Trace, TraceLayer};
+    /// Executor for [`async_std`]
+    #[cfg(feature = "async-std-comp")]
+    #[derive(Clone, Debug, Default)]
+    pub struct AsyncStdExecutor;
 
-    #[cfg(feature = "limit")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "limit")))]
-    pub use apalis_core::layers::limit::RateLimitLayer;
-
-    #[cfg(feature = "extensions")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "extensions")))]
-    pub use apalis_core::layers::extensions::Extension;
-
-    #[cfg(feature = "sentry")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "sentry")))]
-    pub use apalis_core::layers::sentry::SentryJobLayer;
-
-    #[cfg(feature = "prometheus")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "prometheus")))]
-    pub use apalis_core::layers::prometheus::PrometheusLayer;
+    #[cfg(feature = "async-std-comp")]
+    impl apalis_core::executor::Executor for AsyncStdExecutor {
+        fn spawn(&self, future: impl std::future::Future<Output = ()> + Send + 'static) {
+            async_std::task::spawn(future);
+        }
+    }
 }
 
 /// Common imports
 pub mod prelude {
-    #[cfg(feature = "expose")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "expose")))]
-    pub use apalis_core::expose::*;
+    #[cfg(feature = "tokio-comp")]
+    pub use crate::utils::TokioExecutor;
     pub use apalis_core::{
-        builder::WorkerBuilder,
-        builder::WorkerFactory,
-        builder::WorkerFactoryFn,
-        context::JobContext,
-        error::JobError,
-        executor::*,
-        job::{Job, JobFuture, JobId},
-        job_fn::job_fn,
-        monitor::Monitor,
-        request::JobRequest,
-        request::JobState,
+        builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
+        data::Extensions,
+        error::{BoxDynError, Error},
+        executor::Executor,
+        layers::extensions::{AddExtension, Data},
+        memory::{MemoryStorage, MemoryWrapper},
+        monitor::{Monitor, MonitorContext},
+        mq::{Message, MessageQueue},
+        notify::Notify,
+        poller::stream::BackendStream,
+        poller::{controller::Controller, FetchNext, Poller},
+        request::{Request, RequestStream},
         response::IntoResponse,
-        utils::*,
-        worker::{WorkerContext, WorkerId},
-    };
-    pub use apalis_core::{
-        storage::builder::WithStorage, storage::Storage, storage::StorageWorkerPulse,
+        service_fn::{service_fn, FromData, ServiceFn},
+        storage::{Job, Storage, StorageStream},
+        task::attempt::Attempt,
+        task::task_id::TaskId,
+        worker::{Context, Event, Ready, Worker, WorkerError, WorkerId},
+        Backend, Codec,
     };
 }

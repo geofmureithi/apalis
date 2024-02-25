@@ -16,7 +16,7 @@ on:
 
 name: Mysql CI
 
-jobs:  
+jobs:
   test-mysql:
     name: Test Suite with MySQL
     runs-on: ubuntu-latest
@@ -31,7 +31,7 @@ jobs:
         ports:
           - 3306:3306
     env:
-          DATABASE_URL: mysql://test:test@localhost/test
+      DATABASE_URL: mysql://test:test@localhost/test
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
       - uses: actions-rs/toolchain@v1
@@ -39,7 +39,5 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: cargo test --no-default-features --features mysql,migrate,tokio-comp,chrono -- --test-threads=1
-        working-directory: packages/apalis-sql
-      - run: cargo test --no-default-features --features mysql,migrate,tokio-comp,time -- --test-threads=1
+      - run: cargo test --no-default-features --features mysql,migrate,tokio-comp -- --test-threads=1
         working-directory: packages/apalis-sql

@@ -1,12 +1,20 @@
 use apalis::prelude::*;
-use apalis_redis::RedisStorage;
-use apalis_sql::{mysql::MysqlStorage, postgres::PostgresStorage, sqlite::SqliteStorage};
+
+use apalis::redis::RedisStorage;
+use apalis::{
+    mysql::{MySqlPool, MysqlStorage},
+    postgres::{PgPool, PostgresStorage},
+    sqlite::{SqlitePool, SqliteStorage},
+};
 use criterion::*;
+use futures::Future;
 use paste::paste;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
-
 macro_rules! define_bench {
     ($name:expr, $setup:expr ) => {
         paste! {
@@ -18,20 +26,19 @@ macro_rules! define_bench {
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &s| {
                 b.to_async(Runtime::new().unwrap())
                     .iter_custom(|iters| async move {
-                        let mut interval = tokio::time::interval(Duration::from_millis(50));
+                        let mut interval = tokio::time::interval(Duration::from_millis(100));
                         let storage = { $setup };
                         let mut s1 = storage.clone();
+                        let counter = Counter::default();
+                        let c = counter.clone();
                         tokio::spawn(async move {
-                            Monitor::new()
-                                .register_with_count(1, |index| {
+                            Monitor::<TokioExecutor>::new()
+                                .register({
                                     let worker =
-                                        WorkerBuilder::new(format!("{}-bench-{index}", $name))
-                                            .with_storage_config(storage.clone(), |cfg| {
-                                                cfg.buffer_size(100)
-                                                    .enqueue_scheduled(None)
-                                                    .reenqueue_orphaned(None)
-                                            })
-                                            .build(job_fn(handle_test_job));
+                                        WorkerBuilder::new(format!("{}-bench", $name))
+                                            .data(c)
+                                            .source(storage)
+                                            .build_fn(handle_test_job);
                                     worker
                                 })
                                 .run()
@@ -47,8 +54,11 @@ macro_rules! define_bench {
                             while s1.len().await.unwrap_or(-1) != 0 {
                                 interval.tick().await;
                             }
+                            counter.0.store(0, Ordering::Relaxed);
                         }
-                        start.elapsed()
+                        let elapsed = start.elapsed();
+                        s1.cleanup().await;
+                        elapsed
                     })
             });
             group.bench_with_input(BenchmarkId::new("push", size), &size, |b, &s| {
@@ -72,33 +82,77 @@ impl Job for TestJob {
     const NAME: &'static str = "TestJob";
 }
 
-async fn handle_test_job(_req: TestJob, _ctx: JobContext) -> Result<(), JobError> {
+#[derive(Debug, Default, Clone)]
+struct Counter(Arc<AtomicUsize>);
+
+async fn handle_test_job(_req: TestJob, counter: Data<Counter>) -> Result<(), Error> {
+    counter.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
 
+trait CleanUp {
+    fn cleanup(&mut self) -> impl Future<Output = ()> + Send;
+}
+
+impl CleanUp for SqliteStorage<TestJob> {
+    async fn cleanup(&mut self) {
+        let pool = self.pool();
+        let query = "DELETE FROM Jobs; DELETE from Workers;";
+        sqlx::query(query).execute(pool).await.unwrap();
+    }
+}
+
+impl CleanUp for PostgresStorage<TestJob> {
+    async fn cleanup(&mut self) {
+        let pool = self.pool();
+        let query = "DELETE FROM apalis.jobs;";
+        sqlx::query(query).execute(pool).await.unwrap();
+        let query = "DELETE from apalis.workers;";
+        sqlx::query(query).execute(pool).await.unwrap();
+    }
+}
+
+impl CleanUp for MysqlStorage<TestJob> {
+    async fn cleanup(&mut self) {
+        let pool = self.pool();
+        let query = "DELETE FROM jobs; DELETE from workers;";
+        sqlx::query(query).execute(pool).await.unwrap();
+    }
+}
+
+impl CleanUp for RedisStorage<TestJob> {
+    async fn cleanup(&mut self) {
+        let mut conn = self.get_connection().clone();
+        let _resp: String = redis::cmd("FLUSHDB")
+            .query_async(&mut conn)
+            .await
+            .expect("failed to Flushdb");
+    }
+}
+
 define_bench!("sqlite_in_memory", {
-    let sqlite = SqliteStorage::connect("sqlite::memory:").await.unwrap();
-    let _ = sqlite.setup().await;
-    sqlite
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    let _ = SqliteStorage::setup(&pool).await;
+    SqliteStorage::new(pool)
 });
 
 define_bench!("redis", {
-    let redis = RedisStorage::connect(env!("REDIS_URL")).await.unwrap();
+    let conn = apalis::redis::connect(env!("REDIS_URL")).await.unwrap();
+    let redis = RedisStorage::new(conn);
     redis
 });
 
 define_bench!("postgres", {
-    let pg = PostgresStorage::connect(env!("POSTGRES_URL"))
-        .await
-        .unwrap();
-    let _ = pg.setup().await;
-    pg
-});
-define_bench!("mysql", {
-    let mysql = MysqlStorage::connect(env!("MYSQL_URL")).await.unwrap();
-    let _ = mysql.setup().await.unwrap();
-    mysql
+    let pool = PgPool::connect(env!("POSTGRES_URL")).await.unwrap();
+    let _ = PostgresStorage::setup(&pool).await.unwrap();
+    PostgresStorage::new(pool)
 });
 
-criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
+// define_bench!("mysql", {
+//     let pool = MySqlPool::connect(env!("MYSQL_URL")).await.unwrap();
+//     let _ = MysqlStorage::setup(&pool).await.unwrap();
+//     MysqlStorage::new(pool)
+// });
+
+criterion_group!(benches, sqlite_in_memory, redis, postgres);
 criterion_main!(benches);
