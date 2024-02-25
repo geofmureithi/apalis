@@ -165,6 +165,19 @@ sequenceDiagram
     end
     Worker->>+Backend: Update job status to 'completed'
 ```
+## External examples
+
+- [Shuttle](https://github.com/shuttle-hq/shuttle-examples/tree/main/shuttle-cron): Using apalis-cron with [shuttle.rs](https://shuttle.rs)
+- [Actix-Web](https://github.com/actix/examples/tree/master/background-jobs): Using apalis-redis with actix-web
+
+## Projects using apalis
+- [Ryot](https://github.com/IgnisDa/ryot): A self hosted platform for tracking various facets of your life - media, fitness etc.
+- [Summarizer](https://github.com/akhildevelops/summarizer): Podcast summarizer
+
+## Resources
+
+- [Background job processing with rust using actix and redis](https://mureithi.me/blog/background-job-processing-with-rust-actix-redis)
+
 
 ### Web UI
 
@@ -217,10 +230,6 @@ v 0.2
 
 - [x] Redis Example
 - [x] Actix Web Example
-
-## Resources
-
-- [Background job processing with rust using actix and redis](https://mureithi.me/blog/background-job-processing-with-rust-actix-redis)
 
 ## Contributing
 
