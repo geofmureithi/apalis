@@ -109,7 +109,6 @@ impl CleanUp for PostgresStorage<TestJob> {
         sqlx::query(query).execute(pool).await.unwrap();
         let query = "DELETE from apalis.workers;";
         sqlx::query(query).execute(pool).await.unwrap();
-
     }
 }
 

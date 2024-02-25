@@ -59,7 +59,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.4", features = ["redis"] }
+apalis = { version = "0.5", features = ["redis"] } # Backends available: postgres, sqlite, mysql, amqp
 ```
 
 ## Usage
@@ -174,7 +174,7 @@ If you are running [apalis Board](https://github.com/geofmureithi/apalis-board),
 
 ## Thanks to
 
-- [`tower`] - Tower is a library of modular and reusable components for building robust networking clients and servers.
+- [tower] - Tower is a library of modular and reusable components for building robust networking clients and servers.
 - [redis-rs](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
 - [sqlx](https://github.com/launchbadge/sqlx) - The Rust SQL Toolkit
 
