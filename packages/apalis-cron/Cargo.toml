@@ -1,6 +1,6 @@
 [package]
 name = "apalis-cron"
-version = "0.5.0-alpha.0"
+version = "0.5.0"
 edition = "2021"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 license = "MIT"
@@ -9,7 +9,7 @@ description = "A simple yet extensible library for cron-like job scheduling for 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.5.0-alpha.0", default-features = false, features = [
+apalis-core = { path = "../../packages/apalis-core", version = "0.5.0", default-features = false, features = [
     "sleep",
     "json",
 ] }
