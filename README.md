@@ -250,7 +250,7 @@ See also the list of [contributors](https://github.com/geofmureithi/apalis/contr
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
 
 [`tower::Service`]: https://docs.rs/tower/latest/tower/trait.Service.html
-[`tower`]: https://crates.io/crates/tower
+[tower]: https://crates.io/crates/tower
 [`actix`]: https://crates.io/crates/actix
 [`tower-http`]: https://crates.io/crates/tower-http
 [`actor`]: https://docs.rs/actix/0.13.0/actix/trait.Actor.html
