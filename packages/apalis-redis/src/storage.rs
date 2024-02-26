@@ -116,6 +116,7 @@ pub struct Config {
     max_retries: usize,
     keep_alive: Duration,
     enqueue_scheduled: Duration,
+    queue_name_prefix: Option<String>,
 }
 
 impl Default for Config {
@@ -126,6 +127,7 @@ impl Default for Config {
             max_retries: 5,
             keep_alive: Duration::from_secs(30),
             enqueue_scheduled: Duration::from_secs(30),
+            queue_name_prefix: None,
         }
     }
 }
@@ -156,6 +158,11 @@ impl Config {
         &self.enqueue_scheduled
     }
 
+    /// get the queue name prefix setting
+    pub fn get_queue_name_prefix(&self) -> Option<&str> {
+        self.queue_name_prefix.as_deref()
+    }
+
     /// get the fetch interval
     pub fn set_fetch_interval(&mut self, fetch_interval: Duration) {
         self.fetch_interval = fetch_interval;
@@ -179,6 +186,11 @@ impl Config {
     /// get the enqueued setting
     pub fn set_enqueue_scheduled(&mut self, enqueue_scheduled: Duration) {
         self.enqueue_scheduled = enqueue_scheduled;
+    }
+
+    /// get the queue name prefix setting
+    pub fn set_queue_name_prefix(&mut self, queue_name_prefix: Option<String>) {
+        self.queue_name_prefix = queue_name_prefix;
     }
 }
 
@@ -231,7 +243,11 @@ impl<T: Job + Serialize + DeserializeOwned> RedisStorage<T> {
 
     /// Start a new connection providing custom config
     pub fn new_with_config(conn: ConnectionManager, config: Config) -> Self {
-        let name = T::NAME;
+        let name = config
+            .get_queue_name_prefix()
+            .map(|prefix| format!("{prefix}:{}", T::NAME))
+            .unwrap_or_else(|| T::NAME.to_string());
+        let name = name.as_str();
         RedisStorage {
             conn,
             job_type: PhantomData,
