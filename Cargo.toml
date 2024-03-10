@@ -68,6 +68,8 @@ layers = [
   "filter",
 ]
 
+docsrs = ["document-features"]
+
 [dependencies.apalis-redis]
 version = "0.5.0"
 optional = true
