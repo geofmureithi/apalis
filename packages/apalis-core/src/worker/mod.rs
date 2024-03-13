@@ -445,7 +445,7 @@ impl<S, P> Worker<Ready<S, P>> {
                         id: WorkerId::new_with_instance(worker.id.name(), instance),
                         state: FetchNext::new(sender),
                     });
-                    
+
                     if res.is_ok() {
                         match receiver.await {
                             Ok(Ok(Some(req))) => {
@@ -458,7 +458,8 @@ impl<S, P> Worker<Ready<S, P>> {
                                             ctx.notify(Worker {
                                                 state: Event::Error(e.into()),
                                                 id: WorkerId::new_with_instance(
-                                                    worker_id.name(), instance,
+                                                    worker_id.name(),
+                                                    instance,
                                                 ),
                                             });
                                         };
