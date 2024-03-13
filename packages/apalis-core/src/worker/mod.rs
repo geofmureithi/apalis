@@ -427,7 +427,7 @@ impl<S, P> Worker<Ready<S, P>> {
             .layer(Data::new(worker.state.clone()));
         let mut service = worker_layers.service(service);
         worker.running.store(true, Ordering::Relaxed);
-
+        let worker_id = worker.id().clone();
         loop {
             if worker.is_shutting_down() {
                 if let Some(ctx) = worker.state.context.as_ref() {
@@ -445,11 +445,25 @@ impl<S, P> Worker<Ready<S, P>> {
                         id: WorkerId::new_with_instance(worker.id.name(), instance),
                         state: FetchNext::new(sender),
                     });
+                    
                     if res.is_ok() {
                         match receiver.await {
                             Ok(Ok(Some(req))) => {
                                 let fut = service.call(req);
-                                worker.spawn(fut.map(|_| ()));
+                                let worker_id = worker_id.clone();
+                                let state = worker.state.clone();
+                                worker.spawn(fut.map(move |res| {
+                                    if let Err(e) = res {
+                                        if let Some(ctx) = state.context.as_ref() {
+                                            ctx.notify(Worker {
+                                                state: Event::Error(e.into()),
+                                                id: WorkerId::new_with_instance(
+                                                    worker_id.name(), instance,
+                                                ),
+                                            });
+                                        };
+                                    }
+                                }));
                             }
                             Ok(Err(e)) => {
                                 if let Some(ctx) = worker.state.context.as_ref() {
@@ -606,7 +620,6 @@ impl<E: Executor + Send + Clone + 'static> Future for Context<E> {
                 Poll::Pending
             }
         } else {
-            // self.wake();
             self.add_waker(cx);
             Poll::Pending
         }

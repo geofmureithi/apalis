@@ -107,7 +107,7 @@ async fn main() -> Result<(), std::io::Error> {
                 .with_storage(sqlite)
                 .build_fn(send_email)
         })
-        // .shutdown_timeout(Duration::from_secs(5))
+        .shutdown_timeout(Duration::from_secs(5))
         // Use .run() if you don't want without signals
         .run_with_signal(tokio::signal::ctrl_c()) // This will wait for ctrl+c then gracefully shutdown
         .await?;

@@ -1,13 +1,10 @@
 use std::{
     any::Any,
     fmt::{self, Debug, Formatter},
-    pin::Pin,
     sync::{Arc, RwLock},
-    task::{Context as TaskCtx, Poll},
 };
 
-use futures::{Future, FutureExt};
-use pin_project_lite::pin_project;
+use futures::{future::BoxFuture, Future, FutureExt};
 use tower::Service;
 mod shutdown;
 
@@ -26,6 +23,7 @@ pub struct Monitor<E> {
     workers: Vec<Worker<Context<E>>>,
     executor: E,
     context: MonitorContext,
+    terminator: Option<BoxFuture<'static, ()>>,
 }
 
 /// The internal context of a [Monitor]
@@ -128,7 +126,6 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         self.workers.extend(workers);
         self
     }
-
     /// Runs the monitor and all its registered workers until they have all completed or a shutdown signal is received.
     ///
     /// # Arguments
@@ -164,8 +161,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     ///
     /// If a timeout has been set using the `shutdown_timeout` method, the monitor
     /// will wait for all workers to complete up to the timeout duration before exiting.
-    /// If the timeout is reached and workers have not completed, the monitor will log a warning
-    /// message and exit forcefully.
+    /// If the timeout is reached and workers have not completed, the monitor will exit forcefully.
     pub async fn run(self) -> std::io::Result<()>
     where
         E: Executor + Clone + Send + 'static,
@@ -174,12 +170,19 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         for worker in self.workers {
             futures.push(worker.run().boxed());
         }
-        let shutdown_future = self.context.shutdown.boxed();
-
-        futures::join!(
-            futures::future::join_all(futures).map(|_| ()),
-            shutdown_future,
-        );
+        let shutdown_future = self.context.shutdown.boxed().map(|_| ());
+        if let Some(terminator) = self.terminator {
+            let runner = futures::future::select(
+                futures::future::join_all(futures).map(|_| ()),
+                shutdown_future,
+            );
+            futures::join!(runner, terminator);
+        } else {
+            futures::join!(
+                futures::future::join_all(futures).map(|_| ()),
+                shutdown_future,
+            );
+        }
         Ok(())
     }
 
@@ -200,35 +203,13 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     }
 }
 
-pin_project! {
-    struct EventHandlerFuture<F, N> {
-        #[pin]
-        fut: F,
-        shutdown: Shutdown,
-        #[pin]
-        notified: N
-    }
-}
-impl<F: Future<Output = ()>, N: Future<Output = ()>> Future for EventHandlerFuture<F, N> {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut TaskCtx<'_>) -> Poll<()> {
-        let this = self.project();
-        let shutdown = this.shutdown;
-        if shutdown.is_shutting_down() {
-            this.notified.poll(cx)
-        } else {
-            this.fut.poll(cx)
-        }
-    }
-}
-
 impl<E: Default> Default for Monitor<E> {
     fn default() -> Self {
         Self {
             executor: E::default(),
             context: MonitorContext::new(),
             workers: Vec::new(),
+            terminator: None,
         }
     }
 }
@@ -255,6 +236,7 @@ impl<E> Monitor<E> {
             context: MonitorContext::new(),
             workers: Vec::new(),
             executor,
+            terminator: None,
         }
     }
 
@@ -268,7 +250,34 @@ impl<E> Monitor<E> {
             context: self.context,
             workers: Vec::new(),
             executor,
+            terminator: self.terminator,
         }
+    }
+
+    /// Sets a timeout duration for the monitor's shutdown process.
+    ///
+    /// # Arguments
+    ///
+    /// * `duration` - The timeout duration.
+    ///
+    /// # Returns
+    ///
+    /// The monitor instance, with the shutdown timeout duration set.
+    #[cfg(feature = "sleep")]
+    pub fn shutdown_timeout(self, duration: std::time::Duration) -> Self {
+        self.with_terminator(crate::sleep(duration))
+    }
+
+    /// Sets a future that will start being polled when the monitor's shutdown process starts.
+    ///
+    /// After shutdown has been initiated, the `terminator` future will be run, and if it completes
+    /// before all tasks are completed the shutdown process will complete, thus finishing the
+    /// shutdown even if there are outstanding tasks. This can be useful for using a timeout or
+    /// signal (or combination) to force a full shutdown even if one or more tasks are taking
+    /// longer than expected to finish.
+    pub fn with_terminator(mut self, fut: impl Future<Output = ()> + Send + 'static) -> Self {
+        self.terminator = Some(fut.boxed());
+        self
     }
 }
 
