@@ -12,7 +12,7 @@ use email_service::{send_email, Email};
 use tracing::{error, info};
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
-    for index in 0..100 {
+    for index in 0..1 {
         storage
             .push(Email {
                 to: index.to_string(),
@@ -69,11 +69,13 @@ async fn main() -> Result<()> {
                 _ => {}
             }
         })
+        .shutdown_timeout(Duration::from_millis(5000))
         .run_with_signal(async {
             tokio::signal::ctrl_c().await?;
             info!("Monitor starting shutdown");
             Ok(())
         })
         .await?;
+    info!("Monitor shutdown complete");
     Ok(())
 }
