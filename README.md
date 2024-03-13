@@ -64,7 +64,7 @@ apalis = { version = "0.5", features = ["redis"] } # Backends available: postgre
 
 ## Usage
 
-````rust
+```rust
 use apalis::prelude::*;
 use apalis::redis::RedisStorage;
 use serde::{Deserialize, Serialize};
@@ -80,7 +80,6 @@ impl Job for Email {
 }
 
 /// A function that will be converted into a service.
-/// ```
 async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
   /// execute job
   Ok(())
@@ -103,7 +102,7 @@ async fn main() -> Result<()> {
         .await
 }
 
-````
+```
 
 Then
 
@@ -134,7 +133,6 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
 - _timeout_ — Support timeouts on jobs
 - _limit_ — 💪 Limit the amount of jobs
 - _filter_ — Support filtering jobs based on a predicate
-- _extensions_ — Add a global extensions to jobs
 
 ## Storage Comparison
 
@@ -176,6 +174,7 @@ sequenceDiagram
 
 - [Ryot](https://github.com/IgnisDa/ryot): A self hosted platform for tracking various facets of your life - media, fitness etc.
 - [Summarizer](https://github.com/akhildevelops/summarizer): Podcast summarizer
+- [Universal Inbox](https://github.com/universal-inbox/universal-inbox): Universal Inbox is a solution that centralizes all your notifications and tasks in one place to create a unique inbox.
 
 ## Resources
 
