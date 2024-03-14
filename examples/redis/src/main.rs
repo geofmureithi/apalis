@@ -41,7 +41,8 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
-    let storage = RedisStorage::new(conn);
+    let config = apalis::redis::Config::default();
+    let storage = RedisStorage::new_with_config(conn, config);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 

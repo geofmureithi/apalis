@@ -71,8 +71,7 @@
 #[cfg(feature = "redis")]
 #[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
 pub mod redis {
-    pub use apalis_redis::connect;
-    pub use apalis_redis::RedisStorage;
+    pub use apalis_redis::*;
 }
 
 /// Include the default Sqlite storage
