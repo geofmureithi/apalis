@@ -164,7 +164,7 @@ metrics = { version = "0.22", optional = true, default-features = false }
 metrics-exporter-prometheus = { version = "0.14", optional = true, default-features = false }
 thiserror = "1"
 futures = "0.3"
-pin-project-lite = "0.2.13"
+pin-project-lite = "0.2.14"
 # Needed only for sentry reporting
 uuid = { version = "1.8", optional = true }
 ulid = { version = "1", optional = true }
