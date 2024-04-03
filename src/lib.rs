@@ -74,6 +74,13 @@ pub mod redis {
     pub use apalis_redis::*;
 }
 
+/// Expose SqlContext
+#[cfg(feature = "sqlcontext")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sqlcontext")))]
+pub mod apalis_sql {
+    pub use apalis_sql::context::*;
+}
+
 /// Include the default Sqlite storage
 #[cfg(feature = "sqlite")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
