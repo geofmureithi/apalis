@@ -19,12 +19,14 @@ default = ["tracing", "tokio-comp"]
 
 ## Include redis storage
 redis = ["apalis-redis"]
+## Include SQL Context
+sqlcontext = ["apalis-sql"]
 ## Include Postgres storage
-postgres = ["apalis-sql/postgres"]
+postgres = ["sqlcontext","apalis-sql/postgres"]
 ## Include SQlite storage
-sqlite = ["apalis-sql/sqlite"]
+sqlite = ["sqlcontext","apalis-sql/sqlite"]
 ## Include MySql storage
-mysql = ["apalis-sql/mysql"]
+mysql = ["sqlcontext","apalis-sql/mysql"]
 ## Include Cron functionality
 cron = ["apalis-cron"]
 
