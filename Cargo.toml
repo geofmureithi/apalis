@@ -45,6 +45,7 @@ limit = ["tower/limit"]
 filter = ["tower/filter"]
 ## Compatibility with async-std and smol runtimes
 async-std-comp = [
+  "apalis-core/async-std-comp",
   "apalis-sql?/async-std-comp",
   "apalis-redis?/async-std-comp",
   "apalis-cron?/async-std-comp",
@@ -52,6 +53,7 @@ async-std-comp = [
 ]
 ## Compatibility with tokio and actix runtimes
 tokio-comp = [
+  "apalis-core/tokio-comp",
   "apalis-sql?/tokio-comp",
   "apalis-redis?/tokio-comp",
   "apalis-cron?/tokio-comp",
@@ -87,7 +89,7 @@ path = "./packages/apalis-sql"
 [dependencies.apalis-core]
 version = "0.5.1"
 default-features = false
-path = "./packages/apalis-core"
+path = "packages/apalis-core"
 
 [dependencies.apalis-cron]
 version = "0.5.1"

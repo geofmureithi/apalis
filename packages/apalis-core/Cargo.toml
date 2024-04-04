@@ -19,9 +19,10 @@ pin-project-lite = "0.2.13"
 async-oneshot = "0.5.9"
 thiserror = "1.0.58"
 ulid = { version = "1.1.2", default-features = false, features = ["std"] }
-async-timer = { version = "1.0.0-beta.12", optional = true, default-features = false }
 # Needed for the codec
 serde_json = { version = "1", optional = true }
+tokio = { version = "1", features = ["time"], default-features = false, optional = true }
+async-std = { version = "1", optional = true }
 
 [dependencies.document-features]
 version = "0.2"
@@ -31,8 +32,10 @@ optional = true
 [features]
 default = []
 docsrs = ["document-features"]
-sleep = ["async-timer"]
 json = ["serde_json"]
+async-std-comp = ["async-std"]
+## Compatibility with tokio and actix runtimes
+tokio-comp = ["tokio"]
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
