@@ -14,8 +14,8 @@ postgres = ["sqlx/postgres", "sqlx/json"]
 sqlite = ["sqlx/sqlite", "sqlx/json"]
 mysql = ["sqlx/mysql", "sqlx/json", "sqlx/bigdecimal"]
 migrate = ["sqlx/migrate", "sqlx/macros"]
-async-std-comp = ["async-std", "sqlx/runtime-async-std-rustls"]
-tokio-comp = ["tokio", "sqlx/runtime-tokio-rustls"]
+async-std-comp = ["async-std", "sqlx/runtime-async-std-rustls", "apalis-core/async-std-comp"]
+tokio-comp = ["tokio", "sqlx/runtime-tokio-rustls", "apalis-core/tokio-comp"]
 
 [dependencies.sqlx]
 version = "0.7.4"
@@ -26,7 +26,6 @@ features = ["chrono"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 apalis-core = { path = "../../packages/apalis-core", version = "0.5.1", default-features = false, features = [
-    "sleep",
     "json",
 ] }
 log = "0.4"

@@ -100,10 +100,15 @@ pub trait Codec<T, Compact> {
 }
 
 /// Sleep utilities
-#[cfg(feature = "sleep")]
+#[cfg(feature = "tokio-comp")]
 pub async fn sleep(duration: std::time::Duration) {
-    let mut interval = async_timer::Interval::platform_new(duration);
-    interval.wait().await;
+    tokio::time::sleep(duration).await;
+}
+
+/// Sleep utilities
+#[cfg(feature = "async-std-comp")]
+pub async fn sleep(duration: std::time::Duration) {
+    async_std::task::sleep(duration).await;
 }
 
 #[cfg(test)]
