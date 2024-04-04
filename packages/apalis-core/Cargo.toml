@@ -41,6 +41,6 @@ all-features = true
 
 
 [dev-dependencies]
-tokio = { version = "1.36.0", features = ["macros", "rt", "sync"] }
+tokio = { version = "1.37.0", features = ["macros", "rt", "sync"] }
 tokio-stream = "0.1.15"
 
