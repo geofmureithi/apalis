@@ -373,6 +373,7 @@ where
             .encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
         let job_type = T::NAME;
+        let on = DateTime::from_timestamp(on, 0);
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
@@ -669,6 +670,23 @@ mod tests {
     async fn test_consume_last_pushed_job() {
         let mut storage = setup().await;
         push_email(&mut storage, example_email()).await;
+
+        let worker_id = register_worker(&mut storage).await;
+
+        let job = consume_one(&mut storage, &worker_id).await;
+        let ctx = job.get::<SqlContext>().unwrap();
+        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
+        // TODO: assert!(ctx.lock_at().is_some());
+
+        cleanup(storage, &worker_id).await;
+    }
+
+    #[tokio::test]
+    async fn test_schedule_job() {
+        let mut storage = setup().await;
+        let time = Utc::now() + Duration::from_secs(1);
+        storage.schedule(example_email(), time.timestamp()).await.expect("failed to push a job");
 
         let worker_id = register_worker(&mut storage).await;
 
