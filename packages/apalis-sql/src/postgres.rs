@@ -681,13 +681,19 @@ mod tests {
     #[tokio::test]
     async fn test_schedule_job() {
         let mut storage = setup().await;
-        let time = Utc::now() + Duration::from_secs(1);
+        let worker_id = register_worker(&mut storage).await;
+        let time = Utc::now() + Duration::from_secs(5);
         storage
             .schedule(example_email(), time.timestamp())
             .await
             .expect("failed to push a job");
 
-        let worker_id = register_worker(&mut storage).await;
+        let pool = storage.pool.clone();
+        let jobs = sqlx::query!("Select * from apalis.jobs ")
+            .fetch_one(&pool)
+            .await
+            .expect("Cannot fetch jobs from the db");
+        assert_eq!(jobs.status, State::Pending.to_string());
 
         let job = consume_one(&mut storage, &worker_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
@@ -708,6 +714,15 @@ mod tests {
             .reschedule(job, Duration::from_secs(3))
             .await
             .expect("failed to push a job");
+
+        let pool = storage.pool.clone();
+        let fetch_query = "Select * from apalis.get_jobs($1, $2, $3);";
+        let jobs = sqlx::query!("Select * from apalis.jobs ")
+            .fetch_one(&pool)
+            .await
+            .expect("Cannot fetch jobs from the db");
+        assert_eq!(jobs.status, State::Pending.to_string());
+
         let job = consume_one(&mut storage, &worker_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
         assert_eq!(*ctx.status(), State::Running);
