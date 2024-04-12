@@ -38,8 +38,21 @@
 //!          .await
 //!  }
 //! ```
-use crate::context::SqlContext;
-use crate::Config;
+use std::convert::TryInto;
+use std::sync::Arc;
+use std::{fmt, io};
+use std::{marker::PhantomData, ops::Add, time::Duration};
+
+use async_stream::try_stream;
+use futures::{FutureExt, Stream};
+use futures::{StreamExt, TryStreamExt};
+use log::error;
+use serde::{de::DeserializeOwned, Serialize};
+use sqlx::postgres::PgListener;
+pub use sqlx::postgres::PgPool;
+use sqlx::types::chrono::{DateTime, Utc};
+use sqlx::{Pool, Postgres, Row};
+
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
 use apalis_core::layers::{Ack, AckLayer};
@@ -52,24 +65,12 @@ use apalis_core::storage::{Job, Storage};
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
-use async_stream::try_stream;
-use futures::{FutureExt, Stream};
-use futures::{StreamExt, TryStreamExt};
-use log::error;
-use serde::{de::DeserializeOwned, Serialize};
-use sqlx::postgres::PgListener;
-use sqlx::types::chrono::{DateTime, Utc};
-use sqlx::{Pool, Postgres, Row};
-use std::convert::TryInto;
-use std::sync::Arc;
-use std::{fmt, io};
-use std::{marker::PhantomData, ops::Add, time::Duration};
+
+use crate::context::SqlContext;
+use crate::from_row::SqlRequest;
+use crate::Config;
 
 type Timestamp = i64;
-
-pub use sqlx::postgres::PgPool;
-
-use crate::from_row::SqlRequest;
 
 /// Represents a [Storage] that persists to Postgres
 // #[derive(Debug)]
@@ -426,11 +427,7 @@ where
             )))?;
         let job_id = ctx.id();
 
-        let now: i64 = Utc::now().timestamp();
-        let wait: i64 = wait
-            .as_secs()
-            .try_into()
-            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
+        let on = Utc::now() + wait;
 
         let mut tx = pool.acquire().await?;
         let query =
@@ -438,7 +435,7 @@ where
 
         sqlx::query(query)
             .bind(job_id.to_string())
-            .bind(now.add(wait))
+            .bind(on)
             .execute(&mut *tx)
             .await?;
         Ok(())
@@ -571,12 +568,11 @@ impl<T> PostgresStorage<T> {
 }
 #[cfg(test)]
 mod tests {
+    use email_service::Email;
+
     use crate::context::State;
 
     use super::*;
-    use email_service::Email;
-    use futures::StreamExt;
-    use sqlx::types::chrono::Utc;
 
     /// migrate DB and return a storage instance.
     async fn setup() -> PostgresStorage<Email> {
@@ -654,8 +650,8 @@ mod tests {
         register_worker_at(storage, Utc::now().timestamp()).await
     }
 
-    async fn push_email(storage: &mut PostgresStorage<Email>, email: Email) {
-        storage.push(email).await.expect("failed to push a job");
+    async fn push_email(storage: &mut PostgresStorage<Email>, email: Email) -> TaskId {
+        storage.push(email).await.expect("failed to push a job")
     }
 
     async fn get_job(storage: &mut PostgresStorage<Email>, job_id: &TaskId) -> Request<Email> {
@@ -686,10 +682,32 @@ mod tests {
     async fn test_schedule_job() {
         let mut storage = setup().await;
         let time = Utc::now() + Duration::from_secs(1);
-        storage.schedule(example_email(), time.timestamp()).await.expect("failed to push a job");
+        storage
+            .schedule(example_email(), time.timestamp())
+            .await
+            .expect("failed to push a job");
 
         let worker_id = register_worker(&mut storage).await;
 
+        let job = consume_one(&mut storage, &worker_id).await;
+        let ctx = job.get::<SqlContext>().unwrap();
+        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
+        // TODO: assert!(ctx.lock_at().is_some());
+
+        cleanup(storage, &worker_id).await;
+    }
+
+    #[tokio::test]
+    async fn test_reschedule_job() {
+        let mut storage = setup().await;
+        push_email(&mut storage, example_email()).await;
+        let worker_id = register_worker(&mut storage).await;
+        let job = consume_one(&mut storage, &worker_id).await;
+        storage
+            .reschedule(job, Duration::from_secs(3))
+            .await
+            .expect("failed to push a job");
         let job = consume_one(&mut storage, &worker_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
         assert_eq!(*ctx.status(), State::Running);
