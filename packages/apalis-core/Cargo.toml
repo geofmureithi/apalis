@@ -17,7 +17,7 @@ futures = { version = "0.3", features = ["async-await"] }
 tower = { version = "0.4", features = ["util"], default-features = false }
 pin-project-lite = "0.2.14"
 async-oneshot = "0.5.9"
-thiserror = "1.0.58"
+thiserror = "1.0.59"
 ulid = { version = "1.1.2", default-features = false, features = ["std"] }
 async-timer = { version = "1.0.0-beta.13", optional = true, default-features = false }
 # Needed for the codec

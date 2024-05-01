@@ -162,7 +162,7 @@ tracing-futures = { version = "0.2.5", optional = true, default-features = false
 sentry-core = { version = "0.32.3", optional = true, default-features = false }
 metrics = { version = "0.22", optional = true, default-features = false }
 metrics-exporter-prometheus = { version = "0.14", optional = true, default-features = false }
-thiserror = "1"
+thiserror = "1.0.59"
 futures = "0.3"
 pin-project-lite = "0.2.14"
 # Needed only for sentry reporting
