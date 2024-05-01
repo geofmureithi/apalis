@@ -107,7 +107,7 @@ all-features = true
 
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+criterion = { version = "0.5.1", features = ["async_tokio", "html_reports"] }
 pprof = { version = "0.13", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
