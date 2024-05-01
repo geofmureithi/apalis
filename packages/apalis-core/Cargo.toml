@@ -24,7 +24,7 @@ async-timer = { version = "1.0.0-beta.13", optional = true, default-features = f
 serde_json = { version = "1", optional = true }
 
 [dependencies.document-features]
-version = "0.2"
+version = "0.2.8"
 optional = true
 
 

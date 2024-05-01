@@ -96,7 +96,7 @@ default-features = false
 path = "./packages/apalis-cron"
 
 [dependencies.document-features]
-version = "0.2"
+version = "0.2.8"
 optional = true
 
 
