@@ -14,7 +14,7 @@ apalis-core = { path = "../../packages/apalis-core", version = "0.5.1", default-
     "json",
 ] }
 cron = "0.12.1"
-futures = "0.3"
+futures = "0.3.30"
 tower = { version = "0.4" }
 chrono = { version = "0.4.38", default-features = false, features = [
     "clock",
