@@ -111,7 +111,7 @@ criterion = { version = "0.5.1", features = ["async_tokio", "html_reports"] }
 pprof = { version = "0.13", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.37.0", features = ["macros", "rt-multi-thread"] }
 apalis = { path = ".", features = ["redis", "sqlite", "postgres", "mysql"] }
 redis = { version = "0.25.3", default-features = false, features = [
     "script",
@@ -153,7 +153,7 @@ members = [
 
 
 [dependencies]
-tokio = { version = "1", features = [
+tokio = { version = "1.37.0", features = [
   "rt",
 ], default-features = false, optional = true }
 async-std = { version = "1", optional = true }
