@@ -172,5 +172,5 @@ serde = { version = "1.0", features = ["derive"] }
 
 [dependencies.tracing]
 default_features = false
-version = "0.1"
+version = "0.1.40"
 optional = true
