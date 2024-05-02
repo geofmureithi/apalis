@@ -27,7 +27,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "serde",
 ] }
 async-stream = "0.3"
-futures = "0.3"
+futures = "0.3.30"
 tokio = { version = "1", features = ["rt", "net"], optional = true }
 async-std = { version = "1.12.0", optional = true }
 async-trait = "0.1.80"
