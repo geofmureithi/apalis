@@ -20,7 +20,7 @@ redis = { version = "0.25.3", default-features = false, features = [
     "aio",
     "connection-manager",
 ] }
-serde = "1"
+serde = "1.0.200"
 log = "0.4.21"
 chrono = { version = "0.4.38", default-features = false, features = [
     "clock",

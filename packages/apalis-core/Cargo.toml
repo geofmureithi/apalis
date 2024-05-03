@@ -12,7 +12,7 @@ readme = "../../README.md"
 
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0.200", features = ["derive"] }
 futures = { version = "0.3.30", features = ["async-await"] }
 tower = { version = "0.4", features = ["util"], default-features = false }
 pin-project-lite = "0.2.14"
