@@ -50,3 +50,20 @@ impl Default for Config {
         }
     }
 }
+
+impl Config {
+    /// Set the poll_interval
+    pub fn set_poll_interval(&mut self, interval: Duration) {
+        self.poll_interval = interval;
+    }
+
+    /// Set the keep_alive duration
+    pub fn set_keep_alive(&mut self, keep_alive: Duration) {
+        self.keep_alive = keep_alive;
+    }
+
+    /// Set the buffer_size
+    pub fn set_buffer_size(&mut self, buffer_size: usize) {
+        self.buffer_size = buffer_size;
+    }
+}
