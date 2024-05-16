@@ -50,3 +50,29 @@ impl Default for Config {
         }
     }
 }
+
+impl Config {
+    /// Interval between database poll queries
+    ///
+    /// Defaults to 30ms
+    pub fn poll_interval(mut self, interval: Duration) -> Self {
+        self.poll_interval = interval;
+        self
+    }
+
+    /// Interval between worker keep-alive database updates
+    ///
+    /// Defaults to 30s
+    pub fn keep_alive(mut self, keep_alive: Duration) -> Self {
+        self.keep_alive = keep_alive;
+        self
+    }
+
+    /// Buffer size to use when querying for jobs
+    ///
+    /// Defaults to 10
+    pub fn buffer_size(mut self, buffer_size: usize) -> Self {
+        self.buffer_size = buffer_size;
+        self
+    }
+}
