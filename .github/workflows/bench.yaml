@@ -33,7 +33,7 @@ jobs:
       MYSQL_URL: mysql://test:test@localhost/test
       REDIS_URL: redis://127.0.0.1/
     steps:
-      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4
+      - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
       - uses: boa-dev/criterion-compare-action@v3
         with:
           branchName: ${{ github.base_ref }}
