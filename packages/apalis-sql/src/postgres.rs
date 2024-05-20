@@ -63,7 +63,7 @@ use sqlx::{Pool, Postgres, Row};
 use std::convert::TryInto;
 use std::sync::Arc;
 use std::{fmt, io};
-use std::{marker::PhantomData, ops::Add, time::Duration};
+use std::{marker::PhantomData, time::Duration};
 
 type Timestamp = i64;
 
@@ -368,6 +368,7 @@ where
             "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, 25, $4, NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
         let id = TaskId::new();
+        let on = DateTime::from_timestamp(on, 0);
         let job = self
             .codec
             .encode(&job)
@@ -424,20 +425,14 @@ where
                 "Missing SqlContext",
             )))?;
         let job_id = ctx.id();
-
-        let now: i64 = Utc::now().timestamp();
-        let wait: i64 = wait
-            .as_secs()
-            .try_into()
-            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
-
+        let on = Utc::now() + wait;
         let mut tx = pool.acquire().await?;
         let query =
                 "UPDATE apalis.jobs SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = $2 WHERE id = $1";
 
         sqlx::query(query)
             .bind(job_id.to_string())
-            .bind(now.add(wait))
+            .bind(on)
             .execute(&mut *tx)
             .await?;
         Ok(())
