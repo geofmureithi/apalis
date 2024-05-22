@@ -40,17 +40,37 @@ const JOB_DATA_HASH: &str = "{queue}:data";
 const SCHEDULED_JOBS_SET: &str = "{queue}:scheduled";
 const SIGNAL_LIST: &str = "{queue}:signal";
 
+/// Represents redis key names for various components of the RedisStorage.
+///
+/// This struct defines keys used in Redis to manage jobs and their lifecycle in the storage.
 #[derive(Clone, Debug)]
-struct RedisQueueInfo {
-    active_jobs_list: String,
-    consumers_set: String,
-    dead_jobs_set: String,
-    done_jobs_set: String,
-    failed_jobs_set: String,
-    inflight_jobs_set: String,
-    job_data_hash: String,
-    scheduled_jobs_set: String,
-    signal_list: String,
+pub struct RedisQueueInfo {
+    /// Key for the list of currently active jobs.
+    pub active_jobs_list: String,
+
+    /// Key for the set of active consumers.
+    pub consumers_set: String,
+
+    /// Key for the set of jobs that are no longer retryable.
+    pub dead_jobs_set: String,
+
+    /// Key for the set of jobs that have completed successfully.
+    pub done_jobs_set: String,
+
+    /// Key for the set of jobs that have failed.
+    pub failed_jobs_set: String,
+
+    /// Key for the set of jobs that are currently being processed.
+    pub inflight_jobs_set: String,
+
+    /// Key for the hash storing data for each job.
+    pub job_data_hash: String,
+
+    /// Key for the set of jobs scheduled for future execution.
+    pub scheduled_jobs_set: String,
+
+    /// Key for the list used for signaling and communication between consumers and producers.
+    pub signal_list: String,
 }
 
 #[derive(Clone, Debug)]
@@ -274,6 +294,11 @@ impl<T: Job + Serialize + DeserializeOwned> RedisStorage<T> {
     /// Get current connection
     pub fn get_connection(&self) -> ConnectionManager {
         self.conn.clone()
+    }
+
+    /// Get the underlying queue details
+    pub fn get_queue(&self) -> &RedisQueueInfo {
+        &self.queue
     }
 }
 
