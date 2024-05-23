@@ -89,7 +89,7 @@ struct RedisScript {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct RedisJob<J> {
+pub struct RedisJob<J> {
     ctx: Context,
     job: J,
 }
@@ -202,7 +202,8 @@ impl Config {
     }
 }
 
-type InnerCodec<T> = Arc<
+/// The codec used by redis to encode and decode jobs
+pub type RedisCodec<T> = Arc<
     Box<dyn Codec<RedisJob<T>, Vec<u8>, Error = apalis_core::error::Error> + Sync + Send + 'static>,
 >;
 
@@ -214,7 +215,7 @@ pub struct RedisStorage<T> {
     scripts: RedisScript,
     controller: Controller,
     config: Config,
-    codec: InnerCodec<T>,
+    codec: RedisCodec<T>,
 }
 
 impl<T> fmt::Debug for RedisStorage<T> {
