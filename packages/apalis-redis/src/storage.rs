@@ -301,6 +301,11 @@ impl<T: Job + Serialize + DeserializeOwned> RedisStorage<T> {
     pub fn get_queue(&self) -> &RedisQueueInfo {
         &self.queue
     }
+
+    /// Get the underlying queue details
+    pub fn get_codec(&self) -> &RedisCodec<T> {
+        &self.codec
+    }
 }
 
 impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
