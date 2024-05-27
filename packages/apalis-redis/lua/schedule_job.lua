@@ -7,6 +7,8 @@
 
 -- Returns: 1 if the job was newly scheduled, 0 if it already exists
 
+-- delete the job to keep track of context
+redis.call("HDEL", KEYS[1], ARGV[1])
 -- Set job data in hash
 local set = redis.call("hsetnx", KEYS[1], ARGV[1], ARGV[2])
 redis.call("zadd", KEYS[2], ARGV[3], ARGV[1])
