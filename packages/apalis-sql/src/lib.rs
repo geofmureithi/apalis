@@ -46,7 +46,7 @@ impl Default for Config {
         Self {
             keep_alive: Duration::from_secs(30),
             buffer_size: 10,
-            poll_interval: Duration::from_millis(50),
+            poll_interval: Duration::from_secs(1),
         }
     }
 }
