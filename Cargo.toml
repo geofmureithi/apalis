@@ -159,7 +159,7 @@ tokio = { version = "1", features = [
 async-std = { version = "1", optional = true }
 tower = { version = "0.4", features = ["util"], default-features = false }
 tracing-futures = { version = "0.2.5", optional = true, default-features = false }
-sentry-core = { version = "0.32.3", optional = true, default-features = false }
+sentry-core = { version = "0.34.0", optional = true, default-features = false }
 metrics = { version = "0.22.3", optional = true, default-features = false }
 metrics-exporter-prometheus = { version = "0.14", optional = true, default-features = false }
 thiserror = "1.0.59"
