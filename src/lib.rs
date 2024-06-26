@@ -25,11 +25,7 @@
 //! struct Email {
 //!     to: String,
 //! }
-//!
-//! impl Job for Email {
-//!     const NAME: &'static str = "apalis::Email";
-//! }
-//!
+//! 
 //! async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
 //!     Ok(())
 //! }
