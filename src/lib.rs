@@ -25,7 +25,7 @@
 //! struct Email {
 //!     to: String,
 //! }
-//! 
+//!
 //! async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
 //!     Ok(())
 //! }
