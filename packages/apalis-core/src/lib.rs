@@ -102,8 +102,7 @@ pub trait Codec<T, Compact> {
 /// Sleep utilities
 #[cfg(feature = "sleep")]
 pub async fn sleep(duration: std::time::Duration) {
-    let mut interval = async_timer::Interval::platform_new(duration);
-    interval.wait().await;
+    futures_timer::Delay::new(duration).await;
 }
 
 #[cfg(test)]
