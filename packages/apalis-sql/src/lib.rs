@@ -39,6 +39,7 @@ pub struct Config {
     keep_alive: Duration,
     buffer_size: usize,
     poll_interval: Duration,
+    namespace: String,
 }
 
 impl Default for Config {
@@ -47,6 +48,7 @@ impl Default for Config {
             keep_alive: Duration::from_secs(30),
             buffer_size: 10,
             poll_interval: Duration::from_millis(50),
+            namespace: String::from("apalis::sql"),
         }
     }
 }
@@ -73,6 +75,14 @@ impl Config {
     /// Defaults to 10
     pub fn buffer_size(mut self, buffer_size: usize) -> Self {
         self.buffer_size = buffer_size;
+        self
+    }
+
+    /// Set the namespace to consume and push jobs to
+    ///
+    /// Defaults to "apalis::sql"
+    pub fn namespace(mut self, namespace: &str) -> Self {
+        self.namespace = namespace.to_owned();
         self
     }
 }

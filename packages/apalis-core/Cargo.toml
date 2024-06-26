@@ -1,6 +1,6 @@
 [package]
 name = "apalis-core"
-version = "0.5.3"
+version = "0.6.0-alpha.0"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2021"
 license = "MIT"
@@ -43,4 +43,3 @@ all-features = true
 [dev-dependencies]
 tokio = { version = "1.37.0", features = ["macros", "rt", "sync"] }
 tokio-stream = "0.1.15"
-

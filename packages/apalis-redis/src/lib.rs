@@ -30,7 +30,7 @@
 mod storage;
 pub use storage::connect;
 pub use storage::Config;
-pub use storage::RedisStorage;
-pub use storage::RedisQueueInfo;
 pub use storage::RedisCodec;
 pub use storage::RedisJob;
+pub use storage::RedisQueueInfo;
+pub use storage::RedisStorage;

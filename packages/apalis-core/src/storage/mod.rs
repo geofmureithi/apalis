@@ -11,7 +11,7 @@ pub type StorageStream<T, E> = BoxStream<'static, Result<Option<Request<T>>, E>>
 /// The underlying type must implement [Job]
 pub trait Storage: Backend<Request<Self::Job>> {
     /// The type of job that can be persisted
-    type Job: Job;
+    type Job;
 
     /// The error produced by the storage
     type Error;
@@ -59,20 +59,4 @@ pub trait Storage: Backend<Request<Self::Job>> {
 
     /// Vacuum the storage, removes done and killed jobs
     fn vacuum(&self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
-}
-
-/// Trait representing a job.
-///
-///
-/// # Example
-/// ```rust
-/// # use apalis_core::storage::Job;
-/// # struct Email;
-/// impl Job for Email {
-///     const NAME: &'static str = "apalis::Email";
-/// }
-/// ```
-pub trait Job {
-    /// Represents the name for job.
-    const NAME: &'static str;
 }

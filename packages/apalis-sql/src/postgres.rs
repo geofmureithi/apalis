@@ -48,7 +48,8 @@ use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
 use apalis_core::request::{Request, RequestStream};
-use apalis_core::storage::{Job, Storage};
+use apalis_core::storage::Storage;
+use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
@@ -118,7 +119,7 @@ impl<T> fmt::Debug for PostgresStorage<T> {
     }
 }
 
-impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
+impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
     for PostgresStorage<T>
 {
     type Stream = BackendStream<RequestStream<Request<T>>>;
@@ -241,11 +242,11 @@ impl PgListen {
     }
 
     /// Add a new subscription
-    pub fn subscribe<T: Job>(&mut self) -> PgSubscription {
+    pub fn subscribe(&mut self, namespace: &str) -> PgSubscription {
         let sub = PgSubscription {
             notify: Notify::new(),
         };
-        self.subscriptions.push((T::NAME.to_owned(), sub.clone()));
+        self.subscriptions.push((namespace.to_owned(), sub.clone()));
         sub
     }
     /// Start listening to jobs
@@ -264,7 +265,7 @@ impl PgListen {
     }
 }
 
-impl<T: DeserializeOwned + Send + Unpin + Job + 'static> PostgresStorage<T> {
+impl<T: DeserializeOwned + Send + Unpin + 'static> PostgresStorage<T> {
     fn stream_jobs(
         &self,
         worker_id: &WorkerId,
@@ -274,12 +275,13 @@ impl<T: DeserializeOwned + Send + Unpin + Job + 'static> PostgresStorage<T> {
         let pool = self.pool.clone();
         let worker_id = worker_id.clone();
         let codec = self.codec.clone();
+        let config = self.config.clone();
         try_stream! {
             loop {
                 //  Ideally wait for a job or a tick
                 apalis_core::sleep(interval).await;
                 let tx = pool.clone();
-                let job_type = T::NAME;
+                let job_type = &config.namespace;
                 let fetch_query = "Select * from apalis.get_jobs($1, $2, $3);";
                 let jobs: Vec<SqlRequest<serde_json::Value>> = sqlx::query_as(fetch_query)
                     .bind(worker_id.to_string())
@@ -293,7 +295,10 @@ impl<T: DeserializeOwned + Send + Unpin + Job + 'static> PostgresStorage<T> {
                     yield Some(Into::into(SqlRequest {
                         context: job.context,
                         req: codec.decode(&job.req).map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?,
-                    }))
+                    })).map(|mut req: Request<T>| {
+                        req.insert(Namespace(config.namespace.clone()));
+                        req
+                    })
                 }
 
             }
@@ -310,7 +315,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job + 'static> PostgresStorage<T> {
         let last_seen = DateTime::from_timestamp(last_seen, 0).ok_or(sqlx::Error::Io(
             io::Error::new(io::ErrorKind::InvalidInput, "Invalid Timestamp"),
         ))?;
-        let worker_type = T::NAME;
+        let worker_type = self.config.namespace.clone();
         let storage_name = std::any::type_name::<Self>();
         let query = "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen)
                 VALUES ($1, $2, $3, $4, $5)
@@ -330,7 +335,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job + 'static> PostgresStorage<T> {
 
 impl<T> Storage for PostgresStorage<T>
 where
-    T: Job + Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
+    T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
 {
     type Job = T;
 
@@ -353,11 +358,11 @@ where
             .codec
             .encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-        let job_type = T::NAME;
+        let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
-            .bind(job_type.to_string())
+            .bind(&job_type)
             .execute(&pool)
             .await?;
         Ok(id)
@@ -373,7 +378,7 @@ where
             .codec
             .encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
-        let job_type = T::NAME;
+        let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
@@ -543,11 +548,8 @@ impl<T> PostgresStorage<T> {
     }
 
     /// Reenqueue jobs that have been abandoned by their workers
-    pub async fn reenqueue_orphaned(&self, count: i32) -> Result<(), sqlx::Error>
-    where
-        T: Job,
-    {
-        let job_type = T::NAME;
+    pub async fn reenqueue_orphaned(&self, count: i32) -> Result<(), sqlx::Error> {
+        let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = "Update apalis.jobs
                             SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ='Job was abandoned'

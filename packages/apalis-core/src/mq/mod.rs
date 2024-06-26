@@ -21,19 +21,3 @@ pub trait MessageQueue<Message>: Backend<Request<Message>> {
     /// Returns the current size of the queue.
     fn size(&self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
-
-/// Trait representing a job.
-///
-///
-/// # Example
-/// ```rust
-/// # use apalis_core::mq::Message;
-/// # struct Email;
-/// impl Message for Email {
-///     const NAME: &'static str = "redis::Email";
-/// }
-/// ```
-pub trait Message {
-    /// Represents the name for job.
-    const NAME: &'static str;
-}

@@ -76,7 +76,7 @@ struct Filter {
 
 async fn push_job<J, S>(job: web::Json<J>, storage: web::Data<S>) -> HttpResponse
 where
-    J: Job + Serialize + DeserializeOwned + 'static,
+    J: Serialize + DeserializeOwned + 'static,
     S: Storage<Output = J>,
 {
     let storage = &*storage.into_inner();
@@ -90,7 +90,7 @@ where
 
 async fn get_jobs<J, S>(storage: web::Data<S>, filter: web::Query<Filter>) -> HttpResponse
 where
-    J: Job + Serialize + DeserializeOwned + 'static,
+    J: Serialize + DeserializeOwned + 'static,
     S: Storage<Output = J> + JobStreamExt<J> + Send,
 {
     let storage = &*storage.into_inner();
@@ -106,7 +106,7 @@ where
 
 async fn get_workers<J, S>(storage: web::Data<S>) -> HttpResponse
 where
-    J: Job + Serialize + DeserializeOwned + 'static,
+    J: Serialize + DeserializeOwned + 'static,
     S: Storage<Output = J> + JobStreamExt<J>,
 {
     let storage = &*storage.into_inner();
@@ -120,7 +120,7 @@ where
 
 async fn get_job<J, S>(job_id: web::Path<JobId>, storage: web::Data<S>) -> HttpResponse
 where
-    J: Job + Serialize + DeserializeOwned + 'static,
+    J: Serialize + DeserializeOwned + 'static,
     S: Storage<Output = J> + 'static,
 {
     let storage = &*storage.into_inner();
@@ -140,7 +140,7 @@ trait StorageRest<J>: Storage<Output = J> {
 impl<J, S> StorageRest<J> for S
 where
     S: Storage<Output = J> + JobStreamExt<J> + 'static,
-    J: Job + Serialize + DeserializeOwned + 'static,
+    J: Serialize + DeserializeOwned + 'static,
 {
     fn name(&self) -> String {
         J::NAME.to_string()
@@ -165,7 +165,7 @@ struct StorageApiBuilder {
 impl StorageApiBuilder {
     fn add_storage<J, S>(mut self, storage: S) -> Self
     where
-        J: Job + Serialize + DeserializeOwned + 'static,
+        J: Serialize + DeserializeOwned + 'static,
         S: StorageRest<J> + JobStreamExt<J>,
         S: Storage<Output = J>,
         S: 'static + Send,

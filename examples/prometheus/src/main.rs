@@ -87,7 +87,7 @@ async fn add_new_job<T>(
     Extension(mut storage): Extension<RedisStorage<T>>,
 ) -> impl IntoResponse
 where
-    T: 'static + Debug + Job + Serialize + DeserializeOwned + Unpin + Send + Sync,
+    T: 'static + Debug + Serialize + DeserializeOwned + Unpin + Send + Sync,
 {
     dbg!(&input);
     let new_job = storage.push(input).await;

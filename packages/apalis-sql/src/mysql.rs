@@ -6,7 +6,8 @@ use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
 use apalis_core::request::{Request, RequestStream};
-use apalis_core::storage::{Job, Storage};
+use apalis_core::storage::Storage;
+use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
@@ -109,16 +110,17 @@ impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
     }
 }
 
-impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> {
+impl<T: DeserializeOwned + Send + Unpin + Sync + 'static> MysqlStorage<T> {
     fn stream_jobs(
         self,
         worker_id: &WorkerId,
         interval: Duration,
         buffer_size: usize,
+        config: &Config,
     ) -> impl Stream<Item = Result<Option<Request<T>>, sqlx::Error>> {
         let pool = self.pool.clone();
         let worker_id = worker_id.to_string();
-
+        let config = config.clone();
         try_stream! {
             let pool = pool.clone();
             let buffer_size = u32::try_from(buffer_size)
@@ -126,7 +128,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
             loop {
                 apalis_core::sleep(interval).await;
                 let pool = pool.clone();
-                let job_type = T::NAME;
+                let job_type = self.config.namespace.clone();
                 let mut tx = pool.begin().await?;
                 let fetch_query = "SELECT id FROM jobs
                 WHERE status = 'Pending' AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE SKIP LOCKED";
@@ -159,7 +161,10 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
                         yield Some(Into::into(SqlRequest {
                             context: job.context,
                             req: self.codec.decode(&job.req).map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?
-                        }))
+                        })).map(|mut req: Request<T>| {
+                            req.insert(Namespace(config.namespace.clone()));
+                            req
+                        })
                     }
                 }
             }
@@ -174,7 +179,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
         let pool = self.pool.clone();
 
         let mut tx = pool.acquire().await?;
-        let worker_type = T::NAME;
+        let worker_type = self.config.namespace.clone();
         let storage_name = std::any::type_name::<Self>();
         let query =
             "REPLACE INTO workers (id, worker_type, storage_name, layers, last_seen) VALUES (?, ?, ?, ?, ?);";
@@ -192,7 +197,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
 
 impl<T> Storage for MysqlStorage<T>
 where
-    T: Job + Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
+    T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
 {
     type Job = T;
 
@@ -210,7 +215,7 @@ where
             .codec
             .encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-        let job_type = T::NAME;
+        let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
@@ -231,7 +236,7 @@ where
             .encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
-        let job_type = T::NAME;
+        let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
@@ -346,7 +351,7 @@ where
     }
 }
 
-impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
+impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
     for MysqlStorage<T>
 {
     type Stream = BackendStream<RequestStream<Request<T>>>;
@@ -364,7 +369,7 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
         let ack_notify = self.ack_notify.clone();
         let mut hb_storage = self.clone();
         let stream = self
-            .stream_jobs(&worker, config.poll_interval, config.buffer_size)
+            .stream_jobs(&worker, config.poll_interval, config.buffer_size, &config)
             .map_err(|e| Error::SourceError(Box::new(e)));
         let stream = BackendStream::new(stream.boxed(), controller);
 
@@ -426,7 +431,7 @@ impl<T: Sync> Ack<T> for MysqlStorage<T> {
     }
 }
 
-impl<T: Job> MysqlStorage<T> {
+impl<T> MysqlStorage<T> {
     /// Kill a job
     pub async fn kill(&mut self, worker_id: &WorkerId, job_id: &TaskId) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
@@ -463,7 +468,7 @@ impl<T: Job> MysqlStorage<T> {
 
     /// Readd jobs that are abandoned to the queue
     pub async fn reenqueue_orphaned(&self, timeout: i64) -> Result<bool, sqlx::Error> {
-        let job_type = T::NAME;
+        let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update jobs
                         INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?

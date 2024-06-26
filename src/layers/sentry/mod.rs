@@ -3,13 +3,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use apalis_core::task::namespace::Namespace;
 use sentry_core::protocol;
 use tower::Layer;
 use tower::Service;
 
 use apalis_core::error::Error;
 use apalis_core::request::Request;
-use apalis_core::storage::Job;
 use apalis_core::task::attempt::Attempt;
 use apalis_core::task::task_id::TaskId;
 
@@ -130,7 +130,6 @@ impl<S, J, F, Res> Service<Request<J>> for SentryJobService<S>
 where
     S: Service<Request<J>, Response = Res, Error = Error, Future = F>,
     F: Future<Output = Result<Res, Error>> + 'static,
-    J: Job,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -141,11 +140,12 @@ where
     }
 
     fn call(&mut self, request: Request<J>) -> Self::Future {
-        let op = J::NAME;
-        let trx_ctx = sentry_core::TransactionContext::new(op, "apalis.job");
         let job_type = std::any::type_name::<J>().to_string();
         let ctx = request.get::<Attempt>().cloned().unwrap_or_default();
         let task_id = request.get::<TaskId>().unwrap();
+        let namespace = request.get::<Namespace>().unwrap();
+        let trx_ctx = sentry_core::TransactionContext::new(namespace, "apalis.job");
+
         let job_details = Task {
             id: task_id.clone(),
             current_attempt: ctx.current().try_into().unwrap(),
