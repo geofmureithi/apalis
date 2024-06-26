@@ -51,7 +51,7 @@ macro_rules! define_bench {
                             for _i in 0..s {
                                 let _ = s1.push(TestJob).await;
                             }
-                            while s1.len().await.unwrap_or(-1) != 0 {
+                            while counter.0.load(Ordering::Relaxed) != s && s1.len().await.unwrap_or(-1) != 0 {
                                 interval.tick().await;
                             }
                             counter.0.store(0, Ordering::Relaxed);
