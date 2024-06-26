@@ -68,15 +68,10 @@ apalis = { version = "0.5", features = ["redis"] } # Backends available: postgre
 use apalis::prelude::*;
 use apalis::redis::RedisStorage;
 use serde::{Deserialize, Serialize};
-use anyhow::Result;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Email {
     to: String,
-}
-
-impl Job for Email {
-    const NAME: &'static str = "apalis::Email";
 }
 
 /// A function that will be converted into a service.

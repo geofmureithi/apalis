@@ -15,9 +15,6 @@ use std::str::FromStr;
 #[derive(Default, Debug, Clone)]
 struct Reminder;
 
-impl Job for Reminder {
-    const NAME: &'static str = "reminder::DailyReminder";
-}
 async fn send_reminder(job: Reminder, ctx: JobContext) {
     // Do reminder stuff
 }

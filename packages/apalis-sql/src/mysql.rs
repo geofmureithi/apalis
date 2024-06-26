@@ -539,7 +539,7 @@ mod tests {
 
     async fn consume_one(storage: &MysqlStorage<Email>, worker_id: &WorkerId) -> Request<Email> {
         let storage = storage.clone();
-        let mut stream = storage.stream_jobs(worker_id, std::time::Duration::from_secs(10), 1);
+        let mut stream = storage.stream_jobs(worker_id, std::time::Duration::from_secs(10), 1, &Config::default());
         stream
             .next()
             .await

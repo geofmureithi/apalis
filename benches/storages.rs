@@ -77,11 +77,6 @@ macro_rules! define_bench {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct TestJob;
-
-impl Job for TestJob {
-    const NAME: &'static str = "TestJob";
-}
-
 #[derive(Debug, Default, Clone)]
 struct Counter(Arc<AtomicUsize>);
 
@@ -148,11 +143,11 @@ define_bench!("postgres", {
     PostgresStorage::new(pool)
 });
 
-// define_bench!("mysql", {
-//     let pool = MySqlPool::connect(env!("MYSQL_URL")).await.unwrap();
-//     let _ = MysqlStorage::setup(&pool).await.unwrap();
-//     MysqlStorage::new(pool)
-// });
+define_bench!("mysql", {
+    let pool = MySqlPool::connect(env!("MYSQL_URL")).await.unwrap();
+    let _ = MysqlStorage::setup(&pool).await.unwrap();
+    MysqlStorage::new(pool)
+});
 
 criterion_group!(benches, sqlite_in_memory, redis, postgres);
 criterion_main!(benches);
