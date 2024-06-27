@@ -6,6 +6,7 @@ use apalis::{
     postgres::{PgPool, PostgresStorage},
     sqlite::{SqlitePool, SqliteStorage},
 };
+use apalis_redis::Config;
 use criterion::*;
 use futures::Future;
 use paste::paste;
@@ -133,7 +134,7 @@ define_bench!("sqlite_in_memory", {
 
 define_bench!("redis", {
     let conn = apalis::redis::connect(env!("REDIS_URL")).await.unwrap();
-    let redis = RedisStorage::new(conn);
+    let redis = RedisStorage::new(conn, Config::default());
     redis
 });
 
