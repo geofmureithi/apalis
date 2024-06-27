@@ -26,7 +26,7 @@ macro_rules! define_bench {
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &s| {
                 b.to_async(Runtime::new().unwrap())
                     .iter_custom(|iters| async move {
-                        let mut interval = tokio::time::interval(Duration::from_millis(100));
+                        let mut interval = tokio::time::interval(Duration::from_millis(150));
                         let storage = { $setup };
                         let mut s1 = storage.clone();
                         let counter = Counter::default();
@@ -51,7 +51,7 @@ macro_rules! define_bench {
                             for _i in 0..s {
                                 let _ = s1.push(TestJob).await;
                             }
-                            while counter.0.load(Ordering::Relaxed) != s && s1.len().await.unwrap_or(-1) != 0 {
+                            while (counter.0.load(Ordering::Relaxed) != s) || (s1.len().await.unwrap_or(-1) != 0) {
                                 interval.tick().await;
                             }
                             counter.0.store(0, Ordering::Relaxed);
@@ -149,5 +149,5 @@ define_bench!("mysql", {
     MysqlStorage::new(pool)
 });
 
-criterion_group!(benches, sqlite_in_memory, redis, postgres);
+criterion_group!(benches, sqlite_in_memory);
 criterion_main!(benches);

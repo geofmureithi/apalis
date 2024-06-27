@@ -180,34 +180,45 @@ impl Config {
         &self.enqueue_scheduled
     }
 
+    /// get the namespace
+    pub fn get_namespace(&self) -> &String {
+        &self.namespace
+    }
+
     /// get the fetch interval
-    pub fn set_fetch_interval(&mut self, fetch_interval: Duration) {
+    pub fn set_fetch_interval(mut self, fetch_interval: Duration) -> Self {
         self.fetch_interval = fetch_interval;
+        self
     }
 
     /// set the buffer setting
-    pub fn set_buffer_size(&mut self, buffer_size: usize) {
+    pub fn set_buffer_size(mut self, buffer_size: usize) -> Self {
         self.buffer_size = buffer_size;
+        self
     }
 
     /// set the max-retries setting
-    pub fn set_max_retries(&mut self, max_retries: usize) {
+    pub fn set_max_retries(mut self, max_retries: usize) -> Self {
         self.max_retries = max_retries;
+        self
     }
 
     /// set the keep-alive setting
-    pub fn set_keep_alive(&mut self, keep_alive: Duration) {
+    pub fn set_keep_alive(mut self, keep_alive: Duration) -> Self {
         self.keep_alive = keep_alive;
+        self
     }
 
     /// get the enqueued setting
-    pub fn set_enqueue_scheduled(&mut self, enqueue_scheduled: Duration) {
+    pub fn set_enqueue_scheduled(mut self, enqueue_scheduled: Duration) -> Self {
         self.enqueue_scheduled = enqueue_scheduled;
+        self
     }
 
     /// set the namespace for the Storage
-    pub fn set_namespace(&mut self, namespace: String) {
-        self.namespace = namespace;
+    pub fn set_namespace(mut self, namespace: &str) -> Self {
+        self.namespace = namespace.to_owned();
+        self
     }
 
     /// Returns the Redis key for the list of active jobs associated with the queue.
@@ -332,19 +343,21 @@ impl<T> Clone for RedisStorage<T> {
 }
 
 impl<T: Serialize + DeserializeOwned> RedisStorage<T> {
-    /// Start a new connection
-    pub fn new(conn: ConnectionManager) -> Self {
-        Self::new_with_config(conn, Config::default())
-    }
-
     /// Start a new connection providing custom config
-    pub fn new_with_config(conn: ConnectionManager, config: Config) -> Self {
+    pub fn new(conn: ConnectionManager, config: Config) -> Self {
+        Self::new_with_codec(conn, config, JsonCodec)
+    }
+    /// Start a new connection providing custom config and a codec
+    pub fn new_with_codec<C>(conn: ConnectionManager, config: Config, codec: C) -> Self
+    where
+        C: Codec<RedisJob<T>, Vec<u8>, Error = apalis_core::error::Error> + Sync + Send + 'static,
+    {
         RedisStorage {
             conn,
             job_type: PhantomData,
             controller: Controller::new(),
             config,
-            codec: Arc::new(Box::new(JsonCodec)),
+            codec: Arc::new(Box::new(codec)),
             scripts: RedisScript {
                 ack_job: redis::Script::new(include_str!("../lua/ack_job.lua")),
                 push_job: redis::Script::new(include_str!("../lua/push_job.lua")),
@@ -884,7 +897,7 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         let conn = connect(redis_url).await.unwrap();
-        let storage = RedisStorage::new(conn);
+        let storage = RedisStorage::new(conn, Config::default());
         storage
     }
 
@@ -897,8 +910,6 @@ mod tests {
             .await
             .expect("failed to Flushdb");
     }
-
-    struct DummyService {}
 
     fn example_email() -> Email {
         Email {
@@ -1021,7 +1032,7 @@ mod tests {
         let worker_id = register_worker_at(&mut storage).await;
 
         let _job = consume_one(&mut storage, &worker_id).await;
-        let result = storage
+        storage
             .reenqueue_orphaned(5, 300)
             .await
             .expect("failed to reenqueue_orphaned");

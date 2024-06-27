@@ -8,7 +8,7 @@ use tracing_subscriber::prelude::*;
 use apalis::{
     layers::tracing::TraceLayer,
     prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
-    redis::RedisStorage,
+    redis::{Config, RedisStorage},
     utils::TokioExecutor,
 };
 
@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     let conn = apalis::redis::connect(redis_url)
         .await
         .expect("Could not connect to RedisStorage");
-    let storage = RedisStorage::new(conn);
+    let storage = RedisStorage::new(conn, Config::default());
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
