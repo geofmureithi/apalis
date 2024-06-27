@@ -8,7 +8,7 @@ use tracing_subscriber::prelude::*;
 use apalis::{
     layers::tracing::TraceLayer,
     prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
-    redis::RedisStorage,
+    redis::{Config, RedisStorage},
     utils::TokioExecutor,
 };
 
@@ -29,10 +29,11 @@ impl fmt::Display for InvalidEmailError {
 
 impl Error for InvalidEmailError {}
 
-async fn email_service(_email: Email) {
+async fn email_service(email: Email) -> Result<(), InvalidEmailError> {
     tracing::info!("Checking if dns configured");
     sleep(Duration::from_millis(1008)).await;
-    tracing::info!("Sent in 1 sec");
+    tracing::info!("Failed in 1 sec");
+    Err(InvalidEmailError { email: email.to })
 }
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
@@ -65,7 +66,7 @@ async fn main() -> Result<()> {
     let conn = apalis::redis::connect(redis_url)
         .await
         .expect("Could not connect to RedisStorage");
-    let storage = RedisStorage::new(conn);
+    let storage = RedisStorage::new(conn, Config::default());
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 

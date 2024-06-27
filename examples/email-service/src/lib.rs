@@ -1,4 +1,3 @@
-use apalis::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -6,10 +5,6 @@ pub struct Email {
     pub to: String,
     pub subject: String,
     pub text: String,
-}
-
-impl Job for Email {
-    const NAME: &'static str = "apalis::Email";
 }
 
 pub async fn send_email(job: Email) {

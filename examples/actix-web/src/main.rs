@@ -2,6 +2,7 @@ use actix_web::rt::signal;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use anyhow::Result;
 use apalis::prelude::*;
+use apalis::redis::Config;
 use apalis::utils::TokioExecutor;
 use apalis::{layers::tracing::TraceLayer, redis::RedisStorage};
 use futures::future;
@@ -27,7 +28,7 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
-    let storage = RedisStorage::new(conn);
+    let storage = RedisStorage::new(conn, Config::default());
     let data = web::Data::new(storage.clone());
     let http = async {
         HttpServer::new(move || {

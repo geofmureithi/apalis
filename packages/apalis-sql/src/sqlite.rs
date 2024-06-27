@@ -8,7 +8,8 @@ use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
 use apalis_core::request::{Request, RequestStream};
-use apalis_core::storage::{Job, Storage};
+use apalis_core::storage::Storage;
+use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
@@ -89,7 +90,7 @@ impl SqliteStorage<()> {
     }
 }
 
-impl<T: Job + Serialize + DeserializeOwned> SqliteStorage<T> {
+impl<T: Serialize + DeserializeOwned> SqliteStorage<T> {
     /// Construct a new Storage from a pool
     pub fn new(pool: SqlitePool) -> Self {
         Self::new_with_config(pool, Config::default())
@@ -112,7 +113,7 @@ impl<T: Job + Serialize + DeserializeOwned> SqliteStorage<T> {
         last_seen: i64,
     ) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let worker_type = T::NAME;
+        let worker_type = self.config.namespace.clone();
         let storage_name = std::any::type_name::<Self>();
         let query = "INSERT INTO Workers (id, worker_type, storage_name, layers, last_seen)
                 VALUES ($1, $2, $3, $4, $5)
@@ -135,10 +136,11 @@ impl<T: Job + Serialize + DeserializeOwned> SqliteStorage<T> {
     }
 }
 
-async fn fetch_next<T: Job>(
+async fn fetch_next(
     pool: Pool<Sqlite>,
     worker_id: &WorkerId,
     id: String,
+    config: &Config,
 ) -> Result<Option<SqlRequest<String>>, sqlx::Error> {
     let now: i64 = Utc::now().timestamp();
     let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
@@ -146,14 +148,14 @@ async fn fetch_next<T: Job>(
         .bind(id.to_string())
         .bind(worker_id.to_string())
         .bind(now)
-        .bind(T::NAME)
+        .bind(config.namespace.clone())
         .fetch_optional(&pool)
         .await?;
 
     Ok(job)
 }
 
-impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
+impl<T: DeserializeOwned + Send + Unpin> SqliteStorage<T> {
     fn stream_jobs(
         &self,
         worker_id: &WorkerId,
@@ -163,12 +165,13 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
         let pool = self.pool.clone();
         let worker_id = worker_id.clone();
         let codec = self.codec.clone();
+        let config = self.config.clone();
         try_stream! {
             loop {
                 apalis_core::sleep(interval).await;
                 let tx = pool.clone();
                 let mut tx = tx.acquire().await?;
-                let job_type = T::NAME;
+                let job_type = &config.namespace;
                 let fetch_query = "SELECT id FROM Jobs
                     WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at < ?1 AND job_type = ?2 LIMIT ?3";
                 let now: i64 = Utc::now().timestamp();
@@ -179,7 +182,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
                     .fetch_all(&mut *tx)
                     .await?;
                 for id in ids {
-                    let res = fetch_next::<T>(pool.clone(), &worker_id, id.0).await?;
+                    let res = fetch_next(pool.clone(), &worker_id, id.0, &config).await?;
                     yield match res {
                         None => None::<Request<T>>,
                         Some(c) => Some(
@@ -190,7 +193,10 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
                                 })?,
                             }
                             .into(),
-                        ),
+                        ).map(|mut req: Request<T>| {
+                            req.insert(Namespace(config.namespace.clone()));
+                            req
+                        }),
                     }
 
                     .map(Into::into);
@@ -202,7 +208,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job> SqliteStorage<T> {
 
 impl<T> Storage for SqliteStorage<T>
 where
-    T: Job + Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
+    T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
 {
     type Job = T;
 
@@ -219,7 +225,7 @@ where
             .codec
             .encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-        let job_type = T::NAME;
+        let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
@@ -238,7 +244,7 @@ where
             .codec
             .encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-        let job_type = T::NAME;
+        let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(job)
             .bind(id.to_string())
@@ -393,11 +399,8 @@ impl<T> SqliteStorage<T> {
     }
 
     /// Add jobs that failed back to the queue if there are still remaining attemps
-    pub async fn reenqueue_failed(&self) -> Result<(), sqlx::Error>
-    where
-        T: Job,
-    {
-        let job_type = T::NAME;
+    pub async fn reenqueue_failed(&self) -> Result<(), sqlx::Error> {
+        let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update Jobs
                             SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL
@@ -419,11 +422,8 @@ impl<T> SqliteStorage<T> {
     }
 
     /// Add jobs that workers have disappeared to the queue
-    pub async fn reenqueue_orphaned(&self, timeout: i64) -> Result<(), sqlx::Error>
-    where
-        T: Job,
-    {
-        let job_type = T::NAME;
+    pub async fn reenqueue_orphaned(&self, timeout: i64) -> Result<(), sqlx::Error> {
+        let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update Jobs
                             SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
@@ -442,7 +442,7 @@ impl<T> SqliteStorage<T> {
     }
 }
 
-impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
+impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
     for SqliteStorage<T>
 {
     type Stream = BackendStream<RequestStream<Request<T>>>;

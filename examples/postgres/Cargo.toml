@@ -16,5 +16,5 @@ email-service = { path = "../email-service" }
 tower = { version = "0.4", features = ["buffer"] }
 
 [dependencies.tracing]
-default_features = false
+default-features = false
 version = "0.1"
