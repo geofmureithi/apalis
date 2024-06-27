@@ -148,7 +148,7 @@ members = [
   "examples/tracing",
   # "examples/rest-api",
   "examples/async-std-runtime",
-  "examples/basics",
+  "examples/basics", "examples/redis-with-msg-pack",
 ]
 
 

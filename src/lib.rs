@@ -19,7 +19,7 @@
 //! ```rust, no_run
 //! use apalis::prelude::*;
 //! use serde::{Deserialize, Serialize};
-//! use apalis::redis::RedisStorage;
+//! use apalis::redis::{RedisStorage, Config};
 //!
 //! #[derive(Debug, Deserialize, Serialize)]
 //! struct Email {
@@ -34,7 +34,7 @@
 //! async fn main() {
 //!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
 //!     let conn = apalis::redis::connect(redis).await.unwrap();
-//!     let storage = RedisStorage::new(conn);
+//!     let storage = RedisStorage::new(conn, Config::default());
 //!     Monitor::<TokioExecutor>::new()
 //!         .register_with_count(2, {
 //!             WorkerBuilder::new(&format!("quick-sand"))

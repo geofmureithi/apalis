@@ -66,7 +66,7 @@ apalis = { version = "0.5", features = ["redis"] } # Backends available: postgre
 
 ```rust
 use apalis::prelude::*;
-use apalis::redis::RedisStorage;
+use apalis::redis::{RedisStorage, Config};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
     let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
-    let storage = RedisStorage::new(redis).await?;
+    let storage = RedisStorage::new(redis, Config::default()).await?;
     Monitor::new()
         .register_with_count(2, {
             WorkerBuilder::new(format!("email-worker"))
