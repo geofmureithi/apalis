@@ -1,6 +1,8 @@
 use std::marker::PhantomData;
 use std::{fmt, sync::Arc};
-pub use tower::{layer::layer_fn, util::BoxCloneService, Layer, Service, ServiceBuilder};
+pub use tower::{
+    layer::layer_fn, layer::util::Identity, util::BoxCloneService, Layer, Service, ServiceBuilder,
+};
 
 use futures::{future::BoxFuture, Future, FutureExt};
 
@@ -158,7 +160,7 @@ pub trait Ack<J> {
     type Error: std::error::Error;
     /// Acknowledges successful processing of the given request
     fn ack(
-        &self,
+        &mut self,
         worker_id: &WorkerId,
         data: &Self::Acknowledger,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
@@ -244,7 +246,7 @@ where
     }
 
     fn call(&mut self, request: Request<J>) -> Self::Future {
-        let ack = self.ack.clone();
+        let mut ack = self.ack.clone();
         let worker_id = self.worker_id.clone();
         let data = request.get::<<A as Ack<J>>::Acknowledger>().cloned();
 

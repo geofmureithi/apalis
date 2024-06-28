@@ -54,6 +54,11 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Create a new config with a jobs namespace
+    pub fn new(namespace: &str) -> Self {
+        Config::default().namespace(namespace)
+    }
+    
     /// Interval between database poll queries
     ///
     /// Defaults to 30ms
