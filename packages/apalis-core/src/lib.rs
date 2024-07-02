@@ -77,14 +77,8 @@ pub trait Backend<Req> {
     /// Returns the final decoration of layers
     type Layer;
 
-    /// Allows the backend to decorate the service with [Layer]
-    ///
-    /// [Layer]: tower::Layer
-    #[allow(unused)]
-    fn common_layer(&self, worker: WorkerId) -> Self::Layer;
-
     /// Returns a poller that is ready for streaming
-    fn poll(self, worker: WorkerId) -> Poller<Self::Stream>;
+    fn poll(self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer>;
 }
 
 /// This allows encoding and decoding of requests in different backends

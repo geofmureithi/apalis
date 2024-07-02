@@ -4,12 +4,9 @@ use anyhow::Result;
 use apalis::prelude::*;
 use apalis::redis::RedisStorage;
 
-use deadpool_redis::{redis::aio::{ConnectionLike, MultiplexedConnection}, Config, Connection, Manager, Pool, Runtime};
+use deadpool_redis::{Config, Connection, Runtime};
 use email_service::{send_email, Email};
-use serde::{de::DeserializeOwned, Serialize};
 use tracing::info;
-
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -21,10 +18,10 @@ async fn main() -> Result<()> {
         .set_namespace("apalis::redis-dead-pool")
         .set_max_retries(5);
 
-    let mut cfg = Config::from_url("redis://127.0.0.1/");
+    let cfg = Config::from_url("redis://127.0.0.1/");
     let pool = cfg.create_pool(Some(Runtime::Tokio1)).unwrap();
     let conn = pool.get().await.unwrap();
-    let mut storage = RedisStorage::new(conn, config);
+    let mut storage = RedisStorage::new_with_config(conn, config);
     // This can be in another part of the program
     produce_jobs(&mut storage).await?;
 

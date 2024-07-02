@@ -1,6 +1,6 @@
 use futures::{future::BoxFuture, Stream};
 use serde::{Deserialize, Serialize};
-use tower::{layer::util::Identity, ServiceBuilder};
+use tower::layer::util::Identity;
 
 use std::{fmt::Debug, pin::Pin};
 
@@ -64,16 +64,13 @@ pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, Error>>;
 impl<T> Backend<Request<T>> for RequestStream<Request<T>> {
     type Stream = Self;
 
-    type Layer = ServiceBuilder<Identity>;
-
-    fn common_layer(&self, _worker: WorkerId) -> Self::Layer {
-        ServiceBuilder::new()
-    }
+    type Layer = Identity;
 
     fn poll(self, _worker: WorkerId) -> Poller<Self::Stream> {
         Poller {
             stream: self,
             heartbeat: Box::pin(async {}),
+            layer: Identity::new(),
         }
     }
 }

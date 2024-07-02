@@ -18,6 +18,7 @@ use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::types::chrono::Utc;
 use sqlx::{Pool, Row, Sqlite};
+use std::any::type_name;
 use std::convert::TryInto;
 use std::sync::Arc;
 use std::{fmt, io};
@@ -95,8 +96,19 @@ impl SqliteStorage<()> {
 }
 
 impl<T: Serialize + DeserializeOwned> SqliteStorage<T> {
+    /// Create a new instance
+    pub fn new(pool: SqlitePool) -> Self {
+        Self {
+            pool,
+            job_type: PhantomData,
+            controller: Controller::new(),
+            config: Config::new(type_name::<T>()),
+            codec: Arc::new(Box::new(JsonCodec)),
+        }
+    }
+
     /// Create a new instance with a custom config
-    pub fn new(pool: SqlitePool, config: Config) -> Self {
+    pub fn new_with_config(pool: SqlitePool, config: Config) -> Self {
         Self {
             pool,
             job_type: PhantomData,
@@ -440,11 +452,8 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
     type Stream = BackendStream<RequestStream<Request<T>>>;
     type Layer = AckLayer<SqliteStorage<T>, T>;
 
-    fn common_layer(&self, worker_id: WorkerId) -> Self::Layer {
-        AckLayer::new(self.clone(), worker_id)
-    }
-
-    fn poll(mut self, worker: WorkerId) -> Poller<Self::Stream> {
+    fn poll(mut self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+        let layer = AckLayer::new(self.clone(), worker.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
         let stream = self
@@ -461,7 +470,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
             }
         }
         .boxed();
-        Poller::new(stream, heartbeat)
+        Poller::new_with_layer(stream, heartbeat, layer)
     }
 }
 

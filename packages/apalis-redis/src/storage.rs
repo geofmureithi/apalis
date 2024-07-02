@@ -1,6 +1,6 @@
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::data::Extensions;
-use apalis_core::layers::{Ack, AckLayer, Identity, ServiceBuilder};
+use apalis_core::layers::{AckLayer, AckStream};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
@@ -20,6 +20,7 @@ use redis::ErrorKind;
 use redis::{aio::ConnectionManager, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use std::any::type_name;
 use std::num::TryFromIntError;
 use std::sync::Arc;
 use std::{fmt, io};
@@ -134,7 +135,7 @@ struct Context {
 /// Config for a [RedisStorage]
 #[derive(Clone, Debug)]
 pub struct Config {
-    fetch_interval: Duration,
+    poll_interval: Duration,
     buffer_size: usize,
     max_retries: usize,
     keep_alive: Duration,
@@ -145,7 +146,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            fetch_interval: Duration::from_millis(100),
+            poll_interval: Duration::from_millis(100),
             buffer_size: 10,
             max_retries: 5,
             keep_alive: Duration::from_secs(30),
@@ -156,9 +157,9 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Get the rate of polling per unit of time
-    pub fn get_fetch_interval(&self) -> &Duration {
-        &self.fetch_interval
+    /// Get the interval of polling
+    pub fn get_poll_interval(&self) -> &Duration {
+        &self.poll_interval
     }
 
     /// Get the number of jobs to fetch
@@ -186,9 +187,9 @@ impl Config {
         &self.namespace
     }
 
-    /// get the fetch interval
-    pub fn set_fetch_interval(mut self, fetch_interval: Duration) -> Self {
-        self.fetch_interval = fetch_interval;
+    /// get the poll interval
+    pub fn set_poll_interval(mut self, poll_interval: Duration) -> Self {
+        self.poll_interval = poll_interval;
         self
     }
 
@@ -344,10 +345,20 @@ impl<T, Conn: Clone> Clone for RedisStorage<T, Conn> {
 }
 
 impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn> {
-    /// Start a new connection providing custom config
-    pub fn new(conn: Conn, config: Config) -> Self {
+    /// Start a new connection
+    pub fn new(conn: Conn) -> Self {
+        Self::new_with_codec(
+            conn,
+            Config::default().set_namespace(type_name::<T>()),
+            JsonCodec,
+        )
+    }
+
+    /// Start a connection with a custom config
+    pub fn new_with_config(conn: Conn, config: Config) -> Self {
         Self::new_with_codec(conn, config, JsonCodec)
     }
+
     /// Start a new connection providing custom config and a codec
     pub fn new_with_codec<C>(conn: Conn, config: Config, codec: C) -> Self
     where
@@ -404,16 +415,13 @@ impl<
 {
     type Stream = BackendStream<RequestStream<Request<T>>>;
 
-    // type Layer = AckLayer<RedisStorage<T, Conn>, T>;
-    type Layer = ServiceBuilder<Identity>;
+    type Layer = AckLayer<AckStream<TaskId>, T>;
 
-    fn common_layer(&self, worker_id: WorkerId) -> Self::Layer {
-        // AckLayer::new(self.clone(), worker_id)
-        ServiceBuilder::new()
-    }
-
-    fn poll(mut self, worker: WorkerId) -> Poller<Self::Stream> {
+    fn poll(mut self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
+        let (ack_tx, ack_rx) = mpsc::channel(self.config.buffer_size);
+        let ack = AckStream(ack_tx);
+        let layer = AckLayer::new(ack, worker.clone());
         let controller = self.controller.clone();
         let config = self.config.clone();
         let stream: RequestStream<Request<T>> = Box::pin(rx);
@@ -423,7 +431,11 @@ impl<
             let mut enqueue_scheduled_stm =
                 apalis_core::interval::interval(config.enqueue_scheduled).fuse();
 
-            let mut poll_next_stm = apalis_core::interval::interval(config.fetch_interval).fuse();
+            let mut poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
+
+            // TODO: use .ready_chunks(config.buffer_size)
+            // TODO: create a ack_jobs.loa
+            let mut ack_stream = ack_rx.fuse();
 
             loop {
                 select! {
@@ -439,21 +451,25 @@ impl<
                             tx.send(Ok(Some(job))).await.unwrap();
                         }
                     }
+                    id_to_ack = ack_stream.next() => {
+                        if let Some((worker_id, task_id)) = id_to_ack {
+                            self.ack(&worker_id, &task_id).await.unwrap();
+                        }
+                    }
                 };
             }
         };
-        Poller::new(BackendStream::new(stream, controller), heartbeat.boxed())
+        Poller::new_with_layer(
+            BackendStream::new(stream, controller),
+            heartbeat.boxed(),
+            layer,
+        )
     }
 }
 
-impl<T: Sync + Send, Conn: ConnectionLike + Send + Sync> Ack<T> for RedisStorage<T, Conn> {
-    type Acknowledger = TaskId;
-    type Error = RedisError;
-    async fn ack(
-        &mut self,
-        worker_id: &WorkerId,
-        task_id: &Self::Acknowledger,
-    ) -> Result<(), RedisError> {
+impl<T, Conn: ConnectionLike + Send + Sync + 'static> RedisStorage<T, Conn> {
+    /// Ack a job
+    pub async fn ack(&mut self, worker_id: &WorkerId, task_id: &TaskId) -> Result<(), RedisError> {
         let ack_job = self.scripts.ack_job.clone();
         let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
         let done_jobs_set = &self.config.done_jobs_set();
@@ -475,10 +491,7 @@ impl<
         Conn: ConnectionLike + Send + Sync + 'static,
     > RedisStorage<T, Conn>
 {
-    async fn fetch_next(
-        &mut self,
-        worker_id: &WorkerId,
-    ) -> Result<Vec<Request<T>>, RedisError> {
+    async fn fetch_next(&mut self, worker_id: &WorkerId) -> Result<Vec<Request<T>>, RedisError> {
         let fetch_jobs = self.scripts.get_jobs.clone();
         let consumers_set = self.config.consumers_set();
         let active_jobs_list = self.config.active_jobs_list();
@@ -910,7 +923,10 @@ mod tests {
         }
     }
 
-    async fn consume_one(storage: &mut RedisStorage<Email>, worker_id: &WorkerId) -> Request<Email> {
+    async fn consume_one(
+        storage: &mut RedisStorage<Email>,
+        worker_id: &WorkerId,
+    ) -> Request<Email> {
         let mut stream = storage.fetch_next(worker_id);
         stream
             .await

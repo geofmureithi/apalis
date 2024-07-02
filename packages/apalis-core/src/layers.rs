@@ -1,12 +1,14 @@
+use futures::channel::mpsc::{SendError, Sender};
+use futures::SinkExt;
+use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::{fmt, sync::Arc};
 pub use tower::{
     layer::layer_fn, layer::util::Identity, util::BoxCloneService, Layer, Service, ServiceBuilder,
 };
 
-use futures::{future::BoxFuture, Future, FutureExt};
-
 use crate::{request::Request, worker::WorkerId};
+use futures::{future::BoxFuture, Future, FutureExt};
 
 /// A generic layer that has been stripped off types.
 /// This is returned by a [crate::Backend] and can be used to customize the middleware of the service consuming tasks
@@ -164,6 +166,22 @@ pub trait Ack<J> {
         worker_id: &WorkerId,
         data: &Self::Acknowledger,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+/// A generic stream that emits (worker_id, task_id)
+#[derive(Debug)]
+pub struct AckStream<A>(pub Sender<(WorkerId, A)>);
+
+impl<J, A: Send + Clone + 'static> Ack<J> for AckStream<A> {
+    type Acknowledger = A;
+    type Error = SendError;
+    fn ack(
+        &mut self,
+        worker_id: &WorkerId,
+        data: &Self::Acknowledger,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.0.send((worker_id.clone(), data.clone())).into_future()
+    }
 }
 
 /// A layer that acknowledges a job completed successfully

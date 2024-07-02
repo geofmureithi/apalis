@@ -9,7 +9,7 @@ use anyhow::Result;
 use apalis::{
     layers::{sentry::SentryLayer, tracing::TraceLayer},
     prelude::*,
-    redis::{Config, RedisStorage},
+    redis::RedisStorage,
 };
 use email_service::Email;
 use tokio::time::sleep;
@@ -130,7 +130,7 @@ async fn main() -> Result<()> {
         .init();
 
     let conn = apalis::redis::connect(redis_url).await?;
-    let storage = RedisStorage::new(conn, Config::default());
+    let storage = RedisStorage::new(conn);
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
