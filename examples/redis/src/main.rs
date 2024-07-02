@@ -5,8 +5,8 @@ use std::{
 };
 
 use anyhow::Result;
+use apalis::prelude::*;
 use apalis::redis::RedisStorage;
-use apalis::{prelude::*, redis::Config};
 
 use email_service::{send_email, Email};
 use tracing::{error, info};
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
-    let storage = RedisStorage::new(conn, Config::default());
+    let storage = RedisStorage::new(conn);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 

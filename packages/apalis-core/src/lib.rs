@@ -77,14 +77,8 @@ pub trait Backend<Req> {
     /// Returns the final decoration of layers
     type Layer;
 
-    /// Allows the backend to decorate the service with [Layer]
-    ///
-    /// [Layer]: tower::Layer
-    #[allow(unused)]
-    fn common_layer(&self, worker: WorkerId) -> Self::Layer;
-
     /// Returns a poller that is ready for streaming
-    fn poll(self, worker: WorkerId) -> Poller<Self::Stream>;
+    fn poll(self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer>;
 }
 
 /// This allows encoding and decoding of requests in different backends
@@ -103,6 +97,58 @@ pub trait Codec<T, Compact> {
 #[cfg(feature = "sleep")]
 pub async fn sleep(duration: std::time::Duration) {
     futures_timer::Delay::new(duration).await;
+}
+
+#[cfg(feature = "sleep")]
+/// Interval utilities
+pub mod interval {
+    use std::fmt;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use std::time::Duration;
+
+    use futures::future::BoxFuture;
+    use futures::Stream;
+
+    use crate::sleep;
+    /// Creates a new stream that yields at a set interval.
+    pub fn interval(duration: Duration) -> Interval {
+        Interval {
+            timer: Box::pin(sleep(duration)),
+            interval: duration,
+        }
+    }
+
+    /// A stream representing notifications at fixed interval
+    #[must_use = "streams do nothing unless polled or .awaited"]
+    pub struct Interval {
+        timer: BoxFuture<'static, ()>,
+        interval: Duration,
+    }
+
+    impl fmt::Debug for Interval {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Interval")
+                .field("interval", &self.interval)
+                .field("timer", &"a future represented `apalis_core::sleep`")
+                .finish()
+        }
+    }
+
+    impl Stream for Interval {
+        type Item = ();
+
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            match Pin::new(&mut self.timer).poll(cx) {
+                Poll::Ready(_) => {}
+                Poll::Pending => return Poll::Pending,
+            };
+            let interval = self.interval;
+            let _ = std::mem::replace(&mut self.timer, Box::pin(sleep(interval)));
+            Poll::Ready(Some(()))
+        }
+    }
 }
 
 #[cfg(test)]
