@@ -58,7 +58,7 @@ impl Config {
     pub fn new(namespace: &str) -> Self {
         Config::default().namespace(namespace)
     }
-    
+
     /// Interval between database poll queries
     ///
     /// Defaults to 30ms

@@ -1,6 +1,5 @@
 use futures::channel::mpsc::{SendError, Sender};
 use futures::SinkExt;
-use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::{fmt, sync::Arc};
 pub use tower::{
@@ -180,7 +179,7 @@ impl<J, A: Send + Clone + 'static> Ack<J> for AckStream<A> {
         worker_id: &WorkerId,
         data: &Self::Acknowledger,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.0.send((worker_id.clone(), data.clone())).into_future()
+        self.0.send((worker_id.clone(), data.clone())).boxed()
     }
 }
 
