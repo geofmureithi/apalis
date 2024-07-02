@@ -548,7 +548,7 @@ impl<T> PostgresStorage<T> {
     }
 
     /// Puts the job instantly back into the queue
-    /// Another [Worker] may consume
+    /// Another Worker may consume
     pub async fn retry(
         &mut self,
         worker_id: &WorkerId,
@@ -642,13 +642,8 @@ mod tests {
         storage: &mut PostgresStorage<Email>,
         worker_id: &WorkerId,
     ) -> Request<Email> {
-        let mut stream = storage.stream_jobs(worker_id, std::time::Duration::from_secs(10), 1);
-        stream
-            .next()
-            .await
-            .expect("stream is empty")
-            .expect("failed to poll job")
-            .expect("no job is pending")
+        let mut req = storage.fetch_next(worker_id).await;
+        req.unwrap()[0].clone()
     }
 
     async fn register_worker_at(

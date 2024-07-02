@@ -371,7 +371,7 @@ where
 
 impl<T> SqliteStorage<T> {
     /// Puts the job instantly back into the queue
-    /// Another [Worker] may consume
+    /// Another Worker may consume
     pub async fn retry(
         &mut self,
         worker_id: &WorkerId,

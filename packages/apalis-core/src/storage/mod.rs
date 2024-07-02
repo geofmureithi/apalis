@@ -8,7 +8,6 @@ use crate::{request::Request, Backend};
 pub type StorageStream<T, E> = BoxStream<'static, Result<Option<Request<T>>, E>>;
 
 /// Represents a [Storage] that can persist a request.
-/// The underlying type must implement [Job]
 pub trait Storage: Backend<Request<Self::Job>> {
     /// The type of job that can be persisted
     type Job;

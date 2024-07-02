@@ -890,7 +890,6 @@ impl<T, Conn: ConnectionLike + Send + Sync + 'static> RedisStorage<T, Conn> {
 #[cfg(test)]
 mod tests {
     use email_service::Email;
-    use futures::StreamExt;
 
     use super::*;
 
@@ -901,7 +900,7 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         let conn = connect(redis_url).await.unwrap();
-        let storage = RedisStorage::new(conn, Config::default());
+        let storage = RedisStorage::new(conn);
         storage
     }
 
@@ -927,7 +926,7 @@ mod tests {
         storage: &mut RedisStorage<Email>,
         worker_id: &WorkerId,
     ) -> Request<Email> {
-        let mut stream = storage.fetch_next(worker_id);
+        let stream = storage.fetch_next(worker_id);
         stream
             .await
             .expect("stream is empty")
