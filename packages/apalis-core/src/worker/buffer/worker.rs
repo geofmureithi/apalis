@@ -98,24 +98,11 @@ where
     }
 
     fn failed(&mut self, error: tower::BoxError) {
-        // The underlying service failed when we called `poll_ready` on it with the given `error`. We
-        // need to communicate this to all the `Buffer` handles. To do so, we wrap up the error in
-        // an `Arc`, send that `Arc<E>` to all pending requests, and store it so that subsequent
-        // requests will also fail with the same error.
-
-        // Note that we need to handle the case where some handle is concurrently trying to send us
-        // a request. We need to make sure that *either* the send of the request fails *or* it
-        // receives an error on the `oneshot` it constructed. Specifically, we want to avoid the
-        // case where we send errors to all outstanding requests, and *then* the caller sends its
-        // request. We do this by *first* exposing the error, *then* closing the channel used to
-        // send more requests (so the client will see the error when the send fails), and *then*
-        // sending the error to all outstanding requests.
         let error = ServiceError::new(error);
 
         let mut inner = self.handle.inner.lock().unwrap();
 
         if inner.is_some() {
-            // Future::poll was called after we've already errored out!
             return;
         }
 
@@ -123,10 +110,6 @@ where
         drop(inner);
 
         self.rx.close();
-
-        // By closing the mpsc::Receiver, we know that poll_next_msg will soon return Ready(None),
-        // which will trigger the `self.finish == true` phase. We just need to make sure that any
-        // requests that we receive before we've exhausted the receiver receive the error:
         self.failed = Some(error);
     }
 }
@@ -145,42 +128,22 @@ where
 
         loop {
             match ready!(self.poll_next_msg(cx)) {
-                Some((msg, first)) => {
-                    // let _guard = msg.span.enter();
+                Some((msg, _)) => {
                     if let Some(ref failed) = self.failed {
-                        // tracing::trace!("notifying caller about worker failure");
                         let _ = msg.tx.send(Err(failed.clone()));
                         continue;
                     }
-
-                    // Wait for the service to be ready
-                    // tracing::trace!(
-                    //     resumed = !first,
-                    //     message = "worker received request; waiting for service readiness"
-                    // );
                     match self.service.poll_ready(cx) {
                         Poll::Ready(Ok(())) => {
-                            // tracing::debug!(service.ready = true, message = "processing request");
                             let response = self.service.call(msg.request);
-
-                            // Send the response future back to the sender.
-                            //
-                            // An error means the request had been canceled in-between
-                            // our calls, the response future will just be dropped.
-                            // tracing::trace!("returning response future");
                             let _ = msg.tx.send(Ok(response));
                         }
                         Poll::Pending => {
-                            // tracing::trace!(service.ready = false, message = "delay");
-                            // Put out current message back in its slot.
-                            // drop(_guard);
                             self.current_message = Some(msg);
                             return Poll::Pending;
                         }
                         Poll::Ready(Err(e)) => {
                             let error = e.into();
-                            // tracing::debug!({ %error }, "service failed");
-                            // drop(_guard);
                             self.failed(error);
                             let _ = msg.tx.send(Err(self
                                 .failed

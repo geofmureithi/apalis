@@ -5,8 +5,6 @@ use super::{
 };
 
 use futures::channel::{mpsc, oneshot};
-use futures::sink::SinkExt;
-use futures::stream::StreamExt;
 use futures::task::AtomicWaker;
 use std::sync::Arc;
 use std::{
@@ -78,22 +76,10 @@ where
     }
 
     fn call(&mut self, request: Req) -> Self::Future {
-        // tracing::trace!("sending request to buffer worker");
-
-        // get the current Span so that we can explicitly propagate it to the worker
-        // if we didn't do this, events on the worker related to this span wouldn't be counted
-        // towards that span since the worker would have no way of entering it.
-        // let span = tracing::Span::current();
-
-        // If we've made it here, then a channel permit has already been
-        // acquired, so we can freely allocate a oneshot.
         let (tx, rx) = oneshot::channel();
-
         match self.tx.send_item(Message { request, tx }) {
             Ok(_) => ResponseFuture::new(rx),
-            // If the channel is closed, propagate the error from the worker.
             Err(_) => {
-                // tracing::trace!("buffer channel closed");
                 ResponseFuture::failed(self.get_worker_error())
             }
         }
@@ -128,14 +114,17 @@ impl<T> PollSender<T> {
         }
     }
 
-    fn poll_reserve(&self, cx: &mut Context<'_>) -> Poll<Result<(), ()>> {
+    fn poll_reserve(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), ()>> {
         if self.tx.is_closed() {
             return Poll::Ready(Err(()));
         }
 
         self.waker.register(cx.waker());
 
-        Poll::Ready(Ok(()))
+        self.tx.poll_ready(cx).map(|res| match res {
+            Ok(_) => Ok(()),
+            Err(_) => Err(()),
+        })
     }
 
     fn send_item(&mut self, item: T) -> Result<(), ()> {

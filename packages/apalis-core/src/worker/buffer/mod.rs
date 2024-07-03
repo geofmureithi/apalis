@@ -1,10 +1,10 @@
-mod error;
-mod future;
-mod message;
-mod reusable;
-mod sender;
-mod service;
-mod worker;
+pub mod error;
+pub mod future;
+pub mod message;
+pub mod reusable;
+pub mod sender;
+pub mod service;
+pub mod worker;
 
 
-pub(super) use service::Buffer;
+pub use service::Buffer;
