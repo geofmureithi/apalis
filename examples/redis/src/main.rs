@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
-use apalis::redis::RedisStorage;
+use apalis::{layers::limit::RateLimitLayer, redis::RedisStorage};
 use apalis::{prelude::*, redis::Config};
 
 use email_service::{send_email, Email};
@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
     let worker = WorkerBuilder::new("rango-tango")
         .chain(|svc| svc.timeout(Duration::from_millis(500)))
         .data(Count::default())
+        .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
         .with_storage(storage)
         .build_fn(send_email);
 

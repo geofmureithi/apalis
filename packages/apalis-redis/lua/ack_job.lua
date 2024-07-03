@@ -4,7 +4,7 @@
 -- ARGV[1]: the job ID
 -- ARGV[2]: the current time
 
--- Returns: nil
+-- Returns: bool
 
 -- Remove the job from this consumer's inflight set
 local removed = redis.call("srem", KEYS[1], ARGV[1])

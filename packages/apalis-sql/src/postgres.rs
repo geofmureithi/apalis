@@ -42,7 +42,7 @@ use crate::context::SqlContext;
 use crate::Config;
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
-use apalis_core::layers::{Ack, AckLayer};
+use apalis_core::layers::{Ack, AckLayer, AckResponse};
 use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
@@ -62,6 +62,7 @@ use sqlx::postgres::PgListener;
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres, Row};
 use std::convert::TryInto;
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::{fmt, io};
 use std::{marker::PhantomData, time::Duration};
@@ -87,7 +88,7 @@ pub struct PostgresStorage<T> {
     >,
     config: Config,
     controller: Controller,
-    ack_notify: Notify<(WorkerId, TaskId)>,
+    ack_notify: Notify<AckResponse<TaskId>>,
 }
 
 impl<T> Clone for PostgresStorage<T> {
@@ -146,8 +147,8 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 .next()
                 .await
             {
-                let worker_ids: Vec<String> = ids.iter().map(|c| c.0.to_string()).collect();
-                let task_ids: Vec<String> = ids.iter().map(|c| c.1.to_string()).collect();
+                let worker_ids: Vec<String> = ids.iter().map(|c| c.worker.to_string()).collect();
+                let task_ids: Vec<String> = ids.iter().map(|c| c.acknowledger.to_string()).collect();
 
                 let query =
             "UPDATE apalis.jobs SET status = 'Done', done_at = now() WHERE id = ANY($1::text[]) AND lock_by = ANY($2::text[])";
@@ -496,11 +497,10 @@ impl<T: Sync> Ack<T> for PostgresStorage<T> {
     type Error = sqlx::Error;
     async fn ack(
         &self,
-        worker_id: &WorkerId,
-        task_id: &Self::Acknowledger,
+        res: AckResponse<Self::Acknowledger>
     ) -> Result<(), sqlx::Error> {
         self.ack_notify
-            .notify((worker_id.clone(), task_id.clone()))
+            .notify(res)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::Interrupted, e)))?;
 
         Ok(())

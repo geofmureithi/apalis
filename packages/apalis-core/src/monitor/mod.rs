@@ -109,7 +109,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     /// The monitor instance, with all workers added to the collection.
     pub fn register_with_count<
         J: Send + Sync + 'static,
-        S: Service<Request<J>> + Send + 'static + Clone,
+        S: Service<Request<J>> + Send + 'static,
         P: Backend<Request<J>> + 'static,
     >(
         mut self,
