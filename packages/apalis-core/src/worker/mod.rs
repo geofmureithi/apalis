@@ -8,6 +8,7 @@ use crate::poller::FetchNext;
 use crate::request::Request;
 use crate::service_fn::FromData;
 use crate::Backend;
+use buffer::Buffer;
 use futures::future::Shared;
 use futures::{Future, FutureExt};
 use pin_project_lite::pin_project;
@@ -23,7 +24,9 @@ use std::task::{Context as TaskCtx, Poll, Waker};
 use thiserror::Error;
 use tower::{Service, ServiceBuilder, ServiceExt};
 
+mod buffer;
 mod stream;
+
 // By default a worker starts 3 futures, one for polling, one for worker stream and the other for consuming.
 const WORKER_FUTURES: usize = 3;
 
@@ -217,7 +220,7 @@ impl<S, P> Worker<Ready<S, P>> {
     /// Start a worker with a custom executor
     pub fn with_executor<E, J>(self, executor: E) -> Worker<Context<E>>
     where
-        S: Service<Request<J>> + Send + 'static + Clone,
+        S: Service<Request<J>> + Send + 'static,
         P: Backend<Request<J>> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
@@ -237,7 +240,7 @@ impl<S, P> Worker<Ready<S, P>> {
             .shared();
         Self::build_worker_instance(
             WorkerId::new(self.id.name()),
-            service.clone(),
+            service,
             executor.clone(),
             notifier.clone(),
             polling.clone(),
@@ -249,7 +252,7 @@ impl<S, P> Worker<Ready<S, P>> {
     /// Run as a monitored worker
     pub fn with_monitor<E, J>(self, monitor: &Monitor<E>) -> Worker<Context<E>>
     where
-        S: Service<Request<J>> + Send + 'static + Clone,
+        S: Service<Request<J>> + Send + 'static,
         P: Backend<Request<J>> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
@@ -270,7 +273,7 @@ impl<S, P> Worker<Ready<S, P>> {
             .shared();
         Self::build_worker_instance(
             WorkerId::new(self.id.name()),
-            service.clone(),
+            service,
             executor.clone(),
             notifier.clone(),
             polling.clone(),
@@ -286,7 +289,7 @@ impl<S, P> Worker<Ready<S, P>> {
         monitor: &Monitor<E>,
     ) -> Vec<Worker<Context<E>>>
     where
-        S: Service<Request<J>> + Send + 'static + Clone,
+        S: Service<Request<J>> + Send + 'static,
         P: Backend<Request<J>> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
@@ -297,6 +300,7 @@ impl<S, P> Worker<Ready<S, P>> {
     {
         let notifier = Notify::new();
         let service = self.state.service;
+        let (service, poll_worker) = Buffer::pair(service, instances);
         let backend = self.state.backend;
         let executor = monitor.executor().clone();
         let context = monitor.context().clone();
@@ -306,6 +310,8 @@ impl<S, P> Worker<Ready<S, P>> {
             .into_future()
             .shared();
         let mut workers = Vec::new();
+
+        executor.spawn(poll_worker);
 
         for instance in 0..instances {
             workers.push(Self::build_worker_instance(
@@ -329,7 +335,7 @@ impl<S, P> Worker<Ready<S, P>> {
         executor: E,
     ) -> Vec<Worker<Context<E>>>
     where
-        S: Service<Request<J>> + Send + 'static + Clone,
+        S: Service<Request<J>> + Send + 'static,
         P: Backend<Request<J>> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
@@ -342,13 +348,14 @@ impl<S, P> Worker<Ready<S, P>> {
         let worker_id = self.id.clone();
         let notifier = Notify::new();
         let service = self.state.service;
+        let (service, poll_worker) = Buffer::pair(service, instances);
         let backend = self.state.backend;
         let poller = backend.poll(worker_id.clone());
         let polling = poller.heartbeat.shared();
         let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
             .into_future()
             .shared();
-
+        executor.spawn(poll_worker);
         let mut workers = Vec::new();
         for instance in 0..instances {
             workers.push(Self::build_worker_instance(
@@ -374,7 +381,7 @@ impl<S, P> Worker<Ready<S, P>> {
         context: Option<MonitorContext>,
     ) -> Worker<Context<E>>
     where
-        LS: Service<Request<J>> + Send + 'static + Clone,
+        LS: Service<Request<J>> + Send + 'static,
         LS::Future: Send + 'static,
         LS::Response: 'static,
         LS::Error: Send + Sync + Into<BoxDynError> + 'static,
@@ -409,7 +416,7 @@ impl<S, P> Worker<Ready<S, P>> {
         worker: Worker<Context<E>>,
         notifier: WorkerNotify<Result<Option<Request<J>>, Error>>,
     ) where
-        LS: Service<Request<J>> + Send + 'static + Clone,
+        LS: Service<Request<J>> + Send + 'static,
         LS::Future: Send + 'static,
         LS::Response: 'static,
         LS::Error: Send + Sync + Into<BoxDynError> + 'static,
