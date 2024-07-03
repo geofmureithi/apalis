@@ -2,7 +2,8 @@
 name = "apalis-sql"
 version = "0.5.3"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
-edition = "2021"
+edition.workspace = true
+repository.workspace = true
 readme = "../../README.md"
 
 license = "MIT"

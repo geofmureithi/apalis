@@ -1,7 +1,8 @@
 [package]
 name = "apalis-cron"
 version = "0.5.3"
-edition = "2021"
+edition.workspace = true
+repository.workspace = true
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 license = "MIT"
 description = "A simple yet extensible library for cron-like job scheduling for rust."

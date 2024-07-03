@@ -17,5 +17,5 @@ tower = "0.4"
 
 
 [dependencies.tracing]
-default_features = false
+default-features = false
 version = "0.1"

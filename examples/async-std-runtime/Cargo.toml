@@ -23,5 +23,5 @@ ctrlc = "3.2.5"
 async-channel = "2"
 
 [dependencies.tracing]
-default_features = false
+default-features = false
 version = "0.1"
