@@ -392,7 +392,7 @@ impl<T> SqliteStorage<T> {
         Ok(())
     }
 
-    /// Add jobs that failed back to the queue if there are still remaining attemps
+    /// Add jobs that failed back to the queue if there are still remaining attempts
     pub async fn reenqueue_failed(&self) -> Result<(), sqlx::Error>
     where
         T: Job,

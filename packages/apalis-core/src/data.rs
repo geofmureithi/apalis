@@ -161,7 +161,7 @@ impl Extensions {
         self.map.as_ref().map_or(true, |map| map.is_empty())
     }
 
-    /// Get the numer of extensions available.
+    /// Get the number of extensions available.
     ///
     /// # Example
     ///
