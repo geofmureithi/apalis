@@ -80,7 +80,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     /// Registers a single instance of a [Worker]
     pub fn register<
         J: Send + Sync + 'static,
-        S: Service<Request<J>> + Send + 'static + Clone,
+        S: Service<Request<J>> + Send + 'static,
         P: Backend<Request<J>> + 'static,
     >(
         mut self,
