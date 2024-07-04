@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tower::{layer::util::Identity, ServiceBuilder};
+use tower::layer::util::Identity;
 
 #[derive(Debug)]
 /// An example of the basics of a backend
@@ -99,17 +99,14 @@ impl<T> Stream for MemoryWrapper<T> {
 impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<T> {
     type Stream = BackendStream<RequestStream<Request<T>>>;
 
-    type Layer = ServiceBuilder<Identity>;
-
-    fn common_layer(&self, _worker: WorkerId) -> Self::Layer {
-        ServiceBuilder::new()
-    }
+    type Layer = Identity;
 
     fn poll(self, _worker: WorkerId) -> Poller<Self::Stream> {
         let stream = self.inner.map(|r| Ok(Some(Request::new(r)))).boxed();
         Poller {
             stream: BackendStream::new(stream, self.controller),
             heartbeat: Box::pin(async {}),
+            layer: Identity::new(),
         }
     }
 }

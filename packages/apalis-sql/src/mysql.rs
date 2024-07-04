@@ -19,6 +19,7 @@ use serde_json::Value;
 use sqlx::mysql::MySqlRow;
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::{MySql, Pool, Row};
+use std::any::type_name;
 use std::convert::TryInto;
 use std::sync::Arc;
 use std::{fmt, io};
@@ -89,7 +90,7 @@ impl MysqlStorage<()> {
 impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
     /// Create a new instance from a pool
     pub fn new(pool: MySqlPool) -> Self {
-        Self::new_with_config(pool, Config::default())
+        Self::new_with_config(pool, Config::new(type_name::<T>()))
     }
 
     /// Create a new instance from a pool and custom config
@@ -248,7 +249,7 @@ where
     }
 
     async fn fetch_by_id(
-        &self,
+        &mut self,
         job_id: &TaskId,
     ) -> Result<Option<Request<Self::Job>>, sqlx::Error> {
         let pool = self.pool.clone();
@@ -272,7 +273,7 @@ where
         }
     }
 
-    async fn len(&self) -> Result<i64, sqlx::Error> {
+    async fn len(&mut self) -> Result<i64, sqlx::Error> {
         let pool = self.pool.clone();
 
         let query = "Select Count(*) as count from jobs where status='Pending'";
@@ -303,7 +304,7 @@ where
         Ok(())
     }
 
-    async fn update(&self, job: Request<Self::Job>) -> Result<(), sqlx::Error> {
+    async fn update(&mut self, job: Request<Self::Job>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let ctx = job
             .get::<SqlContext>()
@@ -339,11 +340,11 @@ where
         Ok(())
     }
 
-    async fn is_empty(&self) -> Result<bool, Self::Error> {
+    async fn is_empty(&mut self) -> Result<bool, Self::Error> {
         Ok(self.len().await? == 0)
     }
 
-    async fn vacuum(&self) -> Result<usize, sqlx::Error> {
+    async fn vacuum(&mut self) -> Result<usize, sqlx::Error> {
         let pool = self.pool.clone();
         let query = "Delete from jobs where status='Done'";
         let record = sqlx::query(query).execute(&pool).await?;
@@ -358,11 +359,8 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
 
     type Layer = AckLayer<MysqlStorage<T>, T>;
 
-    fn common_layer(&self, worker_id: WorkerId) -> Self::Layer {
-        AckLayer::new(self.clone(), worker_id)
-    }
-
-    fn poll(self, worker: WorkerId) -> Poller<Self::Stream> {
+    fn poll(self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+        let layer = AckLayer::new(self.clone(), worker.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
         let pool = self.pool.clone();
@@ -409,16 +407,20 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 apalis_core::sleep(config.keep_alive).await;
             }
         };
-        Poller::new(stream, async {
-            futures::join!(heartbeat, ack_heartbeat);
-        })
+        Poller::new_with_layer(
+            stream,
+            async {
+                futures::join!(heartbeat, ack_heartbeat);
+            },
+            layer,
+        )
     }
 }
 
-impl<T: Sync> Ack<T> for MysqlStorage<T> {
+impl<T: Sync + Send> Ack<T> for MysqlStorage<T> {
     type Acknowledger = TaskId;
     type Error = sqlx::Error;
-    async fn ack(&self, response: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
+    async fn ack(&mut self, response: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
         self.ack_notify
             .notify((response.worker.clone(), response.acknowledger.clone()))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::BrokenPipe, e)))?;

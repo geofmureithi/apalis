@@ -1,6 +1,6 @@
 [package]
 name = "apalis"
-version = "0.6.0-alpha.0"
+version = "0.6.0-alpha.1"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
@@ -71,26 +71,26 @@ layers = [
 docsrs = ["document-features"]
 
 [dependencies.apalis-redis]
-version = "0.6.0-alpha.0"
+version = "0.6.0-alpha.1"
 optional = true
 path = "./packages/apalis-redis"
 default-features = false
 
 [dependencies.apalis-sql]
 
-version = "0.6.0-alpha.0"
+version = "0.6.0-alpha.1"
 features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"
 
 [dependencies.apalis-core]
-version = "0.6.0-alpha.0"
+version = "0.6.0-alpha.1"
 default-features = false
 path = "./packages/apalis-core"
 
 [dependencies.apalis-cron]
-version = "0.6.0-alpha.0"
+version = "0.6.0-alpha.1"
 optional = true
 default-features = false
 path = "./packages/apalis-cron"
@@ -148,7 +148,7 @@ members = [
   "examples/tracing",
   # "examples/rest-api",
   "examples/async-std-runtime",
-  "examples/basics", "examples/redis-with-msg-pack",
+  "examples/basics", "examples/redis-with-msg-pack", "examples/redis-deadpool",
 ]
 
 

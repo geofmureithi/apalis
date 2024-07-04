@@ -1,7 +1,10 @@
-use std::fmt::Debug;
+use futures::channel::mpsc::{SendError, Sender};
+use futures::SinkExt;
 use std::marker::PhantomData;
 use std::{fmt, sync::Arc};
-pub use tower::{layer::layer_fn, util::BoxCloneService, Layer, Service, ServiceBuilder};
+pub use tower::{
+    layer::layer_fn, layer::util::Identity, util::BoxCloneService, Layer, Service, ServiceBuilder,
+};
 
 use crate::{request::Request, worker::WorkerId};
 use futures::{future::BoxFuture, Future, FutureExt};
@@ -158,7 +161,7 @@ pub trait Ack<J> {
     type Error: std::error::Error;
     /// Acknowledges successful processing of the given request
     fn ack(
-        &self,
+        &mut self,
         response: AckResponse<Self::Acknowledger>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
@@ -183,6 +186,21 @@ impl<A: fmt::Display> AckResponse<A> {
             self.acknowledger.to_string(),
             self.result
         )
+    }
+}
+
+/// A generic stream that emits (worker_id, task_id)
+#[derive(Debug)]
+pub struct AckStream<A>(pub Sender<AckResponse<A>>);
+
+impl<J, A: Send + Clone + 'static> Ack<J> for AckStream<A> {
+    type Acknowledger = A;
+    type Error = SendError;
+    fn ack(
+        &mut self,
+        response: AckResponse<A>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.0.send(response).boxed()
     }
 }
 
@@ -251,7 +269,7 @@ where
     <SV as Service<Request<J>>>::Future: std::marker::Send + 'static,
     A: Ack<J> + Send + 'static + Clone + Send + Sync,
     J: 'static,
-    <SV as Service<Request<J>>>::Response: std::marker::Send + Debug + Sync,
+    <SV as Service<Request<J>>>::Response: std::marker::Send + fmt::Debug + Sync,
     <A as Ack<J>>::Acknowledger: Sync + Send + Clone,
 {
     type Response = SV::Response;
@@ -266,7 +284,7 @@ where
     }
 
     fn call(&mut self, request: Request<J>) -> Self::Future {
-        let ack = self.ack.clone();
+        let mut ack = self.ack.clone();
         let worker_id = self.worker_id.clone();
         let data = request.get::<<A as Ack<J>>::Acknowledger>().cloned();
         let fut = self.service.call(request);

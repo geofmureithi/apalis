@@ -6,7 +6,7 @@ use sqlx::types::chrono::{DateTime, Utc};
 use std::{fmt, str::FromStr};
 
 /// The context for a job is represented here
-/// Used to provide a context when a job is defined through the [Job] trait
+/// Used to provide a context for a job with an sql backend
 #[derive(Debug, Clone)]
 pub struct SqlContext {
     id: TaskId,
@@ -127,7 +127,7 @@ impl SqlContext {
     }
 }
 
-/// Represents the state of a [Request]
+/// Represents the state of a job
 #[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
 pub enum State {
     /// Job is pending

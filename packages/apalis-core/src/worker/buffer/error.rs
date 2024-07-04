@@ -1,7 +1,7 @@
 //! Error types for the `Buffer` middleware.
 
-use tower::BoxError;
 use std::{fmt, sync::Arc};
+use tower::BoxError;
 
 /// An error produced by a [`Service`] wrapped by a [`Buffer`]
 ///

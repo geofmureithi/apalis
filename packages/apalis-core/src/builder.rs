@@ -167,8 +167,9 @@ where
     S::Future: Send,
 
     S::Response: 'static,
-    P::Layer: Layer<S>,
-    M: Layer<<P::Layer as Layer<S>>::Service>,
+    M: Layer<S>,
+    // P::Layer: Layer<S>,
+    // M: Layer<<P::Layer as Layer<S>>::Service>,
 {
     type Source = P;
 
@@ -176,9 +177,9 @@ where
     /// Build a worker, given a tower service
     fn build(self, service: S) -> Worker<Ready<Self::Service, P>> {
         let worker_id = self.id;
-        let common_layer = self.source.common_layer(worker_id.clone());
+        // let common_layer = self.source.common_layer(worker_id.clone());
         let poller = self.source;
-        let middleware = self.layer.layer(common_layer);
+        let middleware = self.layer;
         let service = middleware.service(service);
 
         Worker::new(worker_id, Ready::new(service, poller))
