@@ -182,9 +182,7 @@ impl<A: fmt::Display> AckResponse<A> {
     pub fn to_json(&self) -> String {
         format!(
             r#"{{"worker": "{}", "acknowledger": "{}", "result": "{}"}}"#,
-            self.worker,
-            self.acknowledger,
-            self.result
+            self.worker, self.acknowledger, self.result
         )
     }
 }
