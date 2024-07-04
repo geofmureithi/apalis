@@ -19,6 +19,7 @@ use log::*;
 use redis::ErrorKind;
 use redis::{aio::ConnectionManager, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::any::type_name;
 use std::fmt::{self, Debug};
 use std::num::TryFromIntError;
 use std::sync::Arc;
@@ -343,9 +344,22 @@ impl<T> Clone for RedisStorage<T> {
 }
 
 impl<T: Serialize + DeserializeOwned> RedisStorage<T> {
-    /// Start a new connection providing custom config
-    pub fn new(conn: ConnectionManager, config: Config) -> Self {
-        Self::new_with_codec(conn, config, JsonCodec)
+    /// Start a new connection
+    pub fn new(conn: ConnectionManager) -> Self {
+        Self::new_with_codec(
+            conn,
+            Config::default().set_namespace(type_name::<T>()),
+            JsonCodec,
+        )
+    }
+
+    /// Start a new connection with a custom config
+    pub fn new_with_config(conn: ConnectionManager, config: Config) -> Self {
+        Self::new_with_codec(
+            conn,
+            config,
+            JsonCodec,
+        )
     }
     /// Start a new connection providing custom config and a codec
     pub fn new_with_codec<C>(conn: ConnectionManager, config: Config, codec: C) -> Self
@@ -445,10 +459,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
 impl<T: Sync> Ack<T> for RedisStorage<T> {
     type Acknowledger = TaskId;
     type Error = RedisError;
-    async fn ack(
-        &self,
-        res: AckResponse<Self::Acknowledger>
-    ) -> Result<(), RedisError> {
+    async fn ack(&self, res: AckResponse<Self::Acknowledger>) -> Result<(), RedisError> {
         let mut conn = self.conn.clone();
         let ack_job = self.scripts.ack_job.clone();
         let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), res.worker);
@@ -459,7 +470,7 @@ impl<T: Sync> Ack<T> for RedisStorage<T> {
         ack_job
             .key(inflight_set)
             .key(done_jobs_set)
-            .arg(res.to_json())
+            .arg(res.acknowledger.to_string())
             .arg(now)
             .invoke_async(&mut conn)
             .await
@@ -896,7 +907,7 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         let conn = connect(redis_url).await.unwrap();
-        let storage = RedisStorage::new(conn, Config::default());
+        let storage = RedisStorage::new(conn);
         storage
     }
 

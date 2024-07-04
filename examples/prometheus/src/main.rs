@@ -5,7 +5,6 @@
 //! ```
 use anyhow::Result;
 use apalis::prelude::*;
-use apalis::redis::Config;
 use apalis::{layers::prometheus::PrometheusLayer, redis::RedisStorage};
 use axum::{
     extract::Form,
@@ -31,7 +30,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
     let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
-    let storage = RedisStorage::new(conn, Config::default());
+    let storage = RedisStorage::new(conn);
     // build our application with some routes
     let recorder_handle = setup_metrics_recorder();
     let app = Router::new()

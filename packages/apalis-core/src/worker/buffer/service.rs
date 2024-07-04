@@ -79,9 +79,7 @@ where
         let (tx, rx) = oneshot::channel();
         match self.tx.send_item(Message { request, tx }) {
             Ok(_) => ResponseFuture::new(rx),
-            Err(_) => {
-                ResponseFuture::failed(self.get_worker_error())
-            }
+            Err(_) => ResponseFuture::failed(self.get_worker_error()),
         }
     }
 }

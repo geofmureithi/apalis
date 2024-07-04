@@ -134,7 +134,7 @@ define_bench!("sqlite_in_memory", {
 
 define_bench!("redis", {
     let conn = apalis::redis::connect(env!("REDIS_URL")).await.unwrap();
-    let redis = RedisStorage::new(conn, Config::default());
+    let redis = RedisStorage::new(conn);
     redis
 });
 

@@ -5,14 +5,14 @@ use std::{
 };
 
 use anyhow::Result;
+use apalis::prelude::*;
 use apalis::{layers::limit::RateLimitLayer, redis::RedisStorage};
-use apalis::{prelude::*, redis::Config};
 
 use email_service::{send_email, Email};
 use tracing::{error, info};
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
-    for index in 0..100 {
+    for index in 0..10 {
         storage
             .push(Email {
                 to: index.to_string(),
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
-    let storage = RedisStorage::new(conn, Config::default());
+    let storage = RedisStorage::new(conn);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
@@ -72,6 +72,7 @@ async fn main() -> Result<()> {
         })
         .shutdown_timeout(Duration::from_millis(5000))
         .run_with_signal(async {
+            info!("Monitor started");
             tokio::signal::ctrl_c().await?;
             info!("Monitor starting shutdown");
             Ok(())

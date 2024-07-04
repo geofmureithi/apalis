@@ -8,12 +8,12 @@ use std::{fmt, sync::Arc};
 /// [`Service`]: crate::Service
 /// [`Buffer`]: crate::buffer::Buffer
 #[derive(Debug)]
-pub struct ServiceError {
+pub(crate) struct ServiceError {
     inner: Arc<BoxError>,
 }
 
 /// An error produced when the a buffer's worker closes unexpectedly.
-pub struct Closed {
+pub(crate) struct Closed {
     _p: (),
 }
 
@@ -34,7 +34,7 @@ impl ServiceError {
 }
 
 impl fmt::Display for ServiceError {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(fmt, "buffered service failed: {}", self.inner)
     }
 }

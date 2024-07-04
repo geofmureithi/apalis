@@ -8,7 +8,6 @@ use crate::poller::FetchNext;
 use crate::request::Request;
 use crate::service_fn::FromData;
 use crate::Backend;
-use buffer::Buffer;
 use futures::future::Shared;
 use futures::{Future, FutureExt};
 use pin_project_lite::pin_project;
@@ -26,6 +25,8 @@ use tower::{Service, ServiceBuilder, ServiceExt};
 
 mod buffer;
 mod stream;
+
+pub use buffer::service::Buffer;
 
 // By default a worker starts 3 futures, one for polling, one for worker stream and the other for consuming.
 const WORKER_FUTURES: usize = 3;
