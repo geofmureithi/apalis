@@ -145,7 +145,8 @@ pub mod interval {
                 Poll::Pending => return Poll::Pending,
             };
             let interval = self.interval;
-            let _ = std::mem::replace(&mut self.timer, Box::pin(sleep(interval)));
+            let fut = std::mem::replace(&mut self.timer, Box::pin(sleep(interval)));
+            drop(fut);
             Poll::Ready(Some(()))
         }
     }

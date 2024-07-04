@@ -62,6 +62,7 @@ where
     ///
     /// If a `Message` is returned, the `bool` is true if this is the first time we received this
     /// message, and false otherwise (i.e., we tried to forward it to the backing service before).
+    #[allow(clippy::type_complexity)]
     fn poll_next_msg(
         &mut self,
         cx: &mut Context<'_>,
