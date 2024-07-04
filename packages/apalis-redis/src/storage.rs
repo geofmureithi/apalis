@@ -987,7 +987,11 @@ mod tests {
         let job_id = &job.get::<Context>().unwrap().id;
 
         storage
-            .ack(&worker_id, &job_id)
+            .ack(AckResponse {
+                acknowledger: job_id.clone(),
+                result: "Success".to_string(),
+                worker: worker_id.clone(),
+            })
             .await
             .expect("failed to acknowledge the job");
 

@@ -585,7 +585,6 @@ mod tests {
 
     use super::*;
     use email_service::Email;
-    use futures::StreamExt;
     use sqlx::types::chrono::Utc;
 
     /// migrate DB and return a storage instance.
@@ -638,7 +637,7 @@ mod tests {
         storage: &mut PostgresStorage<Email>,
         worker_id: &WorkerId,
     ) -> Request<Email> {
-        let mut req = storage.fetch_next(worker_id).await;
+        let req = storage.fetch_next(worker_id).await;
         req.unwrap()[0].clone()
     }
 
@@ -699,7 +698,11 @@ mod tests {
         let job_id = ctx.id();
 
         storage
-            .ack(&worker_id, job_id)
+            .ack(AckResponse {
+                acknowledger: job_id.clone(),
+                result: "Success".to_string(),
+                worker: worker_id.clone(),
+            })
             .await
             .expect("failed to acknowledge the job");
 
