@@ -1,6 +1,6 @@
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
-use apalis_core::layers::{Ack, AckLayer};
+use apalis_core::layers::{Ack, AckLayer, AckResponse};
 use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
@@ -420,13 +420,9 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
 impl<T: Sync + Send> Ack<T> for MysqlStorage<T> {
     type Acknowledger = TaskId;
     type Error = sqlx::Error;
-    async fn ack(
-        &mut self,
-        worker_id: &WorkerId,
-        task_id: &Self::Acknowledger,
-    ) -> Result<(), sqlx::Error> {
+    async fn ack(&mut self, response: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
         self.ack_notify
-            .notify((worker_id.clone(), task_id.clone()))
+            .notify((response.worker.clone(), response.acknowledger.clone()))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::BrokenPipe, e)))?;
 
         Ok(())
@@ -631,7 +627,11 @@ mod tests {
         let job_id = ctx.id();
 
         storage
-            .ack(&worker_id, job_id)
+            .ack(AckResponse {
+                acknowledger: job_id.clone(),
+                result: "Success".to_string(),
+                worker: worker_id.clone(),
+            })
             .await
             .expect("failed to acknowledge the job");
 

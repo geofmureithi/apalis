@@ -162,24 +162,43 @@ pub trait Ack<J> {
     /// Acknowledges successful processing of the given request
     fn ack(
         &mut self,
-        worker_id: &WorkerId,
-        data: &Self::Acknowledger,
+        response: AckResponse<Self::Acknowledger>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+/// ACK response
+#[derive(Debug, Clone)]
+pub struct AckResponse<A> {
+    /// The worker id
+    pub worker: WorkerId,
+    /// The acknowledger
+    pub acknowledger: A,
+    /// The stringified result
+    pub result: String,
+}
+
+impl<A: fmt::Display> AckResponse<A> {
+    /// Output a json for the response
+    pub fn to_json(&self) -> String {
+        format!(
+            r#"{{"worker": "{}", "acknowledger": "{}", "result": "{}"}}"#,
+            self.worker, self.acknowledger, self.result
+        )
+    }
 }
 
 /// A generic stream that emits (worker_id, task_id)
 #[derive(Debug)]
-pub struct AckStream<A>(pub Sender<(WorkerId, A)>);
+pub struct AckStream<A>(pub Sender<AckResponse<A>>);
 
 impl<J, A: Send + Clone + 'static> Ack<J> for AckStream<A> {
     type Acknowledger = A;
     type Error = SendError;
     fn ack(
         &mut self,
-        worker_id: &WorkerId,
-        data: &Self::Acknowledger,
+        response: AckResponse<A>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.0.send((worker_id.clone(), data.clone())).boxed()
+        self.0.send(response).boxed()
     }
 }
 
@@ -248,7 +267,7 @@ where
     <SV as Service<Request<J>>>::Future: std::marker::Send + 'static,
     A: Ack<J> + Send + 'static + Clone + Send + Sync,
     J: 'static,
-    <SV as Service<Request<J>>>::Response: std::marker::Send,
+    <SV as Service<Request<J>>>::Response: std::marker::Send + fmt::Debug + Sync,
     <A as Ack<J>>::Acknowledger: Sync + Send + Clone,
 {
     type Response = SV::Response;
@@ -266,12 +285,18 @@ where
         let mut ack = self.ack.clone();
         let worker_id = self.worker_id.clone();
         let data = request.get::<<A as Ack<J>>::Acknowledger>().cloned();
-
         let fut = self.service.call(request);
         let fut_with_ack = async move {
             let res = fut.await;
-            if let Some(data) = data {
-                if let Err(_e) = ack.ack(&worker_id, &data).await {
+            if let Some(task_id) = data {
+                if let Err(_e) = ack
+                    .ack(AckResponse {
+                        worker: worker_id,
+                        acknowledger: task_id,
+                        result: format!("{res:?}"),
+                    })
+                    .await
+                {
                     // tracing::warn!("Acknowledgement Failed: {}", e);
                     // try get monitor, and emit
                 }

@@ -1,6 +1,6 @@
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::data::Extensions;
-use apalis_core::layers::{AckLayer, AckStream};
+use apalis_core::layers::{Ack, AckLayer, AckResponse, AckStream};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
@@ -19,11 +19,11 @@ use redis::aio::ConnectionLike;
 use redis::ErrorKind;
 use redis::{aio::ConnectionManager, Client, IntoConnectionInfo, RedisError, Script, Value};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
 use std::any::type_name;
+use std::fmt::{self, Debug};
+use std::io;
 use std::num::TryFromIntError;
 use std::sync::Arc;
-use std::{fmt, io};
 use std::{marker::PhantomData, time::Duration};
 
 /// Shorthand to create a client and connect
@@ -452,8 +452,8 @@ impl<
                         }
                     }
                     id_to_ack = ack_stream.next() => {
-                        if let Some((worker_id, task_id)) = id_to_ack {
-                            self.ack(&worker_id, &task_id).await.unwrap();
+                        if let Some(res) = id_to_ack {
+                            self.ack(res).await.unwrap();
                         }
                     }
                 };
@@ -467,19 +467,22 @@ impl<
     }
 }
 
-impl<T, Conn: ConnectionLike + Send + Sync + 'static> RedisStorage<T, Conn> {
-    /// Ack a job
-    pub async fn ack(&mut self, worker_id: &WorkerId, task_id: &TaskId) -> Result<(), RedisError> {
+impl<T: Sync + Send, Conn: ConnectionLike + Send + Sync + 'static> Ack<T>
+    for RedisStorage<T, Conn>
+{
+    type Acknowledger = TaskId;
+    type Error = RedisError;
+    async fn ack(&mut self, res: AckResponse<Self::Acknowledger>) -> Result<(), RedisError> {
         let ack_job = self.scripts.ack_job.clone();
-        let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
+        let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), res.worker);
         let done_jobs_set = &self.config.done_jobs_set();
 
-        let now: i64 = Utc::now().timestamp();
+        let now: i64 = res.acknowledger.inner().timestamp_ms().try_into().unwrap();
 
         ack_job
             .key(inflight_set)
             .key(done_jobs_set)
-            .arg(task_id.to_string())
+            .arg(res.acknowledger.to_string())
             .arg(now)
             .invoke_async(&mut self.conn)
             .await
@@ -984,7 +987,11 @@ mod tests {
         let job_id = &job.get::<Context>().unwrap().id;
 
         storage
-            .ack(&worker_id, &job_id)
+            .ack(AckResponse {
+                acknowledger: job_id.clone(),
+                result: "Success".to_string(),
+                worker: worker_id.clone(),
+            })
             .await
             .expect("failed to acknowledge the job");
 

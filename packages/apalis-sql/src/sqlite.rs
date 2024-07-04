@@ -3,7 +3,7 @@ use crate::Config;
 
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
-use apalis_core::layers::{Ack, AckLayer};
+use apalis_core::layers::{Ack, AckLayer, AckResponse};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
@@ -477,17 +477,15 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
 impl<T: Sync + Send> Ack<T> for SqliteStorage<T> {
     type Acknowledger = TaskId;
     type Error = sqlx::Error;
-    async fn ack(
-        &mut self,
-        worker_id: &WorkerId,
-        task_id: &Self::Acknowledger,
-    ) -> Result<(), sqlx::Error> {
+    async fn ack(&mut self, res: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
+        let pool = self.pool.clone();
         let query =
-                "UPDATE Jobs SET status = 'Done', done_at = strftime('%s','now') WHERE id = ?1 AND lock_by = ?2";
+                "UPDATE Jobs SET status = 'Done', done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
         sqlx::query(query)
-            .bind(task_id.to_string())
-            .bind(worker_id.to_string())
-            .execute(&self.pool)
+            .bind(res.acknowledger.to_string())
+            .bind(res.worker.to_string())
+            .bind(res.result)
+            .execute(&pool)
             .await?;
         Ok(())
     }
@@ -609,7 +607,11 @@ mod tests {
         let job_id = ctx.id();
 
         storage
-            .ack(&worker_id, job_id)
+            .ack(AckResponse {
+                acknowledger: job_id.clone(),
+                result: "Success".to_string(),
+                worker: worker_id.clone(),
+            })
             .await
             .expect("failed to acknowledge the job");
 

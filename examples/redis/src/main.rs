@@ -6,13 +6,13 @@ use std::{
 
 use anyhow::Result;
 use apalis::prelude::*;
-use apalis::redis::RedisStorage;
+use apalis::{layers::limit::RateLimitLayer, redis::RedisStorage};
 
 use email_service::{send_email, Email};
 use tracing::{error, info};
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
-    for index in 0..1 {
+    for index in 0..10 {
         storage
             .push(Email {
                 to: index.to_string(),
@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
     let worker = WorkerBuilder::new("rango-tango")
         .chain(|svc| svc.timeout(Duration::from_millis(500)))
         .data(Count::default())
+        .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
         .with_storage(storage)
         .build_fn(send_email);
 
@@ -71,6 +72,7 @@ async fn main() -> Result<()> {
         })
         .shutdown_timeout(Duration::from_millis(5000))
         .run_with_signal(async {
+            info!("Monitor started");
             tokio::signal::ctrl_c().await?;
             info!("Monitor starting shutdown");
             Ok(())

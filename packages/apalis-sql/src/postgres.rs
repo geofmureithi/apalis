@@ -42,7 +42,7 @@ use crate::context::SqlContext;
 use crate::Config;
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
-use apalis_core::layers::{Ack, AckLayer};
+use apalis_core::layers::{Ack, AckLayer, AckResponse};
 use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
@@ -63,6 +63,7 @@ use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres, Row};
 use std::any::type_name;
 use std::convert::TryInto;
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::{fmt, io};
 use std::{marker::PhantomData, time::Duration};
@@ -88,7 +89,7 @@ pub struct PostgresStorage<T> {
     >,
     config: Config,
     controller: Controller,
-    ack_notify: Notify<(WorkerId, TaskId)>,
+    ack_notify: Notify<AckResponse<TaskId>>,
     subscription: Option<PgSubscription>,
 }
 
@@ -137,7 +138,6 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
         let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
         let ack_notify = self.ack_notify.clone();
         let pool = self.pool.clone();
-
         let heartbeat = async move {
             let mut keep_alive_stm = apalis_core::interval::interval(config.keep_alive).fuse();
             let mut ack_stream = ack_notify.clone().ready_chunks(config.buffer_size).fuse();
@@ -167,8 +167,8 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                     }
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
-                            let worker_ids: Vec<String> = ids.iter().map(|c| c.0.to_string()).collect();
-                            let task_ids: Vec<String> = ids.iter().map(|c| c.1.to_string()).collect();
+                            let worker_ids: Vec<String> = ids.iter().map(|c| c.worker.to_string()).collect();
+                            let task_ids: Vec<String> = ids.iter().map(|c| c.acknowledger.to_string()).collect();
 
                             let query =
                         "UPDATE apalis.jobs SET status = 'Done', done_at = now() WHERE id = ANY($1::text[]) AND lock_by = ANY($2::text[])";
@@ -516,13 +516,9 @@ where
 impl<T: Sync + Send> Ack<T> for PostgresStorage<T> {
     type Acknowledger = TaskId;
     type Error = sqlx::Error;
-    async fn ack(
-        &mut self,
-        worker_id: &WorkerId,
-        task_id: &Self::Acknowledger,
-    ) -> Result<(), sqlx::Error> {
+    async fn ack(&mut self, res: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
         self.ack_notify
-            .notify((worker_id.clone(), task_id.clone()))
+            .notify(res)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::Interrupted, e)))?;
 
         Ok(())
@@ -589,7 +585,6 @@ mod tests {
 
     use super::*;
     use email_service::Email;
-    use futures::StreamExt;
     use sqlx::types::chrono::Utc;
 
     /// migrate DB and return a storage instance.
@@ -642,7 +637,7 @@ mod tests {
         storage: &mut PostgresStorage<Email>,
         worker_id: &WorkerId,
     ) -> Request<Email> {
-        let mut req = storage.fetch_next(worker_id).await;
+        let req = storage.fetch_next(worker_id).await;
         req.unwrap()[0].clone()
     }
 
@@ -703,7 +698,11 @@ mod tests {
         let job_id = ctx.id();
 
         storage
-            .ack(&worker_id, job_id)
+            .ack(AckResponse {
+                acknowledger: job_id.clone(),
+                result: "Success".to_string(),
+                worker: worker_id.clone(),
+            })
             .await
             .expect("failed to acknowledge the job");
 
