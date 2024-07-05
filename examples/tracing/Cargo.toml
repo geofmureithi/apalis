@@ -18,5 +18,5 @@ futures = "0.3"
 
 
 [dependencies.tracing]
-default_features = false
+default-features = false
 version = "0.1"

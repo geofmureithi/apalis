@@ -1,15 +1,19 @@
+[workspace.package]
+edition = "2021"
+repository = "https://github.com/geofmureithi/apalis"
+
 [package]
 name = "apalis"
 version = "0.5.3"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
-repository = "https://github.com/geofmureithi/apalis"
+edition.workspace = true
+repository.workspace = true
 documentation = "https://docs.rs/apalis"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["job", "task", "scheduler", "worker", "cron"]
 categories = ["database"]
-edition = "2021"
 
 [lib]
 bench = false
@@ -171,6 +175,6 @@ ulid = { version = "1", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 
 [dependencies.tracing]
-default_features = false
+default-features = false
 version = "0.1.40"
 optional = true
