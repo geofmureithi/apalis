@@ -20,7 +20,7 @@ jobs:
         ports:
           - 5432:5432
       mysql:
-        image: mysql:8
+        image: mysql:9
         env:
           MYSQL_DATABASE: test
           MYSQL_USER: test
