@@ -5,7 +5,7 @@ use std::{
 };
 
 use futures::{future::BoxFuture, Future, FutureExt};
-use tower::Service;
+use tower::{Layer, Service};
 mod shutdown;
 
 use crate::{
@@ -91,6 +91,13 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         S::Response: 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        P::Layer: Layer<S>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+            Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+            Send + std::error::Error + Sync,
     {
         self.workers.push(worker.with_monitor(&self));
 
@@ -121,6 +128,13 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         S::Response: 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        P::Layer: Layer<S>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+            Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+            Send + std::error::Error + Sync,
     {
         let workers = worker.with_monitor_instances(count, &self);
         self.workers.extend(workers);
