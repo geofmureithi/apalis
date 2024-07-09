@@ -94,8 +94,8 @@ struct RedisScript {
 /// The actual structure of a Redis job
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RedisJob<J> {
-    ctx: Context,
-    job: J,
+    pub ctx: Context,
+    pub job: J,
 }
 
 impl<T> From<RedisJob<T>> for Request<T> {
@@ -126,8 +126,8 @@ impl<T> TryFrom<Request<T>> for RedisJob<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct Context {
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct Context {
     id: TaskId,
     attempts: usize,
 }
