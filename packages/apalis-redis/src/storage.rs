@@ -94,7 +94,9 @@ struct RedisScript {
 /// The actual structure of a Redis job
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RedisJob<J> {
+    /// The job context
     pub ctx: Context,
+    /// The inner job
     pub job: J,
 }
 
@@ -433,27 +435,45 @@ impl<
 
             let mut poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
 
-            // TODO: use .ready_chunks(config.buffer_size)
-            // TODO: create a ack_jobs.loa
             let mut ack_stream = ack_rx.fuse();
+
+            if let Err(e) = self.keep_alive(&worker).await {
+                error!("RegistrationError: {}", e);
+            }
 
             loop {
                 select! {
                     _ = keep_alive_stm.next() => {
-                        self.keep_alive(&worker).await.unwrap();
+                        if let Err(e) = self.keep_alive(&worker).await {
+                            error!("KeepAliveError: {}", e);
+                        }
                     }
                     _ = enqueue_scheduled_stm.next() => {
-                        self.enqueue_scheduled(config.buffer_size).await.unwrap();
+                        if let Err(e) = self.enqueue_scheduled(config.buffer_size).await {
+                            error!("EnqueueScheduledError: {}", e);
+                        }
                     }
                     _ = poll_next_stm.next() => {
-                        let res = self.fetch_next(&worker).await.unwrap();
-                        for job in res {
-                            tx.send(Ok(Some(job))).await.unwrap();
+                        let res = self.fetch_next(&worker).await;
+                        match res {
+                            Err(e) => {
+                                error!("PollNextError: {}", e);
+                            }
+                            Ok(res) => {
+                                for job in res {
+                                    if let Err(e) = tx.send(Ok(Some(job))).await {
+                                        error!("EnqueueError: {}", e);
+                                    }
+                                }
+                            }
                         }
+
                     }
                     id_to_ack = ack_stream.next() => {
                         if let Some(res) = id_to_ack {
-                            self.ack(res).await.unwrap();
+                            if let Err(e) = self.ack(res).await {
+                                error!("AckError: {}", e);
+                            }
                         }
                     }
                 };

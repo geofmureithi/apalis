@@ -152,18 +152,32 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 storage: &mut PostgresStorage<T>,
                 worker: &WorkerId,
                 tx: &mut mpsc::Sender<Result<Option<Request<T>>, Error>>,
-            ) {
-                let res = storage.fetch_next(worker).await.unwrap();
+            ) -> Result<(), Error> {
+                let res = storage
+                    .fetch_next(worker)
+                    .await
+                    .map_err(|e| Error::Failed(Box::new(e)))?;
                 for job in res {
-                    tx.send(Ok(Some(job))).await.unwrap();
+                    tx.send(Ok(Some(job)))
+                        .await
+                        .map_err(|e| Error::Failed(Box::new(e)))?;
                 }
+                Ok(())
+            }
+
+            if let Err(e) = self
+                .keep_alive_at::<Self::Layer>(&worker, Utc::now().timestamp())
+                .await
+            {
+                error!("KeepAliveError: {}", e);
             }
 
             loop {
                 select! {
                     _ = keep_alive_stm.next() => {
-                        let now: i64 = Utc::now().timestamp();
-                        self.keep_alive_at::<Self::Layer>(&worker, now).await.unwrap();
+                        if let Err(e) = self.keep_alive_at::<Self::Layer>(&worker, Utc::now().timestamp()).await {
+                            error!("KeepAliveError: {}", e);
+                        }
                     }
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
@@ -178,15 +192,20 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                                 .execute(&pool)
                                 .await
                             {
-                                error!("Ack failed: {e}");
+                                error!("AckError: {e}");
                             }
                         }
                     }
                     _ = poll_next_stm.next() => {
-                        fetch_next_batch(&mut self, &worker, &mut tx).await;
+                        if let Err(e) = fetch_next_batch(&mut self, &worker, &mut tx).await {
+                            error!("FetchNextError: {e}");
+
+                        }
                     }
                     _ = pg_notification.next() => {
-                        fetch_next_batch(&mut self, &worker, &mut tx).await;
+                        if let Err(e) = fetch_next_batch(&mut self, &worker, &mut tx).await {
+                            error!("PgNotificationError: {e}");
+                        }
                     }
 
 

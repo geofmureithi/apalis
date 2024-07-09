@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc, time::Duration};
+use std::{marker::PhantomData, time::Duration};
 
 use anyhow::Result;
 use apalis::{
