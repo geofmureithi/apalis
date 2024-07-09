@@ -9,13 +9,12 @@ use apalis::{
 
 use apalis_core::{
     codec::json::JsonCodec,
-    layers::{Ack, AckLayer},
+    layers::{Ack, AckLayer, AckResponse},
 };
 use email_service::{send_email, Email};
 use futures::{channel::mpsc, SinkExt};
 use rsmq_async::{Rsmq, RsmqConnection, RsmqError};
 use tokio::time::sleep;
-use tower::layer::util::Identity;
 use tracing::{error, info};
 
 struct RedisMq<T> {
@@ -71,13 +70,9 @@ impl<T: Send> Ack<T> for RedisMq<T> {
 
     type Error = RsmqError;
 
-    async fn ack(
-        &mut self,
-        worker_id: &WorkerId,
-        data: &Self::Acknowledger,
-    ) -> Result<(), Self::Error> {
-        println!("Attempting to ACK {}", data);
-        self.conn.delete_message("email", data).await?;
+    async fn ack(&mut self, ack: AckResponse<String>) -> Result<(), Self::Error> {
+        println!("Attempting to ACK {}", ack.acknowledger);
+        self.conn.delete_message("email", &ack.acknowledger).await?;
         Ok(())
     }
 }
@@ -141,8 +136,7 @@ async fn main() -> Result<()> {
         codec: RedisCodec::new(Box::new(JsonCodec)),
         config: Config::default(),
     };
-    // This can be in another part of the program
-    // produce_jobs(&mut mq).await?;
+    produce_jobs(&mut mq).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
         .layer(TraceLayer::new())

@@ -6,7 +6,6 @@ use apalis::{
     postgres::{PgPool, PostgresStorage},
     sqlite::{SqlitePool, SqliteStorage},
 };
-use apalis_redis::Config;
 use criterion::*;
 use futures::Future;
 use paste::paste;
