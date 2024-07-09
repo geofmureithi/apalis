@@ -5,8 +5,8 @@ use std::{
 };
 
 use anyhow::Result;
-use apalis::prelude::*;
 use apalis::{layers::limit::RateLimitLayer, redis::RedisStorage};
+use apalis::{layers::TimeoutLayer, prelude::*};
 
 use email_service::{send_email, Email};
 use tracing::{error, info};
@@ -46,9 +46,10 @@ async fn main() -> Result<()> {
     produce_jobs(storage.clone()).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .chain(|svc| svc.timeout(Duration::from_millis(500)))
-        .data(Count::default())
+        .chain(|svc| svc.map_err(|e| Error::Failed(e)))
         .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
+        .layer(TimeoutLayer::new(Duration::from_millis(500)))
+        .data(Count::default())
         .with_storage(storage)
         .build_fn(send_email);
 
