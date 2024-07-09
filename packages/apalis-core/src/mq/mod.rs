@@ -12,7 +12,8 @@ pub trait MessageQueue<Message>: Backend<Request<Message>> {
     type Error;
 
     /// Enqueues a message to the queue.
-    fn enqueue(&mut self, message: Message) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn enqueue(&mut self, message: Message)
+        -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Attempts to dequeue a message from the queue.
     /// Returns `None` if the queue is empty.
