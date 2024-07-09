@@ -153,7 +153,10 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 worker: &WorkerId,
                 tx: &mut mpsc::Sender<Result<Option<Request<T>>, Error>>,
             ) -> Result<(), Error> {
-                let res = storage.fetch_next(worker).await?;
+                let res = storage
+                    .fetch_next(worker)
+                    .await
+                    .map_err(|e| Error::Failed(Box::new(e)))?;
                 for job in res {
                     tx.send(Ok(Some(job)))
                         .await

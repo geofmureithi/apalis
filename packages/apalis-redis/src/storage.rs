@@ -94,7 +94,9 @@ struct RedisScript {
 /// The actual structure of a Redis job
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RedisJob<J> {
+    /// The job context
     pub ctx: Context,
+    /// The inner job
     pub job: J,
 }
 
