@@ -113,17 +113,16 @@ impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<T> {
 
 impl<Message: Send + 'static + Sync> MessageQueue<Message> for MemoryStorage<Message> {
     type Error = ();
-    async fn enqueue(&self, message: Message) -> Result<(), Self::Error> {
-        self.inner.sender.clone().try_send(message).unwrap();
+    async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
+        self.inner.sender.try_send(message).unwrap();
         Ok(())
     }
 
-    async fn dequeue(&self) -> Result<Option<Message>, ()> {
-        Err(())
-        // self.inner.receiver.lock().await.next().await
+    async fn dequeue(&mut self) -> Result<Option<Message>, ()> {
+        Ok(self.inner.receiver.lock().await.next().await)
     }
 
-    async fn size(&self) -> Result<usize, ()> {
-        Ok(self.inner.clone().count().await)
+    async fn size(&mut self) -> Result<usize, ()> {
+        Ok(self.inner.receiver.lock().await.size_hint().0)
     }
 }

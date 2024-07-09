@@ -12,12 +12,12 @@ pub trait MessageQueue<Message>: Backend<Request<Message>> {
     type Error;
 
     /// Enqueues a message to the queue.
-    fn enqueue(&self, message: Message) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn enqueue(&mut self, message: Message) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Attempts to dequeue a message from the queue.
     /// Returns `None` if the queue is empty.
-    fn dequeue(&self) -> impl Future<Output = Result<Option<Message>, Self::Error>> + Send;
+    fn dequeue(&mut self) -> impl Future<Output = Result<Option<Message>, Self::Error>> + Send;
 
     /// Returns the current size of the queue.
-    fn size(&self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
+    fn size(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
