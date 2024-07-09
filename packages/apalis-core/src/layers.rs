@@ -188,7 +188,7 @@ impl<A: fmt::Display> AckResponse<A> {
 }
 
 /// A generic stream that emits (worker_id, task_id)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AckStream<A>(pub Sender<AckResponse<A>>);
 
 impl<J, A: Send + Clone + 'static> Ack<J> for AckStream<A> {

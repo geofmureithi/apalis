@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context as TaskCtx, Poll, Waker};
 use thiserror::Error;
-use tower::{Service, ServiceBuilder, ServiceExt};
+use tower::{Layer, Service, ServiceBuilder, ServiceExt};
 
 mod buffer;
 mod stream;
@@ -230,12 +230,21 @@ impl<S, P> Worker<Ready<S, P>> {
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
+        P::Layer: Layer<S>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+            Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+            Send + std::error::Error + Sync,
     {
         let notifier = Notify::new();
         let service = self.state.service;
         let backend = self.state.backend;
         let poller = backend.poll(self.id.clone());
         let polling = poller.heartbeat.shared();
+        let default_layer = poller.layer;
+        let service = default_layer.layer(service);
         let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
             .into_future()
             .shared();
@@ -261,6 +270,13 @@ impl<S, P> Worker<Ready<S, P>> {
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
+        P::Layer: Layer<S>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+            Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+            Send + std::error::Error + Sync,
     {
         let notifier = Notify::new();
         let service = self.state.service;
@@ -268,6 +284,8 @@ impl<S, P> Worker<Ready<S, P>> {
         let executor = monitor.executor().clone();
         let context = monitor.context().clone();
         let poller = backend.poll(self.id.clone());
+        let default_layer = poller.layer;
+        let service = default_layer.layer(service);
         let polling = poller.heartbeat.shared();
         let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
             .into_future()
@@ -298,14 +316,23 @@ impl<S, P> Worker<Ready<S, P>> {
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
+        P::Layer: Layer<S>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+            Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+            Send + std::error::Error + Sync,
     {
         let notifier = Notify::new();
         let service = self.state.service;
-        let (service, poll_worker) = Buffer::pair(service, instances);
         let backend = self.state.backend;
         let executor = monitor.executor().clone();
         let context = monitor.context().clone();
         let poller = backend.poll(self.id.clone());
+        let default_layer = poller.layer;
+        let service = default_layer.layer(service);
+        let (service, poll_worker) = Buffer::pair(service, instances);
         let polling = poller.heartbeat.shared();
         let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
             .into_future()
@@ -345,6 +372,13 @@ impl<S, P> Worker<Ready<S, P>> {
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
+        P::Layer: Layer<S>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+            Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+            Send + std::error::Error + Sync,
     {
         let worker_id = self.id.clone();
         let notifier = Notify::new();
