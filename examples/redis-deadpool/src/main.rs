@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use apalis::prelude::*;
-use apalis::redis::RedisStorage;
+use apalis_redis::RedisStorage;
 
 use deadpool_redis::{Config, Connection, Runtime};
 use email_service::{send_email, Email};
@@ -14,8 +14,8 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let config = apalis::redis::Config::default()
-        .set_namespace("apalis::redis-dead-pool")
+    let config = apalis_redis::Config::default()
+        .set_namespace("apalis_redis-dead-pool")
         .set_max_retries(5);
 
     let cfg = Config::from_url("redis://127.0.0.1/");

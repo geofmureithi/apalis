@@ -6,11 +6,9 @@ use std::time::Duration;
 use tracing_subscriber::prelude::*;
 
 use anyhow::Result;
-use apalis::{
-    layers::{sentry::SentryLayer, tracing::TraceLayer},
-    prelude::*,
-    redis::RedisStorage,
-};
+use apalis::layers::tracing::TraceLayer;
+use apalis::{layers::sentry::SentryLayer, prelude::*};
+use apalis_redis::RedisStorage;
 use email_service::Email;
 use tokio::time::sleep;
 
@@ -129,7 +127,7 @@ async fn main() -> Result<()> {
         .with(sentry_tracing::layer())
         .init();
 
-    let conn = apalis::redis::connect(redis_url).await?;
+    let conn = apalis_redis::connect(redis_url).await?;
     let storage = RedisStorage::new(conn);
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;

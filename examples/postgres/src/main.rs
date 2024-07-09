@@ -1,8 +1,8 @@
 use anyhow::Result;
 use apalis::layers::retry::RetryPolicy;
-use apalis::postgres::{PgListen, PgPool};
+use apalis::layers::tracing::TraceLayer;
 use apalis::prelude::*;
-use apalis::{layers::tracing::TraceLayer, postgres::PostgresStorage};
+use apalis_sql::postgres::{PgListen, PgPool, PostgresStorage};
 use email_service::{send_email, Email};
 use tower::retry::RetryLayer;
 use tracing::{debug, info};

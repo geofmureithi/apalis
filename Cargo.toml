@@ -17,16 +17,6 @@ bench = false
 [features]
 default = ["tracing", "tokio-comp"]
 
-## Include redis storage
-redis = ["apalis-redis"]
-## Include Postgres storage
-postgres = ["apalis-sql/postgres"]
-## Include SQlite storage
-sqlite = ["apalis-sql/sqlite"]
-## Include MySql storage
-mysql = ["apalis-sql/mysql"]
-## Include Cron functionality
-cron = ["apalis-cron"]
 
 ## Support Tracing 👀
 tracing = ["dep:tracing", "dep:tracing-futures"]
@@ -44,19 +34,9 @@ limit = ["tower/limit"]
 ## Support filtering jobs based on a predicate
 filter = ["tower/filter"]
 ## Compatibility with async-std and smol runtimes
-async-std-comp = [
-  "apalis-sql?/async-std-comp",
-  "apalis-redis?/async-std-comp",
-  "apalis-cron?/async-std-comp",
-  "async-std",
-]
+async-std-comp = ["async-std"]
 ## Compatibility with tokio and actix runtimes
-tokio-comp = [
-  "apalis-sql?/tokio-comp",
-  "apalis-redis?/tokio-comp",
-  "apalis-cron?/tokio-comp",
-  "tokio",
-]
+tokio-comp = ["tokio"]
 
 layers = [
   "sentry",
@@ -70,30 +50,11 @@ layers = [
 
 docsrs = ["document-features"]
 
-[dependencies.apalis-redis]
-version = "0.6.0-rc.1"
-optional = true
-path = "./packages/apalis-redis"
-default-features = false
-
-[dependencies.apalis-sql]
-
-version = "0.6.0-rc.1"
-features = ["migrate"]
-optional = true
-default-features = false
-path = "./packages/apalis-sql"
-
 [dependencies.apalis-core]
 version = "0.6.0-rc.1"
 default-features = false
 path = "./packages/apalis-core"
 
-[dependencies.apalis-cron]
-version = "0.6.0-rc.1"
-optional = true
-default-features = false
-path = "./packages/apalis-cron"
 
 [dependencies.document-features]
 version = "0.2"
@@ -112,11 +73,10 @@ pprof = { version = "0.13", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-apalis = { path = ".", features = ["redis", "sqlite", "postgres", "mysql"] }
 redis = { version = "0.25.3", default-features = false, features = [
-    "script",
-    "aio",
-    "connection-manager",
+  "script",
+  "aio",
+  "connection-manager",
 ] }
 
 [dev-dependencies.sqlx]
@@ -148,7 +108,10 @@ members = [
   "examples/tracing",
   # "examples/rest-api",
   "examples/async-std-runtime",
-  "examples/basics", "examples/redis-with-msg-pack", "examples/redis-deadpool", "examples/redis-mq-example",
+  "examples/basics",
+  "examples/redis-with-msg-pack",
+  "examples/redis-deadpool",
+  "examples/redis-mq-example",
 ]
 
 

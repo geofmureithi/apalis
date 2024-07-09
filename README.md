@@ -66,7 +66,7 @@ apalis = { version = "0.5", features = ["redis"] } # Backends available: postgre
 
 ```rust
 use apalis::prelude::*;
-use apalis::redis::{RedisStorage, Config};
+use apalis_redis::{RedisStorage, Config};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]

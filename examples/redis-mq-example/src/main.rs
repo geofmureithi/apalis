@@ -1,11 +1,9 @@
 use std::{marker::PhantomData, time::Duration};
 
 use anyhow::Result;
-use apalis::{
-    layers::tracing::TraceLayer,
-    prelude::*,
-    redis::{self, Config, RedisCodec, RedisJob},
-};
+use apalis::{layers::tracing::TraceLayer, prelude::*};
+
+use apalis_redis::{self, Config, RedisCodec, RedisJob};
 
 use apalis_core::{
     codec::json::JsonCodec,
@@ -20,7 +18,7 @@ use tracing::{error, info};
 struct RedisMq<T> {
     conn: Rsmq,
     msg_type: PhantomData<T>,
-    config: redis::Config,
+    config: Config,
     codec: RedisCodec<T>,
 }
 
