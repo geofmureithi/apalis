@@ -108,12 +108,12 @@ members = [
   "examples/axum",
   "examples/prometheus",
   "examples/tracing",
-  # "examples/rest-api",
   "examples/async-std-runtime",
   "examples/basics",
   "examples/redis-with-msg-pack",
   "examples/redis-deadpool",
-  "examples/redis-mq-example", "examples/cron",
+  "examples/redis-mq-example",
+  "examples/cron",
 ]
 
 
