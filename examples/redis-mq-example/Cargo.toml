@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-apalis = { path = "../../", features = ["redis"]}
+apalis = { path = "../.." }
+apalis-redis = { path = "../../packages/apalis-redis" }
 apalis-core = { path = "../../packages/apalis-core", features = ["json"] }
 rsmq_async = "11.1.0"
 anyhow = "1"

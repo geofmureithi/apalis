@@ -59,14 +59,16 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.5", features = ["redis"] } # Backends available: postgres, sqlite, mysql, amqp
+apalis = { version = "0.6" }
+apalis-redis = { version = "0.6" }
+# apalis-sql = { version = "0.6", features = ["postgres"] } # or mysql, sqlite
 ```
 
 ## Usage
 
 ```rust
 use apalis::prelude::*;
-use apalis::redis::{RedisStorage, Config};
+use apalis_redis::{RedisStorage, Config};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -81,11 +83,12 @@ async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
     let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
-    let storage = RedisStorage::new(redis, Config::default()).await?;
+    let conn = apalis_redis::connect(redis_url).await.expect("Could not connect");
+    let storage = RedisStorage::new(conn);
     Monitor::new()
         .register_with_count(2, {
             WorkerBuilder::new(format!("email-worker"))
@@ -117,11 +120,6 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
 ## Feature flags
 
 - _tracing_ (enabled by default) — Support Tracing 👀
-- _redis_ — Include redis storage
-- _postgres_ — Include Postgres storage
-- _sqlite_ — Include SQlite storage
-- _mysql_ — Include MySql storage
-- _cron_ — Include cron job processing
 - _sentry_ — Support for Sentry exception and performance monitoring
 - _prometheus_ — Support Prometheus metrics
 - _retry_ — Support direct retrying jobs

@@ -1,16 +1,15 @@
 use anyhow::Result;
 
+use apalis::layers::tracing::TraceLayer;
+use apalis::{
+    prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
+    utils::TokioExecutor,
+};
+use apalis_redis::RedisStorage;
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 use tracing_subscriber::prelude::*;
-
-use apalis::{
-    layers::tracing::TraceLayer,
-    prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
-    redis::RedisStorage,
-    utils::TokioExecutor,
-};
 
 use tokio::time::sleep;
 
@@ -63,7 +62,7 @@ async fn main() -> Result<()> {
         .with(fmt_layer)
         .init();
 
-    let conn = apalis::redis::connect(redis_url)
+    let conn = apalis_redis::connect(redis_url)
         .await
         .expect("Could not connect to RedisStorage");
     let storage = RedisStorage::new(conn);

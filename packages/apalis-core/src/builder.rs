@@ -225,27 +225,20 @@ pub trait WorkerFactoryFn<J, F, K> {
     /// - An async function with an argument of the item being processed plus up-to 16 arguments that are extracted from the request [`Data`]
     ///
     /// A function can return:
-    /// - Unit
+    /// - ()
     /// - primitive
     /// - Result<T, E: Error>
     /// - impl IntoResponse
     ///
     /// ```rust
+    /// # use apalis_core::layers::extensions::Data;
     /// #[derive(Debug)]
     /// struct Email;
     /// #[derive(Debug)]
     /// struct PgPool;
-    /// # struct PgError;
     ///
-    /// async fn send_email(email: Email) {
-    ///     // Implementation of the job function
-    ///     // ...
-    /// }
-    ///
-    /// async fn send_email(email: Email, data: Data<PgPool>) -> Result<(), PgError> {
-    ///     // Implementation of the job function?
-    ///     // ...
-    ///     Ok(())
+    /// async fn send_email(email: Email, data: Data<PgPool>) {
+    ///     // Implementation of the task function?
     /// }
     /// ```
     ///

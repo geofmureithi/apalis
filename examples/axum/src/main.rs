@@ -4,8 +4,9 @@
 //! cd examples && cargo run -p axum-example
 //! ```
 use anyhow::Result;
+use apalis::layers::tracing::TraceLayer;
 use apalis::prelude::*;
-use apalis::{layers::tracing::TraceLayer, redis::RedisStorage};
+use apalis_redis::RedisStorage;
 use axum::{
     extract::Form,
     http::StatusCode,
@@ -55,7 +56,7 @@ async fn main() -> Result<()> {
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
     let storage = RedisStorage::new(conn);
     // build our application with some routes
     let app = Router::new()

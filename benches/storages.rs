@@ -1,11 +1,11 @@
 use apalis::prelude::*;
 
-use apalis::redis::RedisStorage;
 use apalis::{
     mysql::{MySqlPool, MysqlStorage},
     postgres::{PgPool, PostgresStorage},
     sqlite::{SqlitePool, SqliteStorage},
 };
+use apalis_redis::RedisStorage;
 use criterion::*;
 use futures::Future;
 use paste::paste;
@@ -132,7 +132,7 @@ define_bench!("sqlite_in_memory", {
 });
 
 define_bench!("redis", {
-    let conn = apalis::redis::connect(env!("REDIS_URL")).await.unwrap();
+    let conn = apalis_redis::connect(env!("REDIS_URL")).await.unwrap();
     let redis = RedisStorage::new(conn);
     redis
 });

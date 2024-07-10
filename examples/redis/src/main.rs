@@ -5,8 +5,9 @@ use std::{
 };
 
 use anyhow::Result;
-use apalis::{layers::limit::RateLimitLayer, redis::RedisStorage};
+use apalis::layers::limit::RateLimitLayer;
 use apalis::{layers::TimeoutLayer, prelude::*};
+use apalis_redis::RedisStorage;
 
 use email_service::{send_email, Email};
 use tracing::{error, info};
@@ -40,7 +41,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
     let storage = RedisStorage::new(conn);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;

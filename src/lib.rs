@@ -19,7 +19,7 @@
 //! ```rust, no_run
 //! use apalis::prelude::*;
 //! use serde::{Deserialize, Serialize};
-//! use apalis::redis::{RedisStorage, Config};
+//! use apalis_redis::{RedisStorage, Config};
 //!
 //! #[derive(Debug, Deserialize, Serialize)]
 //! struct Email {
@@ -33,7 +33,7 @@
 //! #[tokio::main]
 //! async fn main() {
 //!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
-//!     let conn = apalis::redis::connect(redis).await.unwrap();
+//!     let conn = apalis_redis::connect(redis).await.unwrap();
 //!     let storage = RedisStorage::new(conn);
 //!     Monitor::<TokioExecutor>::new()
 //!         .register_with_count(2, {
@@ -62,42 +62,6 @@
 //! [`tower-http`]: https://crates.io/crates/tower-http
 //! [`Layer`]: https://docs.rs/tower/latest/tower/trait.Layer.html
 //! [`Stream`]: https://docs.rs/futures/latest/futures/stream/trait.Stream.html
-
-/// Include the default Redis storage
-#[cfg(feature = "redis")]
-#[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
-pub mod redis {
-    pub use apalis_redis::*;
-}
-
-/// Include the default Sqlite storage
-#[cfg(feature = "sqlite")]
-#[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
-pub mod sqlite {
-    pub use apalis_sql::sqlite::*;
-}
-
-/// Include the default Postgres storage
-#[cfg(feature = "postgres")]
-#[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
-pub mod postgres {
-    pub use apalis_sql::postgres::*;
-}
-
-/// Include the default MySQL storage
-#[cfg(feature = "mysql")]
-#[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
-pub mod mysql {
-    pub use apalis_sql::mysql::*;
-}
-
-/// Include Cron utilities
-#[cfg(feature = "cron")]
-#[cfg_attr(docsrs, doc(cfg(feature = "cron")))]
-pub mod cron {
-    pub use apalis_cron::*;
-}
-
 /// apalis fully supports middleware via [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html)
 pub mod layers;
 

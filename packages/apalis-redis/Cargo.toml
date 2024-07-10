@@ -37,7 +37,7 @@ async-trait = "0.1.80"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 email-service = { path = "../../examples/email-service" }
 apalis = { path = "../../", default-features = false, features = [
-    "tokio-comp", "redis"
+    "tokio-comp",
 ] }
 
 [features]

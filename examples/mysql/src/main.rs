@@ -1,7 +1,8 @@
 use anyhow::Result;
-use apalis::mysql::MySqlPool;
+use apalis::layers::tracing::TraceLayer;
 use apalis::prelude::*;
-use apalis::{layers::tracing::TraceLayer, mysql::MysqlStorage};
+use apalis_sql::mysql::MySqlPool;
+use apalis_sql::mysql::MysqlStorage;
 use email_service::{send_email, Email};
 
 async fn produce_jobs(storage: &MysqlStorage<Email>) -> Result<()> {

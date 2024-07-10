@@ -4,11 +4,8 @@ mod service;
 
 use std::time::Duration;
 
-use apalis::{
-    layers::tracing::TraceLayer,
-    prelude::*,
-    sqlite::{SqlitePool, SqliteStorage},
-};
+use apalis::{layers::tracing::TraceLayer, prelude::*};
+use apalis_sql::sqlite::{SqlitePool, SqliteStorage};
 
 use email_service::Email;
 use layer::LogLayer;

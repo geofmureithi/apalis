@@ -153,7 +153,7 @@ impl Default for Config {
             max_retries: 5,
             keep_alive: Duration::from_secs(30),
             enqueue_scheduled: Duration::from_secs(30),
-            namespace: String::from("apalis::redis"),
+            namespace: String::from("apalis_redis"),
         }
     }
 }

@@ -2,11 +2,10 @@ use std::{future::Future, str::FromStr, time::Duration};
 
 use anyhow::Result;
 use apalis::{
-    cron::{CronStream, Schedule},
     layers::{retry::RetryLayer, retry::RetryPolicy, tracing::MakeSpan, tracing::TraceLayer},
     prelude::*,
 };
-
+use apalis_cron::{CronStream, Schedule};
 use chrono::{DateTime, Utc};
 use tracing::{debug, info, Instrument, Level, Span};
 

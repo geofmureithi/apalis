@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use apalis::prelude::*;
-use apalis::redis::RedisStorage;
+use apalis_redis::RedisStorage;
 
 use email_service::{send_email, Email};
 use serde::{de::DeserializeOwned, Serialize};
@@ -27,9 +27,9 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
-    let config = apalis::redis::Config::default()
-        .set_namespace("apalis::redis-with-msg-pack")
+    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
+    let config = apalis_redis::Config::default()
+        .set_namespace("apalis_redis-with-msg-pack")
         .set_max_retries(5);
     let storage = RedisStorage::new_with_codec(conn, config, MessagePack);
     // This can be in another part of the program

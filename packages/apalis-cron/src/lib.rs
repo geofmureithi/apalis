@@ -15,17 +15,12 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! # use apalis_utils::layers::retry::RetryLayer;
-//! # use apalis_utils::layers::retry::DefaultRetryPolicy;
-//! # use apalis_core::extensions::Data;
-//! # use apalis_core::service_fn::service_fn;
+//! # use apalis::layers::retry::RetryLayer;
+//! # use apalis::layers::retry::RetryPolicy;
 //! use tower::ServiceBuilder;
 //! use apalis_cron::Schedule;
 //! use std::str::FromStr;
-//! # use apalis_core::monitor::Monitor;
-//! # use apalis_core::builder::WorkerBuilder;
-//! # use apalis_core::builder::WorkerFactoryFn;
-//! # use apalis_utils::TokioExecutor;
+//! # use apalis::prelude::*;
 //! use apalis_cron::CronStream;
 //! use chrono::{DateTime, Utc};
 //!
@@ -50,7 +45,7 @@
 //! async fn main() {
 //!     let schedule = Schedule::from_str("@daily").unwrap();
 //!     let worker = WorkerBuilder::new("morning-cereal")
-//!         .layer(RetryLayer::new(DefaultRetryPolicy))
+//!         .layer(RetryLayer::new(RetryPolicy::retries(5)))
 //!         .data(FakeService)
 //!         .stream(CronStream::new(schedule).into_stream())
 //!         .build_fn(send_reminder);

@@ -2,9 +2,9 @@ mod job;
 
 use anyhow::Result;
 use apalis::utils::TokioExecutor;
-use apalis::{layers::tracing::TraceLayer, prelude::*, sqlite::SqliteStorage};
+use apalis::{layers::tracing::TraceLayer, prelude::*};
+use apalis_sql::sqlite::SqliteStorage;
 use chrono::Utc;
-
 use email_service::{send_email, Email};
 use job::Notification;
 use sqlx::SqlitePool;

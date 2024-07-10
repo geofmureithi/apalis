@@ -313,7 +313,7 @@ mod tests {
     #[tokio::test]
     async fn it_works() {
         let backend = MemoryStorage::new();
-        let handle = backend.clone();
+        let mut handle = backend.clone();
 
         tokio::spawn(async move {
             for i in 0..10 {
@@ -339,7 +339,7 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_run() {
         let backend = MemoryStorage::new();
-        let handle = backend.clone();
+        let mut handle = backend.clone();
 
         tokio::spawn(async move {
             for i in 0..1000 {
