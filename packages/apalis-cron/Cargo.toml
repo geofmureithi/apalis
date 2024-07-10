@@ -11,7 +11,6 @@ description = "A simple yet extensible library for cron-like job scheduling for 
 [dependencies]
 apalis-core = { path = "../../packages/apalis-core", version = "0.6.0-rc.1", default-features = false, features = [
     "sleep",
-    "json",
 ] }
 cron = "0.12.1"
 futures = "0.3.30"
@@ -29,10 +28,6 @@ apalis-core = { path = "../../packages/apalis-core" }
 apalis = { path = "../../", default-features = false, features = ["retry"] }
 serde = { version = "1.0", features = ["derive"] }
 
-[features]
-default = ["tokio-comp"]
-async-std-comp = ["async-std"]
-tokio-comp = ["tokio/net"]
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

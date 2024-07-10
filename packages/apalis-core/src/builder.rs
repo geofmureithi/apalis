@@ -55,6 +55,7 @@ impl<Serv> WorkerBuilder<(), (), Identity, Serv> {
 
 impl<J, M, Serv> WorkerBuilder<J, (), M, Serv> {
     /// Consume a stream directly
+    #[deprecated(since = "0.6.0", note = "Consider using the `.backend`")]
     pub fn stream<NS: Stream<Item = Result<Option<Request<NJ>>, Error>> + Send + 'static, NJ>(
         self,
         stream: NS,

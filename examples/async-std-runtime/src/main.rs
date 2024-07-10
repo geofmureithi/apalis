@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
     let worker = WorkerBuilder::new("daily-cron-worker")
         .layer(RetryLayer::new(RetryPolicy::retries(5)))
         .layer(TraceLayer::new().make_span_with(ReminderSpan::new()))
-        .stream(CronStream::new(schedule).into_stream())
+        .backend(CronStream::new(schedule))
         .build_fn(send_reminder);
 
     Monitor::<AsyncStdExecutor>::new()

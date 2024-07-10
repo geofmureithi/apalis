@@ -113,7 +113,7 @@ members = [
   "examples/basics",
   "examples/redis-with-msg-pack",
   "examples/redis-deadpool",
-  "examples/redis-mq-example",
+  "examples/redis-mq-example", "examples/cron",
 ]
 
 

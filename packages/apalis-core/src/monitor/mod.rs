@@ -97,7 +97,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
             Send,
         <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
-            Send + std::error::Error + Sync,
+            Send + Into<BoxDynError> + Sync,
     {
         self.workers.push(worker.with_monitor(&self));
 

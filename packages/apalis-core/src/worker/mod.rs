@@ -276,7 +276,7 @@ impl<S, P> Worker<Ready<S, P>> {
         <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
             Send,
         <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
-            Send + std::error::Error + Sync,
+            Send + Into<BoxDynError> + Sync,
     {
         let notifier = Notify::new();
         let service = self.state.service;
@@ -322,7 +322,7 @@ impl<S, P> Worker<Ready<S, P>> {
         <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
             Send,
         <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
-            Send + std::error::Error + Sync,
+            Send + Into<BoxDynError> + Sync,
     {
         let notifier = Notify::new();
         let service = self.state.service;
@@ -378,7 +378,7 @@ impl<S, P> Worker<Ready<S, P>> {
         <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
             Send,
         <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
-            Send + std::error::Error + Sync,
+            Send + Into<BoxDynError> + Sync,
     {
         let worker_id = self.id.clone();
         let notifier = Notify::new();
