@@ -22,6 +22,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //! # apalis-core
 //! Utilities for building job and message processing tools.
+use std::sync::Arc;
+
 use futures::Stream;
 use poller::Poller;
 use worker::WorkerId;
@@ -92,6 +94,10 @@ pub trait Codec<T, Compact> {
     /// Decode back to our request type
     fn decode(&self, compact: &Compact) -> Result<T, Self::Error>;
 }
+
+/// A boxed codec
+pub type BoxCodec<T, Compact, Error = error::Error> =
+    Arc<Box<dyn Codec<T, Compact, Error = Error> + Sync + Send + 'static>>;
 
 /// Sleep utilities
 #[cfg(feature = "sleep")]
