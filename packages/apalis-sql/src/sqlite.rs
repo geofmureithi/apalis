@@ -149,6 +149,11 @@ impl<T: Serialize + DeserializeOwned> SqliteStorage<T> {
     pub fn codec(&self) -> &SqliteCodec<T> {
         &self.codec
     }
+
+    /// Get the config used by the storage
+    pub fn get_config(&self) -> &Config {
+        &self.config
+    }
 }
 
 async fn fetch_next(

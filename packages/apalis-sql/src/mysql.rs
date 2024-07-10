@@ -114,6 +114,11 @@ impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
     pub fn codec(&self) -> &BoxCodec<T, serde_json::Value> {
         &self.codec
     }
+
+    /// Get the config used by the storage
+    pub fn get_config(&self) -> &Config {
+        &self.config
+    }
 }
 
 impl<T: DeserializeOwned + Send + Unpin + Sync + 'static> MysqlStorage<T> {
