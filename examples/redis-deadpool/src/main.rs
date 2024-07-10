@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     produce_jobs(&mut storage).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .with_storage(storage)
+        .backend(storage)
         .data(pool)
         .build_fn(send_email);
 

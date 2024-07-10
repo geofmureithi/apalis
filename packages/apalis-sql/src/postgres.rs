@@ -31,7 +31,7 @@
 //!          .register_with_count(4, {
 //!              WorkerBuilder::new(&format!("tasty-avocado"))
 //!                  .data(0usize)
-//!                  .source(pg)
+//!                  .backend(pg)
 //!                  .build_fn(send_email)
 //!          })
 //!          .run()

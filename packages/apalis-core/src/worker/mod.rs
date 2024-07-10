@@ -720,8 +720,8 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
-        let backend = MemoryStorage::new();
-        let mut handle = backend.clone();
+        let in_memory = MemoryStorage::new();
+        let mut handle = in_memory.clone();
 
         tokio::spawn(async move {
             for i in 0..ITEMS {
@@ -749,7 +749,7 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             // .chain(|svc| svc.timeout(Duration::from_millis(500)))
             .data(Count::default())
-            .source(backend);
+            .backend(in_memory);
         let worker = worker.build_fn(task);
         let worker = worker.with_executor(TokioTestExecutor);
         let w = worker.clone();

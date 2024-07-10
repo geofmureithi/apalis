@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
         .register(
             WorkerBuilder::new("tasty-avocado")
                 .chain(|srv| srv.layer(TraceLayer::new()))
-                .with_storage(storage)
+                .backend(storage)
                 .build_fn(email_service),
         )
         .run()

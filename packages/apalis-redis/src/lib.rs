@@ -18,7 +18,7 @@
 //!     Monitor::<TokioExecutor>::new()
 //!        .register(
 //!            WorkerBuilder::new("tasty-pear")
-//!                .source(storage.clone())
+//!                .backend(storage.clone())
 //!                .build_fn(send_email),
 //!        )
 //!        .run()

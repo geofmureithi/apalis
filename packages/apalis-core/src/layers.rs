@@ -91,7 +91,7 @@ pub mod extensions {
     ///
     /// let worker = WorkerBuilder::new("tasty-avocado")
     ///     .data(state)
-    ///     .source(MemoryStorage::new())
+    ///     .backend(MemoryStorage::new())
     ///     .build(service_fn(email_service));
     /// ```
 

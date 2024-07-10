@@ -138,7 +138,7 @@ async fn main() -> Result<()> {
 
     let worker = WorkerBuilder::new("rango-tango")
         .layer(TraceLayer::new())
-        .with_mq(mq)
+        .backend(mq)
         .build_fn(send_email);
 
     Monitor::<TokioExecutor>::new()

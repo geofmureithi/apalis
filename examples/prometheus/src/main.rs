@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
             .register_with_count(2, {
                 WorkerBuilder::new("tasty-banana")
                     .layer(PrometheusLayer)
-                    .with_storage(storage.clone())
+                    .backend(storage.clone())
                     .build_fn(send_email)
             })
             .run()

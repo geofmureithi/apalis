@@ -138,7 +138,7 @@ async fn main() -> Result<()> {
                 .layer(NewSentryLayer::new_from_top())
                 .layer(SentryLayer::new())
                 .layer(TraceLayer::new())
-                .with_storage(storage.clone())
+                .backend(storage.clone())
                 .build_fn(email_service)
         })
         .run()

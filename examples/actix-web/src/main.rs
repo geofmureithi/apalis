@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
         .register_with_count(2, {
             WorkerBuilder::new("tasty-avocado")
                 .layer(TraceLayer::new())
-                .with_storage(storage)
+                .backend(storage)
                 .build_fn(send_email)
         })
         .run_with_signal(signal::ctrl_c());

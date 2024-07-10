@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
         .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
         .layer(TimeoutLayer::new(Duration::from_millis(500)))
         .data(Count::default())
-        .with_storage(storage)
+        .backend(storage)
         .build_fn(send_email);
 
     Monitor::<TokioExecutor>::new()

@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
             WorkerBuilder::new("tasty-orange")
                 .layer(TraceLayer::new())
                 .layer(RetryLayer::new(RetryPolicy::retries(5)))
-                .with_storage(pg)
+                .backend(pg)
                 .build_fn(send_email)
         })
         .on_event(|e| debug!("{e:?}"))

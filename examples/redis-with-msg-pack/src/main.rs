@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
     produce_jobs(storage.clone()).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .with_storage(storage)
+        .backend(storage)
         .build_fn(send_email);
 
     Monitor::<TokioExecutor>::new()
