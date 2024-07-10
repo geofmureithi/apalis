@@ -1,6 +1,6 @@
 [package]
 name = "apalis-core"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.2"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition = "2021"
 license = "MIT"

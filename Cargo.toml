@@ -1,6 +1,6 @@
 [package]
 name = "apalis"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.2"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 repository = "https://github.com/geofmureithi/apalis"
@@ -51,7 +51,7 @@ layers = [
 docsrs = ["document-features"]
 
 [dependencies.apalis-core]
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.2"
 default-features = false
 path = "./packages/apalis-core"
 
