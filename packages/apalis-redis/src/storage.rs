@@ -95,9 +95,51 @@ struct RedisScript {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RedisJob<J> {
     /// The job context
-    pub ctx: Context,
+    ctx: Context,
     /// The inner job
-    pub job: J,
+    job: J,
+}
+
+impl<J> RedisJob<J> {
+    /// Creates a new RedisJob.
+    pub fn new(job: J, ctx: Context) -> Self {
+        RedisJob { ctx, job }
+    }
+
+    /// Gets a reference to the context.
+    pub fn ctx(&self) -> &Context {
+        &self.ctx
+    }
+
+    /// Gets a mutable reference to the context.
+    pub fn ctx_mut(&mut self) -> &mut Context {
+        &mut self.ctx
+    }
+
+    /// Sets the context.
+    pub fn set_ctx(&mut self, ctx: Context) {
+        self.ctx = ctx;
+    }
+
+    /// Gets a reference to the job.
+    pub fn job(&self) -> &J {
+        &self.job
+    }
+
+    /// Gets a mutable reference to the job.
+    pub fn job_mut(&mut self) -> &mut J {
+        &mut self.job
+    }
+
+    /// Sets the job.
+    pub fn set_job(&mut self, job: J) {
+        self.job = job;
+    }
+
+    /// Combines context and job into a tuple.
+    pub fn into_tuple(self) -> (Context, J) {
+        (self.ctx, self.job)
+    }
 }
 
 impl<T> From<RedisJob<T>> for Request<T> {

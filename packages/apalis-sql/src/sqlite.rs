@@ -12,7 +12,7 @@ use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
-use apalis_core::{Backend, Codec};
+use apalis_core::{Backend, BoxCodec};
 use async_stream::try_stream;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
@@ -31,7 +31,7 @@ pub use sqlx::sqlite::SqlitePool;
 /// The code used to encode Sqlite jobs.
 ///
 /// Currently uses JSON
-pub type SqliteCodec<T> = Arc<Box<dyn Codec<T, String, Error = Error> + Sync + Send + 'static>>;
+pub type SqliteCodec<T> = BoxCodec<T, String>;
 
 /// Represents a [Storage] that persists to Sqlite
 // #[derive(Debug)]
@@ -200,22 +200,19 @@ impl<T: DeserializeOwned + Send + Unpin> SqliteStorage<T> {
                     let res = fetch_next(&pool, &worker_id, id.0, &config).await?;
                     yield match res {
                         None => None::<Request<T>>,
-                        Some(c) => Some(
-                            SqlRequest {
-                                context: c.context,
-                                req: codec.decode(&c.req).map_err(|e| {
-                                    sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e))
-                                })?,
-                            }
-                            .into(),
-                        ).map(|mut req: Request<T>| {
+                        Some(job) => {
+                            let (req, ctx) = job.into_tuple();
+                            let req = codec
+                                .decode(&req)
+                                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+                                .unwrap();
+                            let req = SqlRequest::new(req, ctx);
+                            let mut req: Request<T> = req.into();
                             req.insert(Namespace(config.namespace.clone()));
-                            req
-                        }),
+                            Some(req)
+                        }
                     }
-
-                    .map(Into::into);
-                }
+                };
             }
         }
     }
@@ -280,15 +277,18 @@ where
             .await?;
         match res {
             None => Ok(None),
-            Some(c) => Ok(Some(
-                SqlRequest {
-                    context: c.context,
-                    req: self.codec.decode(&c.req).map_err(|e| {
-                        sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e))
-                    })?,
-                }
-                .into(),
-            )),
+            Some(job) => Ok(Some({
+                let (req, ctx) = job.into_tuple();
+                let req = self
+                    .codec
+                    .decode(&req)
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+                    .unwrap();
+                let req = SqlRequest::new(req, ctx);
+                let mut req: Request<T> = req.into();
+                req.insert(Namespace(self.config.namespace.clone()));
+                req
+            })),
         }
     }
 

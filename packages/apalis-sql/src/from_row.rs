@@ -6,8 +6,50 @@ use crate::context::SqlContext;
 /// Wrapper for [Request]
 #[derive(Debug, Clone)]
 pub struct SqlRequest<T> {
-    pub(crate) req: T,
-    pub(crate) context: SqlContext,
+    req: T,
+    context: SqlContext,
+}
+
+impl<T> SqlRequest<T> {
+    /// Creates a new SqlRequest.
+    pub fn new(req: T, context: SqlContext) -> Self {
+        SqlRequest { req, context }
+    }
+
+    /// Gets a reference to the request.
+    pub fn req(&self) -> &T {
+        &self.req
+    }
+
+    /// Gets a mutable reference to the request.
+    pub fn req_mut(&mut self) -> &mut T {
+        &mut self.req
+    }
+
+    /// Sets the request.
+    pub fn set_req(&mut self, req: T) {
+        self.req = req;
+    }
+
+    /// Gets a reference to the context.
+    pub fn context(&self) -> &SqlContext {
+        &self.context
+    }
+
+    /// Gets a mutable reference to the context.
+    pub fn context_mut(&mut self) -> &mut SqlContext {
+        &mut self.context
+    }
+
+    /// Sets the context.
+    pub fn set_context(&mut self, context: SqlContext) {
+        self.context = context;
+    }
+
+    /// Combines request and context into a tuple.
+    pub fn into_tuple(self) -> (T, SqlContext) {
+        (self.req, self.context)
+    }
 }
 
 impl<T> From<SqlRequest<T>> for Request<T> {

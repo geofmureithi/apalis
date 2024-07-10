@@ -81,10 +81,7 @@ impl<Message: Send + 'static> MessageQueue<Message> for RedisMq<Message> {
     async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
         let bytes = self
             .codec
-            .encode(&RedisJob {
-                ctx: Default::default(),
-                job: message,
-            })
+            .encode(&RedisJob::new(message, Default::default()))
             .unwrap();
         self.conn.send_message("email", bytes, None).await?;
         Ok(())

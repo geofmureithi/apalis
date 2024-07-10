@@ -10,7 +10,7 @@ use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
-use apalis_core::{Backend, Codec};
+use apalis_core::{Backend, BoxCodec};
 use async_stream::try_stream;
 use futures::{Stream, StreamExt, TryStreamExt};
 use log::error;
@@ -38,7 +38,7 @@ pub struct MysqlStorage<T> {
     job_type: PhantomData<T>,
     controller: Controller,
     config: Config,
-    codec: Arc<Box<dyn Codec<T, serde_json::Value, Error = Error> + Sync + Send + 'static>>,
+    codec: BoxCodec<T, serde_json::Value>,
     ack_notify: Notify<(WorkerId, TaskId)>,
 }
 
@@ -109,6 +109,11 @@ impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
     pub fn pool(&self) -> &Pool<MySql> {
         &self.pool
     }
+
+    /// Expose the codec
+    pub fn codec(&self) -> &BoxCodec<T, serde_json::Value> {
+        &self.codec
+    }
 }
 
 impl<T: DeserializeOwned + Send + Unpin + Sync + 'static> MysqlStorage<T> {
@@ -159,13 +164,18 @@ impl<T: DeserializeOwned + Send + Unpin + Sync + 'static> MysqlStorage<T> {
                     let jobs: Vec<SqlRequest<Value>> = query.fetch_all(&pool).await?;
 
                     for job in jobs {
-                        yield Some(Into::into(SqlRequest {
-                            context: job.context,
-                            req: self.codec.decode(&job.req).map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?
-                        })).map(|mut req: Request<T>| {
+                        yield {
+                            let (req, ctx) = job.into_tuple();
+                            let req = self
+                                .codec
+                                .decode(&req)
+                                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+                                .unwrap();
+                            let req = SqlRequest::new(req, ctx);
+                            let mut req: Request<T> = req.into();
                             req.insert(Namespace(config.namespace.clone()));
-                            req
-                        })
+                            Some(req)
+                        }
                     }
                 }
             }
@@ -261,15 +271,17 @@ where
             .await?;
         match res {
             None => Ok(None),
-            Some(c) => Ok(Some(
-                SqlRequest {
-                    context: c.context,
-                    req: self.codec.decode(&c.req).map_err(|e| {
-                        sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e))
-                    })?,
-                }
-                .into(),
-            )),
+            Some(job) => Ok(Some({
+                let (req, ctx) = job.into_tuple();
+                let req = self
+                    .codec
+                    .decode(&req)
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+                let req = SqlRequest::new(req, ctx);
+                let mut req: Request<T> = req.into();
+                req.insert(Namespace(self.config.namespace.clone()));
+                req
+            })),
         }
     }
 

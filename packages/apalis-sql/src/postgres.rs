@@ -52,7 +52,7 @@ use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
-use apalis_core::{Backend, Codec};
+use apalis_core::{Backend, BoxCodec};
 use futures::channel::mpsc;
 use futures::StreamExt;
 use futures::{select, stream, SinkExt};
@@ -79,14 +79,7 @@ use crate::from_row::SqlRequest;
 pub struct PostgresStorage<T> {
     pool: PgPool,
     job_type: PhantomData<T>,
-    codec: Arc<
-        Box<
-            dyn Codec<T, serde_json::Value, Error = apalis_core::error::Error>
-                + Sync
-                + Send
-                + 'static,
-        >,
-    >,
+    codec: BoxCodec<T, serde_json::Value>,
     config: Config,
     controller: Controller,
     ack_notify: Notify<AckResponse<TaskId>>,
@@ -259,6 +252,16 @@ impl<T: Serialize + DeserializeOwned> PostgresStorage<T> {
     pub fn pool(&self) -> &Pool<Postgres> {
         &self.pool
     }
+
+    /// Expose the config
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// Expose the codec
+    pub fn codec(&self) -> &BoxCodec<T, serde_json::Value> {
+        &self.codec
+    }
 }
 
 /// A listener that listens to Postgres notifications
@@ -323,7 +326,6 @@ impl PgListen {
 impl<T: DeserializeOwned + Send + Unpin + 'static> PostgresStorage<T> {
     async fn fetch_next(&mut self, worker_id: &WorkerId) -> Result<Vec<Request<T>>, sqlx::Error> {
         let config = &self.config;
-        let codec = &self.codec;
         let job_type = &config.namespace;
         let fetch_query = "Select * from apalis.get_jobs($1, $2, $3);";
         let jobs: Vec<SqlRequest<serde_json::Value>> = sqlx::query_as(fetch_query)
@@ -339,15 +341,15 @@ impl<T: DeserializeOwned + Send + Unpin + 'static> PostgresStorage<T> {
         let jobs: Vec<_> = jobs
             .into_iter()
             .map(|job| {
-                let req = SqlRequest {
-                    context: job.context,
-                    req: codec
-                        .decode(&job.req)
-                        .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
-                        .unwrap(),
-                };
+                let (req, ctx) = job.into_tuple();
+                let req = self
+                    .codec
+                    .decode(&req)
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+                    .unwrap();
+                let req = SqlRequest::new(req, ctx);
                 let mut req: Request<T> = req.into();
-                req.insert(Namespace(config.namespace.clone()));
+                req.insert(Namespace(self.config.namespace.clone()));
                 req
             })
             .collect();
@@ -445,17 +447,21 @@ where
             .bind(job_id.to_string())
             .fetch_optional(&self.pool)
             .await?;
+
         match res {
             None => Ok(None),
-            Some(c) => Ok(Some(
-                SqlRequest {
-                    context: c.context,
-                    req: self.codec.decode(&c.req).map_err(|e| {
-                        sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e))
-                    })?,
-                }
-                .into(),
-            )),
+            Some(job) => Ok(Some({
+                let (req, ctx) = job.into_tuple();
+                let req = self
+                    .codec
+                    .decode(&req)
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+                    .unwrap();
+                let req = SqlRequest::new(req, ctx);
+                let mut req: Request<T> = req.into();
+                req.insert(Namespace(self.config.namespace.clone()));
+                req
+            })),
         }
     }
 
