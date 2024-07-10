@@ -37,7 +37,7 @@ macro_rules! define_bench {
                                     let worker =
                                         WorkerBuilder::new(format!("{}-bench", $name))
                                             .data(c)
-                                            .source(storage)
+                                            .backend(storage)
                                             .build_fn(handle_test_job);
                                     worker
                                 })

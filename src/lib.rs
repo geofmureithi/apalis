@@ -39,7 +39,7 @@
 //!         .register_with_count(2, {
 //!             WorkerBuilder::new(&format!("quick-sand"))
 //!                 .data(0usize)
-//!                 .source(storage.clone())
+//!                 .backend(storage.clone())
 //!                 .build_fn(send_email)
 //!         })
 //!         .run()

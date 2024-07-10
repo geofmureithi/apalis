@@ -12,7 +12,6 @@ use crate::{
     request::Request,
     service_fn::service_fn,
     service_fn::ServiceFn,
-    storage::Storage,
     worker::{Ready, Worker, WorkerId},
     Backend,
 };
@@ -54,7 +53,7 @@ impl<Serv> WorkerBuilder<(), (), Identity, Serv> {
     }
 }
 
-impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
+impl<J, M, Serv> WorkerBuilder<J, (), M, Serv> {
     /// Consume a stream directly
     pub fn stream<NS: Stream<Item = Result<Option<Request<NJ>>, Error>> + Send + 'static, NJ>(
         self,
@@ -69,21 +68,7 @@ impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
         }
     }
 
-    /// Set the source to a [Storage]
-    pub fn with_storage<NS: Storage<Job = NJ>, NJ>(
-        self,
-        storage: NS,
-    ) -> WorkerBuilder<NJ, NS, M, Serv> {
-        WorkerBuilder {
-            request: PhantomData,
-            layer: self.layer,
-            source: storage,
-            id: self.id,
-            service: self.service,
-        }
-    }
-
-    /// Set the source to a backend that implements only [Backend]
+    /// Set the source to a backend that implements [Backend]
     pub fn backend<NS: Backend<Request<NJ>>, NJ>(
         self,
         backend: NS,
