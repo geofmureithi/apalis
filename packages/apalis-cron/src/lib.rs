@@ -58,8 +58,12 @@
 //! ```
 
 use apalis_core::data::Extensions;
+use apalis_core::layers::Identity;
+use apalis_core::poller::Poller;
 use apalis_core::request::RequestStream;
 use apalis_core::task::task_id::TaskId;
+use apalis_core::worker::WorkerId;
+use apalis_core::Backend;
 use apalis_core::{error::Error, request::Request};
 use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
@@ -104,7 +108,7 @@ where
     Tz::Offset: Send + Sync,
 {
     /// Convert to consumable
-    pub fn into_stream(self) -> RequestStream<Request<J>> {
+    fn into_stream(self) -> RequestStream<Request<J>> {
         let timezone = self.timezone.clone();
         let stream = async_stream::stream! {
             let mut schedule = self.schedule.upcoming_owned(timezone.clone());
@@ -126,5 +130,21 @@ where
             }
         };
         Box::pin(stream)
+    }
+}
+
+impl<J, Tz> Backend<Request<J>> for CronStream<J, Tz>
+where
+    J: From<DateTime<Tz>> + Send + Sync + 'static,
+    Tz: TimeZone + Send + Sync + 'static,
+    Tz::Offset: Send + Sync,
+{
+    type Stream = RequestStream<Request<J>>;
+
+    type Layer = Identity;
+
+    fn poll(self, _worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+        let stream = self.into_stream();
+        Poller::new(stream, async {})
     }
 }
