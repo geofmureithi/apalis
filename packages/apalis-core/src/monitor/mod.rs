@@ -325,7 +325,7 @@ mod tests {
             Ok::<_, io::Error>(request)
         });
         let worker = WorkerBuilder::new("rango-tango")
-            .source(backend)
+            .backend(backend)
             .build(service);
         let monitor: Monitor<TestExecutor> = Monitor::new();
         let monitor = monitor.register(worker);
@@ -351,7 +351,7 @@ mod tests {
             Ok::<_, io::Error>(request)
         });
         let worker = WorkerBuilder::new("rango-tango")
-            .source(backend)
+            .backend(backend)
             .build(service);
         let monitor: Monitor<TestExecutor> = Monitor::new();
         let monitor = monitor.on_event(|e| {

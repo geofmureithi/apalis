@@ -62,13 +62,13 @@ async fn main() -> Result<()> {
         .register_with_count(2, {
             WorkerBuilder::new("tasty-banana")
                 .layer(TraceLayer::new())
-                .with_storage(email_storage)
+                .backend(email_storage)
                 .build_fn(send_email)
         })
         .register_with_count(10, {
             WorkerBuilder::new("tasty-mango")
                 .layer(TraceLayer::new())
-                .with_storage(notification_storage)
+                .backend(notification_storage)
                 .build_fn(job::notify)
         })
         .run()

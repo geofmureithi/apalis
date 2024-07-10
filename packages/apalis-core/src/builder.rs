@@ -9,7 +9,6 @@ use tower::{
 use crate::{
     error::Error,
     layers::extensions::Data,
-    mq::MessageQueue,
     request::Request,
     service_fn::service_fn,
     service_fn::ServiceFn,
@@ -84,22 +83,8 @@ impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
         }
     }
 
-    /// Set the source to a [MessageQueue]
-    pub fn with_mq<NS: MessageQueue<NJ>, NJ>(
-        self,
-        message_queue: NS,
-    ) -> WorkerBuilder<NJ, NS, M, Serv> {
-        WorkerBuilder {
-            request: PhantomData,
-            layer: self.layer,
-            source: message_queue,
-            id: self.id,
-            service: self.service,
-        }
-    }
-
-    /// Set the source to a generic backend that implements only [Backend]
-    pub fn source<NS: Backend<Request<NJ>>, NJ>(
+    /// Set the source to a backend that implements only [Backend]
+    pub fn backend<NS: Backend<Request<NJ>>, NJ>(
         self,
         backend: NS,
     ) -> WorkerBuilder<NJ, NS, M, Serv> {
@@ -168,16 +153,12 @@ where
 
     S::Response: 'static,
     M: Layer<S>,
-    // P::Layer: Layer<S>,
-    // M: Layer<<P::Layer as Layer<S>>::Service>,
 {
     type Source = P;
 
     type Service = M::Service;
-    /// Build a worker, given a tower service
     fn build(self, service: S) -> Worker<Ready<Self::Service, P>> {
         let worker_id = self.id;
-        // let common_layer = self.source.common_layer(worker_id.clone());
         let poller = self.source;
         let middleware = self.layer;
         let service = middleware.service(service);

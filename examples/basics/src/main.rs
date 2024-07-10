@@ -101,7 +101,7 @@ async fn main() -> Result<(), std::io::Error> {
                 // Add shared context to all jobs executed by this worker
                 .data(EmailService::new())
                 .data(ValidEmailCache::new())
-                .with_storage(sqlite)
+                .backend(sqlite)
                 .build_fn(send_email)
         })
         .shutdown_timeout(Duration::from_secs(5))
