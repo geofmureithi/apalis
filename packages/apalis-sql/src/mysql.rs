@@ -643,7 +643,7 @@ mod tests {
         storage
             .ack(AckResponse {
                 acknowledger: job_id.clone(),
-                result: "Success".to_string(),
+                result: Ok("Success".to_string()),
                 worker: worker_id.clone(),
             })
             .await
