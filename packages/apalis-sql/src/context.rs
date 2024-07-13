@@ -7,7 +7,7 @@ use std::{fmt, str::FromStr};
 
 /// The context for a job is represented here
 /// Used to provide a context for a job with an sql backend
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlContext {
     id: TaskId,
     status: State,

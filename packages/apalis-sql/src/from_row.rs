@@ -1,10 +1,11 @@
 use apalis_core::task::task_id::TaskId;
 use apalis_core::{data::Extensions, request::Request, worker::WorkerId};
+use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Type};
 
 use crate::context::SqlContext;
 /// Wrapper for [Request]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlRequest<T> {
     req: T,
     context: SqlContext,
