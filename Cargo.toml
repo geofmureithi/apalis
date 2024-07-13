@@ -15,7 +15,7 @@ edition = "2021"
 bench = false
 
 [features]
-default = ["catch-panic", "tracing", "tokio-comp"]
+default = ["tracing", "tokio-comp"]
 
 
 ## Support Tracing 👀
