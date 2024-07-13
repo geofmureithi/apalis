@@ -78,7 +78,7 @@ pub struct RedisQueueInfo {
 
 #[derive(Clone, Debug)]
 struct RedisScript {
-    ack_job: Script,
+    done_job: Script,
     enqueue_scheduled: Script,
     get_jobs: Script,
     kill_job: Script,
@@ -415,7 +415,7 @@ impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn> {
             config,
             codec: Arc::new(Box::new(codec)),
             scripts: RedisScript {
-                ack_job: redis::Script::new(include_str!("../lua/ack_job.lua")),
+                done_job: redis::Script::new(include_str!("../lua/done_job.lua")),
                 push_job: redis::Script::new(include_str!("../lua/push_job.lua")),
                 retry_job: redis::Script::new(include_str!("../lua/retry_job.lua")),
                 enqueue_scheduled: redis::Script::new(include_str!(
@@ -535,19 +535,59 @@ impl<T: Sync + Send, Conn: ConnectionLike + Send + Sync + 'static> Ack<T>
     type Acknowledger = TaskId;
     type Error = RedisError;
     async fn ack(&mut self, res: AckResponse<Self::Acknowledger>) -> Result<(), RedisError> {
-        let ack_job = self.scripts.ack_job.clone();
         let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), res.worker);
-        let done_jobs_set = &self.config.done_jobs_set();
 
-        let now: i64 = res.acknowledger.inner().timestamp_ms().try_into().unwrap();
+        let now: i64 = Utc::now().timestamp();
 
-        ack_job
-            .key(inflight_set)
-            .key(done_jobs_set)
-            .arg(res.acknowledger.to_string())
-            .arg(now)
-            .invoke_async(&mut self.conn)
-            .await
+        match res.result {
+            Ok(success_res) => {
+                let done_job = self.scripts.done_job.clone();
+                let done_jobs_set = &self.config.done_jobs_set();
+                done_job
+                    .key(inflight_set)
+                    .key(done_jobs_set)
+                    .key(self.config.job_data_hash())
+                    .arg(res.acknowledger.to_string())
+                    .arg(now)
+                    .arg(success_res)
+                    .invoke_async(&mut self.conn)
+                    .await
+            }
+            Err(e) => match e {
+                e if e.contains("BackoffRetry") => {
+                    //do nothing, should be handled by BackoffLayer
+                    Ok(())
+                }
+
+                e if e.starts_with("RetryError") => {
+                    let retry_job = self.scripts.retry_job.clone();
+                    let retry_jobs_set = &self.config.scheduled_jobs_set();
+                    retry_job
+                        .key(inflight_set)
+                        .key(retry_jobs_set)
+                        .key(self.config.job_data_hash())
+                        .arg(res.acknowledger.to_string())
+                        .arg(now)
+                        .arg(e)
+                        .invoke_async(&mut self.conn)
+                        .await
+                }
+
+                _ => {
+                    let kill_job = self.scripts.kill_job.clone();
+                    let kill_jobs_set = &self.config.dead_jobs_set();
+                    kill_job
+                        .key(inflight_set)
+                        .key(kill_jobs_set)
+                        .key(self.config.job_data_hash())
+                        .arg(res.acknowledger.to_string())
+                        .arg(now)
+                        .arg(e)
+                        .invoke_async(&mut self.conn)
+                        .await
+                }
+            },
+        }
     }
 }
 
@@ -862,27 +902,16 @@ impl<T, Conn: ConnectionLike + Send + Sync + 'static> RedisStorage<T, Conn> {
         let current_worker_id = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
         let job_data_hash = self.config.job_data_hash();
         let dead_jobs_set = self.config.dead_jobs_set();
-        let fetch_job = self.fetch_by_id(task_id);
         let now: i64 = Utc::now().timestamp();
-        let res = fetch_job.await?;
-        match res {
-            Some(job) => {
-                let data = self
-                    .codec
-                    .encode(&job.try_into()?)
-                    .map_err(|e| (ErrorKind::IoError, "Encode error", e.to_string()))?;
-                kill_job
-                    .key(current_worker_id)
-                    .key(dead_jobs_set)
-                    .key(job_data_hash)
-                    .arg(task_id.to_string())
-                    .arg(now)
-                    .arg(data)
-                    .invoke_async(&mut self.conn)
-                    .await
-            }
-            None => Err(RedisError::from((ErrorKind::ResponseError, "Id not found"))),
-        }
+        kill_job
+            .key(current_worker_id)
+            .key(dead_jobs_set)
+            .key(job_data_hash)
+            .arg(task_id.to_string())
+            .arg(now)
+            .arg("AbortError")
+            .invoke_async(&mut self.conn)
+            .await
     }
 
     /// Required to add scheduled jobs to the active set
@@ -1051,7 +1080,7 @@ mod tests {
         storage
             .ack(AckResponse {
                 acknowledger: job_id.clone(),
-                result: "Success".to_string(),
+                result: Ok("Success".to_string()),
                 worker: worker_id.clone(),
             })
             .await
