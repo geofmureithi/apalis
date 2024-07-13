@@ -126,6 +126,7 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
 - _timeout_ — Support timeouts on jobs
 - _limit_ — 💪 Limit the amount of jobs
 - _filter_ — Support filtering jobs based on a predicate
+- _catch-panic_ - Catch panics that occur during execution
 
 ## Storage Comparison
 
