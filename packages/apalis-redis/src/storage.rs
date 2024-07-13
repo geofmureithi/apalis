@@ -554,12 +554,12 @@ impl<T: Sync + Send, Conn: ConnectionLike + Send + Sync + 'static> Ack<T>
                     .await
             }
             Err(e) => match e {
-                e if e.starts_with("BackoffRetry") => {
+                e if e.contains("BackoffRetry") => {
                     //do nothing, should be handled by BackoffLayer
                     Ok(())
                 }
 
-                e if e.starts_with("Retry") => {
+                e if e.starts_with("RetryError") => {
                     let retry_job = self.scripts.retry_job.clone();
                     let retry_jobs_set = &self.config.scheduled_jobs_set();
                     retry_job
@@ -902,27 +902,16 @@ impl<T, Conn: ConnectionLike + Send + Sync + 'static> RedisStorage<T, Conn> {
         let current_worker_id = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
         let job_data_hash = self.config.job_data_hash();
         let dead_jobs_set = self.config.dead_jobs_set();
-        let fetch_job = self.fetch_by_id(task_id);
         let now: i64 = Utc::now().timestamp();
-        let res = fetch_job.await?;
-        match res {
-            Some(job) => {
-                let data = self
-                    .codec
-                    .encode(&job.try_into()?)
-                    .map_err(|e| (ErrorKind::IoError, "Encode error", e.to_string()))?;
-                kill_job
-                    .key(current_worker_id)
-                    .key(dead_jobs_set)
-                    .key(job_data_hash)
-                    .arg(task_id.to_string())
-                    .arg(now)
-                    .arg(data)
-                    .invoke_async(&mut self.conn)
-                    .await
-            }
-            None => Err(RedisError::from((ErrorKind::ResponseError, "Id not found"))),
-        }
+        kill_job
+            .key(current_worker_id)
+            .key(dead_jobs_set)
+            .key(job_data_hash)
+            .arg(task_id.to_string())
+            .arg(now)
+            .arg("AbortError")
+            .invoke_async(&mut self.conn)
+            .await
     }
 
     /// Required to add scheduled jobs to the active set

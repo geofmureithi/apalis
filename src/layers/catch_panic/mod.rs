@@ -175,7 +175,7 @@ mod tests {
 
         assert_eq!(
             response.unwrap_err().to_string()[0..87],
-            *"Task Failed: PanicError: called `Option::unwrap()` on a `None` value, Backtrace:    0: "
+            *"FailedError: PanicError: called `Option::unwrap()` on a `None` value, Backtrace:    0: "
         );
     }
 }

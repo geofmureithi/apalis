@@ -11,23 +11,27 @@ pub type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
 #[non_exhaustive]
 pub enum Error {
     /// An error occurred during execution.
-    #[error("Task Failed: {0}")]
+    #[error("FailedError: {0}")]
     Failed(#[source] BoxDynError),
 
     /// A generic IO error
-    #[error("IO error: {0}")]
+    #[error("IoError: {0}")]
     Io(#[from] std::io::Error),
 
     /// Missing some context and yet it was requested during execution.
-    #[error("MissingContext: {0}")]
-    InvalidContext(String),
+    #[error("MissingContextError: {0}")]
+    MissingContext(String),
 
     /// Execution was aborted
-    #[error("Execution was aborted")]
+    #[error("AbortError")]
     Abort,
 
+    /// Execution failed and job will be retried
+    #[error("RetryError: {0}")]
+    Retry(#[source] BoxDynError),
+
     /// Encountered an error during worker execution
-    #[error("Encountered an error during worker execution")]
+    #[error("WorkerError: {0}")]
     WorkerError(WorkerError),
 
     #[doc(hidden)]

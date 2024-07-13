@@ -162,7 +162,7 @@ impl FromStr for State {
             "Retry" => Ok(State::Retry),
             "Failed" => Ok(State::Failed),
             "Killed" => Ok(State::Killed),
-            _ => Err(Error::InvalidContext("Invalid Job state".to_string())),
+            _ => Err(Error::MissingContext("Invalid Job state".to_string())),
         }
     }
 }

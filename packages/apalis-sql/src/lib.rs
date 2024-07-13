@@ -133,9 +133,9 @@ impl Config {
 pub(crate) fn calculate_status(res: &Result<String, String>) -> State {
     match res {
         Ok(_) => State::Done,
-        Err(e) => match &e[..10] {
-            "RetryError" => State::Retry,
-            "KillError" => State::Killed,
+        Err(e) => match &e {
+            _ if e.starts_with("RetryError") => State::Retry,
+            _ if e.starts_with("AbortError") => State::Killed,
             _ => State::Failed,
         },
     }
