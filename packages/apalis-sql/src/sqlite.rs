@@ -1,5 +1,5 @@
 use crate::context::SqlContext;
-use crate::Config;
+use crate::{calculate_status, Config};
 
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
@@ -209,8 +209,7 @@ impl<T: DeserializeOwned + Send + Unpin> SqliteStorage<T> {
                             let (req, ctx) = job.into_tuple();
                             let req = codec
                                 .decode(&req)
-                                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
-                                .unwrap();
+                                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
                             let req = SqlRequest::new(req, ctx);
                             let mut req: Request<T> = req.into();
                             req.insert(Namespace(config.namespace.clone()));
@@ -485,11 +484,14 @@ impl<T: Sync + Send> Ack<T> for SqliteStorage<T> {
     async fn ack(&mut self, res: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let query =
-                "UPDATE Jobs SET status = 'Done', done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
+                "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
+        let result = serde_json::to_string(&res.result)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         sqlx::query(query)
             .bind(res.acknowledger.to_string())
             .bind(res.worker.to_string())
-            .bind(res.result)
+            .bind(result)
+            .bind(calculate_status(&res.result).to_string())
             .execute(&pool)
             .await?;
         Ok(())

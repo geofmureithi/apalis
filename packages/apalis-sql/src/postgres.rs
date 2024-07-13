@@ -39,7 +39,7 @@
 //!  }
 //! ```
 use crate::context::SqlContext;
-use crate::Config;
+use crate::{calculate_status, Config};
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
 use apalis_core::layers::{Ack, AckLayer, AckResponse};
@@ -174,14 +174,16 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                     }
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
-                            let worker_ids: Vec<String> = ids.iter().map(|c| c.worker.to_string()).collect();
-                            let task_ids: Vec<String> = ids.iter().map(|c| c.acknowledger.to_string()).collect();
-
+                            let ack_ids: Vec<(String, String, String, String)> = ids.iter().map(|c| {
+                                (c.acknowledger.to_string(), c.worker.to_string(), serde_json::to_string(&c.result).unwrap(), calculate_status(&c.result).to_string())
+                            }).collect();
                             let query =
-                        "UPDATE apalis.jobs SET status = 'Done', done_at = now() WHERE id = ANY($1::text[]) AND lock_by = ANY($2::text[])";
+                                "UPDATE apalis.jobs SET status = Q.status, done_at = now(), lock_by = Q.lock_by, last_error = Q.result FROM (
+                                                SELECT(value-->0)::text as id, (value->>1)::text as worker_id, (value->>2)::text as result, (value->>3)::text as status FROM json_array_elements($1)
+                                            ) Q
+                                            WHERE id = Q.id";
                             if let Err(e) = sqlx::query(query)
-                                .bind(task_ids)
-                                .bind(worker_ids)
+                                .bind(serde_json::to_string(&ack_ids).unwrap())
                                 .execute(&pool)
                                 .await
                             {

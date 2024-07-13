@@ -5,6 +5,7 @@
 -- ARGV[1]: the job ID
 -- ARGV[2]: the current time
 -- ARGV[3]: the serialized job data
+-- ARGV[4]: the result of the job
 
 -- Returns: nil
 
@@ -17,6 +18,10 @@ if removed == 1 then
 
   -- Reset the job data
   redis.call("hset", KEYS[3], ARGV[1], ARGV[3])
+
+   -- Save the result of the job
+   local ns = "::result"
+   redis.call("hmset", KEYS[3].. ns, ARGV[1], ARGV[4] )
 
   return 1
 end

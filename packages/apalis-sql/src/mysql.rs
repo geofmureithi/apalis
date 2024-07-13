@@ -27,7 +27,7 @@ use std::{marker::PhantomData, ops::Add, time::Duration};
 
 use crate::context::SqlContext;
 use crate::from_row::SqlRequest;
-use crate::Config;
+use crate::{calculate_status, Config};
 
 pub use sqlx::mysql::MySqlPool;
 
@@ -39,7 +39,7 @@ pub struct MysqlStorage<T> {
     controller: Controller,
     config: Config,
     codec: BoxCodec<T, serde_json::Value>,
-    ack_notify: Notify<(WorkerId, TaskId)>,
+    ack_notify: Notify<AckResponse<TaskId>>,
 }
 
 impl<T> fmt::Debug for MysqlStorage<T> {
@@ -395,22 +395,19 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 .next()
                 .await
             {
-                let worker_ids: Vec<String> = ids.iter().map(|c| c.0.to_string()).collect();
-                let task_ids: Vec<String> = ids.iter().map(|c| c.1.to_string()).collect();
-                let id_params = format!("?{}", ", ?".repeat(task_ids.len() - 1));
-                let worker_params = format!("?{}", ", ?".repeat(worker_ids.len() - 1));
-                let query =
-                format!("UPDATE jobs SET status = 'Done', done_at = now() WHERE id IN ( { } ) AND lock_by IN ( { } )", id_params, worker_params);
-                let mut query = sqlx::query(&query);
-                for i in task_ids {
-                    query = query.bind(i);
+                for id in ids {
+                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ? WHERE id = ? AND lock_by = ?";
+                    let query = sqlx::query(query);
+                    let query = query
+                        .bind(calculate_status(&id.result).to_string())
+                        .bind(serde_json::to_string(&id.result).unwrap())
+                        .bind(id.acknowledger.to_string())
+                        .bind(id.worker.to_string());
+                    if let Err(e) = query.execute(&pool).await {
+                        error!("Ack failed: {e}");
+                    }
                 }
-                for i in worker_ids {
-                    query = query.bind(i);
-                }
-                if let Err(e) = query.execute(&pool).await {
-                    error!("Ack failed: {e}");
-                }
+
                 apalis_core::sleep(config.poll_interval).await;
             }
         };
@@ -439,7 +436,7 @@ impl<T: Sync + Send> Ack<T> for MysqlStorage<T> {
     type Error = sqlx::Error;
     async fn ack(&mut self, response: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
         self.ack_notify
-            .notify((response.worker.clone(), response.acknowledger.clone()))
+            .notify(response)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::BrokenPipe, e)))?;
 
         Ok(())

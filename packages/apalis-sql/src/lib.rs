@@ -12,6 +12,8 @@
 
 use std::time::Duration;
 
+use context::State;
+
 /// The context of the sql job
 pub mod context;
 /// Util for fetching rows
@@ -124,5 +126,17 @@ impl Config {
     /// Gets a mutable reference to the namespace.
     pub fn namespace_mut(&mut self) -> &mut String {
         &mut self.namespace
+    }
+}
+
+/// Calculates the status from a result
+pub(crate) fn calculate_status(res: &Result<String, String>) -> State {
+    match res {
+        Ok(_) => State::Done,
+        Err(e) => match &e[..10] {
+            "RetryError" => State::Retry,
+            "KillError" => State::Killed,
+            _ => State::Failed,
+        },
     }
 }
