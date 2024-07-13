@@ -1,7 +1,9 @@
 use std::sync::{atomic::AtomicUsize, Arc};
 
+use serde::{Deserialize, Serialize};
+
 /// A wrapper to keep count of the attempts tried by a task
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attempt(Arc<AtomicUsize>);
 
 impl Default for Attempt {
