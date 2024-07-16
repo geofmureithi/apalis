@@ -983,7 +983,18 @@ impl<T, Conn: ConnectionLike + Send + Sync + 'static> RedisStorage<T, Conn> {
 
 #[cfg(test)]
 mod tests {
+    use apalis_core::test_storage;
     use email_service::Email;
+
+    use apalis_core::test_utils::apalis_test_service_fn;
+    use apalis_core::test_utils::TestWrapper;
+
+    test_storage!({
+        let redis_url = std::env::var("REDIS_URL").expect("No REDIS_URL is specified");
+        let conn = connect(redis_url).await.unwrap();
+        let storage = RedisStorage::new(conn);
+        storage
+    });
 
     use super::*;
 

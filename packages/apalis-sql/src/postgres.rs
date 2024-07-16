@@ -53,13 +53,13 @@ use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, BoxCodec};
+use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
 use futures::StreamExt;
 use futures::{select, stream, SinkExt};
 use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::postgres::PgListener;
-use chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres, Row};
 use std::any::type_name;
 use std::convert::TryInto;
@@ -612,11 +612,15 @@ mod tests {
 
     use super::*;
     use apalis_core::task::attempt::Attempt;
-    use email_service::Email;
+    use apalis_core::test_utils::DummyService;
     use chrono::Utc;
+    use email_service::Email;
 
-    /// migrate DB and return a storage instance.
-    async fn setup() -> PostgresStorage<Email> {
+    use apalis_core::test_storage;
+    use apalis_core::test_utils::apalis_test_service_fn;
+    use apalis_core::test_utils::TestWrapper;
+
+    test_storage!({
         let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
         let pool = PgPool::connect(&db_url).await.unwrap();
         // Because connections cannot be shared across async runtime
@@ -625,6 +629,18 @@ mod tests {
         PostgresStorage::setup(&pool).await.unwrap();
         let storage = PostgresStorage::new(pool);
         storage
+    });
+
+    /// migrate DB and return a storage instance.
+    async fn setup() -> TestWrapper<PostgresStorage<Email>, Email> {
+        let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
+        let pool = PgPool::connect(&db_url).await.unwrap();
+        // Because connections cannot be shared across async runtime
+        // (different runtimes are created for each test),
+        // we don't share the storage and tests must be run sequentially.
+        PostgresStorage::setup(&pool).await.unwrap();
+        let storage = PostgresStorage::new(pool);
+        TestWrapper::new_with_service(storage, DummyService)
     }
 
     /// rollback DB changes made by tests.
@@ -633,7 +649,7 @@ mod tests {
     ///  - worker identified by `worker_id`
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(storage: PostgresStorage<Email>, worker_id: &WorkerId) {
+    async fn cleanup(storage: TestWrapper<PostgresStorage<Email>, Email>, worker_id: &WorkerId) {
         let mut tx = storage
             .pool
             .acquire()
@@ -651,8 +667,6 @@ mod tests {
             .expect("failed to delete worker");
     }
 
-    struct DummyService {}
-
     fn example_email() -> Email {
         Email {
             subject: "Test Subject".to_string(),
@@ -662,7 +676,7 @@ mod tests {
     }
 
     async fn consume_one(
-        storage: &mut PostgresStorage<Email>,
+        storage: &mut TestWrapper<PostgresStorage<Email>, Email>,
         worker_id: &WorkerId,
     ) -> Request<Email> {
         let req = storage.fetch_next(worker_id).await;
@@ -670,7 +684,7 @@ mod tests {
     }
 
     async fn register_worker_at(
-        storage: &mut PostgresStorage<Email>,
+        storage: &mut TestWrapper<PostgresStorage<Email>, Email>,
         last_seen: Timestamp,
     ) -> WorkerId {
         let worker_id = WorkerId::new("test-worker");
@@ -682,15 +696,18 @@ mod tests {
         worker_id
     }
 
-    async fn register_worker(storage: &mut PostgresStorage<Email>) -> WorkerId {
+    async fn register_worker(storage: &mut TestWrapper<PostgresStorage<Email>, Email>) -> WorkerId {
         register_worker_at(storage, Utc::now().timestamp()).await
     }
 
-    async fn push_email(storage: &mut PostgresStorage<Email>, email: Email) {
+    async fn push_email(storage: &mut TestWrapper<PostgresStorage<Email>, Email>, email: Email) {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job(storage: &mut PostgresStorage<Email>, job_id: &TaskId) -> Request<Email> {
+    async fn get_job(
+        storage: &mut TestWrapper<PostgresStorage<Email>, Email>,
+        job_id: &TaskId,
+    ) -> Request<Email> {
         storage
             .fetch_by_id(job_id)
             .await
@@ -709,7 +726,7 @@ mod tests {
         let ctx = job.get::<SqlContext>().unwrap();
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
-        // TODO: assert!(ctx.lock_at().is_some());
+        assert!(ctx.lock_at().is_some());
 
         cleanup(storage, &worker_id).await;
     }
@@ -730,17 +747,15 @@ mod tests {
                 acknowledger: job_id.clone(),
                 result: Ok("Success".to_string()),
                 worker: worker_id.clone(),
-                attempts: Attempt::new_with_value(0)
-
+                attempts: Attempt::new_with_value(0),
             })
             .await
             .expect("failed to acknowledge the job");
 
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
-        // TODO: Currently ack is done in the background
-        // assert_eq!(*ctx.status(), State::Done);
-        // assert!(ctx.done_at().is_some());
+        assert_eq!(*ctx.status(), State::Done);
+        assert!(ctx.done_at().is_some());
 
         cleanup(storage, &worker_id).await;
     }
@@ -765,7 +780,7 @@ mod tests {
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
         assert_eq!(*ctx.status(), State::Killed);
-        // TODO: assert!(ctx.done_at().is_some());
+        assert!(ctx.done_at().is_some());
 
         cleanup(storage, &worker_id).await;
     }

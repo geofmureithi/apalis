@@ -14,9 +14,9 @@ use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, BoxCodec};
 use async_stream::try_stream;
+use chrono::Utc;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
-use chrono::Utc;
 use sqlx::{Pool, Row, Sqlite};
 use std::any::type_name;
 use std::convert::TryInto;
@@ -506,12 +506,26 @@ mod tests {
 
     use super::*;
     use apalis_core::task::attempt::Attempt;
+    use apalis_core::test_utils::DummyService;
+    use chrono::Utc;
     use email_service::Email;
     use futures::StreamExt;
-    use chrono::Utc;
+
+    use apalis_core::test_storage;
+    use apalis_core::test_utils::apalis_test_service_fn;
+    use apalis_core::test_utils::TestWrapper;
+
+    test_storage!({
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        SqliteStorage::setup(&pool)
+            .await
+            .expect("failed to migrate DB");
+        let storage = SqliteStorage::new(pool);
+        storage
+    });
 
     /// migrate DB and return a storage instance.
-    async fn setup() -> SqliteStorage<Email> {
+    async fn setup() -> TestWrapper<SqliteStorage<Email>, Email> {
         // Because connections cannot be shared across async runtime
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
@@ -521,7 +535,7 @@ mod tests {
             .expect("failed to migrate DB");
         let storage = SqliteStorage::<Email>::new(pool);
 
-        storage
+        TestWrapper::new_with_service(storage, DummyService)
     }
 
     #[tokio::test]
@@ -539,8 +553,6 @@ mod tests {
         assert_eq!(len, 1);
     }
 
-    struct DummyService {}
-
     fn example_email() -> Email {
         Email {
             subject: "Test Subject".to_string(),
@@ -550,7 +562,7 @@ mod tests {
     }
 
     async fn consume_one(
-        storage: &mut SqliteStorage<Email>,
+        storage: &mut TestWrapper<SqliteStorage<Email>, Email>,
         worker_id: &WorkerId,
     ) -> Request<Email> {
         let mut stream = storage
@@ -564,7 +576,10 @@ mod tests {
             .expect("no job is pending")
     }
 
-    async fn register_worker_at(storage: &mut SqliteStorage<Email>, last_seen: i64) -> WorkerId {
+    async fn register_worker_at(
+        storage: &mut TestWrapper<SqliteStorage<Email>, Email>,
+        last_seen: i64,
+    ) -> WorkerId {
         let worker_id = WorkerId::new("test-worker");
 
         storage
@@ -574,15 +589,18 @@ mod tests {
         worker_id
     }
 
-    async fn register_worker(storage: &mut SqliteStorage<Email>) -> WorkerId {
+    async fn register_worker(storage: &mut TestWrapper<SqliteStorage<Email>, Email>) -> WorkerId {
         register_worker_at(storage, Utc::now().timestamp()).await
     }
 
-    async fn push_email(storage: &mut SqliteStorage<Email>, email: Email) {
+    async fn push_email(storage: &mut TestWrapper<SqliteStorage<Email>, Email>, email: Email) {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job(storage: &mut SqliteStorage<Email>, job_id: &TaskId) -> Request<Email> {
+    async fn get_job(
+        storage: &mut TestWrapper<SqliteStorage<Email>, Email>,
+        job_id: &TaskId,
+    ) -> Request<Email> {
         storage
             .fetch_by_id(job_id)
             .await
@@ -620,8 +638,7 @@ mod tests {
                 acknowledger: job_id.clone(),
                 result: Ok("Success".to_string()),
                 worker: worker_id.clone(),
-                attempts: Attempt::new_with_value(0)
-
+                attempts: Attempt::new_with_value(0),
             })
             .await
             .expect("failed to acknowledge the job");
@@ -675,12 +692,11 @@ mod tests {
         let job_id = ctx.id();
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
-        // TODO: rework these assertions
-        // assert_eq!(*ctx.status(), State::Pending);
-        // assert!(ctx.done_at().is_none());
-        // assert!(ctx.lock_by().is_none());
-        // assert!(ctx.lock_at().is_none());
-        // assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_string()));
+        assert_eq!(*ctx.status(), State::Pending);
+        assert!(ctx.done_at().is_none());
+        assert!(ctx.lock_by().is_none());
+        assert!(ctx.lock_at().is_none());
+        assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_string()));
     }
 
     #[tokio::test]

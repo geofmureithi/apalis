@@ -168,3 +168,208 @@ impl crate::executor::Executor for TestExecutor {
         tokio::spawn(future);
     }
 }
+
+/// Test utilities that allows you to test backends
+pub mod test_utils {
+    use crate::error::{BoxDynError};
+
+    use crate::request::Request;
+
+    use crate::task::task_id::TaskId;
+    use crate::worker::WorkerId;
+    use crate::Backend;
+    use futures::channel::mpsc::{channel, Sender};
+    use futures::stream::{Stream, StreamExt};
+    use futures::{Future, FutureExt, SinkExt};
+    use std::collections::HashMap;
+    use std::fmt::Debug;
+    use std::marker::PhantomData;
+    use std::ops::{Deref, DerefMut};
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context, Poll};
+    use std::thread;
+    use tower::{Layer, Service};
+
+    /// Define a dummy service
+    #[derive(Debug, Clone)]
+    pub struct DummyService;
+
+    impl<Request: Send + 'static> Service<Request> for DummyService {
+        type Response = Request;
+        type Error = std::convert::Infallible;
+        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: Request) -> Self::Future {
+            let fut = async move { Ok(req) };
+            Box::pin(fut)
+        }
+    }
+
+    /// A generic backend wrapper that polls and executes jobs
+    #[derive(Debug)]
+    pub struct TestWrapper<B, Req> {
+        stop_tx: Sender<()>,
+        executions: Arc<Mutex<HashMap<TaskId, Result<String, String>>>>,
+        _p: PhantomData<Req>,
+        backend: B,
+    }
+
+    impl<B: Clone, Req> Clone for TestWrapper<B, Req> {
+        fn clone(&self) -> Self {
+            TestWrapper {
+                stop_tx: self.stop_tx.clone(),
+                executions: Arc::clone(&self.executions),
+                _p: PhantomData,
+                backend: self.backend.clone(),
+            }
+        }
+    }
+
+    impl<B, Req> TestWrapper<B, Req>
+    where
+        B: Backend<Request<Req>> + Send + Sync + 'static + Clone,
+        Req: Send + 'static,
+        B::Stream: Send + 'static,
+        B::Stream: Stream<Item = Result<Option<Request<Req>>, crate::error::Error>> + Unpin,
+    {
+        /// Build a new instance provided a custom service
+        pub fn new_with_service<S>(backend: B, service: S) -> Self
+        where
+            S: Service<Request<Req>> + Send + 'static,
+            B::Layer: Layer<S>,
+            <<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service: Service<Request<Req>> + Send + 'static,
+            <<<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service as Service<Request<Req>>>::Response: Debug,
+            <<<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service as Service<Request<Req>>>::Error: Send + Into<BoxDynError> + Sync
+        {
+            let worker_id = WorkerId::new("test-worker");
+            let b = backend.clone();
+            let mut poller = b.poll(worker_id);
+            let (stop_tx, mut stop_rx) = channel::<()>(1);
+
+            let mut service = poller.layer.layer(service);
+
+            let executions: Arc<Mutex<HashMap<TaskId, Result<String, String>>>> =
+                Default::default();
+            let executions_clone = executions.clone();
+            thread::spawn(move || {
+                futures::executor::block_on(async move {
+                    let heartbeat = poller.heartbeat.shared();
+                    loop {
+                        futures::select! {
+
+                            item = poller.stream.next().fuse() => match item {
+                                Some(Ok(Some(req))) => {
+
+                                    let task_id = req.get::<TaskId>().cloned().expect("Request does not contain Task_ID");
+                                    // handle request
+                                    match service.call(req).await {
+                                        Ok(res) => {
+                                            executions_clone.lock().unwrap().insert(task_id, Ok(format!("{res:?}")));
+                                        },
+                                        Err(err) => {
+                                            executions_clone.lock().unwrap().insert(task_id, Err(err.into().to_string()));
+                                        }
+                                    }
+                                }
+                                Some(Ok(None)) | None => break,
+                                Some(Err(_e)) => {
+                                    // handle error
+                                    break;
+                                }
+                            },
+                            _ = stop_rx.next().fuse() => break,
+                            _ = heartbeat.clone().fuse() => {
+
+                            },
+                        }
+                    }
+                });
+            });
+
+            Self {
+                stop_tx,
+                executions,
+                _p: PhantomData,
+                backend,
+            }
+        }
+
+        /// Stop polling
+        pub fn stop(mut self) {
+            let _ = self.stop_tx.send(());
+        }
+
+        /// Gets the current state of results
+        pub fn get_results(&self) -> HashMap<TaskId, Result<String, String>> {
+            self.executions.lock().unwrap().clone()
+        }
+    }
+
+    impl<B, Req> Deref for TestWrapper<B, Req>
+    where
+        B: Backend<Request<Req>>,
+    {
+        type Target = B;
+
+        fn deref(&self) -> &Self::Target {
+            &self.backend
+        }
+    }
+
+    impl<B, Req> DerefMut for TestWrapper<B, Req>
+    where
+        B: Backend<Request<Req>>,
+    {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.backend
+        }
+    }
+
+    pub use tower::service_fn as apalis_test_service_fn;
+
+    #[macro_export]
+    /// Tests a generic mq
+    macro_rules! test_message_queue {
+        ($backend_instance:expr) => {
+            #[tokio::test]
+            async fn it_works_as_an_mq_backend() {
+                let backend = $backend_instance;
+                let service = apalis_test_service_fn(|request: Request<u32>| async {
+                    Ok::<_, io::Error>(request)
+                });
+                let mut t = TestWrapper::new_with_service(backend, service);
+                let res = t.get_results();
+                assert_eq!(res.len(), 0); // No job is done
+                t.enqueue(1).await.unwrap();
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                let res = t.get_results();
+                assert_eq!(res.len(), 1); // One job is done
+            }
+        };
+    }
+    #[macro_export]
+    /// Tests a generic storage
+    macro_rules! test_storage {
+        ($backend_instance:expr) => {
+            #[tokio::test]
+            async fn it_works_as_a_storage_backend() {
+                let backend = $backend_instance;
+                let service = apalis_test_service_fn(|request: Request<u32>| async {
+                    Ok::<_, io::Error>(request)
+                });
+                let mut t = TestWrapper::new_with_service(backend, service);
+                let res = t.get_results();
+                assert_eq!(res.len(), 0); // No job is done
+                t.push(1).await.unwrap();
+                ::apalis_core::sleep(Duration::from_secs(1)).await;
+                let res = t.get_results();
+                assert_eq!(res.len(), 1); // One job is done
+            }
+        };
+    }
+}
