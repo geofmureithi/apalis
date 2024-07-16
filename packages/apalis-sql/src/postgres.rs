@@ -59,7 +59,7 @@ use futures::{select, stream, SinkExt};
 use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::postgres::PgListener;
-use sqlx::types::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres, Row};
 use std::any::type_name;
 use std::convert::TryInto;
@@ -174,12 +174,12 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                     }
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
-                            let ack_ids: Vec<(String, String, String, String)> = ids.iter().map(|c| {
-                                (c.acknowledger.to_string(), c.worker.to_string(), serde_json::to_string(&c.result).unwrap(), calculate_status(&c.result).to_string())
+                            let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|c| {
+                                (c.acknowledger.to_string(), c.worker.to_string(), serde_json::to_string(&c.result).unwrap(), calculate_status(&c.result).to_string(), c.attempts.current() as u64)
                             }).collect();
                             let query =
-                                "UPDATE apalis.jobs SET status = Q.status, done_at = now(), lock_by = Q.lock_by, last_error = Q.result FROM (
-                                                SELECT(value-->0)::text as id, (value->>1)::text as worker_id, (value->>2)::text as result, (value->>3)::text as status FROM json_array_elements($1)
+                                "UPDATE apalis.jobs SET status = Q.status, done_at = now(), lock_by = Q.lock_by, last_error = Q.result, attempts = Q.attempts FROM (
+                                                SELECT(value-->0)::text as id, (value->>1)::text as worker_id, (value->>2)::text as result, (value->>3)::text as status, (value->>4)::int as attempts FROM json_array_elements($1)
                                             ) Q
                                             WHERE id = Q.id";
                             if let Err(e) = sqlx::query(query)
@@ -611,8 +611,9 @@ mod tests {
     use crate::context::State;
 
     use super::*;
+    use apalis_core::task::attempt::Attempt;
     use email_service::Email;
-    use sqlx::types::chrono::Utc;
+    use chrono::Utc;
 
     /// migrate DB and return a storage instance.
     async fn setup() -> PostgresStorage<Email> {
@@ -729,6 +730,8 @@ mod tests {
                 acknowledger: job_id.clone(),
                 result: Ok("Success".to_string()),
                 worker: worker_id.clone(),
+                attempts: Attempt::new_with_value(0)
+
             })
             .await
             .expect("failed to acknowledge the job");

@@ -17,7 +17,7 @@ use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use sqlx::mysql::MySqlRow;
-use sqlx::types::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use sqlx::{MySql, Pool, Row};
 use std::any::type_name;
 use std::convert::TryInto;
@@ -396,11 +396,12 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 .await
             {
                 for id in ids {
-                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ? WHERE id = ? AND lock_by = ?";
+                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ?, attempts = ? WHERE id = ? AND lock_by = ?";
                     let query = sqlx::query(query);
                     let query = query
                         .bind(calculate_status(&id.result).to_string())
                         .bind(serde_json::to_string(&id.result).unwrap())
+                        .bind(id.attempts.current() as u64)
                         .bind(id.acknowledger.to_string())
                         .bind(id.worker.to_string());
                     if let Err(e) = query.execute(&pool).await {
@@ -512,6 +513,7 @@ mod tests {
     use crate::context::State;
 
     use super::*;
+    use apalis_core::task::attempt::Attempt;
     use email_service::Email;
     use futures::StreamExt;
 
@@ -645,6 +647,7 @@ mod tests {
                 acknowledger: job_id.clone(),
                 result: Ok("Success".to_string()),
                 worker: worker_id.clone(),
+                attempts: Attempt::new_with_value(0)
             })
             .await
             .expect("failed to acknowledge the job");

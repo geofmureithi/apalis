@@ -1082,6 +1082,7 @@ mod tests {
                 acknowledger: job_id.clone(),
                 result: Ok("Success".to_string()),
                 worker: worker_id.clone(),
+                attempts: Attempt::new_with_value(0)
             })
             .await
             .expect("failed to acknowledge the job");

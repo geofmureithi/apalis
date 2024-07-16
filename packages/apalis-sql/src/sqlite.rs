@@ -16,7 +16,7 @@ use apalis_core::{Backend, BoxCodec};
 use async_stream::try_stream;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
-use sqlx::types::chrono::Utc;
+use chrono::Utc;
 use sqlx::{Pool, Row, Sqlite};
 use std::any::type_name;
 use std::convert::TryInto;
@@ -484,7 +484,7 @@ impl<T: Sync + Send> Ack<T> for SqliteStorage<T> {
     async fn ack(&mut self, res: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let query =
-                "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
+                "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3, attempts =?5 WHERE id = ?1 AND lock_by = ?2";
         let result = serde_json::to_string(&res.result)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         sqlx::query(query)
@@ -492,6 +492,7 @@ impl<T: Sync + Send> Ack<T> for SqliteStorage<T> {
             .bind(res.worker.to_string())
             .bind(result)
             .bind(calculate_status(&res.result).to_string())
+            .bind(res.attempts.current() as i64)
             .execute(&pool)
             .await?;
         Ok(())
@@ -504,9 +505,10 @@ mod tests {
     use crate::context::State;
 
     use super::*;
+    use apalis_core::task::attempt::Attempt;
     use email_service::Email;
     use futures::StreamExt;
-    use sqlx::types::chrono::Utc;
+    use chrono::Utc;
 
     /// migrate DB and return a storage instance.
     async fn setup() -> SqliteStorage<Email> {
@@ -618,6 +620,8 @@ mod tests {
                 acknowledger: job_id.clone(),
                 result: Ok("Success".to_string()),
                 worker: worker_id.clone(),
+                attempts: Attempt::new_with_value(0)
+
             })
             .await
             .expect("failed to acknowledge the job");

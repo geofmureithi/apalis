@@ -1,7 +1,9 @@
+use crate::task::attempt::Attempt;
 use crate::{request::Request, worker::WorkerId};
 use futures::channel::mpsc::{SendError, Sender};
 use futures::SinkExt;
 use futures::{future::BoxFuture, Future, FutureExt};
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::{fmt, sync::Arc};
 pub use tower::{
@@ -168,7 +170,7 @@ pub trait Ack<Task> {
 }
 
 /// ACK response
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AckResponse<A> {
     /// The worker id
     pub worker: WorkerId,
@@ -176,16 +178,8 @@ pub struct AckResponse<A> {
     pub acknowledger: A,
     /// The stringified result
     pub result: Result<String, String>,
-}
-
-impl<A: fmt::Display> AckResponse<A> {
-    /// Output a json for the response
-    pub fn to_json(&self) -> String {
-        format!(
-            r#"{{"worker": "{}", "acknowledger": "{}", "result": "{:?}"}}"#,
-            self.worker, self.acknowledger, self.result
-        )
-    }
+    /// The number of attempts made by the request
+    pub attempts: Attempt,
 }
 
 /// A generic stream that emits (worker_id, task_id)
@@ -286,6 +280,8 @@ where
         let mut ack = self.ack.clone();
         let worker_id = self.worker_id.clone();
         let data = request.get::<<A as Ack<T>>::Acknowledger>().cloned();
+        let attempts = request.get::<Attempt>().cloned().unwrap_or_default();
+
         let fut = self.service.call(request);
         let fut_with_ack = async move {
             let res = fut.await;
@@ -299,6 +295,7 @@ where
                         worker: worker_id,
                         acknowledger: task_id,
                         result,
+                        attempts,
                     })
                     .await
                 {
