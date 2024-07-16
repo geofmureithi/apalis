@@ -484,7 +484,7 @@ impl<T: Sync + Send> Ack<T> for SqliteStorage<T> {
     async fn ack(&mut self, res: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let query =
-                "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
+                "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3, attempts =?5 WHERE id = ?1 AND lock_by = ?2";
         let result = serde_json::to_string(&res.result)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         sqlx::query(query)
@@ -492,6 +492,7 @@ impl<T: Sync + Send> Ack<T> for SqliteStorage<T> {
             .bind(res.worker.to_string())
             .bind(result)
             .bind(calculate_status(&res.result).to_string())
+            .bind(res.attempts.current() as i64)
             .execute(&pool)
             .await?;
         Ok(())

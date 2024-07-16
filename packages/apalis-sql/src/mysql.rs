@@ -396,11 +396,12 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 .await
             {
                 for id in ids {
-                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ? WHERE id = ? AND lock_by = ?";
+                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ?, attempts = ? WHERE id = ? AND lock_by = ?";
                     let query = sqlx::query(query);
                     let query = query
                         .bind(calculate_status(&id.result).to_string())
                         .bind(serde_json::to_string(&id.result).unwrap())
+                        .bind(id.attempts.current() as u64)
                         .bind(id.acknowledger.to_string())
                         .bind(id.worker.to_string());
                     if let Err(e) = query.execute(&pool).await {
