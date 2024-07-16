@@ -16,7 +16,7 @@ use apalis_core::{Backend, BoxCodec};
 use async_stream::try_stream;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use serde::{de::DeserializeOwned, Serialize};
-use sqlx::types::chrono::Utc;
+use chrono::Utc;
 use sqlx::{Pool, Row, Sqlite};
 use std::any::type_name;
 use std::convert::TryInto;
@@ -507,7 +507,7 @@ mod tests {
     use super::*;
     use email_service::Email;
     use futures::StreamExt;
-    use sqlx::types::chrono::Utc;
+    use chrono::Utc;
 
     /// migrate DB and return a storage instance.
     async fn setup() -> SqliteStorage<Email> {

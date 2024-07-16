@@ -17,7 +17,7 @@ use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use sqlx::mysql::MySqlRow;
-use sqlx::types::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use sqlx::{MySql, Pool, Row};
 use std::any::type_name;
 use std::convert::TryInto;

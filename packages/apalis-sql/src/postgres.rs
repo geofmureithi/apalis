@@ -59,7 +59,7 @@ use futures::{select, stream, SinkExt};
 use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::postgres::PgListener;
-use sqlx::types::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres, Row};
 use std::any::type_name;
 use std::convert::TryInto;
@@ -612,7 +612,7 @@ mod tests {
 
     use super::*;
     use email_service::Email;
-    use sqlx::types::chrono::Utc;
+    use chrono::Utc;
 
     /// migrate DB and return a storage instance.
     async fn setup() -> PostgresStorage<Email> {

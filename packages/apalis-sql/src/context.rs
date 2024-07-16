@@ -2,7 +2,7 @@ use apalis_core::error::Error;
 use apalis_core::task::{attempt::Attempt, task_id::TaskId};
 use apalis_core::worker::WorkerId;
 use serde::{Deserialize, Serialize};
-use sqlx::types::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use std::{fmt, str::FromStr};
 
 /// The context for a job is represented here
