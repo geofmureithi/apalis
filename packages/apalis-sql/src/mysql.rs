@@ -514,7 +514,6 @@ mod tests {
     use crate::sql_storage_tests;
 
     use super::*;
-    use apalis::utils::TokioExecutor;
     use apalis_core::task::attempt::Attempt;
 
     use apalis_core::test_utils::DummyService;
@@ -530,7 +529,7 @@ mod tests {
     sql_storage_tests!(setup::<Email>, MysqlStorage<Email>, Email);
 
     /// migrate DB and return a storage instance.
-    async fn setup<T>() -> MysqlStorage<T> {
+    async fn setup<T: Serialize + DeserializeOwned>() -> MysqlStorage<T> {
         let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
         // Because connections cannot be shared across async runtime
         // (different runtimes are created for each test),

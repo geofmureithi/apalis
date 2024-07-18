@@ -606,7 +606,6 @@ mod tests {
     use crate::sql_storage_tests;
 
     use super::*;
-    use apalis::utils::TokioExecutor;
     use apalis_core::task::attempt::Attempt;
     use apalis_core::test_utils::DummyService;
     use chrono::Utc;

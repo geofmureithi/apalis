@@ -145,11 +145,12 @@ pub(crate) fn calculate_status(res: &Result<String, String>) -> State {
 macro_rules! sql_storage_tests {
     ($setup:path, $storage_type:ty, $job_type:ty) => {
         async fn setup_test_wrapper() -> TestWrapper<$storage_type, $job_type> {
-            TestWrapper::new_with_service(
+            let (t, poller) = TestWrapper::new_with_service(
                 $setup().await,
                 apalis_core::service_fn::service_fn(email_service::send_email),
-                TokioExecutor,
-            )
+            );
+            tokio::spawn(poller);
+            t
         }
 
         #[tokio::test]

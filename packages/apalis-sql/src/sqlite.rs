@@ -506,8 +506,6 @@ mod tests {
     use crate::sql_storage_tests;
 
     use super::*;
-    use apalis::utils::TokioExecutor;
-    use apalis_core::service_fn::service_fn;
     use apalis_core::task::attempt::Attempt;
     use apalis_core::test_utils::DummyService;
     use chrono::Utc;
@@ -706,101 +704,5 @@ mod tests {
         let ctx = job.get::<SqlContext>().unwrap();
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker_id));
-    }
-}
-
-#[cfg(test)]
-mod backend_tests {
-    use std::ops::DerefMut;
-
-    use apalis::utils::TokioExecutor;
-    use apalis_core::{service_fn::service_fn, storage::Storage, test_utils::TestWrapper};
-    use email_service::{
-        example_good_email, example_killed_email, example_retry_able_email, Email,
-    };
-    use sqlx::SqlitePool;
-
-    use crate::context::{SqlContext, State};
-
-    use super::SqliteStorage;
-
-    /// migrate DB and return a storage instance.
-    async fn setup() -> SqliteStorage<Email> {
-        // Because connections cannot be shared across async runtime
-        // (different runtimes are created for each test),
-        // we don't share the storage and tests must be run sequentially.
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        SqliteStorage::setup(&pool)
-            .await
-            .expect("failed to migrate DB");
-        let storage = SqliteStorage::<Email>::new(pool);
-
-        storage
-    }
-
-    async fn setup_test_wrapper() -> TestWrapper<SqliteStorage<Email>, Email> {
-        TestWrapper::new_with_service(
-            setup().await,
-            service_fn(email_service::send_email),
-            TokioExecutor,
-        )
-    }
-
-    #[tokio::test]
-    async fn test_kill_job() {
-        let mut storage = setup_test_wrapper().await;
-
-        storage.push(example_killed_email()).await.unwrap();
-
-        let (job_id, res) = storage.execute_next().await;
-        assert_eq!(
-            res,
-            Err("AbortError: Invalid character. Job killed".to_owned())
-        );
-        let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
-        let ctx = job.get::<SqlContext>().unwrap();
-        assert_eq!(*ctx.status(), State::Killed);
-        assert!(ctx.done_at().is_some());
-        assert_eq!(
-            ctx.last_error().clone().unwrap(),
-            "{\"Err\":\"AbortError: Invalid character. Job killed\"}"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_acknowledge_good_job() {
-        let mut storage = setup_test_wrapper().await;
-        storage.push(example_good_email()).await.unwrap();
-
-        let (job_id, res) = storage.execute_next().await;
-        assert_eq!(res, Ok("()".to_owned()));
-        let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
-        let ctx = job.get::<SqlContext>().unwrap();
-        assert_eq!(*ctx.status(), State::Done);
-        assert!(ctx.done_at().is_some());
-    }
-
-    #[tokio::test]
-    async fn test_acknowledge_failed_job() {
-        let mut storage = setup_test_wrapper().await;
-
-        storage.push(example_retry_able_email()).await.unwrap();
-
-        for index in 1..25 {
-            let (job_id, res) = storage.execute_next().await;
-            assert_eq!(
-                res,
-                Err("FailedError: Missing separator character '@'.".to_owned())
-            );
-            let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
-            let ctx = job.get::<SqlContext>().unwrap();
-            assert_eq!(*ctx.status(), State::Failed);
-            assert_eq!(ctx.attempts().current(), index);
-            assert!(ctx.done_at().is_some());
-            assert_eq!(
-                ctx.last_error().clone().unwrap(),
-                "{\"Err\":\"FailedError: Missing separator character '@'.\"}"
-            );
-        }
     }
 }

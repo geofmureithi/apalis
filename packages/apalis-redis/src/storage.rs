@@ -990,17 +990,12 @@ mod tests {
     use apalis_core::test_utils::apalis_test_service_fn;
     use apalis_core::test_utils::TestWrapper;
 
-    generic_storage_test!({
-        let redis_url = std::env::var("REDIS_URL").expect("No REDIS_URL is specified");
-        let conn = connect(redis_url).await.unwrap();
-        let storage = RedisStorage::new(conn);
-        storage
-    });
+    generic_storage_test!(setup);
 
     use super::*;
 
     /// migrate DB and return a storage instance.
-    async fn setup() -> RedisStorage<Email> {
+    async fn setup<T: Serialize + DeserializeOwned>() -> RedisStorage<T> {
         let redis_url = std::env::var("REDIS_URL").expect("No REDIS_URL is specified");
         // Because connections cannot be shared across async runtime
         // (different runtimes are created for each test),

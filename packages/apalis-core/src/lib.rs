@@ -173,14 +173,12 @@ impl crate::executor::Executor for TestExecutor {
 /// Test utilities that allows you to test backends
 pub mod test_utils {
     use crate::error::BoxDynError;
-
-    use crate::executor::Executor;
     use crate::request::Request;
-
     use crate::task::task_id::TaskId;
     use crate::worker::WorkerId;
     use crate::Backend;
     use futures::channel::mpsc::{channel, Receiver, Sender};
+    use futures::future::BoxFuture;
     use futures::stream::{Stream, StreamExt};
     use futures::{Future, FutureExt, SinkExt};
     use std::fmt::Debug;
@@ -217,18 +215,38 @@ pub mod test_utils {
         _p: PhantomData<Req>,
         backend: B,
     }
-
-    // impl<B: Clone, Req> Clone for TestWrapper<B, Req> {
-    //     fn clone(&self) -> Self {
-    //         TestWrapper {
-    //             stop_tx: self.stop_tx.clone(),
-    //            res_rx: self.res_rx.clone(),
-    //             _p: PhantomData,
-    //             backend: self.backend.clone(),
-    //         }
-    //     }
-    // }
-
+    /// A test wrapper to allow you to test without requiring a worker.
+    /// Important for testing backends and jobs
+    /// # Example
+    /// ```no_run
+    /// #[cfg(tests)]
+    /// mod tests {
+    ///    use crate::{
+    ///        error::Error, memory::MemoryStorage, mq::MessageQueue, service_fn::service_fn,
+    ///    };
+    ///
+    ///    use super::*;
+    ///
+    ///    async fn is_even(req: usize) -> Result<(), Error> {
+    ///        if req % 2 == 0 {
+    ///            Ok(())
+    ///        } else {
+    ///            Err(Error::Abort("Not an even number".to_string()))
+    ///        }
+    ///    }
+    ///
+    ///    #[tokio::test]
+    ///    async fn test_accepts_even() {
+    ///        let backend = MemoryStorage::new();
+    ///        let (mut tester, poller) = TestWrapper::new_with_service(backend, service_fn(is_even));
+    ///        tokio::spawn(poller);
+    ///        tester.enqueue(42usize).await.unwrap();
+    ///        assert_eq!(tester.size().await.unwrap(), 1);
+    ///        let (_, resp) = tester.execute_next().await;
+    ///        assert_eq!(resp, Ok("()".to_string()));
+    ///    }
+    ///}
+    /// ````
     impl<B, Req> TestWrapper<B, Req>
     where
         B: Backend<Request<Req>> + Send + Sync + 'static + Clone,
@@ -237,7 +255,7 @@ pub mod test_utils {
         B::Stream: Stream<Item = Result<Option<Request<Req>>, crate::error::Error>> + Unpin,
     {
         /// Build a new instance provided a custom service
-        pub fn new_with_service<S, E: Executor>(backend: B, service: S, executor: E) -> Self
+        pub fn new_with_service<S>(backend: B, service: S) -> (Self, BoxFuture<'static, ()>)
         where
             S: Service<Request<Req>> + Send + 'static,
             B::Layer: Layer<S>,
@@ -263,7 +281,8 @@ pub mod test_utils {
                         item = poller.stream.next().fuse() => match item {
                             Some(Ok(Some(req))) => {
 
-                                let task_id = req.get::<TaskId>().cloned().expect("Request does not contain Task_ID");
+                                let task_id = req.get::<TaskId>().cloned().unwrap_or_default();
+                                // .expect("Request does not contain Task_ID");
                                 // handle request
                                 match service.call(req).await {
                                     Ok(res) => {
@@ -287,13 +306,15 @@ pub mod test_utils {
                     }
                 }
             };
-            executor.spawn(poller);
-            Self {
-                stop_tx,
-                res_rx,
-                _p: PhantomData,
-                backend,
-            }
+            (
+                Self {
+                    stop_tx,
+                    res_rx,
+                    _p: PhantomData,
+                    backend,
+                },
+                poller.boxed(),
+            )
         }
 
         /// Stop polling
@@ -339,7 +360,8 @@ pub mod test_utils {
                 let service = apalis_test_service_fn(|request: Request<u32>| async {
                     Ok::<_, io::Error>(request)
                 });
-                let mut t = TestWrapper::new_with_service(backend, service, TokioExecutor);
+                let (mut t, poller) = TestWrapper::new_with_service(backend, service);
+                tokio::spawn(poller);
                 t.enqueue(1).await.unwrap();
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 let _res = t.execute_next().await;
@@ -357,7 +379,8 @@ pub mod test_utils {
                 let service = apalis_test_service_fn(|request: Request<u32>| async move {
                     Ok::<_, io::Error>(request.take())
                 });
-                let mut t = TestWrapper::new_with_service(backend, service, TokioExecutor);
+                let (mut t, poller) = TestWrapper::new_with_service(backend, service);
+                tokio::spawn(poller);
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 0); // No jobs
                 t.push(1).await.unwrap();
