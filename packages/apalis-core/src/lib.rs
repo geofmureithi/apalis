@@ -174,6 +174,7 @@ impl crate::executor::Executor for TestExecutor {
 pub mod test_utils {
     use crate::error::BoxDynError;
     use crate::request::Request;
+    use crate::storage::Storage;
     use crate::task::task_id::TaskId;
     use crate::worker::WorkerId;
     use crate::Backend;
@@ -390,6 +391,7 @@ pub mod test_utils {
                 assert_eq!(res.1, Ok("1".to_owned()));
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 0); // No jobs
+                t.vacuum().await.unwrap();
             }
         };
     }
