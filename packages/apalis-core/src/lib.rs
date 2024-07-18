@@ -169,26 +169,25 @@ impl crate::executor::Executor for TestExecutor {
     }
 }
 
+#[cfg(feature = "test-utils")]
 /// Test utilities that allows you to test backends
 pub mod test_utils {
-    use crate::error::{BoxDynError};
+    use crate::error::BoxDynError;
 
+    use crate::executor::Executor;
     use crate::request::Request;
 
     use crate::task::task_id::TaskId;
     use crate::worker::WorkerId;
     use crate::Backend;
-    use futures::channel::mpsc::{channel, Sender};
+    use futures::channel::mpsc::{channel, Receiver, Sender};
     use futures::stream::{Stream, StreamExt};
     use futures::{Future, FutureExt, SinkExt};
-    use std::collections::HashMap;
     use std::fmt::Debug;
     use std::marker::PhantomData;
     use std::ops::{Deref, DerefMut};
     use std::pin::Pin;
-    use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
-    use std::thread;
     use tower::{Layer, Service};
 
     /// Define a dummy service
@@ -214,21 +213,21 @@ pub mod test_utils {
     #[derive(Debug)]
     pub struct TestWrapper<B, Req> {
         stop_tx: Sender<()>,
-        executions: Arc<Mutex<HashMap<TaskId, Result<String, String>>>>,
+        res_rx: Receiver<(TaskId, Result<String, String>)>,
         _p: PhantomData<Req>,
         backend: B,
     }
 
-    impl<B: Clone, Req> Clone for TestWrapper<B, Req> {
-        fn clone(&self) -> Self {
-            TestWrapper {
-                stop_tx: self.stop_tx.clone(),
-                executions: Arc::clone(&self.executions),
-                _p: PhantomData,
-                backend: self.backend.clone(),
-            }
-        }
-    }
+    // impl<B: Clone, Req> Clone for TestWrapper<B, Req> {
+    //     fn clone(&self) -> Self {
+    //         TestWrapper {
+    //             stop_tx: self.stop_tx.clone(),
+    //            res_rx: self.res_rx.clone(),
+    //             _p: PhantomData,
+    //             backend: self.backend.clone(),
+    //         }
+    //     }
+    // }
 
     impl<B, Req> TestWrapper<B, Req>
     where
@@ -238,62 +237,60 @@ pub mod test_utils {
         B::Stream: Stream<Item = Result<Option<Request<Req>>, crate::error::Error>> + Unpin,
     {
         /// Build a new instance provided a custom service
-        pub fn new_with_service<S>(backend: B, service: S) -> Self
+        pub fn new_with_service<S, E: Executor>(backend: B, service: S, executor: E) -> Self
         where
             S: Service<Request<Req>> + Send + 'static,
             B::Layer: Layer<S>,
             <<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service: Service<Request<Req>> + Send + 'static,
-            <<<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service as Service<Request<Req>>>::Response: Debug,
-            <<<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service as Service<Request<Req>>>::Error: Send + Into<BoxDynError> + Sync
+            <<<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service as Service<Request<Req>>>::Response: Send + Debug,
+            <<<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service as Service<Request<Req>>>::Error: Send + Into<BoxDynError> + Sync,
+            <<<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service as Service<Request<Req>>>::Future: Send + 'static,
         {
             let worker_id = WorkerId::new("test-worker");
             let b = backend.clone();
             let mut poller = b.poll(worker_id);
             let (stop_tx, mut stop_rx) = channel::<()>(1);
 
+            let (mut res_tx, res_rx) = channel(10);
+
             let mut service = poller.layer.layer(service);
 
-            let executions: Arc<Mutex<HashMap<TaskId, Result<String, String>>>> =
-                Default::default();
-            let executions_clone = executions.clone();
-            thread::spawn(move || {
-                futures::executor::block_on(async move {
-                    let heartbeat = poller.heartbeat.shared();
-                    loop {
-                        futures::select! {
+            let poller = async move {
+                let heartbeat = poller.heartbeat.shared();
+                loop {
+                    futures::select! {
 
-                            item = poller.stream.next().fuse() => match item {
-                                Some(Ok(Some(req))) => {
+                        item = poller.stream.next().fuse() => match item {
+                            Some(Ok(Some(req))) => {
 
-                                    let task_id = req.get::<TaskId>().cloned().expect("Request does not contain Task_ID");
-                                    // handle request
-                                    match service.call(req).await {
-                                        Ok(res) => {
-                                            executions_clone.lock().unwrap().insert(task_id, Ok(format!("{res:?}")));
-                                        },
-                                        Err(err) => {
-                                            executions_clone.lock().unwrap().insert(task_id, Err(err.into().to_string()));
-                                        }
+                                let task_id = req.get::<TaskId>().cloned().expect("Request does not contain Task_ID");
+                                // handle request
+                                match service.call(req).await {
+                                    Ok(res) => {
+                                        res_tx.send((task_id, Ok(format!("{res:?}")))).await.unwrap();
+                                    },
+                                    Err(err) => {
+                                        res_tx.send((task_id, Err(err.into().to_string()))).await.unwrap();
                                     }
                                 }
-                                Some(Ok(None)) | None => break,
-                                Some(Err(_e)) => {
-                                    // handle error
-                                    break;
-                                }
-                            },
-                            _ = stop_rx.next().fuse() => break,
-                            _ = heartbeat.clone().fuse() => {
+                            }
+                            Some(Ok(None)) | None => break,
+                            Some(Err(_e)) => {
+                                // handle error
+                                break;
+                            }
+                        },
+                        _ = stop_rx.next().fuse() => break,
+                        _ = heartbeat.clone().fuse() => {
 
-                            },
-                        }
+                        },
                     }
-                });
-            });
-
+                }
+            };
+            executor.spawn(poller);
             Self {
                 stop_tx,
-                executions,
+                res_rx,
                 _p: PhantomData,
                 backend,
             }
@@ -305,8 +302,8 @@ pub mod test_utils {
         }
 
         /// Gets the current state of results
-        pub fn get_results(&self) -> HashMap<TaskId, Result<String, String>> {
-            self.executions.lock().unwrap().clone()
+        pub async fn execute_next(&mut self) -> (TaskId, Result<String, String>) {
+            self.res_rx.next().await.unwrap()
         }
     }
 
@@ -342,33 +339,34 @@ pub mod test_utils {
                 let service = apalis_test_service_fn(|request: Request<u32>| async {
                     Ok::<_, io::Error>(request)
                 });
-                let mut t = TestWrapper::new_with_service(backend, service);
-                let res = t.get_results();
-                assert_eq!(res.len(), 0); // No job is done
+                let mut t = TestWrapper::new_with_service(backend, service, TokioExecutor);
                 t.enqueue(1).await.unwrap();
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                let res = t.get_results();
-                assert_eq!(res.len(), 1); // One job is done
+                let _res = t.execute_next().await;
+                // assert_eq!(res.len(), 1); // One job is done
             }
         };
     }
     #[macro_export]
     /// Tests a generic storage
-    macro_rules! test_storage {
-        ($backend_instance:expr) => {
+    macro_rules! generic_storage_test {
+        ($setup:path ) => {
             #[tokio::test]
-            async fn it_works_as_a_storage_backend() {
-                let backend = $backend_instance;
-                let service = apalis_test_service_fn(|request: Request<u32>| async {
-                    Ok::<_, io::Error>(request)
+            async fn integration_test_storage_push_and_consume() {
+                let backend = $setup().await;
+                let service = apalis_test_service_fn(|request: Request<u32>| async move {
+                    Ok::<_, io::Error>(request.take())
                 });
-                let mut t = TestWrapper::new_with_service(backend, service);
-                let res = t.get_results();
-                assert_eq!(res.len(), 0); // No job is done
+                let mut t = TestWrapper::new_with_service(backend, service, TokioExecutor);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // No jobs
                 t.push(1).await.unwrap();
-                ::apalis_core::sleep(Duration::from_secs(1)).await;
-                let res = t.get_results();
-                assert_eq!(res.len(), 1); // One job is done
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1); // A job exists
+                let res = t.execute_next().await;
+                assert_eq!(res.1, Ok("1".to_owned()));
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // No jobs
             }
         };
     }

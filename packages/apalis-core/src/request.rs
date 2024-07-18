@@ -4,7 +4,10 @@ use tower::layer::util::Identity;
 
 use std::{fmt::Debug, pin::Pin};
 
-use crate::{data::Extensions, error::Error, poller::Poller, task::task_id::TaskId, worker::WorkerId, Backend};
+use crate::{
+    data::Extensions, error::Error, poller::Poller, task::task_id::TaskId, worker::WorkerId,
+    Backend,
+};
 
 /// Represents a job which can be serialized and executed
 

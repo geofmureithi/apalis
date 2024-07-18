@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::Any, sync::Arc};
 
 use crate::error::Error;
 
@@ -15,22 +15,30 @@ impl IntoResponse for bool {
     fn into_response(self) -> std::result::Result<Self, Error> {
         match self {
             true => Ok(true),
-            false => Err(Error::Failed(Box::new(std::io::Error::new(
+            false => Err(Error::Failed(Arc::new(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Job returned false",
-            )))),
+            ))))),
         }
     }
 }
 
-impl<T: Any, E: std::error::Error + Sync + Send + 'static> IntoResponse
+impl<T: Any, E: std::error::Error + Sync + Send + 'static + Any> IntoResponse
     for std::result::Result<T, E>
 {
     type Result = Result<T, Error>;
     fn into_response(self) -> Result<T, Error> {
         match self {
             Ok(value) => Ok(value),
-            Err(e) => Err(Error::Failed(Box::new(e))),
+            Err(e) => {
+                // Try to downcast the error to see if it is already of type `Error`
+                if let Some(custom_error) =
+                    (&e as &(dyn std::error::Error + 'static)).downcast_ref::<Error>()
+                {
+                    return Err(custom_error.clone());
+                }
+                Err(Error::Failed(Arc::new(Box::new(e))))
+            }
         }
     }
 }

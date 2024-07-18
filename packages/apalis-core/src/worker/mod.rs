@@ -135,7 +135,7 @@ pub enum Event {
 }
 
 /// Possible errors that can occur when starting a worker.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum WorkerError {
     /// An error occurred while processing a job.
     #[error("Failed to process job: {0}")]

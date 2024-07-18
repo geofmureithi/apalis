@@ -149,11 +149,11 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 let res = storage
                     .fetch_next(worker)
                     .await
-                    .map_err(|e| Error::Failed(Box::new(e)))?;
+                    .map_err(|e| Error::SourceError(Arc::new(Box::new(e))))?;
                 for job in res {
                     tx.send(Ok(Some(job)))
                         .await
-                        .map_err(|e| Error::Failed(Box::new(e)))?;
+                        .map_err(|e| Error::SourceError(Arc::new(Box::new(e))))?;
                 }
                 Ok(())
             }
@@ -175,7 +175,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
                             let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|c| {
-                                (c.acknowledger.to_string(), c.worker.to_string(), serde_json::to_string(&c.result).unwrap(), calculate_status(&c.result).to_string(), c.attempts.current() as u64)
+                                (c.acknowledger.to_string(), c.worker.to_string(), serde_json::to_string(&c.result).unwrap(), calculate_status(&c.result).to_string(), (c.attempts.current() + 1) as u64 )
                             }).collect();
                             let query =
                                 "UPDATE apalis.jobs SET status = Q.status, done_at = now(), lock_by = Q.lock_by, last_error = Q.result, attempts = Q.attempts FROM (
@@ -207,13 +207,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 };
             }
         };
-        Poller::new_with_layer(
-            BackendStream::new(rx.boxed(), controller),
-            async {
-                futures::join!(heartbeat);
-            },
-            layer,
-        )
+        Poller::new_with_layer(BackendStream::new(rx.boxed(), controller), heartbeat, layer)
     }
 }
 
@@ -609,18 +603,25 @@ impl<T> PostgresStorage<T> {
 #[cfg(test)]
 mod tests {
     use crate::context::State;
+    use crate::sql_storage_tests;
 
     use super::*;
+    use apalis::utils::TokioExecutor;
     use apalis_core::task::attempt::Attempt;
     use apalis_core::test_utils::DummyService;
     use chrono::Utc;
     use email_service::Email;
 
-    use apalis_core::test_storage;
+    use apalis_core::generic_storage_test;
     use apalis_core::test_utils::apalis_test_service_fn;
     use apalis_core::test_utils::TestWrapper;
 
-    test_storage!({
+    generic_storage_test!(setup);
+
+    sql_storage_tests!(setup::<Email>, PostgresStorage<Email>, Email);
+
+    /// migrate DB and return a storage instance.
+    async fn setup<T: Serialize + DeserializeOwned>() -> PostgresStorage<T> {
         let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
         let pool = PgPool::connect(&db_url).await.unwrap();
         // Because connections cannot be shared across async runtime
@@ -629,18 +630,6 @@ mod tests {
         PostgresStorage::setup(&pool).await.unwrap();
         let storage = PostgresStorage::new(pool);
         storage
-    });
-
-    /// migrate DB and return a storage instance.
-    async fn setup() -> TestWrapper<PostgresStorage<Email>, Email> {
-        let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
-        let pool = PgPool::connect(&db_url).await.unwrap();
-        // Because connections cannot be shared across async runtime
-        // (different runtimes are created for each test),
-        // we don't share the storage and tests must be run sequentially.
-        PostgresStorage::setup(&pool).await.unwrap();
-        let storage = PostgresStorage::new(pool);
-        TestWrapper::new_with_service(storage, DummyService)
     }
 
     /// rollback DB changes made by tests.
@@ -649,7 +638,7 @@ mod tests {
     ///  - worker identified by `worker_id`
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(storage: TestWrapper<PostgresStorage<Email>, Email>, worker_id: &WorkerId) {
+    async fn cleanup(storage: PostgresStorage<Email>, worker_id: &WorkerId) {
         let mut tx = storage
             .pool
             .acquire()
@@ -676,7 +665,7 @@ mod tests {
     }
 
     async fn consume_one(
-        storage: &mut TestWrapper<PostgresStorage<Email>, Email>,
+        storage: &mut PostgresStorage<Email>,
         worker_id: &WorkerId,
     ) -> Request<Email> {
         let req = storage.fetch_next(worker_id).await;
@@ -684,7 +673,7 @@ mod tests {
     }
 
     async fn register_worker_at(
-        storage: &mut TestWrapper<PostgresStorage<Email>, Email>,
+        storage: &mut PostgresStorage<Email>,
         last_seen: Timestamp,
     ) -> WorkerId {
         let worker_id = WorkerId::new("test-worker");
@@ -696,18 +685,15 @@ mod tests {
         worker_id
     }
 
-    async fn register_worker(storage: &mut TestWrapper<PostgresStorage<Email>, Email>) -> WorkerId {
+    async fn register_worker(storage: &mut PostgresStorage<Email>) -> WorkerId {
         register_worker_at(storage, Utc::now().timestamp()).await
     }
 
-    async fn push_email(storage: &mut TestWrapper<PostgresStorage<Email>, Email>, email: Email) {
+    async fn push_email(storage: &mut PostgresStorage<Email>, email: Email) {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job(
-        storage: &mut TestWrapper<PostgresStorage<Email>, Email>,
-        job_id: &TaskId,
-    ) -> Request<Email> {
+    async fn get_job(storage: &mut PostgresStorage<Email>, job_id: &TaskId) -> Request<Email> {
         storage
             .fetch_by_id(job_id)
             .await

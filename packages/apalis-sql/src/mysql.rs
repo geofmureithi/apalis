@@ -385,7 +385,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
         let mut hb_storage = self.clone();
         let stream = self
             .stream_jobs(&worker, config.poll_interval, config.buffer_size, &config)
-            .map_err(|e| Error::SourceError(Box::new(e)));
+            .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
 
         let ack_heartbeat = async move {
@@ -401,7 +401,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                     let query = query
                         .bind(calculate_status(&id.result).to_string())
                         .bind(serde_json::to_string(&id.result).unwrap())
-                        .bind(id.attempts.current() as u64)
+                        .bind(id.attempts.current() as u64 + 1)
                         .bind(id.acknowledger.to_string())
                         .bind(id.worker.to_string());
                     if let Err(e) = query.execute(&pool).await {
@@ -511,31 +511,26 @@ impl<T> MysqlStorage<T> {
 mod tests {
 
     use crate::context::State;
+    use crate::sql_storage_tests;
 
     use super::*;
+    use apalis::utils::TokioExecutor;
     use apalis_core::task::attempt::Attempt;
 
     use apalis_core::test_utils::DummyService;
     use email_service::Email;
     use futures::StreamExt;
 
-    use apalis_core::test_storage;
+    use apalis_core::generic_storage_test;
     use apalis_core::test_utils::apalis_test_service_fn;
     use apalis_core::test_utils::TestWrapper;
 
-    test_storage!({
-        let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
-        let pool = MySqlPool::connect(db_url).await.unwrap();
-        MysqlStorage::setup(&pool)
-            .await
-            .expect("failed to migrate DB");
-        let storage = MysqlStorage::new(pool);
+    generic_storage_test!(setup);
 
-        storage
-    });
+    sql_storage_tests!(setup::<Email>, MysqlStorage<Email>, Email);
 
     /// migrate DB and return a storage instance.
-    async fn setup() -> TestWrapper<MysqlStorage<Email>, Email> {
+    async fn setup<T>() -> MysqlStorage<T> {
         let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
         // Because connections cannot be shared across async runtime
         // (different runtimes are created for each test),
@@ -546,7 +541,7 @@ mod tests {
             .expect("failed to migrate DB");
         let storage = MysqlStorage::new(pool);
 
-        TestWrapper::new_with_service(storage, DummyService)
+        storage
     }
 
     /// rollback DB changes made by tests.
@@ -555,7 +550,7 @@ mod tests {
     ///  - worker identified by `worker_id`
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(storage: TestWrapper<MysqlStorage<Email>, Email>, worker_id: &WorkerId) {
+    async fn cleanup(storage: MysqlStorage<Email>, worker_id: &WorkerId) {
         sqlx::query("DELETE FROM jobs WHERE lock_by = ? OR status = 'Pending'")
             .bind(worker_id.to_string())
             .execute(&storage.pool)
@@ -595,7 +590,7 @@ mod tests {
     }
 
     async fn register_worker_at(
-        storage: &mut TestWrapper<MysqlStorage<Email>, Email>,
+        storage: &mut MysqlStorage<Email>,
         last_seen: DateTime<Utc>,
     ) -> WorkerId {
         let worker_id = WorkerId::new("test-worker");
@@ -607,20 +602,17 @@ mod tests {
         worker_id
     }
 
-    async fn register_worker(storage: &mut TestWrapper<MysqlStorage<Email>, Email>) -> WorkerId {
+    async fn register_worker(storage: &mut MysqlStorage<Email>) -> WorkerId {
         let now = Utc::now();
 
         register_worker_at(storage, now).await
     }
 
-    async fn push_email(storage: &mut TestWrapper<MysqlStorage<Email>, Email>, email: Email) {
+    async fn push_email(storage: &mut MysqlStorage<Email>, email: Email) {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job(
-        storage: &mut TestWrapper<MysqlStorage<Email>, Email>,
-        job_id: &TaskId,
-    ) -> Request<Email> {
+    async fn get_job(storage: &mut MysqlStorage<Email>, job_id: &TaskId) -> Request<Email> {
         storage
             .fetch_by_id(job_id)
             .await

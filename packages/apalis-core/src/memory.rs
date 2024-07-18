@@ -114,7 +114,10 @@ impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<T> {
 impl<Message: Send + 'static + Sync> MessageQueue<Message> for MemoryStorage<Message> {
     type Error = ();
     async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
-        self.inner.sender.try_send(Request::new(message)).map_err(|_| ())?;
+        self.inner
+            .sender
+            .try_send(Request::new(message))
+            .map_err(|_| ())?;
         Ok(())
     }
 

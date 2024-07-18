@@ -45,6 +45,7 @@ apalis = { path = "../../", default-features = false, features = [
     "tokio-comp",
 ] }
 once_cell = "1.19.0"
+apalis-sql = { path = ".", features = ["tokio-comp"] }
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

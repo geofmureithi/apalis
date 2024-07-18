@@ -559,6 +559,7 @@ impl<T: Sync + Send, Conn: ConnectionLike + Send + Sync + 'static> Ack<T>
                     Ok(())
                 }
 
+                // TODO: Just automatically retry
                 e if e.starts_with("RetryError") => {
                     let retry_job = self.scripts.retry_job.clone();
                     let retry_jobs_set = &self.config.scheduled_jobs_set();
@@ -983,13 +984,13 @@ impl<T, Conn: ConnectionLike + Send + Sync + 'static> RedisStorage<T, Conn> {
 
 #[cfg(test)]
 mod tests {
-    use apalis_core::test_storage;
+    use apalis_core::generic_storage_test;
     use email_service::Email;
 
     use apalis_core::test_utils::apalis_test_service_fn;
     use apalis_core::test_utils::TestWrapper;
 
-    test_storage!({
+    generic_storage_test!({
         let redis_url = std::env::var("REDIS_URL").expect("No REDIS_URL is specified");
         let conn = connect(redis_url).await.unwrap();
         let storage = RedisStorage::new(conn);
@@ -1093,7 +1094,7 @@ mod tests {
                 acknowledger: job_id.clone(),
                 result: Ok("Success".to_string()),
                 worker: worker_id.clone(),
-                attempts: Attempt::new_with_value(0)
+                attempts: Attempt::new_with_value(0),
             })
             .await
             .expect("failed to acknowledge the job");
