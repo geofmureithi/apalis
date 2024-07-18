@@ -9,7 +9,7 @@ license = "MIT"
 description = "SQL Storage for apalis. Use sqlite, postgres and mysql for background job processing"
 
 [features]
-default = ["sqlite", "migrate", "postgres"]
+default = ["migrate"]
 postgres = ["sqlx/postgres", "sqlx/json"]
 sqlite = ["sqlx/sqlite", "sqlx/json"]
 mysql = ["sqlx/mysql", "sqlx/json", "sqlx/bigdecimal"]

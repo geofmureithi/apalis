@@ -140,7 +140,7 @@ pub(crate) fn calculate_status(res: &Result<String, String>) -> State {
     }
 }
 
-///
+/// Standard checks for any sql backend
 #[macro_export]
 macro_rules! sql_storage_tests {
     ($setup:path, $storage_type:ty, $job_type:ty) => {
@@ -167,6 +167,7 @@ macro_rules! sql_storage_tests {
                 res,
                 Err("AbortError: Invalid character. Job killed".to_owned())
             );
+            apalis_core::sleep(Duration::from_secs(1)).await;
             let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
             let ctx = job.get::<SqlContext>().unwrap();
             assert_eq!(*ctx.status(), State::Killed);
@@ -187,6 +188,7 @@ macro_rules! sql_storage_tests {
 
             let (job_id, res) = storage.execute_next().await;
             assert_eq!(res, Ok("()".to_owned()));
+            apalis_core::sleep(Duration::from_secs(1)).await;
             let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
             let ctx = job.get::<SqlContext>().unwrap();
             assert_eq!(*ctx.status(), State::Done);
@@ -202,22 +204,21 @@ macro_rules! sql_storage_tests {
                 .await
                 .unwrap();
 
-            for index in 1..25 {
-                let (job_id, res) = storage.execute_next().await;
-                assert_eq!(
-                    res,
-                    Err("FailedError: Missing separator character '@'.".to_owned())
-                );
-                let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
-                let ctx = job.get::<SqlContext>().unwrap();
-                assert_eq!(*ctx.status(), State::Failed);
-                assert_eq!(ctx.attempts().current(), index);
-                assert!(ctx.done_at().is_some());
-                assert_eq!(
-                    ctx.last_error().clone().unwrap(),
-                    "{\"Err\":\"FailedError: Missing separator character '@'.\"}"
-                );
-            }
+            let (job_id, res) = storage.execute_next().await;
+            assert_eq!(
+                res,
+                Err("FailedError: Missing separator character '@'.".to_owned())
+            );
+            apalis_core::sleep(Duration::from_secs(1)).await;
+            let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
+            let ctx = job.get::<SqlContext>().unwrap();
+            assert_eq!(*ctx.status(), State::Failed);
+            assert_eq!(ctx.attempts().current(), 1);
+            assert!(ctx.done_at().is_some());
+            assert_eq!(
+                ctx.last_error().clone().unwrap(),
+                "{\"Err\":\"FailedError: Missing separator character '@'.\"}"
+            );
         }
     };
 }

@@ -39,6 +39,7 @@ email-service = { path = "../../examples/email-service" }
 apalis = { path = "../../", default-features = false, features = [
     "tokio-comp",
 ] }
+apalis-core = { path = "../apalis-core", features = ["test-utils"] }
 
 [features]
 default = ["tokio-comp"]
