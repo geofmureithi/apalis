@@ -187,7 +187,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                                 .execute(&pool)
                                 .await
                             {
-                                error!("AckError: {e}");
+                                panic!("AckError: {e}");
                             }
                         }
                     }
@@ -644,8 +644,9 @@ mod tests {
             .acquire()
             .await
             .expect("failed to get connection");
-        sqlx::query("Delete from apalis.jobs where job_type = $1")
+        sqlx::query("Delete from apalis.jobs where job_type = $1 OR lock_by = $2")
             .bind(storage.config.namespace())
+            .bind(worker_id.to_string())
             .execute(&mut *tx)
             .await
             .expect("failed to delete jobs");
@@ -695,7 +696,7 @@ mod tests {
 
     async fn get_job(storage: &mut PostgresStorage<Email>, job_id: &TaskId) -> Request<Email> {
         // add a slight delay to allow background actions like ack to complete
-        apalis_core::sleep(Duration::from_secs(1)).await;
+        apalis_core::sleep(Duration::from_secs(2)).await;
         storage
             .fetch_by_id(job_id)
             .await

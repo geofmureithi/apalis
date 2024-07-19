@@ -1001,14 +1001,15 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         let conn = connect(redis_url).await.unwrap();
-        let storage = RedisStorage::new(conn);
+        let mut storage = RedisStorage::new(conn);
+        cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage
     }
 
     /// rollback DB changes made by tests.
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(mut storage: RedisStorage<Email>, _worker_id: &WorkerId) {
+    async fn cleanup<T>(storage: &mut RedisStorage<T>, _worker_id: &WorkerId) {
         let _resp: String = redis::cmd("FLUSHDB")
             .query_async(&mut storage.conn)
             .await
@@ -1071,7 +1072,6 @@ mod tests {
 
         let _job = consume_one(&mut storage, &worker_id).await;
 
-        cleanup(&mut storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -1083,19 +1083,19 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let job_id = &job.get::<Context>().unwrap().id;
+        let attempts = job.get::<Attempt>().unwrap().clone();
 
         storage
             .ack(AckResponse {
                 acknowledger: job_id.clone(),
                 result: Ok("Success".to_string()),
                 worker: worker_id.clone(),
-                attempts: Attempt::new_with_value(0),
+                attempts,
             })
             .await
             .expect("failed to acknowledge the job");
 
         let _job = get_job(&mut storage, &job_id).await;
-        cleanup(&mut storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -1115,8 +1115,6 @@ mod tests {
             .expect("failed to kill job");
 
         let _job = get_job(&mut storage, &job_id).await;
-
-        cleanup(&mut storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -1132,7 +1130,6 @@ mod tests {
             .reenqueue_orphaned(5, 300)
             .await
             .expect("failed to reenqueue_orphaned");
-        cleanup(&mut storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -1149,6 +1146,5 @@ mod tests {
             .await
             .expect("failed to reenqueue_orphaned");
 
-        cleanup(&mut storage, &worker_id).await;
     }
 }
