@@ -538,8 +538,8 @@ mod tests {
         MysqlStorage::setup(&pool)
             .await
             .expect("failed to migrate DB");
-        let storage = MysqlStorage::new(pool);
-
+        let mut storage = MysqlStorage::new(pool);
+        cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage
     }
 
@@ -549,9 +549,9 @@ mod tests {
     ///  - worker identified by `worker_id`
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(storage: MysqlStorage<Email>, worker_id: &WorkerId) {
-        sqlx::query("DELETE FROM jobs WHERE lock_by = ? OR status = 'Pending'")
-            .bind(worker_id.to_string())
+    async fn cleanup<T>(storage: &mut MysqlStorage<T>, worker_id: &WorkerId) {
+        sqlx::query("DELETE FROM jobs WHERE job_type = ?")
+            .bind(storage.config.namespace())
             .execute(&storage.pool)
             .await
             .expect("failed to delete jobs");
@@ -612,6 +612,8 @@ mod tests {
     }
 
     async fn get_job(storage: &mut MysqlStorage<Email>, job_id: &TaskId) -> Request<Email> {
+        // add a slight delay to allow background actions like ack to complete
+        apalis_core::sleep(Duration::from_secs(1)).await;
         storage
             .fetch_by_id(job_id)
             .await
@@ -632,8 +634,6 @@ mod tests {
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
         assert!(ctx.lock_at().is_some());
-
-        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -663,8 +663,6 @@ mod tests {
         // TODO: Fix assertions
         assert_eq!(*ctx.status(), State::Done);
         assert!(ctx.done_at().is_some());
-
-        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -690,8 +688,6 @@ mod tests {
         // TODO: Fix assertions
         assert_eq!(*ctx.status(), State::Killed);
         assert!(ctx.done_at().is_some());
-
-        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -730,8 +726,6 @@ mod tests {
         assert!(context.lock_at().is_none());
         assert!(context.done_at().is_none());
         assert_eq!(*context.last_error(), Some("Job was abandoned".to_string()));
-
-        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -768,7 +762,5 @@ mod tests {
         // TODO: Fix assertions
         assert_eq!(*context.status(), State::Running);
         assert_eq!(*context.lock_by(), Some(worker_id.clone()));
-
-        cleanup(storage, &worker_id).await;
     }
 }

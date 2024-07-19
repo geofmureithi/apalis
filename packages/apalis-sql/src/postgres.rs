@@ -627,24 +627,25 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         PostgresStorage::setup(&pool).await.unwrap();
-        let storage = PostgresStorage::new(pool);
+        let mut storage = PostgresStorage::new(pool);
+        cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage
     }
 
     /// rollback DB changes made by tests.
     /// Delete the following rows:
-    ///  - jobs whose state is `Pending` or locked by `worker_id`
+    ///  - jobs of the current type
     ///  - worker identified by `worker_id`
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(storage: PostgresStorage<Email>, worker_id: &WorkerId) {
+    async fn cleanup<T>(storage: &mut PostgresStorage<T>, worker_id: &WorkerId) {
         let mut tx = storage
             .pool
             .acquire()
             .await
             .expect("failed to get connection");
-        sqlx::query("Delete from apalis.jobs where lock_by = $1 or status = 'Pending'")
-            .bind(worker_id.to_string())
+        sqlx::query("Delete from apalis.jobs where job_type = $1")
+            .bind(storage.config.namespace())
             .execute(&mut *tx)
             .await
             .expect("failed to delete jobs");
@@ -693,6 +694,8 @@ mod tests {
     }
 
     async fn get_job(storage: &mut PostgresStorage<Email>, job_id: &TaskId) -> Request<Email> {
+        // add a slight delay to allow background actions like ack to complete
+        apalis_core::sleep(Duration::from_secs(1)).await;
         storage
             .fetch_by_id(job_id)
             .await
@@ -709,11 +712,13 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
+        let job_id = ctx.id();
+        // Refresh our job
+        let job = get_job(&mut storage, job_id).await;
+        let ctx = job.get::<SqlContext>().unwrap();
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
         assert!(ctx.lock_at().is_some());
-
-        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -741,8 +746,6 @@ mod tests {
         let ctx = job.get::<SqlContext>().unwrap();
         assert_eq!(*ctx.status(), State::Done);
         assert!(ctx.done_at().is_some());
-
-        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -766,8 +769,6 @@ mod tests {
         let ctx = job.get::<SqlContext>().unwrap();
         assert_eq!(*ctx.status(), State::Killed);
         assert!(ctx.done_at().is_some());
-
-        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -793,8 +794,6 @@ mod tests {
         assert!(ctx.lock_by().is_none());
         assert!(ctx.lock_at().is_none());
         assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_string()));
-
-        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -822,7 +821,5 @@ mod tests {
 
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
-
-        cleanup(storage, &worker_id).await;
     }
 }

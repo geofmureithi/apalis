@@ -1071,7 +1071,7 @@ mod tests {
 
         let _job = consume_one(&mut storage, &worker_id).await;
 
-        cleanup(storage, &worker_id).await;
+        cleanup(&mut storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -1095,7 +1095,7 @@ mod tests {
             .expect("failed to acknowledge the job");
 
         let _job = get_job(&mut storage, &job_id).await;
-        cleanup(storage, &worker_id).await;
+        cleanup(&mut storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -1116,7 +1116,7 @@ mod tests {
 
         let _job = get_job(&mut storage, &job_id).await;
 
-        cleanup(storage, &worker_id).await;
+        cleanup(&mut storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -1132,7 +1132,7 @@ mod tests {
             .reenqueue_orphaned(5, 300)
             .await
             .expect("failed to reenqueue_orphaned");
-        cleanup(storage, &worker_id).await;
+        cleanup(&mut storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -1149,6 +1149,6 @@ mod tests {
             .await
             .expect("failed to reenqueue_orphaned");
 
-        cleanup(storage, &worker_id).await;
+        cleanup(&mut storage, &worker_id).await;
     }
 }

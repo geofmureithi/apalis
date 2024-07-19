@@ -49,7 +49,7 @@ impl Default for Config {
         Self {
             keep_alive: Duration::from_secs(30),
             buffer_size: 10,
-            poll_interval: Duration::from_millis(50),
+            poll_interval: Duration::from_millis(100),
             namespace: String::from("apalis::sql"),
         }
     }
@@ -63,7 +63,7 @@ impl Config {
 
     /// Interval between database poll queries
     ///
-    /// Defaults to 30ms
+    /// Defaults to 100ms
     pub fn set_poll_interval(mut self, interval: Duration) -> Self {
         self.poll_interval = interval;
         self
