@@ -1,15 +1,16 @@
 use apalis::prelude::*;
-
-use apalis::{
-    mysql::{MySqlPool, MysqlStorage},
-    postgres::{PgPool, PostgresStorage},
-    sqlite::{SqlitePool, SqliteStorage},
-};
 use apalis_redis::RedisStorage;
+use apalis_sql::mysql::MysqlStorage;
+use apalis_sql::postgres::PostgresStorage;
+use apalis_sql::sqlite::SqliteStorage;
+use apalis_sql::Config;
 use criterion::*;
 use futures::Future;
 use paste::paste;
 use serde::{Deserialize, Serialize};
+use sqlx::MySqlPool;
+use sqlx::PgPool;
+use sqlx::SqlitePool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -133,21 +134,22 @@ define_bench!("sqlite_in_memory", {
 
 define_bench!("redis", {
     let conn = apalis_redis::connect(env!("REDIS_URL")).await.unwrap();
-    let redis = RedisStorage::new(conn);
+    let redis =
+        RedisStorage::new_with_config(conn, apalis_redis::Config::default().set_buffer_size(1000));
     redis
 });
 
 define_bench!("postgres", {
     let pool = PgPool::connect(env!("POSTGRES_URL")).await.unwrap();
     let _ = PostgresStorage::setup(&pool).await.unwrap();
-    PostgresStorage::new(pool)
+    PostgresStorage::new_with_config(pool, Config::new("postgres:bench").set_buffer_size(1000))
 });
 
 define_bench!("mysql", {
     let pool = MySqlPool::connect(env!("MYSQL_URL")).await.unwrap();
     let _ = MysqlStorage::setup(&pool).await.unwrap();
-    MysqlStorage::new(pool)
+    MysqlStorage::new_with_config(pool, Config::new("mysql:bench").set_buffer_size(1000))
 });
 
-criterion_group!(benches, sqlite_in_memory);
+criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
 criterion_main!(benches);

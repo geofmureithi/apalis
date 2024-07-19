@@ -77,6 +77,11 @@ paste = "1.0.14"
 serde = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 apalis-redis = { path = "./packages/apalis-redis" }
+apalis-sql = { path = "./packages/apalis-sql", features = [
+  "postgres",
+  "mysql",
+  "sqlite",
+] }
 redis = { version = "0.25.3", default-features = false, features = [
   "tokio-comp",
   "script",
