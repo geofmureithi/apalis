@@ -12,12 +12,12 @@ use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, BoxCodec};
 use async_stream::try_stream;
+use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt, TryStreamExt};
 use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use sqlx::mysql::MySqlRow;
-use chrono::{DateTime, Utc};
 use sqlx::{MySql, Pool, Row};
 use std::any::type_name;
 use std::convert::TryInto;
@@ -385,7 +385,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
         let mut hb_storage = self.clone();
         let stream = self
             .stream_jobs(&worker, config.poll_interval, config.buffer_size, &config)
-            .map_err(|e| Error::SourceError(Box::new(e)));
+            .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
 
         let ack_heartbeat = async move {
@@ -401,7 +401,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                     let query = query
                         .bind(calculate_status(&id.result).to_string())
                         .bind(serde_json::to_string(&id.result).unwrap())
-                        .bind(id.attempts.current() as u64)
+                        .bind(id.attempts.current() as u64 + 1)
                         .bind(id.acknowledger.to_string())
                         .bind(id.worker.to_string());
                     if let Err(e) = query.execute(&pool).await {
@@ -511,14 +511,25 @@ impl<T> MysqlStorage<T> {
 mod tests {
 
     use crate::context::State;
+    use crate::sql_storage_tests;
 
     use super::*;
     use apalis_core::task::attempt::Attempt;
+
+    use apalis_core::test_utils::DummyService;
     use email_service::Email;
     use futures::StreamExt;
 
+    use apalis_core::generic_storage_test;
+    use apalis_core::test_utils::apalis_test_service_fn;
+    use apalis_core::test_utils::TestWrapper;
+
+    generic_storage_test!(setup);
+
+    sql_storage_tests!(setup::<Email>, MysqlStorage<Email>, Email);
+
     /// migrate DB and return a storage instance.
-    async fn setup() -> MysqlStorage<Email> {
+    async fn setup<T: Serialize + DeserializeOwned>() -> MysqlStorage<T> {
         let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
         // Because connections cannot be shared across async runtime
         // (different runtimes are created for each test),
@@ -527,8 +538,8 @@ mod tests {
         MysqlStorage::setup(&pool)
             .await
             .expect("failed to migrate DB");
-        let storage = MysqlStorage::new(pool);
-
+        let mut storage = MysqlStorage::new(pool);
+        cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage
     }
 
@@ -538,9 +549,9 @@ mod tests {
     ///  - worker identified by `worker_id`
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(storage: MysqlStorage<Email>, worker_id: &WorkerId) {
-        sqlx::query("DELETE FROM jobs WHERE lock_by = ? OR status = 'Pending'")
-            .bind(worker_id.to_string())
+    async fn cleanup<T>(storage: &mut MysqlStorage<T>, worker_id: &WorkerId) {
+        sqlx::query("DELETE FROM jobs WHERE job_type = ?")
+            .bind(storage.config.namespace())
             .execute(&storage.pool)
             .await
             .expect("failed to delete jobs");
@@ -551,9 +562,11 @@ mod tests {
             .expect("failed to delete worker");
     }
 
-    async fn consume_one(storage: &MysqlStorage<Email>, worker_id: &WorkerId) -> Request<Email> {
-        let storage = storage.clone();
-        let mut stream = storage.stream_jobs(
+    async fn consume_one(
+        storage: &mut MysqlStorage<Email>,
+        worker_id: &WorkerId,
+    ) -> Request<Email> {
+        let mut stream = storage.clone().stream_jobs(
             worker_id,
             std::time::Duration::from_secs(10),
             1,
@@ -575,8 +588,6 @@ mod tests {
         }
     }
 
-    struct DummyService {}
-
     async fn register_worker_at(
         storage: &mut MysqlStorage<Email>,
         last_seen: DateTime<Utc>,
@@ -596,17 +607,13 @@ mod tests {
         register_worker_at(storage, now).await
     }
 
-    async fn push_email<S>(storage: &mut S, email: Email)
-    where
-        S: Storage<Job = Email, Error = sqlx::Error>,
-    {
+    async fn push_email(storage: &mut MysqlStorage<Email>, email: Email) {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job<S>(storage: &mut S, job_id: &TaskId) -> Request<Email>
-    where
-        S: Storage<Job = Email, Identifier = TaskId, Error = sqlx::Error>,
-    {
+    async fn get_job(storage: &mut MysqlStorage<Email>, job_id: &TaskId) -> Request<Email> {
+        // add a slight delay to allow background actions like ack to complete
+        apalis_core::sleep(Duration::from_secs(1)).await;
         storage
             .fetch_by_id(job_id)
             .await
@@ -624,42 +631,9 @@ mod tests {
         let job = consume_one(&mut storage, &worker_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
         // TODO: Fix assertions
-        // assert_eq!(*ctx.status(), State::Running);
-        // assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
-        // assert!(ctx.lock_at().is_some());
-
-        cleanup(storage, &worker_id).await;
-    }
-
-    #[tokio::test]
-    async fn test_acknowledge_job() {
-        let mut storage = setup().await;
-        push_email(&mut storage, example_email()).await;
-
-        let worker_id = register_worker(&mut storage).await;
-
-        let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
-        let job_id = ctx.id();
-
-        storage
-            .ack(AckResponse {
-                acknowledger: job_id.clone(),
-                result: Ok("Success".to_string()),
-                worker: worker_id.clone(),
-                attempts: Attempt::new_with_value(0)
-            })
-            .await
-            .expect("failed to acknowledge the job");
-
-        let job = get_job(&mut storage, job_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
-
-        // TODO: Fix assertions
-        // assert_eq!(*ctx.status(), State::Done);
-        // assert!(ctx.done_at().is_some());
-
-        cleanup(storage, &worker_id).await;
+        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
+        assert!(ctx.lock_at().is_some());
     }
 
     #[tokio::test]
@@ -683,10 +657,8 @@ mod tests {
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
         // TODO: Fix assertions
-        // assert_eq!(*ctx.status(), State::Killed);
-        // assert!(ctx.done_at().is_some());
-
-        cleanup(storage, &worker_id).await;
+        assert_eq!(*ctx.status(), State::Killed);
+        assert!(ctx.done_at().is_some());
     }
 
     #[tokio::test]
@@ -720,14 +692,11 @@ mod tests {
         // then, the job status has changed to Pending
         let job = storage.fetch_by_id(ctx.id()).await.unwrap().unwrap();
         let context = job.get::<SqlContext>().unwrap();
-        // TODO: Fix assertions
-        // assert_eq!(*context.status(), State::Pending);
-        // assert!(context.lock_by().is_none());
-        // assert!(context.lock_at().is_none());
-        // assert!(context.done_at().is_none());
-        // assert_eq!(*context.last_error(), Some("Job was abandoned".to_string()));
-
-        cleanup(storage, &worker_id).await;
+        assert_eq!(*context.status(), State::Pending);
+        assert!(context.lock_by().is_none());
+        assert!(context.lock_at().is_none());
+        assert!(context.done_at().is_none());
+        assert_eq!(*context.last_error(), Some("Job was abandoned".to_string()));
     }
 
     #[tokio::test]
@@ -762,9 +731,7 @@ mod tests {
         let job = storage.fetch_by_id(ctx.id()).await.unwrap().unwrap();
         let context = job.get::<SqlContext>().unwrap();
         // TODO: Fix assertions
-        // assert_eq!(*context.status(), State::Running);
-        // assert_eq!(*context.lock_by(), Some(worker_id.clone()));
-
-        cleanup(storage, &worker_id).await;
+        assert_eq!(*context.status(), State::Running);
+        assert_eq!(*context.lock_by(), Some(worker_id.clone()));
     }
 }

@@ -68,6 +68,7 @@ use apalis_core::{error::Error, request::Request};
 use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 /// Represents a stream from a cron schedule with a timezone
 #[derive(Clone, Debug)]
@@ -117,7 +118,7 @@ where
                 match next {
                     Some(next) => {
                         let to_sleep = next - timezone.from_utc_datetime(&Utc::now().naive_utc());
-                        let to_sleep = to_sleep.to_std().map_err(|e| Error::Failed(e.into()))?;
+                        let to_sleep = to_sleep.to_std().map_err(|e| Error::SourceError(Arc::new(e.into())))?;
                         apalis_core::sleep(to_sleep).await;
                         let mut data = Extensions::new();
                         data.insert(TaskId::new());

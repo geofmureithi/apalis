@@ -9,7 +9,7 @@ license = "MIT"
 description = "SQL Storage for apalis. Use sqlite, postgres and mysql for background job processing"
 
 [features]
-default = ["sqlite", "migrate", "postgres"]
+default = ["migrate"]
 postgres = ["sqlx/postgres", "sqlx/json"]
 sqlite = ["sqlx/sqlite", "sqlx/json"]
 mysql = ["sqlx/mysql", "sqlx/json", "sqlx/bigdecimal"]
@@ -45,6 +45,8 @@ apalis = { path = "../../", default-features = false, features = [
     "tokio-comp",
 ] }
 once_cell = "1.19.0"
+apalis-sql = { path = ".", features = ["tokio-comp"] }
+apalis-core = { path = "../apalis-core", features = ["test-utils"] }
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

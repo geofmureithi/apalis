@@ -53,13 +53,13 @@ use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, BoxCodec};
+use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
 use futures::StreamExt;
 use futures::{select, stream, SinkExt};
 use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::postgres::PgListener;
-use chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres, Row};
 use std::any::type_name;
 use std::convert::TryInto;
@@ -149,11 +149,11 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 let res = storage
                     .fetch_next(worker)
                     .await
-                    .map_err(|e| Error::Failed(Box::new(e)))?;
+                    .map_err(|e| Error::SourceError(Arc::new(Box::new(e))))?;
                 for job in res {
                     tx.send(Ok(Some(job)))
                         .await
-                        .map_err(|e| Error::Failed(Box::new(e)))?;
+                        .map_err(|e| Error::SourceError(Arc::new(Box::new(e))))?;
                 }
                 Ok(())
             }
@@ -175,19 +175,31 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
                             let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|c| {
-                                (c.acknowledger.to_string(), c.worker.to_string(), serde_json::to_string(&c.result).unwrap(), calculate_status(&c.result).to_string(), c.attempts.current() as u64)
+                                (c.acknowledger.to_string(), c.worker.to_string(), serde_json::to_string(&c.result).unwrap(), calculate_status(&c.result).to_string(), (c.attempts.current() + 1) as u64 )
                             }).collect();
                             let query =
-                                "UPDATE apalis.jobs SET status = Q.status, done_at = now(), lock_by = Q.lock_by, last_error = Q.result, attempts = Q.attempts FROM (
-                                                SELECT(value-->0)::text as id, (value->>1)::text as worker_id, (value->>2)::text as result, (value->>3)::text as status, (value->>4)::int as attempts FROM json_array_elements($1)
-                                            ) Q
-                                            WHERE id = Q.id";
+                                "UPDATE apalis.jobs
+                                    SET status = Q.status, 
+                                        done_at = now(), 
+                                        lock_by = Q.worker_id, 
+                                        last_error = Q.result, 
+                                        attempts = Q.attempts 
+                                    FROM (
+                                        SELECT (value->>0)::text as id, 
+                                            (value->>1)::text as worker_id, 
+                                            (value->>2)::text as result, 
+                                            (value->>3)::text as status, 
+                                            (value->>4)::int as attempts 
+                                        FROM json_array_elements($1::json)
+                                    ) Q
+                                    WHERE apalis.jobs.id = Q.id;
+                                    ";
                             if let Err(e) = sqlx::query(query)
-                                .bind(serde_json::to_string(&ack_ids).unwrap())
+                                .bind(serde_json::to_value(&ack_ids).unwrap())
                                 .execute(&pool)
                                 .await
                             {
-                                error!("AckError: {e}");
+                                panic!("AckError: {e}");
                             }
                         }
                     }
@@ -207,13 +219,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 };
             }
         };
-        Poller::new_with_layer(
-            BackendStream::new(rx.boxed(), controller),
-            async {
-                futures::join!(heartbeat);
-            },
-            layer,
-        )
+        Poller::new_with_layer(BackendStream::new(rx.boxed(), controller), heartbeat, layer)
     }
 }
 
@@ -609,37 +615,49 @@ impl<T> PostgresStorage<T> {
 #[cfg(test)]
 mod tests {
     use crate::context::State;
+    use crate::sql_storage_tests;
 
     use super::*;
     use apalis_core::task::attempt::Attempt;
-    use email_service::Email;
+    use apalis_core::test_utils::DummyService;
     use chrono::Utc;
+    use email_service::Email;
+
+    use apalis_core::generic_storage_test;
+    use apalis_core::test_utils::apalis_test_service_fn;
+    use apalis_core::test_utils::TestWrapper;
+
+    generic_storage_test!(setup);
+
+    sql_storage_tests!(setup::<Email>, PostgresStorage<Email>, Email);
 
     /// migrate DB and return a storage instance.
-    async fn setup() -> PostgresStorage<Email> {
+    async fn setup<T: Serialize + DeserializeOwned>() -> PostgresStorage<T> {
         let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
         let pool = PgPool::connect(&db_url).await.unwrap();
         // Because connections cannot be shared across async runtime
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         PostgresStorage::setup(&pool).await.unwrap();
-        let storage = PostgresStorage::new(pool);
+        let mut storage = PostgresStorage::new(pool);
+        cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage
     }
 
     /// rollback DB changes made by tests.
     /// Delete the following rows:
-    ///  - jobs whose state is `Pending` or locked by `worker_id`
+    ///  - jobs of the current type
     ///  - worker identified by `worker_id`
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(storage: PostgresStorage<Email>, worker_id: &WorkerId) {
+    async fn cleanup<T>(storage: &mut PostgresStorage<T>, worker_id: &WorkerId) {
         let mut tx = storage
             .pool
             .acquire()
             .await
             .expect("failed to get connection");
-        sqlx::query("Delete from apalis.jobs where lock_by = $1 or status = 'Pending'")
+        sqlx::query("Delete from apalis.jobs where job_type = $1 OR lock_by = $2")
+            .bind(storage.config.namespace())
             .bind(worker_id.to_string())
             .execute(&mut *tx)
             .await
@@ -650,8 +668,6 @@ mod tests {
             .await
             .expect("failed to delete worker");
     }
-
-    struct DummyService {}
 
     fn example_email() -> Email {
         Email {
@@ -691,6 +707,8 @@ mod tests {
     }
 
     async fn get_job(storage: &mut PostgresStorage<Email>, job_id: &TaskId) -> Request<Email> {
+        // add a slight delay to allow background actions like ack to complete
+        apalis_core::sleep(Duration::from_secs(2)).await;
         storage
             .fetch_by_id(job_id)
             .await
@@ -707,42 +725,13 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
-        assert_eq!(*ctx.status(), State::Running);
-        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
-        // TODO: assert!(ctx.lock_at().is_some());
-
-        cleanup(storage, &worker_id).await;
-    }
-
-    #[tokio::test]
-    async fn test_acknowledge_job() {
-        let mut storage = setup().await;
-        push_email(&mut storage, example_email()).await;
-
-        let worker_id = register_worker(&mut storage).await;
-
-        let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
         let job_id = ctx.id();
-
-        storage
-            .ack(AckResponse {
-                acknowledger: job_id.clone(),
-                result: Ok("Success".to_string()),
-                worker: worker_id.clone(),
-                attempts: Attempt::new_with_value(0)
-
-            })
-            .await
-            .expect("failed to acknowledge the job");
-
+        // Refresh our job
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
-        // TODO: Currently ack is done in the background
-        // assert_eq!(*ctx.status(), State::Done);
-        // assert!(ctx.done_at().is_some());
-
-        cleanup(storage, &worker_id).await;
+        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
+        assert!(ctx.lock_at().is_some());
     }
 
     #[tokio::test]
@@ -765,9 +754,7 @@ mod tests {
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.get::<SqlContext>().unwrap();
         assert_eq!(*ctx.status(), State::Killed);
-        // TODO: assert!(ctx.done_at().is_some());
-
-        cleanup(storage, &worker_id).await;
+        assert!(ctx.done_at().is_some());
     }
 
     #[tokio::test]
@@ -793,8 +780,6 @@ mod tests {
         assert!(ctx.lock_by().is_none());
         assert!(ctx.lock_at().is_none());
         assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_string()));
-
-        cleanup(storage, &worker_id).await;
     }
 
     #[tokio::test]
@@ -822,7 +807,5 @@ mod tests {
 
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
-
-        cleanup(storage, &worker_id).await;
     }
 }

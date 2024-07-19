@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
     produce_jobs(storage.clone()).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .chain(|svc| svc.map_err(Error::Failed))
+        .chain(|svc| svc.map_err(|e| Error::Failed(Arc::new(e))))
         .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
         .layer(TimeoutLayer::new(Duration::from_millis(500)))
         .data(Count::default())

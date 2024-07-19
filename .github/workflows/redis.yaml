@@ -1,8 +1,4 @@
 on:
-  push:
-    paths:
-      - "packages/apalis-redis/**"
-      - ".github/workflows/redis.yaml"
   pull_request:
     paths:
       - "packages/apalis-redis/**"

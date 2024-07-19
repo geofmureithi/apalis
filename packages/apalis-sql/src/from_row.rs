@@ -1,5 +1,6 @@
 use apalis_core::task::task_id::TaskId;
 use apalis_core::{data::Extensions, request::Request, worker::WorkerId};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Type};
 
@@ -149,11 +150,11 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
         let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
 
-        let done_at: Option<Timestamp> = row.try_get("done_at").unwrap_or_default();
-        context.set_done_at(done_at);
+        let done_at: Option<chrono::DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();
+        context.set_done_at(done_at.map(|d| d.timestamp()));
 
-        let lock_at: Option<Timestamp> = row.try_get("lock_at").unwrap_or_default();
-        context.set_lock_at(lock_at);
+        let lock_at: Option<chrono::DateTime<Utc>> = row.try_get("lock_at").unwrap_or_default();
+        context.set_lock_at(lock_at.map(|d| d.timestamp()));
 
         let last_error = row.try_get("last_error").unwrap_or_default();
         context.set_last_error(last_error);
@@ -187,9 +188,6 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
     fn from_row(row: &'r sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
         use std::str::FromStr;
-
-        type Timestamp = i64;
-
         let job: T = row.try_get("job")?;
         let id: TaskId =
             TaskId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
@@ -207,11 +205,11 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
         let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
 
-        let done_at: Option<Timestamp> = row.try_get("done_at").unwrap_or_default();
-        context.set_done_at(done_at);
+        let done_at: Option<chrono::NaiveDateTime> = row.try_get("done_at").unwrap_or_default();
+        context.set_done_at(done_at.map(|d| d.and_utc().timestamp()));
 
-        let lock_at: Option<Timestamp> = row.try_get("lock_at").unwrap_or_default();
-        context.set_lock_at(lock_at);
+        let lock_at: Option<chrono::NaiveDateTime> = row.try_get("lock_at").unwrap_or_default();
+        context.set_lock_at(lock_at.map(|d| d.and_utc().timestamp()));
 
         let last_error = row.try_get("last_error").unwrap_or_default();
         context.set_last_error(last_error);

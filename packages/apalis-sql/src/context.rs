@@ -1,8 +1,8 @@
 use apalis_core::error::Error;
 use apalis_core::task::{attempt::Attempt, task_id::TaskId};
 use apalis_core::worker::WorkerId;
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
 /// The context for a job is represented here
@@ -137,8 +137,6 @@ pub enum State {
     Running,
     /// Job was done successfully
     Done,
-    /// Retry Job
-    Retry,
     /// Job has failed. Check `last_error`
     Failed,
     /// Job has been killed
@@ -159,7 +157,6 @@ impl FromStr for State {
             "Pending" | "Latest" => Ok(State::Pending),
             "Running" => Ok(State::Running),
             "Done" => Ok(State::Done),
-            "Retry" => Ok(State::Retry),
             "Failed" => Ok(State::Failed),
             "Killed" => Ok(State::Killed),
             _ => Err(Error::MissingContext("Invalid Job state".to_string())),
@@ -173,7 +170,6 @@ impl fmt::Display for State {
             State::Pending => write!(f, "Pending"),
             State::Running => write!(f, "Running"),
             State::Done => write!(f, "Done"),
-            State::Retry => write!(f, "Retry"),
             State::Failed => write!(f, "Failed"),
             State::Killed => write!(f, "Killed"),
         }

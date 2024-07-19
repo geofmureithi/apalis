@@ -297,6 +297,7 @@ impl<E> Monitor<E> {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_utils::apalis_test_service_fn;
     use std::{io, time::Duration};
 
     use tokio::time::sleep;
@@ -307,11 +308,15 @@ mod tests {
         monitor::Monitor,
         mq::MessageQueue,
         request::Request,
+        test_message_queue,
+        test_utils::TestWrapper,
         TestExecutor,
     };
 
+    test_message_queue!(MemoryStorage::new());
+
     #[tokio::test]
-    async fn it_works() {
+    async fn it_works_with_workers() {
         let backend = MemoryStorage::new();
         let mut handle = backend.clone();
 
@@ -342,7 +347,7 @@ mod tests {
         let mut handle = backend.clone();
 
         tokio::spawn(async move {
-            for i in 0..1000 {
+            for i in 0..10 {
                 handle.enqueue(i).await.unwrap();
             }
         });

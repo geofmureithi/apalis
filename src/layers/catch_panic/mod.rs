@@ -2,6 +2,7 @@ use std::fmt;
 use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use apalis_core::error::Error;
@@ -100,10 +101,10 @@ where
                 } else {
                     "Unknown panic".to_string()
                 };
-                Poll::Ready(Err(Error::Failed(Box::new(PanicError(
+                Poll::Ready(Err(Error::Failed(Arc::new(Box::new(PanicError(
                     panic_info,
                     Backtrace::new(),
-                )))))
+                ))))))
             }
         }
     }

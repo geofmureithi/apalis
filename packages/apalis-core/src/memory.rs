@@ -52,8 +52,8 @@ impl<T> Clone for MemoryStorage<T> {
 /// In-memory queue that implements [Stream]
 #[derive(Debug)]
 pub struct MemoryWrapper<T> {
-    sender: Sender<T>,
-    receiver: Arc<futures::lock::Mutex<Receiver<T>>>,
+    sender: Sender<Request<T>>,
+    receiver: Arc<futures::lock::Mutex<Receiver<Request<T>>>>,
 }
 
 impl<T> Clone for MemoryWrapper<T> {
@@ -84,7 +84,7 @@ impl<T> Default for MemoryWrapper<T> {
 }
 
 impl<T> Stream for MemoryWrapper<T> {
-    type Item = T;
+    type Item = Request<T>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Some(mut receiver) = self.receiver.try_lock() {
@@ -102,7 +102,7 @@ impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<T> {
     type Layer = Identity;
 
     fn poll(self, _worker: WorkerId) -> Poller<Self::Stream> {
-        let stream = self.inner.map(|r| Ok(Some(Request::new(r)))).boxed();
+        let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         Poller {
             stream: BackendStream::new(stream, self.controller),
             heartbeat: Box::pin(async {}),
@@ -114,12 +114,15 @@ impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<T> {
 impl<Message: Send + 'static + Sync> MessageQueue<Message> for MemoryStorage<Message> {
     type Error = ();
     async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
-        self.inner.sender.try_send(message).unwrap();
+        self.inner
+            .sender
+            .try_send(Request::new(message))
+            .map_err(|_| ())?;
         Ok(())
     }
 
     async fn dequeue(&mut self) -> Result<Option<Message>, ()> {
-        Ok(self.inner.receiver.lock().await.next().await)
+        Ok(self.inner.receiver.lock().await.next().await.map(|r| r.req))
     }
 
     async fn size(&mut self) -> Result<usize, ()> {

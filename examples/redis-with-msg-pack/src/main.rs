@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use apalis::prelude::*;
@@ -13,11 +13,11 @@ struct MessagePack;
 impl<T: Serialize + DeserializeOwned> Codec<T, Vec<u8>> for MessagePack {
     type Error = Error;
     fn encode(&self, input: &T) -> Result<Vec<u8>, Self::Error> {
-        rmp_serde::to_vec(input).map_err(|e| Error::SourceError(Box::new(e)))
+        rmp_serde::to_vec(input).map_err(|e| Error::SourceError(Arc::new(Box::new(e))))
     }
 
     fn decode(&self, compact: &Vec<u8>) -> Result<T, Self::Error> {
-        rmp_serde::from_slice(compact).map_err(|e| Error::SourceError(Box::new(e)))
+        rmp_serde::from_slice(compact).map_err(|e| Error::SourceError(Arc::new(Box::new(e))))
     }
 }
 
