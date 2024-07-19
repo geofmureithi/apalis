@@ -195,7 +195,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                                     WHERE apalis.jobs.id = Q.id;
                                     ";
                             if let Err(e) = sqlx::query(query)
-                                .bind(serde_json::to_string(&ack_ids).unwrap())
+                                .bind(serde_json::to_value(&ack_ids).unwrap())
                                 .execute(&pool)
                                 .await
                             {

@@ -177,7 +177,6 @@ macro_rules! sql_storage_tests {
                 ctx.last_error().clone().unwrap(),
                 "{\"Err\":\"AbortError: Invalid character. Job killed\"}"
             );
-            
         }
 
         #[tokio::test]

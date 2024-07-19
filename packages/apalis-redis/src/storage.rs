@@ -1071,7 +1071,6 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let _job = consume_one(&mut storage, &worker_id).await;
-
     }
 
     #[tokio::test]
@@ -1145,6 +1144,5 @@ mod tests {
             .reenqueue_orphaned(5, 300)
             .await
             .expect("failed to reenqueue_orphaned");
-
     }
 }
