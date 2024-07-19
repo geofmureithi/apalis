@@ -47,7 +47,7 @@
 //!     let worker = WorkerBuilder::new("morning-cereal")
 //!         .layer(RetryLayer::new(RetryPolicy::retries(5)))
 //!         .data(FakeService)
-//!         .stream(CronStream::new(schedule).into_stream())
+//!         .backend(CronStream::new(schedule))
 //!         .build_fn(send_reminder);
 //!     Monitor::<TokioExecutor>::new()
 //!         .register(worker)
