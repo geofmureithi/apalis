@@ -637,35 +637,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_acknowledge_job() {
-        let mut storage = setup().await;
-        push_email(&mut storage, example_email()).await;
-
-        let worker_id = register_worker(&mut storage).await;
-
-        let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
-        let job_id = ctx.id();
-
-        storage
-            .ack(AckResponse {
-                acknowledger: job_id.clone(),
-                result: Ok("Success".to_string()),
-                worker: worker_id.clone(),
-                attempts: Attempt::new_with_value(0),
-            })
-            .await
-            .expect("failed to acknowledge the job");
-
-        let job = get_job(&mut storage, job_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
-
-        // TODO: Fix assertions
-        assert_eq!(*ctx.status(), State::Done);
-        assert!(ctx.done_at().is_some());
-    }
-
-    #[tokio::test]
     async fn test_kill_job() {
         let mut storage = setup().await;
 

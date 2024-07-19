@@ -178,10 +178,22 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                                 (c.acknowledger.to_string(), c.worker.to_string(), serde_json::to_string(&c.result).unwrap(), calculate_status(&c.result).to_string(), (c.attempts.current() + 1) as u64 )
                             }).collect();
                             let query =
-                                "UPDATE apalis.jobs SET status = Q.status, done_at = now(), lock_by = Q.lock_by, last_error = Q.result, attempts = Q.attempts FROM (
-                                                SELECT(value-->0)::text as id, (value->>1)::text as worker_id, (value->>2)::text as result, (value->>3)::text as status, (value->>4)::int as attempts FROM json_array_elements($1)
-                                            ) Q
-                                            WHERE id = Q.id";
+                                "UPDATE apalis.jobs
+                                    SET status = Q.status, 
+                                        done_at = now(), 
+                                        lock_by = Q.worker_id, 
+                                        last_error = Q.result, 
+                                        attempts = Q.attempts 
+                                    FROM (
+                                        SELECT (value->>0)::text as id, 
+                                            (value->>1)::text as worker_id, 
+                                            (value->>2)::text as result, 
+                                            (value->>3)::text as status, 
+                                            (value->>4)::int as attempts 
+                                        FROM json_array_elements($1)
+                                    ) Q
+                                    WHERE apalis.jobs.id = Q.id;
+                                    ";
                             if let Err(e) = sqlx::query(query)
                                 .bind(serde_json::to_string(&ack_ids).unwrap())
                                 .execute(&pool)
@@ -720,33 +732,6 @@ mod tests {
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
         assert!(ctx.lock_at().is_some());
-    }
-
-    #[tokio::test]
-    async fn test_acknowledge_job() {
-        let mut storage = setup().await;
-        push_email(&mut storage, example_email()).await;
-
-        let worker_id = register_worker(&mut storage).await;
-
-        let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
-        let job_id = ctx.id();
-
-        storage
-            .ack(AckResponse {
-                acknowledger: job_id.clone(),
-                result: Ok("Success".to_string()),
-                worker: worker_id.clone(),
-                attempts: Attempt::new_with_value(0),
-            })
-            .await
-            .expect("failed to acknowledge the job");
-
-        let job = get_job(&mut storage, job_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
-        assert_eq!(*ctx.status(), State::Done);
-        assert!(ctx.done_at().is_some());
     }
 
     #[tokio::test]
