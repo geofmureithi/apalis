@@ -190,7 +190,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                                             (value->>2)::text as result, 
                                             (value->>3)::text as status, 
                                             (value->>4)::int as attempts 
-                                        FROM json_array_elements($1)
+                                        FROM json_array_elements($1::json)
                                     ) Q
                                     WHERE apalis.jobs.id = Q.id;
                                     ";
