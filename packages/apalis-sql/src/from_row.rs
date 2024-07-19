@@ -131,7 +131,6 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
         use std::str::FromStr;
-        type Timestamp = i64;
 
         let job: T = row.try_get("job")?;
         let id: TaskId =

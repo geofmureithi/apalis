@@ -174,7 +174,6 @@ impl crate::executor::Executor for TestExecutor {
 pub mod test_utils {
     use crate::error::BoxDynError;
     use crate::request::Request;
-    use crate::storage::Storage;
     use crate::task::task_id::TaskId;
     use crate::worker::WorkerId;
     use crate::Backend;
