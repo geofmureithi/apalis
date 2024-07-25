@@ -1,9 +1,8 @@
 use crate::context::SqlContext;
 use crate::{calculate_status, Config};
-
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
-use apalis_core::layers::{Ack, AckLayer, AckResponse};
+use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
@@ -450,14 +449,14 @@ impl<T> SqliteStorage<T> {
     }
 }
 
-impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
+impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res> Backend<Request<T>, Res>
     for SqliteStorage<T>
 {
     type Stream = BackendStream<RequestStream<Request<T>>>;
-    type Layer = AckLayer<SqliteStorage<T>, T>;
+    type Layer = AckLayer<SqliteStorage<T>, T, Res>;
 
-    fn poll(mut self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
-        let layer = AckLayer::new(self.clone(), worker.clone());
+    fn poll<Svc>(mut self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+        let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
         let stream = self
@@ -478,21 +477,25 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
     }
 }
 
-impl<T: Sync + Send> Ack<T> for SqliteStorage<T> {
-    type Acknowledger = TaskId;
-    type Error = sqlx::Error;
-    async fn ack(&mut self, res: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
+impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
+    type Context = SqlContext;
+    type AckError = sqlx::Error;
+    async fn ack(
+        &mut self,
+        ctx: &Self::Context,
+        res: &Result<Res, apalis_core::error::Error>,
+    ) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let query =
                 "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3, attempts =?5 WHERE id = ?1 AND lock_by = ?2";
-        let result = serde_json::to_string(&res.result)
+        let result = serde_json::to_string(&res.as_ref().map_err(|r| r.to_string()))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         sqlx::query(query)
-            .bind(res.acknowledger.to_string())
-            .bind(res.worker.to_string())
+            .bind(ctx.id().to_string())
+            .bind(ctx.lock_by().as_ref().unwrap().to_string())
             .bind(result)
-            .bind(calculate_status(&res.result).to_string())
-            .bind(res.attempts.current() as i64 + 1)
+            .bind(calculate_status(&res).to_string())
+            .bind(ctx.attempts().current() as i64 + 1)
             .execute(&pool)
             .await?;
         Ok(())

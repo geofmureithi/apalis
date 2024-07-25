@@ -4,10 +4,8 @@
 
 use futures::Future;
 
-use crate::{request::Request, Backend};
-
 /// Represents a message queue that can be pushed and consumed.
-pub trait MessageQueue<Message>: Backend<Request<Message>> {
+pub trait MessageQueue<Message> {
     /// The error produced by the queue
     type Error;
 

@@ -96,12 +96,12 @@ impl<T> Stream for MemoryWrapper<T> {
 }
 
 // MemoryStorage as a Backend
-impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<T> {
+impl<T: Send + 'static + Sync, Res> Backend<Request<T>, Res> for MemoryStorage<T> {
     type Stream = BackendStream<RequestStream<Request<T>>>;
 
     type Layer = Identity;
 
-    fn poll(self, _worker: WorkerId) -> Poller<Self::Stream> {
+    fn poll<Svc>(self, _worker: WorkerId) -> Poller<Self::Stream> {
         let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         Poller {
             stream: BackendStream::new(stream, self.controller),
@@ -122,7 +122,14 @@ impl<Message: Send + 'static + Sync> MessageQueue<Message> for MemoryStorage<Mes
     }
 
     async fn dequeue(&mut self) -> Result<Option<Message>, ()> {
-        Ok(self.inner.receiver.lock().await.next().await.map(|r| r.req))
+        Ok(self
+            .inner
+            .receiver
+            .lock()
+            .await
+            .next()
+            .await
+            .map(|r| r.args))
     }
 
     async fn size(&mut self) -> Result<usize, ()> {

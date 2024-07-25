@@ -130,11 +130,11 @@ impl Config {
 }
 
 /// Calculates the status from a result
-pub(crate) fn calculate_status(res: &Result<String, String>) -> State {
+pub(crate) fn calculate_status<Res>(res: &Result<Res, apalis_core::error::Error>) -> State {
     match res {
         Ok(_) => State::Done,
         Err(e) => match &e {
-            _ if e.starts_with("AbortError") => State::Killed,
+            _ if e.to_string().starts_with("AbortError") => State::Killed,
             _ => State::Failed,
         },
     }

@@ -6,23 +6,24 @@ use super::{
 
 use futures::channel::{mpsc, oneshot};
 use futures::task::AtomicWaker;
-use std::sync::Arc;
 use std::{
     future::Future,
     task::{Context, Poll},
 };
+use std::{marker::PhantomData, sync::Arc};
 use tower::Service;
 
 /// Adds an mpsc buffer in front of an inner service.
 ///
 /// See the module documentation for more details.
 #[derive(Debug)]
-pub struct Buffer<Req, F> {
+pub struct Buffer<Req, F, Res> {
     tx: PollSender<Message<Req, F>>,
     handle: Handle,
+    res: PhantomData<Res>,
 }
 
-impl<Req, F> Buffer<Req, F>
+impl<Req, F, Res> Buffer<Req, F, Res>
 where
     F: 'static,
 {
@@ -33,7 +34,7 @@ where
     /// the background `Worker` that you can then spawn.
     pub fn pair<S>(service: S, bound: usize) -> (Self, Worker<S, Req>)
     where
-        S: Service<Req, Future = F> + Send + 'static,
+        S: Service<Req, Future = F, Response = Res> + Send + 'static,
         F: Send,
         S::Error: Into<tower::BoxError> + Send + Sync,
         Req: Send + 'static,
@@ -43,6 +44,7 @@ where
         let buffer = Self {
             tx: PollSender::new(tx),
             handle,
+            res: PhantomData,
         };
         (buffer, worker)
     }
@@ -52,13 +54,13 @@ where
     }
 }
 
-impl<Req, Rsp, F, E> Service<Req> for Buffer<Req, F>
+impl<Req, Res, F, E> Service<Req> for Buffer<Req, F, Res>
 where
-    F: Future<Output = Result<Rsp, E>> + Send + 'static,
+    F: Future<Output = Result<Res, E>> + Send + 'static,
     E: Into<tower::BoxError>,
     Req: Send + 'static,
 {
-    type Response = Rsp;
+    type Response = Res;
     type Error = tower::BoxError;
     type Future = ResponseFuture<F>;
 
@@ -84,7 +86,7 @@ where
     }
 }
 
-impl<Req, F> Clone for Buffer<Req, F>
+impl<Req, F, Res> Clone for Buffer<Req, F, Res>
 where
     Req: Send + 'static,
     F: Send + 'static,
@@ -93,6 +95,7 @@ where
         Self {
             handle: self.handle.clone(),
             tx: self.tx.clone(),
+            res: PhantomData,
         }
     }
 }

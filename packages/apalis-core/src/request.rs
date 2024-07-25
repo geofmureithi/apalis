@@ -13,7 +13,7 @@ use crate::{
 
 #[derive(Serialize, Debug, Deserialize, Clone)]
 pub struct Request<T> {
-    pub(crate) req: T,
+    pub(crate) args: T,
     #[serde(skip)]
     pub(crate) data: Extensions,
 }
@@ -29,17 +29,17 @@ impl<T> Request<T> {
 
     /// Creates a request with context provided
     pub fn new_with_data(req: T, data: Extensions) -> Self {
-        Self { req, data }
+        Self { args: req, data }
     }
 
     /// Get the underlying reference of the request
     pub fn inner(&self) -> &T {
-        &self.req
+        &self.args
     }
 
     /// Take the underlying reference of the request
     pub fn take(self) -> T {
-        self.req
+        self.args
     }
 }
 
@@ -64,12 +64,12 @@ pub type RequestFuture<T> = BoxFuture<'static, T>;
 /// Represents a stream for T.
 pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, Error>>;
 
-impl<T> Backend<Request<T>> for RequestStream<Request<T>> {
+impl<T, Res> Backend<Request<T>, Res> for RequestStream<Request<T>> {
     type Stream = Self;
 
     type Layer = Identity;
 
-    fn poll(self, _worker: WorkerId) -> Poller<Self::Stream> {
+    fn poll<Svc>(self, _worker: WorkerId) -> Poller<Self::Stream> {
         Poller {
             stream: self,
             heartbeat: Box::pin(async {}),

@@ -2,13 +2,13 @@ use std::time::Duration;
 
 use futures::{stream::BoxStream, Future};
 
-use crate::{request::Request, Backend};
+use crate::request::Request;
 
 /// The result of sa stream produced by a [Storage]
 pub type StorageStream<T, E> = BoxStream<'static, Result<Option<Request<T>>, E>>;
 
 /// Represents a [Storage] that can persist a request.
-pub trait Storage: Backend<Request<Self::Job>> {
+pub trait Storage {
     /// The type of job that can be persisted
     type Job;
 

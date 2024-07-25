@@ -1,9 +1,9 @@
-use crate::task::attempt::Attempt;
-use crate::{request::Request, worker::WorkerId};
+use crate::error::{BoxDynError, Error};
+use crate::request::Request;
 use futures::channel::mpsc::{SendError, Sender};
 use futures::SinkExt;
 use futures::{future::BoxFuture, Future, FutureExt};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::marker::PhantomData;
 use std::{fmt, sync::Arc};
 pub use tower::{
@@ -157,148 +157,136 @@ pub mod extensions {
 /// A trait for acknowledging successful processing
 /// This trait is called even when a task fails.
 /// This is a way of a [`Backend`] to save the result of a job or message
-pub trait Ack<Task> {
+pub trait Ack<Task, Response> {
     /// The data to fetch from context to allow acknowledgement
-    type Acknowledger;
+    type Context;
     /// The error returned by the ack
-    type Error: std::error::Error;
+    type AckError: std::error::Error;
+
     /// Acknowledges successful processing of the given request
     fn ack(
         &mut self,
-        response: AckResponse<Self::Acknowledger>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+        ctx: &Self::Context,
+        result: &Result<Response, Error>,
+    ) -> impl Future<Output = Result<(), Self::AckError>> + Send;
 }
 
-/// ACK response
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AckResponse<A> {
-    /// The worker id
-    pub worker: WorkerId,
-    /// The acknowledger
-    pub acknowledger: A,
-    /// The stringified result
-    pub result: Result<String, String>,
-    /// The number of attempts made by the request
-    pub attempts: Attempt,
-}
-
-/// A generic stream that emits (worker_id, task_id)
-#[derive(Debug, Clone)]
-pub struct AckStream<A>(pub Sender<AckResponse<A>>);
-
-impl<J, A: Send + Clone + 'static> Ack<J> for AckStream<A> {
-    type Acknowledger = A;
-    type Error = SendError;
-    fn ack(
+impl<T, Res: Clone + Send + Sync, Ctx: Clone + Send + Sync> Ack<T, Res>
+    for Sender<(Ctx, Result<Res, Error>)>
+{
+    type AckError = SendError;
+    type Context = Ctx;
+    async fn ack(
         &mut self,
-        response: AckResponse<A>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.0.send(response).boxed()
+        ctx: &Self::Context,
+        result: &Result<Res, Error>,
+    ) -> Result<(), Self::AckError> {
+        let ctx = ctx.clone();
+        self.send((ctx, result.clone())).await.unwrap();
+        Ok(())
     }
 }
 
 /// A layer that acknowledges a job completed successfully
 #[derive(Debug)]
-pub struct AckLayer<A: Ack<J>, J> {
+pub struct AckLayer<A, J, Res> {
     ack: A,
     job_type: PhantomData<J>,
-    worker_id: WorkerId,
+    res: PhantomData<Res>,
 }
 
-impl<A: Ack<J>, J> AckLayer<A, J> {
+impl<A, J, Res> AckLayer<A, J, Res> {
     /// Build a new [AckLayer] for a job
-    pub fn new(ack: A, worker_id: WorkerId) -> Self {
+    pub fn new(ack: A) -> Self {
         Self {
             ack,
             job_type: PhantomData,
-            worker_id,
+            res: PhantomData,
         }
     }
 }
 
-impl<A, J, S> Layer<S> for AckLayer<A, J>
+impl<A, J, S, Res> Layer<S> for AckLayer<A, J, Res>
 where
     S: Service<Request<J>> + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::Future: Send + 'static,
-    A: Ack<J> + Clone + Send + Sync + 'static,
+    A: Ack<J, S::Response> + Clone + Send + Sync + 'static,
 {
-    type Service = AckService<S, A, J>;
+    type Service = AckService<S, A, J, S::Response>;
 
     fn layer(&self, service: S) -> Self::Service {
         AckService {
             service,
             ack: self.ack.clone(),
             job_type: PhantomData,
-            worker_id: self.worker_id.clone(),
+            res: PhantomData,
         }
     }
 }
 
 /// The underlying service for an [AckLayer]
 #[derive(Debug)]
-pub struct AckService<SV, A, J> {
+pub struct AckService<SV, A, J, Res> {
     service: SV,
     ack: A,
     job_type: PhantomData<J>,
-    worker_id: WorkerId,
+    res: PhantomData<Res>,
 }
 
-impl<Sv: Clone, A: Clone, J> Clone for AckService<Sv, A, J> {
+impl<Sv: Clone, A: Clone, J, Res> Clone for AckService<Sv, A, J, Res> {
     fn clone(&self) -> Self {
         Self {
             ack: self.ack.clone(),
             job_type: PhantomData,
-            worker_id: self.worker_id.clone(),
             service: self.service.clone(),
+            res: PhantomData,
         }
     }
 }
 
-impl<SV, A, T> Service<Request<T>> for AckService<SV, A, T>
+impl<SV, A, T, Res> Service<Request<T>> for AckService<SV, A, T, Res>
 where
     SV: Service<Request<T>> + Send + Sync + 'static,
-    SV::Error: std::error::Error + Send + Sync + 'static,
+    <SV as Service<Request<T>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
     <SV as Service<Request<T>>>::Future: std::marker::Send + 'static,
-    A: Ack<T> + Send + 'static + Clone + Send + Sync,
-    T: 'static,
-    <SV as Service<Request<T>>>::Response: std::marker::Send + fmt::Debug + Sync,
-    <A as Ack<T>>::Acknowledger: Sync + Send + Clone,
+    A: Ack<T, <SV as Service<Request<T>>>::Response> + Send + 'static + Clone + Send + Sync,
+    T: 'static + Send,
+    <SV as Service<Request<T>>>::Response: std::marker::Send + fmt::Debug + Sync + Serialize,
+    <A as Ack<T, SV::Response>>::Context: Sync + Send + Clone,
 {
     type Response = SV::Response;
-    type Error = SV::Error;
+    type Error = Error;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
+        self.service
+            .poll_ready(cx)
+            .map_err(|e| Error::Failed(Arc::new(e.into())))
     }
 
     fn call(&mut self, request: Request<T>) -> Self::Future {
         let mut ack = self.ack.clone();
-        let worker_id = self.worker_id.clone();
-        let data = request.get::<<A as Ack<T>>::Acknowledger>().cloned();
-        let attempts = request.get::<Attempt>().cloned().unwrap_or_default();
+        let data = request
+            .get::<<A as Ack<T, SV::Response>>::Context>()
+            .cloned();
 
         let fut = self.service.call(request);
         let fut_with_ack = async move {
-            let res = fut.await;
-            let result = res
-                .as_ref()
-                .map(|ok| format!("{ok:?}"))
-                .map_err(|e| e.to_string());
-            if let Some(task_id) = data {
-                if let Err(_e) = ack
-                    .ack(AckResponse {
-                        worker: worker_id,
-                        acknowledger: task_id,
-                        result,
-                        attempts,
-                    })
-                    .await
-                {
+            let res = fut.await.map_err(|err| {
+                let e: BoxDynError = err.into();
+                // Try to downcast the error to see if it is already of type `Error`
+                if let Some(custom_error) = e.downcast_ref::<Error>() {
+                    return custom_error.clone();
+                }
+                Error::Failed(Arc::new(e))
+            });
+
+            if let Some(ctx) = data {
+                if let Err(_e) = ack.ack(&ctx, &res).await {
                     // TODO: Implement tracing in apalis core
                     // tracing::error!("Acknowledgement Failed: {}", e);
                 }

@@ -1,6 +1,6 @@
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
-use apalis_core::layers::{Ack, AckLayer, AckResponse};
+use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
@@ -39,7 +39,10 @@ pub struct MysqlStorage<T> {
     controller: Controller,
     config: Config,
     codec: BoxCodec<T, serde_json::Value>,
-    ack_notify: Notify<AckResponse<TaskId>>,
+    ack_notify: Notify<(
+        SqlContext,
+        Result<serde_json::Value, apalis_core::error::Error>,
+    )>,
 }
 
 impl<T> fmt::Debug for MysqlStorage<T> {
@@ -369,15 +372,15 @@ where
     }
 }
 
-impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
+impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res> Backend<Request<T>, Res>
     for MysqlStorage<T>
 {
     type Stream = BackendStream<RequestStream<Request<T>>>;
 
-    type Layer = AckLayer<MysqlStorage<T>, T>;
+    type Layer = AckLayer<MysqlStorage<T>, T, Res>;
 
-    fn poll(self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
-        let layer = AckLayer::new(self.clone(), worker.clone());
+    fn poll<Svc>(self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+        let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
         let pool = self.pool.clone();
@@ -395,15 +398,18 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                 .next()
                 .await
             {
-                for id in ids {
+                for (ctx, res) in ids {
                     let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ?, attempts = ? WHERE id = ? AND lock_by = ?";
                     let query = sqlx::query(query);
                     let query = query
-                        .bind(calculate_status(&id.result).to_string())
-                        .bind(serde_json::to_string(&id.result).unwrap())
-                        .bind(id.attempts.current() as u64 + 1)
-                        .bind(id.acknowledger.to_string())
-                        .bind(id.worker.to_string());
+                        .bind(calculate_status(&res).to_string())
+                        .bind(
+                            serde_json::to_string(&res.as_ref().map_err(|e| e.to_string()))
+                                .unwrap(),
+                        )
+                        .bind(ctx.attempts().current() as u64 + 1)
+                        .bind(ctx.id().to_string())
+                        .bind(ctx.lock_by().as_ref().unwrap().to_string());
                     if let Err(e) = query.execute(&pool).await {
                         error!("Ack failed: {e}");
                     }
@@ -432,12 +438,21 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
     }
 }
 
-impl<T: Sync + Send> Ack<T> for MysqlStorage<T> {
-    type Acknowledger = TaskId;
-    type Error = sqlx::Error;
-    async fn ack(&mut self, response: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
+impl<T: Sync + Send, Res: Serialize + Send + 'static + Sync> Ack<T, Res> for MysqlStorage<T> {
+    type Context = SqlContext;
+    type AckError = sqlx::Error;
+    async fn ack(
+        &mut self,
+        ctx: &Self::Context,
+        res: &Result<Res, Error>,
+    ) -> Result<(), sqlx::Error> {
         self.ack_notify
-            .notify(response)
+            .notify((
+                ctx.clone(),
+                res.as_ref()
+                    .map(|r| serde_json::to_value(&r).unwrap())
+                    .map_err(|c| c.clone()),
+            ))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::BrokenPipe, e)))?;
 
         Ok(())
