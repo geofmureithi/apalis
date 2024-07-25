@@ -130,11 +130,11 @@ impl Config {
 }
 
 /// Calculates the status from a result
-pub(crate) fn calculate_status(res: &Result<String, String>) -> State {
+pub fn calculate_status<Res>(res: &Result<Res, apalis_core::error::Error>) -> State {
     match res {
         Ok(_) => State::Done,
         Err(e) => match &e {
-            _ if e.starts_with("AbortError") => State::Killed,
+            _ if e.to_string().starts_with("AbortError") => State::Killed,
             _ => State::Failed,
         },
     }
@@ -144,7 +144,8 @@ pub(crate) fn calculate_status(res: &Result<String, String>) -> State {
 #[macro_export]
 macro_rules! sql_storage_tests {
     ($setup:path, $storage_type:ty, $job_type:ty) => {
-        async fn setup_test_wrapper() -> TestWrapper<$storage_type, $job_type> {
+        async fn setup_test_wrapper(
+        ) -> TestWrapper<$storage_type, $job_type, ()> {
             let (mut t, poller) = TestWrapper::new_with_service(
                 $setup().await,
                 apalis_core::service_fn::service_fn(email_service::send_email),

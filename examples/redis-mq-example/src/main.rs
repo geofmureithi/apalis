@@ -1,13 +1,12 @@
-use std::{marker::PhantomData, time::Duration};
+use std::{fmt::Debug, marker::PhantomData, time::Duration};
 
-use anyhow::Result;
 use apalis::{layers::tracing::TraceLayer, prelude::*};
 
 use apalis_redis::{self, Config, RedisCodec, RedisJob};
 
 use apalis_core::{
     codec::json::JsonCodec,
-    layers::{Ack, AckLayer, AckResponse},
+    layers::{Ack, AckLayer},
 };
 use email_service::{send_email, Email};
 use futures::{channel::mpsc, SinkExt};
@@ -34,15 +33,15 @@ impl<T> Clone for RedisMq<T> {
     }
 }
 
-impl<M: Send + 'static> Backend<Request<M>> for RedisMq<M> {
+impl<M: Send + 'static, Res> Backend<Request<M>, Res> for RedisMq<M> {
     type Stream = RequestStream<Request<M>>;
 
-    type Layer = AckLayer<Self, M>;
+    type Layer = AckLayer<Self, M, Res>;
 
-    fn poll(mut self, worker_id: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(mut self, _worker_id: WorkerId) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.get_buffer_size());
         let stream: RequestStream<Request<M>> = Box::pin(rx);
-        let layer = AckLayer::new(self.clone(), worker_id);
+        let layer = AckLayer::new(self.clone());
         let heartbeat = async move {
             loop {
                 sleep(*self.config.get_poll_interval()).await;
@@ -63,14 +62,18 @@ impl<M: Send + 'static> Backend<Request<M>> for RedisMq<M> {
     }
 }
 
-impl<T: Send> Ack<T> for RedisMq<T> {
-    type Acknowledger = String;
+impl<T: Send, Res: Debug + Send + Sync> Ack<T, Res> for RedisMq<T> {
+    type Context = String;
 
-    type Error = RsmqError;
+    type AckError = RsmqError;
 
-    async fn ack(&mut self, ack: AckResponse<String>) -> Result<(), Self::Error> {
-        println!("Attempting to ACK {}", ack.acknowledger);
-        self.conn.delete_message("email", &ack.acknowledger).await?;
+    async fn ack(
+        &mut self,
+        ctx: &Self::Context,
+        res: &Result<Res, apalis_core::error::Error>,
+    ) -> Result<(), Self::AckError> {
+        println!("Attempting to ACK {:?}", res);
+        self.conn.delete_message("email", &ctx).await?;
         Ok(())
     }
 }
@@ -105,7 +108,7 @@ impl<Message: Send + 'static> MessageQueue<Message> for RedisMq<Message> {
     }
 }
 
-async fn produce_jobs(mq: &mut RedisMq<Email>) -> Result<()> {
+async fn produce_jobs(mq: &mut RedisMq<Email>) -> anyhow::Result<()> {
     for index in 0..1 {
         mq.enqueue(Email {
             to: index.to_string(),
@@ -118,7 +121,7 @@ async fn produce_jobs(mq: &mut RedisMq<Email>) -> Result<()> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
 
     tracing_subscriber::fmt::init();

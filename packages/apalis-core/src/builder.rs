@@ -70,10 +70,13 @@ impl<J, M, Serv> WorkerBuilder<J, (), M, Serv> {
     }
 
     /// Set the source to a backend that implements [Backend]
-    pub fn backend<NS: Backend<Request<NJ>>, NJ>(
+    pub fn backend<NB: Backend<Request<NJ>, Res>, NJ, Res: Send>(
         self,
-        backend: NS,
-    ) -> WorkerBuilder<NJ, NS, M, Serv> {
+        backend: NB,
+    ) -> WorkerBuilder<NJ, NB, M, Serv>
+    where
+        Serv: Service<Request<NJ>, Response = Res>,
+    {
         WorkerBuilder {
             request: PhantomData,
             layer: self.layer,
@@ -131,8 +134,12 @@ impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
     }
 }
 
-impl<Req: Send + 'static + Sync, P: Backend<Request<Req>> + 'static, M: 'static, S>
-    WorkerFactory<Req, S> for WorkerBuilder<Req, P, M, S>
+impl<
+        Req: Send + 'static + Sync,
+        P: Backend<Request<Req>, S::Response> + 'static,
+        M: 'static,
+        S,
+    > WorkerFactory<Req, S> for WorkerBuilder<Req, P, M, S>
 where
     S: Service<Request<Req>> + Send + 'static + Clone + Sync,
     S::Future: Send,

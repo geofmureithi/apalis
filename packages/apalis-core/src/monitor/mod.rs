@@ -5,6 +5,7 @@ use std::{
 };
 
 use futures::{future::BoxFuture, Future, FutureExt};
+use serde::Serialize;
 use tower::{Layer, Service};
 mod shutdown;
 
@@ -81,22 +82,23 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     pub fn register<
         J: Send + Sync + 'static,
         S: Service<Request<J>> + Send + 'static,
-        P: Backend<Request<J>> + 'static,
+        P: Backend<Request<J>, Res> + 'static,
+        Res: 'static
     >(
         mut self,
         worker: Worker<Ready<S, P>>,
     ) -> Self
     where
         S::Future: Send,
-        S::Response: 'static,
+        S::Response: 'static + Send + Sync + Serialize,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        <P as Backend<Request<J>, Res>>::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Service<Request<J>, Response = Res>,
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
             Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
             Send + Into<BoxDynError> + Sync,
     {
         self.workers.push(worker.with_monitor(&self));
@@ -117,7 +119,8 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     pub fn register_with_count<
         J: Send + Sync + 'static,
         S: Service<Request<J>> + Send + 'static,
-        P: Backend<Request<J>> + 'static,
+        P: Backend<Request<J>, Res> + 'static,
+        Res: 'static + Send,
     >(
         mut self,
         count: usize,
@@ -125,16 +128,16 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     ) -> Self
     where
         S::Future: Send,
-        S::Response: 'static,
+        S::Response: 'static + Send + Sync + Serialize,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        <P as Backend<Request<J>, Res>>::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Service<Request<J>, Response = Res>,
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
             Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
-            Send + std::error::Error + Sync,
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+            Send + Into<BoxDynError> + Sync,
     {
         let workers = worker.with_monitor_instances(count, &self);
         self.workers.extend(workers);

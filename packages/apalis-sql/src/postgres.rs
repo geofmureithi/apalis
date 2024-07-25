@@ -42,7 +42,7 @@ use crate::context::SqlContext;
 use crate::{calculate_status, Config};
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
-use apalis_core::layers::{Ack, AckLayer, AckResponse};
+use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
@@ -82,7 +82,7 @@ pub struct PostgresStorage<T> {
     codec: BoxCodec<T, serde_json::Value>,
     config: Config,
     controller: Controller,
-    ack_notify: Notify<AckResponse<TaskId>>,
+    ack_notify: Notify<(SqlContext, Result<serde_json::Value, Error>)>,
     subscription: Option<PgSubscription>,
 }
 
@@ -116,15 +116,15 @@ impl<T> fmt::Debug for PostgresStorage<T> {
     }
 }
 
-impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
+impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res> Backend<Request<T>, Res>
     for PostgresStorage<T>
 {
     type Stream = BackendStream<RequestStream<Request<T>>>;
 
-    type Layer = AckLayer<PostgresStorage<T>, T>;
+    type Layer = AckLayer<PostgresStorage<T>, T, Res>;
 
-    fn poll(mut self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
-        let layer = AckLayer::new(self.clone(), worker.clone());
+    fn poll<Svc>(mut self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+        let layer = AckLayer::new(self.clone());
         let subscription = self.subscription.clone();
         let config = self.config.clone();
         let controller = self.controller.clone();
@@ -174,8 +174,8 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Re
                     }
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
-                            let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|c| {
-                                (c.acknowledger.to_string(), c.worker.to_string(), serde_json::to_string(&c.result).unwrap(), calculate_status(&c.result).to_string(), (c.attempts.current() + 1) as u64 )
+                            let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(ctx, res)| {
+                                (ctx.id().to_string(), ctx.lock_by().clone().unwrap().to_string(), serde_json::to_string(&res.as_ref().map_err(|e| e.to_string())).unwrap(), calculate_status(res).to_string(), (ctx.attempts().current() + 1) as u64 )
                             }).collect();
                             let query =
                                 "UPDATE apalis.jobs
@@ -546,12 +546,21 @@ where
     }
 }
 
-impl<T: Sync + Send> Ack<T> for PostgresStorage<T> {
-    type Acknowledger = TaskId;
-    type Error = sqlx::Error;
-    async fn ack(&mut self, res: AckResponse<Self::Acknowledger>) -> Result<(), sqlx::Error> {
+impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for PostgresStorage<T> {
+    type Context = SqlContext;
+    type AckError = sqlx::Error;
+    async fn ack(
+        &mut self,
+        ctx: &Self::Context,
+        res: &Result<Res, apalis_core::error::Error>,
+    ) -> Result<(), sqlx::Error> {
         self.ack_notify
-            .notify(res)
+            .notify((
+                ctx.clone(),
+                res.as_ref()
+                    .map(|r| serde_json::to_value(r).unwrap())
+                    .map_err(|e| e.clone()),
+            ))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::Interrupted, e)))?;
 
         Ok(())
@@ -618,7 +627,6 @@ mod tests {
     use crate::sql_storage_tests;
 
     use super::*;
-    use apalis_core::task::attempt::Attempt;
     use apalis_core::test_utils::DummyService;
     use chrono::Utc;
     use email_service::Email;

@@ -219,29 +219,30 @@ impl<E: Executor + Clone + Send + 'static> Worker<Context<E>> {
 
 impl<S, P> Worker<Ready<S, P>> {
     /// Start a worker with a custom executor
-    pub fn with_executor<E, J>(self, executor: E) -> Worker<Context<E>>
+    pub fn with_executor<E, J, Res: 'static>(self, executor: E) -> Worker<Context<E>>
     where
         S: Service<Request<J>> + Send + 'static,
-        P: Backend<Request<J>> + 'static,
+        P: Backend<Request<J>, Res> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
-        S::Response: 'static,
+        S::Response: 'static + Send + Sync + Serialize,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        <P as Backend<Request<J>, Res>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
         P::Layer: Layer<S>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Service<Request<J>, Response = Res> + 'static,
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
             Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
             Send + std::error::Error + Sync,
     {
         let notifier = Notify::new();
         let service = self.state.service;
         let backend = self.state.backend;
-        let poller = backend.poll(self.id.clone());
+        let poller = backend
+            .poll::<<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service>(self.id.clone());
         let polling = poller.heartbeat.shared();
         let default_layer = poller.layer;
         let service = default_layer.layer(service);
@@ -260,30 +261,33 @@ impl<S, P> Worker<Ready<S, P>> {
     }
 
     /// Run as a monitored worker
-    pub fn with_monitor<E, J>(self, monitor: &Monitor<E>) -> Worker<Context<E>>
+    pub fn with_monitor<E, J, Res: 'static>(self, monitor: &Monitor<E>) -> Worker<Context<E>>
     where
         S: Service<Request<J>> + Send + 'static,
-        P: Backend<Request<J>> + 'static,
+        P: Backend<Request<J>, Res> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
-        S::Response: 'static,
+        S::Response: 'static + Send + Sync + Serialize,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        <P as Backend<Request<J>, Res>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
         P::Layer: Layer<S>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
-            Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
-            Send + Into<BoxDynError> + Sync,
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Service<Request<J>, Response = Res>,
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<
+            Request<J>,
+        >>::Future: Send,
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<
+            Request<J>,
+        >>::Error: Send + Into<BoxDynError> + Sync,
     {
         let notifier = Notify::new();
         let service = self.state.service;
         let backend = self.state.backend;
         let executor = monitor.executor().clone();
         let context = monitor.context().clone();
-        let poller = backend.poll(self.id.clone());
+        let poller = backend
+            .poll::<<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service>(self.id.clone());
         let default_layer = poller.layer;
         let service = default_layer.layer(service);
         let polling = poller.heartbeat.shared();
@@ -302,34 +306,37 @@ impl<S, P> Worker<Ready<S, P>> {
     }
 
     /// Run a specified amounts of instances
-    pub fn with_monitor_instances<E, J>(
+    pub fn with_monitor_instances<E, J, Res: 'static + Send>(
         self,
         instances: usize,
         monitor: &Monitor<E>,
     ) -> Vec<Worker<Context<E>>>
     where
         S: Service<Request<J>> + Send + 'static,
-        P: Backend<Request<J>> + 'static,
+        P: Backend<Request<J>, Res> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
-        S::Response: 'static,
+        S::Response: 'static + Send + Sync + Serialize,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        <P as Backend<Request<J>, Res>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
         P::Layer: Layer<S>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
-            Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
-            Send + Into<BoxDynError> + Sync,
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Service<Request<J>, Response = Res>,
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<
+            Request<J>,
+        >>::Future: Send,
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<
+            Request<J>,
+        >>::Error: Send + Into<BoxDynError> + Sync,
     {
         let notifier = Notify::new();
         let service = self.state.service;
         let backend = self.state.backend;
         let executor = monitor.executor().clone();
         let context = monitor.context().clone();
-        let poller = backend.poll(self.id.clone());
+        let poller = backend
+            .poll::<<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service>(self.id.clone());
         let default_layer = poller.layer;
         let service = default_layer.layer(service);
         let (service, poll_worker) = Buffer::pair(service, instances);
@@ -357,35 +364,37 @@ impl<S, P> Worker<Ready<S, P>> {
     }
 
     /// Run specified worker instances via a specific executor
-    pub fn with_executor_instances<E, J>(
+    pub fn with_executor_instances<E, J, Res: 'static>(
         self,
         instances: usize,
         executor: E,
     ) -> Vec<Worker<Context<E>>>
     where
-        S: Service<Request<J>> + Send + 'static,
-        P: Backend<Request<J>> + 'static,
+        S: Service<Request<J>, Response = Res> + Send + 'static,
+        P: Backend<Request<J>, Res> + 'static,
         J: Send + 'static + Sync,
         S::Future: Send,
-        S::Response: 'static,
+        S::Response: 'static + Send + Sync + Serialize,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        <P as Backend<Request<J>, Res>>::Stream: Unpin + Send + 'static,
         E: Executor + Clone + Send + 'static + Sync,
         P::Layer: Layer<S>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
-        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
-            Send,
-        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
-            Send + Into<BoxDynError> + Sync,
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Service<Request<J>, Response = Res>,
+        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<
+            Request<J>,
+        >>::Future: Send,
+        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<
+            Request<J>,
+        >>::Error: Send + Into<BoxDynError> + Sync,
     {
         let worker_id = self.id.clone();
         let notifier = Notify::new();
         let service = self.state.service;
         let (service, poll_worker) = Buffer::pair(service, instances);
         let backend = self.state.backend;
-        let poller = backend.poll(worker_id.clone());
+        let poller = backend.poll::<S>(worker_id.clone());
         let polling = poller.heartbeat.shared();
         let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
             .into_future()
@@ -406,7 +415,7 @@ impl<S, P> Worker<Ready<S, P>> {
         workers
     }
 
-    pub(crate) fn build_worker_instance<LS, J, E>(
+    pub(crate) fn build_worker_instance<LS, J, E, Res>(
         id: WorkerId,
         service: LS,
         executor: E,
@@ -416,11 +425,11 @@ impl<S, P> Worker<Ready<S, P>> {
         context: Option<MonitorContext>,
     ) -> Worker<Context<E>>
     where
-        LS: Service<Request<J>> + Send + 'static,
+        LS: Service<Request<J>, Response = Res> + Send + 'static,
         LS::Future: Send + 'static,
         LS::Response: 'static,
         LS::Error: Send + Sync + Into<BoxDynError> + 'static,
-        P: Backend<Request<J>>,
+        P: Backend<Request<J>, Res>,
         E: Executor + Send + Clone + 'static + Sync,
         J: Sync + Send + 'static,
         S: 'static,
@@ -445,17 +454,17 @@ impl<S, P> Worker<Ready<S, P>> {
         worker
     }
 
-    pub(crate) async fn build_instance<LS, J, E>(
+    pub(crate) async fn build_instance<LS, J, E, Res>(
         instance: usize,
         service: LS,
         worker: Worker<Context<E>>,
         notifier: WorkerNotify<Result<Option<Request<J>>, Error>>,
     ) where
-        LS: Service<Request<J>> + Send + 'static,
+        LS: Service<Request<J>, Response = Res> + Send + 'static,
         LS::Future: Send + 'static,
         LS::Response: 'static,
         LS::Error: Send + Sync + Into<BoxDynError> + 'static,
-        P: Backend<Request<J>>,
+        P: Backend<Request<J>, Res>,
         E: Executor + Send + Clone + 'static + Sync,
     {
         if let Some(ctx) = worker.state.context.as_ref() {
