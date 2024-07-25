@@ -1,7 +1,8 @@
 use anyhow::Result;
-use apalis::mysql::MySqlPool;
+use apalis::layers::tracing::TraceLayer;
 use apalis::prelude::*;
-use apalis::{layers::tracing::TraceLayer, mysql::MysqlStorage};
+use apalis_sql::mysql::MySqlPool;
+use apalis_sql::mysql::MysqlStorage;
 use email_service::{send_email, Email};
 
 async fn produce_jobs(storage: &MysqlStorage<Email>) -> Result<()> {
@@ -34,9 +35,9 @@ async fn main() -> Result<()> {
 
     Monitor::new_with_executor(TokioExecutor)
         .register_with_count(1, {
-            WorkerBuilder::new(format!("tasty-avocado"))
+            WorkerBuilder::new("tasty-avocado")
                 .layer(TraceLayer::new())
-                .with_storage(mysql)
+                .backend(mysql)
                 .build_fn(send_email)
         })
         .run()

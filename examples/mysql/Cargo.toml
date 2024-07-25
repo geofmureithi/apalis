@@ -8,10 +8,10 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 anyhow = "1"
 apalis = { path = "../../", features = [
-    "mysql",
     "tokio-comp",
     "tracing",
 ], default-features = false }
+apalis-sql = { path = "../../packages/apalis-sql", features = ["mysql"] }
 serde = "1"
 tracing-subscriber = "0.3.11"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

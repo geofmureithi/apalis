@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use apalis_core::{error::Error, request::Request, storage::Job};
+use apalis_core::{error::Error, request::Request, task::namespace::Namespace};
 use futures::Future;
 use pin_project_lite::pin_project;
 use tower::{Layer, Service};
@@ -31,7 +31,6 @@ impl<S, J, F, Res> Service<Request<J>> for PrometheusService<S>
 where
     S: Service<Request<J>, Response = Res, Error = Error, Future = F>,
     F: Future<Output = Result<Res, Error>> + 'static,
-    J: Job,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -43,14 +42,16 @@ where
 
     fn call(&mut self, request: Request<J>) -> Self::Future {
         let start = Instant::now();
+        let namespace = request.get::<Namespace>().unwrap().to_string();
+
         let req = self.service.call(request);
         let job_type = std::any::type_name::<J>().to_string();
-        let op = J::NAME;
+
         ResponseFuture {
             inner: req,
             start,
             job_type,
-            operation: op.to_string(),
+            operation: namespace,
         }
     }
 }
@@ -88,10 +89,11 @@ where
             ("name", this.operation.to_string()),
             ("namespace", this.job_type.to_string()),
             ("status", status),
-            ("latency", latency.to_string()),
         ];
-        metrics::counter!("requests_total", &labels);
-        metrics::histogram!("request_duration_seconds", &labels);
+        let counter = metrics::counter!("requests_total", &labels);
+        counter.increment(1);
+        let hist = metrics::histogram!("request_duration_seconds", &labels);
+        hist.record(latency);
         Poll::Ready(response)
     }
 }

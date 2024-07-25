@@ -1,9 +1,10 @@
 use actix_web::rt::signal;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use anyhow::Result;
+use apalis::layers::tracing::TraceLayer;
 use apalis::prelude::*;
 use apalis::utils::TokioExecutor;
-use apalis::{layers::tracing::TraceLayer, redis::RedisStorage};
+use apalis_redis::RedisStorage;
 use futures::future;
 
 use email_service::{send_email, Email};
@@ -26,7 +27,7 @@ async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
 
-    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
     let storage = RedisStorage::new(conn);
     let data = web::Data::new(storage.clone());
     let http = async {
@@ -44,7 +45,7 @@ async fn main() -> Result<()> {
         .register_with_count(2, {
             WorkerBuilder::new("tasty-avocado")
                 .layer(TraceLayer::new())
-                .with_storage(storage)
+                .backend(storage)
                 .build_fn(send_email)
         })
         .run_with_signal(signal::ctrl_c());

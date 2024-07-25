@@ -5,14 +5,15 @@ use std::{
 };
 
 use anyhow::Result;
-use apalis::prelude::*;
-use apalis::redis::RedisStorage;
+use apalis::layers::limit::RateLimitLayer;
+use apalis::{layers::TimeoutLayer, prelude::*};
+use apalis_redis::RedisStorage;
 
 use email_service::{send_email, Email};
 use tracing::{error, info};
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
-    for index in 0..1 {
+    for index in 0..10 {
         storage
             .push(Email {
                 to: index.to_string(),
@@ -40,16 +41,17 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
-    let config = apalis::redis::Config::default();
-    let storage = RedisStorage::new_with_config(conn, config);
+    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
+    let storage = RedisStorage::new(conn);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .chain(|svc| svc.timeout(Duration::from_millis(500)))
+        .chain(|svc| svc.map_err(|e| Error::Failed(Arc::new(e))))
+        .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
+        .layer(TimeoutLayer::new(Duration::from_millis(500)))
         .data(Count::default())
-        .with_storage(storage)
+        .backend(storage)
         .build_fn(send_email);
 
     Monitor::<TokioExecutor>::new()
@@ -72,6 +74,7 @@ async fn main() -> Result<()> {
         })
         .shutdown_timeout(Duration::from_millis(5000))
         .run_with_signal(async {
+            info!("Monitor started");
             tokio::signal::ctrl_c().await?;
             info!("Monitor starting shutdown");
             Ok(())

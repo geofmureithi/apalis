@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tower::{layer::util::Identity, ServiceBuilder};
+use tower::layer::util::Identity;
 
 #[derive(Debug)]
 /// An example of the basics of a backend
@@ -52,8 +52,8 @@ impl<T> Clone for MemoryStorage<T> {
 /// In-memory queue that implements [Stream]
 #[derive(Debug)]
 pub struct MemoryWrapper<T> {
-    sender: Sender<T>,
-    receiver: Arc<futures::lock::Mutex<Receiver<T>>>,
+    sender: Sender<Request<T>>,
+    receiver: Arc<futures::lock::Mutex<Receiver<Request<T>>>>,
 }
 
 impl<T> Clone for MemoryWrapper<T> {
@@ -84,7 +84,7 @@ impl<T> Default for MemoryWrapper<T> {
 }
 
 impl<T> Stream for MemoryWrapper<T> {
-    type Item = T;
+    type Item = Request<T>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Some(mut receiver) = self.receiver.try_lock() {
@@ -99,34 +99,33 @@ impl<T> Stream for MemoryWrapper<T> {
 impl<T: Send + 'static + Sync> Backend<Request<T>> for MemoryStorage<T> {
     type Stream = BackendStream<RequestStream<Request<T>>>;
 
-    type Layer = ServiceBuilder<Identity>;
-
-    fn common_layer(&self, _worker: WorkerId) -> Self::Layer {
-        ServiceBuilder::new()
-    }
+    type Layer = Identity;
 
     fn poll(self, _worker: WorkerId) -> Poller<Self::Stream> {
-        let stream = self.inner.map(|r| Ok(Some(Request::new(r)))).boxed();
+        let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         Poller {
             stream: BackendStream::new(stream, self.controller),
             heartbeat: Box::pin(async {}),
+            layer: Identity::new(),
         }
     }
 }
 
 impl<Message: Send + 'static + Sync> MessageQueue<Message> for MemoryStorage<Message> {
     type Error = ();
-    async fn enqueue(&self, message: Message) -> Result<(), Self::Error> {
-        self.inner.sender.clone().try_send(message).unwrap();
+    async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
+        self.inner
+            .sender
+            .try_send(Request::new(message))
+            .map_err(|_| ())?;
         Ok(())
     }
 
-    async fn dequeue(&self) -> Result<Option<Message>, ()> {
-        Err(())
-        // self.inner.receiver.lock().await.next().await
+    async fn dequeue(&mut self) -> Result<Option<Message>, ()> {
+        Ok(self.inner.receiver.lock().await.next().await.map(|r| r.req))
     }
 
-    async fn size(&self) -> Result<usize, ()> {
-        Ok(self.inner.clone().count().await)
+    async fn size(&mut self) -> Result<usize, ()> {
+        Ok(self.inner.receiver.lock().await.size_hint().0)
     }
 }

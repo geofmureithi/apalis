@@ -5,10 +5,10 @@ mod service;
 use std::time::Duration;
 
 use apalis::{
-    layers::tracing::TraceLayer,
+    layers::{catch_panic::CatchPanicLayer, tracing::TraceLayer},
     prelude::*,
-    sqlite::{SqlitePool, SqliteStorage},
 };
+use apalis_sql::sqlite::{SqlitePool, SqliteStorage};
 
 use email_service::Email;
 use layer::LogLayer;
@@ -98,13 +98,15 @@ async fn main() -> Result<(), std::io::Error> {
 
     Monitor::<TokioExecutor>::new()
         .register_with_count(2, {
-            WorkerBuilder::new("tasty-banana".to_string())
+            WorkerBuilder::new("tasty-banana")
+                // This handles any panics that may occur in any of the layers below
+                .layer(CatchPanicLayer::new())
                 .layer(TraceLayer::new())
                 .layer(LogLayer::new("some-log-example"))
                 // Add shared context to all jobs executed by this worker
                 .data(EmailService::new())
                 .data(ValidEmailCache::new())
-                .with_storage(sqlite)
+                .backend(sqlite)
                 .build_fn(send_email)
         })
         .shutdown_timeout(Duration::from_secs(5))

@@ -45,6 +45,7 @@ where
                 // so don't retry...
                 None
             }
+            Err(_) if self.retries == 0 => None,
             Err(_) if (self.retries - ctx.current() > 0) => Some(future::ready(self.clone())),
             Err(_) => None,
         }

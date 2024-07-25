@@ -1,10 +1,14 @@
+use crate::task::attempt::Attempt;
+use crate::{request::Request, worker::WorkerId};
+use futures::channel::mpsc::{SendError, Sender};
+use futures::SinkExt;
+use futures::{future::BoxFuture, Future, FutureExt};
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::{fmt, sync::Arc};
-pub use tower::{layer::layer_fn, util::BoxCloneService, Layer, Service, ServiceBuilder};
-
-use futures::{future::BoxFuture, Future, FutureExt};
-
-use crate::{request::Request, worker::WorkerId};
+pub use tower::{
+    layer::layer_fn, layer::util::Identity, util::BoxCloneService, Layer, Service, ServiceBuilder,
+};
 
 /// A generic layer that has been stripped off types.
 /// This is returned by a [crate::Backend] and can be used to customize the middleware of the service consuming tasks
@@ -88,7 +92,7 @@ pub mod extensions {
     ///
     /// let worker = WorkerBuilder::new("tasty-avocado")
     ///     .data(state)
-    ///     .source(MemoryStorage::new())
+    ///     .backend(MemoryStorage::new())
     ///     .build(service_fn(email_service));
     /// ```
 
@@ -151,17 +155,46 @@ pub mod extensions {
 }
 
 /// A trait for acknowledging successful processing
-pub trait Ack<J> {
+/// This trait is called even when a task fails.
+/// This is a way of a [`Backend`] to save the result of a job or message
+pub trait Ack<Task> {
     /// The data to fetch from context to allow acknowledgement
     type Acknowledger;
     /// The error returned by the ack
     type Error: std::error::Error;
     /// Acknowledges successful processing of the given request
     fn ack(
-        &self,
-        worker_id: &WorkerId,
-        data: &Self::Acknowledger,
+        &mut self,
+        response: AckResponse<Self::Acknowledger>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+/// ACK response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AckResponse<A> {
+    /// The worker id
+    pub worker: WorkerId,
+    /// The acknowledger
+    pub acknowledger: A,
+    /// The stringified result
+    pub result: Result<String, String>,
+    /// The number of attempts made by the request
+    pub attempts: Attempt,
+}
+
+/// A generic stream that emits (worker_id, task_id)
+#[derive(Debug, Clone)]
+pub struct AckStream<A>(pub Sender<AckResponse<A>>);
+
+impl<J, A: Send + Clone + 'static> Ack<J> for AckStream<A> {
+    type Acknowledger = A;
+    type Error = SendError;
+    fn ack(
+        &mut self,
+        response: AckResponse<A>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.0.send(response).boxed()
+    }
 }
 
 /// A layer that acknowledges a job completed successfully
@@ -222,15 +255,15 @@ impl<Sv: Clone, A: Clone, J> Clone for AckService<Sv, A, J> {
     }
 }
 
-impl<SV, A, J> Service<Request<J>> for AckService<SV, A, J>
+impl<SV, A, T> Service<Request<T>> for AckService<SV, A, T>
 where
-    SV: Service<Request<J>> + Send + Sync + 'static,
+    SV: Service<Request<T>> + Send + Sync + 'static,
     SV::Error: std::error::Error + Send + Sync + 'static,
-    <SV as Service<Request<J>>>::Future: std::marker::Send + 'static,
-    A: Ack<J> + Send + 'static + Clone + Send + Sync,
-    J: 'static,
-    <SV as Service<Request<J>>>::Response: std::marker::Send,
-    <A as Ack<J>>::Acknowledger: Sync + Send + Clone,
+    <SV as Service<Request<T>>>::Future: std::marker::Send + 'static,
+    A: Ack<T> + Send + 'static + Clone + Send + Sync,
+    T: 'static,
+    <SV as Service<Request<T>>>::Response: std::marker::Send + fmt::Debug + Sync,
+    <A as Ack<T>>::Acknowledger: Sync + Send + Clone,
 {
     type Response = SV::Response;
     type Error = SV::Error;
@@ -243,23 +276,36 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<J>) -> Self::Future {
-        let ack = self.ack.clone();
+    fn call(&mut self, request: Request<T>) -> Self::Future {
+        let mut ack = self.ack.clone();
         let worker_id = self.worker_id.clone();
-        let data = request.get::<<A as Ack<J>>::Acknowledger>().cloned();
+        let data = request.get::<<A as Ack<T>>::Acknowledger>().cloned();
+        let attempts = request.get::<Attempt>().cloned().unwrap_or_default();
 
         let fut = self.service.call(request);
         let fut_with_ack = async move {
             let res = fut.await;
-            if let Some(data) = data {
-                if let Err(_e) = ack.ack(&worker_id, &data).await {
-                    // tracing::warn!("Acknowledgement Failed: {}", e);
-                    // try get monitor, and emit
+            let result = res
+                .as_ref()
+                .map(|ok| format!("{ok:?}"))
+                .map_err(|e| e.to_string());
+            if let Some(task_id) = data {
+                if let Err(_e) = ack
+                    .ack(AckResponse {
+                        worker: worker_id,
+                        acknowledger: task_id,
+                        result,
+                        attempts,
+                    })
+                    .await
+                {
+                    // TODO: Implement tracing in apalis core
+                    // tracing::error!("Acknowledgement Failed: {}", e);
                 }
             } else {
-                // tracing::warn!(
+                // tracing::error!(
                 //     "Acknowledgement could not be called due to missing ack data in context : {}",
-                //     &std::any::type_name::<<A as Ack<J>>::Acknowledger>()
+                //     &std::any::type_name::<<A as Ack<T>>::Acknowledger>()
                 // );
             }
             res

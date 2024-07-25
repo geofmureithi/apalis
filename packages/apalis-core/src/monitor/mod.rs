@@ -5,7 +5,7 @@ use std::{
 };
 
 use futures::{future::BoxFuture, Future, FutureExt};
-use tower::Service;
+use tower::{Layer, Service};
 mod shutdown;
 
 use crate::{
@@ -80,7 +80,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     /// Registers a single instance of a [Worker]
     pub fn register<
         J: Send + Sync + 'static,
-        S: Service<Request<J>> + Send + 'static + Clone,
+        S: Service<Request<J>> + Send + 'static,
         P: Backend<Request<J>> + 'static,
     >(
         mut self,
@@ -91,6 +91,13 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         S::Response: 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        P::Layer: Layer<S>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+            Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+            Send + Into<BoxDynError> + Sync,
     {
         self.workers.push(worker.with_monitor(&self));
 
@@ -109,7 +116,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     /// The monitor instance, with all workers added to the collection.
     pub fn register_with_count<
         J: Send + Sync + 'static,
-        S: Service<Request<J>> + Send + 'static + Clone,
+        S: Service<Request<J>> + Send + 'static,
         P: Backend<Request<J>> + 'static,
     >(
         mut self,
@@ -121,6 +128,13 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         S::Response: 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         <P as Backend<Request<J>>>::Stream: Unpin + Send + 'static,
+        P::Layer: Layer<S>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Service<Request<J>>,
+        <<P as Backend<Request<J>>>::Layer as Layer<S>>::Service: Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
+            Send,
+        <<<P as Backend<Request<J>>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+            Send + std::error::Error + Sync,
     {
         let workers = worker.with_monitor_instances(count, &self);
         self.workers.extend(workers);
@@ -283,6 +297,7 @@ impl<E> Monitor<E> {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_utils::apalis_test_service_fn;
     use std::{io, time::Duration};
 
     use tokio::time::sleep;
@@ -293,13 +308,17 @@ mod tests {
         monitor::Monitor,
         mq::MessageQueue,
         request::Request,
+        test_message_queue,
+        test_utils::TestWrapper,
         TestExecutor,
     };
 
+    test_message_queue!(MemoryStorage::new());
+
     #[tokio::test]
-    async fn it_works() {
+    async fn it_works_with_workers() {
         let backend = MemoryStorage::new();
-        let handle = backend.clone();
+        let mut handle = backend.clone();
 
         tokio::spawn(async move {
             for i in 0..10 {
@@ -311,7 +330,7 @@ mod tests {
             Ok::<_, io::Error>(request)
         });
         let worker = WorkerBuilder::new("rango-tango")
-            .source(backend)
+            .backend(backend)
             .build(service);
         let monitor: Monitor<TestExecutor> = Monitor::new();
         let monitor = monitor.register(worker);
@@ -325,10 +344,10 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_run() {
         let backend = MemoryStorage::new();
-        let handle = backend.clone();
+        let mut handle = backend.clone();
 
         tokio::spawn(async move {
-            for i in 0..1000 {
+            for i in 0..10 {
                 handle.enqueue(i).await.unwrap();
             }
         });
@@ -337,7 +356,7 @@ mod tests {
             Ok::<_, io::Error>(request)
         });
         let worker = WorkerBuilder::new("rango-tango")
-            .source(backend)
+            .backend(backend)
             .build(service);
         let monitor: Monitor<TestExecutor> = Monitor::new();
         let monitor = monitor.on_event(|e| {

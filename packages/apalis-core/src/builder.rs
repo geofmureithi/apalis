@@ -9,11 +9,9 @@ use tower::{
 use crate::{
     error::Error,
     layers::extensions::Data,
-    mq::MessageQueue,
     request::Request,
     service_fn::service_fn,
     service_fn::ServiceFn,
-    storage::Storage,
     worker::{Ready, Worker, WorkerId},
     Backend,
 };
@@ -55,8 +53,9 @@ impl<Serv> WorkerBuilder<(), (), Identity, Serv> {
     }
 }
 
-impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
+impl<J, M, Serv> WorkerBuilder<J, (), M, Serv> {
     /// Consume a stream directly
+    #[deprecated(since = "0.6.0", note = "Consider using the `.backend`")]
     pub fn stream<NS: Stream<Item = Result<Option<Request<NJ>>, Error>> + Send + 'static, NJ>(
         self,
         stream: NS,
@@ -70,36 +69,8 @@ impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
         }
     }
 
-    /// Set the source to a [Storage]
-    pub fn with_storage<NS: Storage<Job = NJ>, NJ>(
-        self,
-        storage: NS,
-    ) -> WorkerBuilder<NJ, NS, M, Serv> {
-        WorkerBuilder {
-            request: PhantomData,
-            layer: self.layer,
-            source: storage,
-            id: self.id,
-            service: self.service,
-        }
-    }
-
-    /// Set the source to a [MessageQueue]
-    pub fn with_mq<NS: MessageQueue<NJ>, NJ>(
-        self,
-        message_queue: NS,
-    ) -> WorkerBuilder<NJ, NS, M, Serv> {
-        WorkerBuilder {
-            request: PhantomData,
-            layer: self.layer,
-            source: message_queue,
-            id: self.id,
-            service: self.service,
-        }
-    }
-
-    /// Set the source to a generic backend that implements only [Backend]
-    pub fn source<NS: Backend<Request<NJ>>, NJ>(
+    /// Set the source to a backend that implements [Backend]
+    pub fn backend<NS: Backend<Request<NJ>>, NJ>(
         self,
         backend: NS,
     ) -> WorkerBuilder<NJ, NS, M, Serv> {
@@ -167,18 +138,15 @@ where
     S::Future: Send,
 
     S::Response: 'static,
-    P::Layer: Layer<S>,
-    M: Layer<<P::Layer as Layer<S>>::Service>,
+    M: Layer<S>,
 {
     type Source = P;
 
     type Service = M::Service;
-    /// Build a worker, given a tower service
     fn build(self, service: S) -> Worker<Ready<Self::Service, P>> {
         let worker_id = self.id;
-        let common_layer = self.source.common_layer(worker_id.clone());
         let poller = self.source;
-        let middleware = self.layer.layer(common_layer);
+        let middleware = self.layer;
         let service = middleware.service(service);
 
         Worker::new(worker_id, Ready::new(service, poller))
@@ -224,27 +192,20 @@ pub trait WorkerFactoryFn<J, F, K> {
     /// - An async function with an argument of the item being processed plus up-to 16 arguments that are extracted from the request [`Data`]
     ///
     /// A function can return:
-    /// - Unit
+    /// - ()
     /// - primitive
     /// - Result<T, E: Error>
     /// - impl IntoResponse
     ///
     /// ```rust
+    /// # use apalis_core::layers::extensions::Data;
     /// #[derive(Debug)]
     /// struct Email;
     /// #[derive(Debug)]
     /// struct PgPool;
-    /// # struct PgError;
     ///
-    /// async fn send_email(email: Email) {
-    ///     // Implementation of the job function
-    ///     // ...
-    /// }
-    ///
-    /// async fn send_email(email: Email, data: Data<PgPool>) -> Result<(), PgError> {
-    ///     // Implementation of the job function?
-    ///     // ...
-    ///     Ok(())
+    /// async fn send_email(email: Email, data: Data<PgPool>) {
+    ///     // Implementation of the task function?
     /// }
     /// ```
     ///

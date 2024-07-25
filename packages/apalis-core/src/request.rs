@@ -1,10 +1,13 @@
 use futures::{future::BoxFuture, Stream};
 use serde::{Deserialize, Serialize};
-use tower::{layer::util::Identity, ServiceBuilder};
+use tower::layer::util::Identity;
 
 use std::{fmt::Debug, pin::Pin};
 
-use crate::{data::Extensions, error::Error, poller::Poller, worker::WorkerId, Backend};
+use crate::{
+    data::Extensions, error::Error, poller::Poller, task::task_id::TaskId, worker::WorkerId,
+    Backend,
+};
 
 /// Represents a job which can be serialized and executed
 
@@ -18,10 +21,10 @@ pub struct Request<T> {
 impl<T> Request<T> {
     /// Creates a new [Request]
     pub fn new(req: T) -> Self {
-        Self {
-            req,
-            data: Extensions::new(),
-        }
+        let id = TaskId::new();
+        let mut data = Extensions::new();
+        data.insert(id);
+        Self::new_with_data(req, data)
     }
 
     /// Creates a request with context provided
@@ -64,16 +67,13 @@ pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, Error>>;
 impl<T> Backend<Request<T>> for RequestStream<Request<T>> {
     type Stream = Self;
 
-    type Layer = ServiceBuilder<Identity>;
-
-    fn common_layer(&self, _worker: WorkerId) -> Self::Layer {
-        ServiceBuilder::new()
-    }
+    type Layer = Identity;
 
     fn poll(self, _worker: WorkerId) -> Poller<Self::Stream> {
         Poller {
             stream: self,
             heartbeat: Box::pin(async {}),
+            layer: Identity::new(),
         }
     }
 }

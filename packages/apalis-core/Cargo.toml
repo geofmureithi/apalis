@@ -1,6 +1,6 @@
 [package]
 name = "apalis-core"
-version = "0.5.3"
+version = "0.6.0-rc.4"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition.workspace = true
 repository.workspace = true
@@ -30,10 +30,11 @@ optional = true
 
 
 [features]
-default = []
+default = ["test-utils"]
 docsrs = ["document-features"]
 sleep = ["futures-timer"]
 json = ["serde_json"]
+test-utils = []
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
@@ -44,4 +45,3 @@ all-features = true
 [dev-dependencies]
 tokio = { version = "1.37.0", features = ["macros", "rt", "sync"] }
 tokio-stream = "0.1.15"
-
