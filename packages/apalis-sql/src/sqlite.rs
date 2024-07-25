@@ -404,7 +404,7 @@ impl<T> SqliteStorage<T> {
         tx.commit().await?;
         Ok(())
     }
-  
+
     /// Add jobs that failed back to the queue if there are still remaining attemps
     pub async fn reenqueue_failed(&mut self) -> Result<(), sqlx::Error> {
         let job_type = self.config.namespace.clone();
