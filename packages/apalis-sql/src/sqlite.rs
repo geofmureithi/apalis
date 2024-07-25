@@ -509,7 +509,6 @@ mod tests {
     use crate::sql_storage_tests;
 
     use super::*;
-    use apalis_core::task::attempt::Attempt;
     use apalis_core::test_utils::DummyService;
     use chrono::Utc;
     use email_service::example_good_email;
@@ -621,12 +620,7 @@ mod tests {
         let job_id = ctx.unwrap().id();
 
         storage
-            .ack(AckResponse {
-                acknowledger: job_id.clone(),
-                result: Ok("Success".to_string()),
-                worker: worker_id.clone(),
-                attempts: Attempt::new_with_value(1),
-            })
+            .ack(ctx.as_ref().unwrap(), &Ok(()))
             .await
             .expect("failed to acknowledge the job");
 

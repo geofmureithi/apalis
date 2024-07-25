@@ -11,12 +11,12 @@ pub struct Email {
     pub text: String,
 }
 
-pub async fn send_email(job: Email) -> Result<usize, Error> {
+pub async fn send_email(job: Email) -> Result<(), Error> {
     let validation = EmailAddress::from_str(&job.to);
     match validation {
         Ok(email) => {
             log::info!("Attempting to send email to {}", email.as_str());
-            Ok(0)
+            Ok(())
         }
         Err(email_address::Error::InvalidCharacter) => {
             log::error!("Killed send email job. Invalid character {}", job.to);
