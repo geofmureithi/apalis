@@ -1,15 +1,19 @@
+[workspace.package]
+edition = "2021"
+repository = "https://github.com/geofmureithi/apalis"
+
 [package]
 name = "apalis"
 version = "0.6.0-rc.4"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
-repository = "https://github.com/geofmureithi/apalis"
+edition.workspace = true
+repository.workspace = true
 documentation = "https://docs.rs/apalis"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["job", "task", "scheduler", "worker", "cron"]
 categories = ["database"]
-edition = "2021"
 
 [lib]
 bench = false
@@ -85,7 +89,7 @@ redis = { version = "0.25.3", default-features = false, features = [
 ] }
 
 [dev-dependencies.sqlx]
-version = "0.7.4"
+version = "0.8.0"
 default-features = false
 features = ["chrono", "mysql", "sqlite", "postgres"]
 
