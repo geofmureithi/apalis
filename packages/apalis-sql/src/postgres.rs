@@ -39,7 +39,7 @@
 //!  }
 //! ```
 use crate::context::SqlContext;
-use crate::Config;
+use crate::{calculate_status, Config};
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
 use apalis_core::layers::{Ack, AckLayer};
@@ -82,7 +82,7 @@ pub struct PostgresStorage<T> {
     codec: BoxCodec<T, serde_json::Value>,
     config: Config,
     controller: Controller,
-    ack_notify: Notify<(SqlContext, serde_json::Value)>,
+    ack_notify: Notify<(SqlContext, Result<serde_json::Value, Error>)>,
     subscription: Option<PgSubscription>,
 }
 
@@ -175,7 +175,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res> Backe
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
                             let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(ctx, res)| {
-                                (ctx.id().to_string(), ctx.lock_by().clone().unwrap().to_string(), serde_json::to_string(&res).unwrap(), ctx.status().to_string(), (ctx.attempts().current() + 1) as u64 )
+                                (ctx.id().to_string(), ctx.lock_by().clone().unwrap().to_string(), serde_json::to_string(&res.as_ref().map_err(|e| e.to_string())).unwrap(), calculate_status(res).to_string(), (ctx.attempts().current() + 1) as u64 )
                             }).collect();
                             let query =
                                 "UPDATE apalis.jobs
@@ -557,7 +557,9 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for PostgresStorage<T> {
         self.ack_notify
             .notify((
                 ctx.clone(),
-                serde_json::to_value(&res.as_ref().map_err(|e| e.to_string())).unwrap(),
+                res.as_ref()
+                    .map(|r| serde_json::to_value(r).unwrap())
+                    .map_err(|e| e.clone()),
             ))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::Interrupted, e)))?;
 
@@ -625,7 +627,6 @@ mod tests {
     use crate::sql_storage_tests;
 
     use super::*;
-    use apalis_core::task::attempt::Attempt;
     use apalis_core::test_utils::DummyService;
     use chrono::Utc;
     use email_service::Email;
