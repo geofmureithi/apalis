@@ -16,7 +16,7 @@ apalis-core = { path = "../../packages/apalis-core", version = "0.5.3", default-
     "sleep",
     "json",
 ] }
-redis = { version = "0.25.3", default-features = false, features = [
+redis = { version = "0.26.0", default-features = false, features = [
     "script",
     "aio",
     "connection-manager",
