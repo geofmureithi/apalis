@@ -22,10 +22,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //! # apalis-core
 //! Utilities for building job and message processing tools.
-use std::sync::Arc;
-
+use error::BoxDynError;
 use futures::Stream;
 use poller::Poller;
+use serde::{Deserialize, Serialize};
 use tower::Service;
 use worker::WorkerId;
 
@@ -86,22 +86,21 @@ pub trait Backend<Req, Res> {
         worker: WorkerId,
     ) -> Poller<Self::Stream, Self::Layer>;
 }
-
-/// This allows encoding and decoding of requests in different backends
-pub trait Codec<T, Compact> {
+/// A codec allows backends to encode and decode data
+pub trait Codec {
+    /// The mode of storage by the codec
+    type Compact;
     /// Error encountered by the codec
-    type Error;
-
-    /// Convert to the compact version
-    fn encode(&self, input: &T) -> Result<Compact, Self::Error>;
-
-    /// Decode back to our request type
-    fn decode(&self, compact: &Compact) -> Result<T, Self::Error>;
+    type Error: Into<BoxDynError>;
+    /// The encoding method
+    fn encode<I>(input: I) -> Result<Self::Compact, Self::Error>
+    where
+        I: Serialize;
+    /// The decoding method
+    fn decode<O>(input: Self::Compact) -> Result<O, Self::Error>
+    where
+        O: for<'de> Deserialize<'de>;
 }
-
-/// A boxed codec
-pub type BoxCodec<T, Compact, Error = error::Error> =
-    Arc<Box<dyn Codec<T, Compact, Error = Error> + Sync + Send + 'static>>;
 
 /// Sleep utilities
 #[cfg(feature = "sleep")]
