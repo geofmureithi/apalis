@@ -10,7 +10,7 @@ use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
-use apalis_core::{Backend, BoxCodec};
+use apalis_core::{Backend, Codec};
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -21,6 +21,7 @@ use sqlx::mysql::MySqlRow;
 use sqlx::{MySql, Pool, Row};
 use std::any::type_name;
 use std::convert::TryInto;
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::{fmt, io};
 use std::{marker::PhantomData, ops::Add, time::Duration};
@@ -33,35 +34,39 @@ pub use sqlx::mysql::MySqlPool;
 
 /// Represents a [Storage] that persists to MySQL
 
-pub struct MysqlStorage<T> {
+pub struct MysqlStorage<T, C = JsonCodec<Value>>
+where
+    C: Codec,
+{
     pool: Pool<MySql>,
     job_type: PhantomData<T>,
     controller: Controller,
     config: Config,
-    codec: BoxCodec<T, serde_json::Value>,
-    ack_notify: Notify<(
-        SqlContext,
-        Result<serde_json::Value, apalis_core::error::Error>,
-    )>,
+    codec: PhantomData<C>,
+    ack_notify: Notify<(SqlContext, Result<C::Compact, apalis_core::error::Error>)>,
 }
 
-impl<T> fmt::Debug for MysqlStorage<T> {
+impl<T, C> fmt::Debug for MysqlStorage<T, C>
+where
+    C: Debug + Codec,
+    C::Compact: Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MysqlStorage")
             .field("pool", &self.pool)
             .field("job_type", &"PhantomData<T>")
             .field("controller", &self.controller)
             .field("config", &self.config)
-            .field(
-                "codec",
-                &"Arc<Box<dyn Codec<T, String, Error = Error> + Sync + Send + 'static>>",
-            )
+            .field("codec", &self.codec)
             .field("ack_notify", &self.ack_notify)
             .finish()
     }
 }
 
-impl<T> Clone for MysqlStorage<T> {
+impl<T, C> Clone for MysqlStorage<T, C>
+where
+    C: Debug + Codec,
+{
     fn clone(&self) -> Self {
         let pool = self.pool.clone();
         MysqlStorage {
@@ -75,7 +80,7 @@ impl<T> Clone for MysqlStorage<T> {
     }
 }
 
-impl MysqlStorage<()> {
+impl MysqlStorage<(), JsonCodec<Value>> {
     /// Get mysql migrations without running them
     #[cfg(feature = "migrate")]
     pub fn migrations() -> sqlx::migrate::Migrator {
@@ -90,7 +95,11 @@ impl MysqlStorage<()> {
     }
 }
 
-impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
+impl<T, C> MysqlStorage<T, C>
+where
+    T: Serialize + DeserializeOwned,
+    C: Codec,
+{
     /// Create a new instance from a pool
     pub fn new(pool: MySqlPool) -> Self {
         Self::new_with_config(pool, Config::new(type_name::<T>()))
@@ -103,8 +112,8 @@ impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
             job_type: PhantomData,
             controller: Controller::new(),
             config,
-            codec: Arc::new(Box::new(JsonCodec)),
             ack_notify: Notify::new(),
+            codec: PhantomData,
         }
     }
 
@@ -114,7 +123,8 @@ impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
     }
 
     /// Expose the codec
-    pub fn codec(&self) -> &BoxCodec<T, serde_json::Value> {
+    #[doc(hidden)]
+    pub fn codec(&self) -> &PhantomData<C> {
         &self.codec
     }
 
@@ -124,7 +134,11 @@ impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
     }
 }
 
-impl<T: DeserializeOwned + Send + Unpin + Sync + 'static> MysqlStorage<T> {
+impl<T, C> MysqlStorage<T, C>
+where
+    T: DeserializeOwned + Send + Unpin + Sync + 'static,
+    C: Codec<Compact = Value> + Send + 'static,
+{
     fn stream_jobs(
         self,
         worker_id: &WorkerId,
@@ -174,9 +188,7 @@ impl<T: DeserializeOwned + Send + Unpin + Sync + 'static> MysqlStorage<T> {
                     for job in jobs {
                         yield {
                             let (req, ctx) = job.into_tuple();
-                            let req = self
-                                .codec
-                                .decode(&req)
+                            let req = C::decode(req)
                                 .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
                                 .unwrap();
                             let req = SqlRequest::new(req, ctx);
@@ -214,9 +226,10 @@ impl<T: DeserializeOwned + Send + Unpin + Sync + 'static> MysqlStorage<T> {
     }
 }
 
-impl<T> Storage for MysqlStorage<T>
+impl<T, C> Storage for MysqlStorage<T, C>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
+    C: Codec<Compact = Value> + Send,
 {
     type Job = T;
 
@@ -230,9 +243,7 @@ where
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, now(), NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
 
-        let job = self
-            .codec
-            .encode(&job)
+        let job = C::encode(job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
@@ -250,9 +261,7 @@ where
         let pool = self.pool.clone();
         let id = TaskId::new();
 
-        let job = self
-            .codec
-            .encode(&job)
+        let job = C::encode(job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
         let job_type = self.config.namespace.clone();
@@ -281,9 +290,7 @@ where
             None => Ok(None),
             Some(job) => Ok(Some({
                 let (req, ctx) = job.into_tuple();
-                let req = self
-                    .codec
-                    .decode(&req)
+                let req = C::decode(req)
                     .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
                 let req = SqlRequest::new(req, ctx);
                 let mut req: Request<T> = req.into();
@@ -372,12 +379,14 @@ where
     }
 }
 
-impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res> Backend<Request<T>, Res>
-    for MysqlStorage<T>
+impl<T, Res, C> Backend<Request<T>, Res> for MysqlStorage<T, C>
+where
+    T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
+    C: Debug + Codec<Compact = Value> + Clone + Send + 'static,
 {
     type Stream = BackendStream<RequestStream<Request<T>>>;
 
-    type Layer = AckLayer<MysqlStorage<T>, T, Res>;
+    type Layer = AckLayer<MysqlStorage<T, C>, T, Res>;
 
     fn poll<Svc>(self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
@@ -438,7 +447,12 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res> Backe
     }
 }
 
-impl<T: Sync + Send, Res: Serialize + Send + 'static + Sync> Ack<T, Res> for MysqlStorage<T> {
+impl<T, Res, C> Ack<T, Res> for MysqlStorage<T, C>
+where
+    T: Sync + Send,
+    Res: Serialize + Send + 'static + Sync,
+    C: Codec<Compact = Value> + Send,
+{
     type Context = SqlContext;
     type AckError = sqlx::Error;
     async fn ack(
@@ -450,8 +464,8 @@ impl<T: Sync + Send, Res: Serialize + Send + 'static + Sync> Ack<T, Res> for Mys
             .notify((
                 ctx.clone(),
                 res.as_ref()
-                    .map(|r| serde_json::to_value(&r).unwrap())
-                    .map_err(|c| c.clone()),
+                    .map_err(|c| c.clone())
+                    .and_then(|r| C::encode(r).map_err(|e| Error::SourceError(Arc::new(e.into())))),
             ))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::BrokenPipe, e)))?;
 
@@ -459,7 +473,7 @@ impl<T: Sync + Send, Res: Serialize + Send + 'static + Sync> Ack<T, Res> for Mys
     }
 }
 
-impl<T> MysqlStorage<T> {
+impl<T, C: Codec> MysqlStorage<T, C> {
     /// Kill a job
     pub async fn kill(&mut self, worker_id: &WorkerId, job_id: &TaskId) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();

@@ -11,7 +11,7 @@ use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
-use apalis_core::{Backend, BoxCodec};
+use apalis_core::{Backend, Codec};
 use async_stream::try_stream;
 use chrono::Utc;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
@@ -27,32 +27,24 @@ use crate::from_row::SqlRequest;
 
 pub use sqlx::sqlite::SqlitePool;
 
-/// The code used to encode Sqlite jobs.
-///
-/// Currently uses JSON
-pub type SqliteCodec<T> = BoxCodec<T, String>;
-
 /// Represents a [Storage] that persists to Sqlite
 // #[derive(Debug)]
-pub struct SqliteStorage<T> {
+pub struct SqliteStorage<T, C = JsonCodec<String>> {
     pool: Pool<Sqlite>,
     job_type: PhantomData<T>,
     controller: Controller,
     config: Config,
-    codec: SqliteCodec<T>,
+    codec: PhantomData<C>,
 }
 
-impl<T> fmt::Debug for SqliteStorage<T> {
+impl<T, C> fmt::Debug for SqliteStorage<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MysqlStorage")
             .field("pool", &self.pool)
             .field("job_type", &"PhantomData<T>")
             .field("controller", &self.controller)
             .field("config", &self.config)
-            .field(
-                "codec",
-                &"Arc<Box<dyn Codec<T, String, Error = Error> + Sync + Send + 'static>>",
-            )
+            .field("codec", &std::any::type_name::<C>())
             .finish()
     }
 }
@@ -102,7 +94,7 @@ impl<T: Serialize + DeserializeOwned> SqliteStorage<T> {
             job_type: PhantomData,
             controller: Controller::new(),
             config: Config::new(type_name::<T>()),
-            codec: Arc::new(Box::new(JsonCodec)),
+            codec: PhantomData,
         }
     }
 
@@ -113,7 +105,7 @@ impl<T: Serialize + DeserializeOwned> SqliteStorage<T> {
             job_type: PhantomData,
             controller: Controller::new(),
             config,
-            codec: Arc::new(Box::new(JsonCodec)),
+            codec: PhantomData,
         }
     }
     /// Keeps a storage notified that the worker is still alive manually
@@ -144,14 +136,16 @@ impl<T: Serialize + DeserializeOwned> SqliteStorage<T> {
         &self.pool
     }
 
-    /// Expose the code used
-    pub fn codec(&self) -> &SqliteCodec<T> {
-        &self.codec
-    }
-
     /// Get the config used by the storage
     pub fn get_config(&self) -> &Config {
         &self.config
+    }
+}
+
+impl<T, C> SqliteStorage<T, C> {
+    /// Expose the code used
+    pub fn codec(&self) -> &PhantomData<C> {
+        &self.codec
     }
 }
 
@@ -174,7 +168,11 @@ async fn fetch_next(
     Ok(job)
 }
 
-impl<T: DeserializeOwned + Send + Unpin> SqliteStorage<T> {
+impl<T, C> SqliteStorage<T, C>
+where
+    T: DeserializeOwned + Send + Unpin,
+    C: Codec<Compact = String>,
+{
     fn stream_jobs(
         &self,
         worker_id: &WorkerId,
@@ -183,7 +181,6 @@ impl<T: DeserializeOwned + Send + Unpin> SqliteStorage<T> {
     ) -> impl Stream<Item = Result<Option<Request<T>>, sqlx::Error>> {
         let pool = self.pool.clone();
         let worker_id = worker_id.clone();
-        let codec = self.codec.clone();
         let config = self.config.clone();
         try_stream! {
             loop {
@@ -205,8 +202,7 @@ impl<T: DeserializeOwned + Send + Unpin> SqliteStorage<T> {
                         None => None::<Request<T>>,
                         Some(job) => {
                             let (req, ctx) = job.into_tuple();
-                            let req = codec
-                                .decode(&req)
+                            let req = C::decode(req)
                                 .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
                             let req = SqlRequest::new(req, ctx);
                             let mut req: Request<T> = req.into();
@@ -221,9 +217,10 @@ impl<T: DeserializeOwned + Send + Unpin> SqliteStorage<T> {
     }
 }
 
-impl<T> Storage for SqliteStorage<T>
+impl<T, C> Storage for SqliteStorage<T, C>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
+    C: Codec<Compact = String> + Send,
 {
     type Job = T;
 
@@ -235,9 +232,7 @@ where
         let id = TaskId::new();
         let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, strftime('%s','now'), NULL, NULL, NULL, NULL)";
 
-        let job = self
-            .codec
-            .encode(&job)
+        let job = C::encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
@@ -254,9 +249,7 @@ where
             "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, ?4, NULL, NULL, NULL, NULL)";
 
         let id = TaskId::new();
-        let job = self
-            .codec
-            .encode(&job)
+        let job = C::encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
@@ -282,11 +275,8 @@ where
             None => Ok(None),
             Some(job) => Ok(Some({
                 let (req, ctx) = job.into_tuple();
-                let req = self
-                    .codec
-                    .decode(&req)
-                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
-                    .unwrap();
+                let req = C::decode(req)
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
                 let req = SqlRequest::new(req, ctx);
                 let mut req: Request<T> = req.into();
                 req.insert(Namespace(self.config.namespace.clone()));

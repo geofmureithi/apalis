@@ -52,13 +52,14 @@ use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
-use apalis_core::{Backend, BoxCodec};
+use apalis_core::{Backend, Codec};
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
 use futures::StreamExt;
 use futures::{select, stream, SinkExt};
 use log::error;
 use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
 use sqlx::postgres::PgListener;
 use sqlx::{Pool, Postgres, Row};
 use std::any::type_name;
@@ -76,22 +77,25 @@ use crate::from_row::SqlRequest;
 
 /// Represents a [Storage] that persists to Postgres
 // #[derive(Debug)]
-pub struct PostgresStorage<T> {
+pub struct PostgresStorage<T, C = JsonCodec<serde_json::Value>>
+where
+    C: Codec,
+{
     pool: PgPool,
     job_type: PhantomData<T>,
-    codec: BoxCodec<T, serde_json::Value>,
+    codec: PhantomData<C>,
     config: Config,
     controller: Controller,
-    ack_notify: Notify<(SqlContext, Result<serde_json::Value, Error>)>,
+    ack_notify: Notify<(SqlContext, Result<C::Compact, Error>)>,
     subscription: Option<PgSubscription>,
 }
 
-impl<T> Clone for PostgresStorage<T> {
+impl<T, C: Codec> Clone for PostgresStorage<T, C> {
     fn clone(&self) -> Self {
         PostgresStorage {
             pool: self.pool.clone(),
             job_type: PhantomData,
-            codec: self.codec.clone(),
+            codec: PhantomData,
             config: self.config.clone(),
             controller: self.controller.clone(),
             ack_notify: self.ack_notify.clone(),
@@ -100,28 +104,27 @@ impl<T> Clone for PostgresStorage<T> {
     }
 }
 
-impl<T> fmt::Debug for PostgresStorage<T> {
+impl<T, C: Codec> fmt::Debug for PostgresStorage<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PostgresStorage")
             .field("pool", &self.pool)
             .field("job_type", &"PhantomData<T>")
             .field("controller", &self.controller)
             .field("config", &self.config)
-            .field(
-                "codec",
-                &"Arc<Box<dyn Codec<T, serde_json::Value, Error = Error> + Sync + Send + 'static>>",
-            )
-            .field("ack_notify", &self.ack_notify)
+            .field("codec", &std::any::type_name::<C>())
+            .field("ack_notify", &std::any::type_name_of_val(&self.ack_notify))
             .finish()
     }
 }
 
-impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res> Backend<Request<T>, Res>
-    for PostgresStorage<T>
+impl<T, C, Res> Backend<Request<T>, Res> for PostgresStorage<T, C>
+where
+    T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
+    C: Codec<Compact = serde_json::Value> + Send + 'static,
 {
     type Stream = BackendStream<RequestStream<Request<T>>>;
 
-    type Layer = AckLayer<PostgresStorage<T>, T, Res>;
+    type Layer = AckLayer<PostgresStorage<T, C>, T, Res>;
 
     fn poll<Svc>(mut self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
@@ -141,8 +144,11 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res> Backe
                 .map(|stm| stm.notify.boxed().fuse())
                 .unwrap_or(stream::iter(vec![]).boxed().fuse());
 
-            async fn fetch_next_batch<T: Unpin + DeserializeOwned + Send + 'static>(
-                storage: &mut PostgresStorage<T>,
+            async fn fetch_next_batch<
+                T: Unpin + DeserializeOwned + Send + 'static,
+                C: Codec<Compact = Value>,
+            >(
+                storage: &mut PostgresStorage<T, C>,
                 worker: &WorkerId,
                 tx: &mut mpsc::Sender<Result<Option<Request<T>>, Error>>,
             ) -> Result<(), Error> {
@@ -238,7 +244,7 @@ impl PostgresStorage<()> {
     }
 }
 
-impl<T: Serialize + DeserializeOwned> PostgresStorage<T> {
+impl<T> PostgresStorage<T> {
     /// New Storage from [PgPool]
     pub fn new(pool: PgPool) -> Self {
         Self::new_with_config(pool, Config::new(type_name::<T>()))
@@ -248,7 +254,7 @@ impl<T: Serialize + DeserializeOwned> PostgresStorage<T> {
         Self {
             pool,
             job_type: PhantomData,
-            codec: Arc::new(Box::new(JsonCodec)),
+            codec: PhantomData,
             config,
             controller: Controller::new(),
             ack_notify: Notify::new(),
@@ -265,10 +271,37 @@ impl<T: Serialize + DeserializeOwned> PostgresStorage<T> {
     pub fn config(&self) -> &Config {
         &self.config
     }
+}
 
+impl<T, C: Codec> PostgresStorage<T, C> {
     /// Expose the codec
-    pub fn codec(&self) -> &BoxCodec<T, serde_json::Value> {
+    pub fn codec(&self) -> &PhantomData<C> {
         &self.codec
+    }
+
+    async fn keep_alive_at<Service>(
+        &mut self,
+        worker_id: &WorkerId,
+        last_seen: Timestamp,
+    ) -> Result<(), sqlx::Error> {
+        let last_seen = DateTime::from_timestamp(last_seen, 0).ok_or(sqlx::Error::Io(
+            io::Error::new(io::ErrorKind::InvalidInput, "Invalid Timestamp"),
+        ))?;
+        let worker_type = self.config.namespace.clone();
+        let storage_name = std::any::type_name::<Self>();
+        let query = "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (id) DO
+                   UPDATE SET last_seen = EXCLUDED.last_seen";
+        sqlx::query(query)
+            .bind(worker_id.to_string())
+            .bind(worker_type)
+            .bind(storage_name)
+            .bind(std::any::type_name::<Service>())
+            .bind(last_seen)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 }
 
@@ -331,7 +364,11 @@ impl PgListen {
     }
 }
 
-impl<T: DeserializeOwned + Send + Unpin + 'static> PostgresStorage<T> {
+impl<T, C> PostgresStorage<T, C>
+where
+    T: DeserializeOwned + Send + Unpin + 'static,
+    C: Codec<Compact = serde_json::Value>,
+{
     async fn fetch_next(&mut self, worker_id: &WorkerId) -> Result<Vec<Request<T>>, sqlx::Error> {
         let config = &self.config;
         let job_type = &config.namespace;
@@ -350,9 +387,7 @@ impl<T: DeserializeOwned + Send + Unpin + 'static> PostgresStorage<T> {
             .into_iter()
             .map(|job| {
                 let (req, ctx) = job.into_tuple();
-                let req = self
-                    .codec
-                    .decode(&req)
+                let req = C::decode(req)
                     .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
                     .unwrap();
                 let req = SqlRequest::new(req, ctx);
@@ -363,36 +398,12 @@ impl<T: DeserializeOwned + Send + Unpin + 'static> PostgresStorage<T> {
             .collect();
         Ok(jobs)
     }
-
-    async fn keep_alive_at<Service>(
-        &mut self,
-        worker_id: &WorkerId,
-        last_seen: Timestamp,
-    ) -> Result<(), sqlx::Error> {
-        let last_seen = DateTime::from_timestamp(last_seen, 0).ok_or(sqlx::Error::Io(
-            io::Error::new(io::ErrorKind::InvalidInput, "Invalid Timestamp"),
-        ))?;
-        let worker_type = self.config.namespace.clone();
-        let storage_name = std::any::type_name::<Self>();
-        let query = "INSERT INTO apalis.workers (id, worker_type, storage_name, layers, last_seen)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (id) DO
-                   UPDATE SET last_seen = EXCLUDED.last_seen";
-        sqlx::query(query)
-            .bind(worker_id.to_string())
-            .bind(worker_type)
-            .bind(storage_name)
-            .bind(std::any::type_name::<Service>())
-            .bind(last_seen)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
 }
 
-impl<T> Storage for PostgresStorage<T>
+impl<T, C> Storage for PostgresStorage<T, C>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
+    C: Codec<Compact = Value> + Send + 'static,
 {
     type Job = T;
 
@@ -411,9 +422,7 @@ where
         let id = TaskId::new();
         let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, 25, NOW() , NULL, NULL, NULL, NULL)";
 
-        let job = self
-            .codec
-            .encode(&job)
+        let job = C::encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
@@ -431,9 +440,7 @@ where
 
         let id = TaskId::new();
         let on = DateTime::from_timestamp(on, 0);
-        let job = self
-            .codec
-            .encode(&job)
+        let job = C::encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
@@ -460,11 +467,8 @@ where
             None => Ok(None),
             Some(job) => Ok(Some({
                 let (req, ctx) = job.into_tuple();
-                let req = self
-                    .codec
-                    .decode(&req)
-                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
-                    .unwrap();
+                let req = C::decode(req)
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
                 let req = SqlRequest::new(req, ctx);
                 let mut req: Request<T> = req.into();
                 req.insert(Namespace(self.config.namespace.clone()));
@@ -546,7 +550,12 @@ where
     }
 }
 
-impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for PostgresStorage<T> {
+impl<T, Res, C> Ack<T, Res> for PostgresStorage<T, C>
+where
+    T: Sync + Send,
+    Res: Serialize + Sync,
+    C: Codec<Compact = Value> + Send,
+{
     type Context = SqlContext;
     type AckError = sqlx::Error;
     async fn ack(
@@ -558,7 +567,13 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for PostgresStorage<T> {
             .notify((
                 ctx.clone(),
                 res.as_ref()
-                    .map(|r| serde_json::to_value(r).unwrap())
+                    .map(|r| {
+                        C::encode(r)
+                            .map_err(|e| {
+                                sqlx::Error::Io(io::Error::new(io::ErrorKind::Interrupted, e))
+                            })
+                            .unwrap()
+                    })
                     .map_err(|e| e.clone()),
             ))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::Interrupted, e)))?;
@@ -567,7 +582,7 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for PostgresStorage<T> {
     }
 }
 
-impl<T> PostgresStorage<T> {
+impl<T, C: Codec> PostgresStorage<T, C> {
     /// Kill a job
     pub async fn kill(
         &mut self,

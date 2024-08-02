@@ -26,8 +26,8 @@ async fn main() -> Result<()> {
     produce_jobs(&mut storage).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .backend(storage)
         .data(pool)
+        .backend(storage)
         .build_fn(send_email);
 
     Monitor::<TokioExecutor>::new()

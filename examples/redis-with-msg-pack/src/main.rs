@@ -5,19 +5,24 @@ use apalis::prelude::*;
 use apalis_redis::RedisStorage;
 
 use email_service::{send_email, Email};
-use serde::{de::DeserializeOwned, Serialize};
+use redis::aio::ConnectionManager;
+use serde::{Deserialize, Serialize};
 use tracing::info;
 
 struct MessagePack;
 
-impl<T: Serialize + DeserializeOwned> Codec<T, Vec<u8>> for MessagePack {
+impl Codec for MessagePack {
+    type Compact = Vec<u8>;
     type Error = Error;
-    fn encode(&self, input: &T) -> Result<Vec<u8>, Self::Error> {
-        rmp_serde::to_vec(input).map_err(|e| Error::SourceError(Arc::new(Box::new(e))))
+    fn encode<T: Serialize>(input: T) -> Result<Vec<u8>, Self::Error> {
+        rmp_serde::to_vec(&input).map_err(|e| Error::SourceError(Arc::new(Box::new(e))))
     }
 
-    fn decode(&self, compact: &Vec<u8>) -> Result<T, Self::Error> {
-        rmp_serde::from_slice(compact).map_err(|e| Error::SourceError(Arc::new(Box::new(e))))
+    fn decode<O>(compact: Vec<u8>) -> Result<O, Self::Error>
+    where
+        O: for<'de> Deserialize<'de>,
+    {
+        rmp_serde::from_slice(&compact).map_err(|e| Error::SourceError(Arc::new(Box::new(e))))
     }
 }
 
@@ -31,7 +36,7 @@ async fn main() -> Result<()> {
     let config = apalis_redis::Config::default()
         .set_namespace("apalis_redis-with-msg-pack")
         .set_max_retries(5);
-    let storage = RedisStorage::new_with_codec(conn, config, MessagePack);
+    let storage = RedisStorage::new_with_codec::<MessagePack>(conn, config);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
@@ -52,7 +57,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
+async fn produce_jobs(
+    mut storage: RedisStorage<Email, ConnectionManager, MessagePack>,
+) -> Result<()> {
     for index in 0..10 {
         storage
             .push(Email {
