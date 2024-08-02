@@ -56,8 +56,10 @@ where
                     .await
                     .unwrap()
                     .map(|r| {
-                        let mut req: Request<M> =
-                            C::decode::<RedisJob<M>>(r.message).map_err(Into::into).unwrap().into();
+                        let mut req: Request<M> = C::decode::<RedisJob<M>>(r.message)
+                            .map_err(Into::into)
+                            .unwrap()
+                            .into();
                         req.insert(r.id);
                         req
                     });
@@ -83,7 +85,9 @@ where
         ctx: &Self::Context,
         _res: &Result<Res, apalis_core::error::Error>,
     ) -> Result<(), Self::AckError> {
-        self.conn.delete_message(self.config.get_namespace(), &ctx).await?;
+        self.conn
+            .delete_message(self.config.get_namespace(), &ctx)
+            .await?;
         Ok(())
     }
 }
@@ -99,18 +103,24 @@ where
         let bytes = C::encode(&RedisJob::new(message, Default::default()))
             .map_err(Into::into)
             .unwrap();
-        self.conn.send_message(self.config.get_namespace(), bytes, None).await?;
+        self.conn
+            .send_message(self.config.get_namespace(), bytes, None)
+            .await?;
         Ok(())
     }
 
     async fn dequeue(&mut self) -> Result<Option<Message>, Self::Error> {
-        Ok(self.conn.receive_message(self.config.get_namespace(), None).await?.map(|r| {
-            let req: Request<Message> = C::decode::<RedisJob<Message>>(r.message)
-                .map_err(Into::into)
-                .unwrap()
-                .into();
-            req.take()
-        }))
+        Ok(self
+            .conn
+            .receive_message(self.config.get_namespace(), None)
+            .await?
+            .map(|r| {
+                let req: Request<Message> = C::decode::<RedisJob<Message>>(r.message)
+                    .map_err(Into::into)
+                    .unwrap()
+                    .into();
+                req.take()
+            }))
     }
 
     async fn size(&mut self) -> Result<usize, Self::Error> {
