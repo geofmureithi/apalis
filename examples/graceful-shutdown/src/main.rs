@@ -8,7 +8,7 @@ use tracing::info;
 #[derive(Debug, Serialize, Deserialize)]
 struct LongRunningJob {}
 
-async fn long_running_task(task: LongRunningJob, worker_ctx: Context<TokioExecutor>) {
+async fn long_running_task(_task: LongRunningJob, worker_ctx: Context<TokioExecutor>) {
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await; // Do some hard thing
         info!("is_shutting_down: {}", worker_ctx.is_shutting_down(),);

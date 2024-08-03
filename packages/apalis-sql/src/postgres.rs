@@ -112,7 +112,7 @@ impl<T, C: Codec> fmt::Debug for PostgresStorage<T, C> {
             .field("controller", &self.controller)
             .field("config", &self.config)
             .field("codec", &std::any::type_name::<C>())
-            .field("ack_notify", &std::any::type_name_of_val(&self.ack_notify))
+            // .field("ack_notify", &std::any::type_name_of_val(&self.ack_notify))
             .finish()
     }
 }
