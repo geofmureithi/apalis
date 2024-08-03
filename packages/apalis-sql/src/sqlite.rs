@@ -667,7 +667,7 @@ mod tests {
         assert!(ctx.done_at().is_none());
         assert!(ctx.lock_by().is_some());
         assert!(ctx.lock_at().is_some());
-        assert_eq!(*ctx.last_error(), Some("".to_string())); //TODO: Fix this
+        assert_eq!(*ctx.last_error(), None);
     }
 
     #[tokio::test]
