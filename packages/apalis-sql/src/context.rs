@@ -117,8 +117,8 @@ impl SqlContext {
     }
 
     /// Set the last error
-    pub fn set_last_error(&mut self, error: String) {
-        self.last_error = Some(error);
+    pub fn set_last_error(&mut self, error: Option<String>) {
+        self.last_error = error;
     }
 
     /// Record an attempt to execute the request

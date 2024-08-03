@@ -29,7 +29,7 @@ impl<T, C> Clone for RedisMq<T, C> {
             conn: self.conn.clone(),
             msg_type: PhantomData,
             config: self.config.clone(),
-            codec: self.codec.clone(),
+            codec: self.codec,
         }
     }
 }
@@ -86,7 +86,7 @@ where
         _res: &Result<Res, apalis_core::error::Error>,
     ) -> Result<(), Self::AckError> {
         self.conn
-            .delete_message(self.config.get_namespace(), &ctx)
+            .delete_message(self.config.get_namespace(), ctx)
             .await?;
         Ok(())
     }

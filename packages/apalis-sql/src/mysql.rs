@@ -74,7 +74,7 @@ where
             job_type: PhantomData,
             controller: self.controller.clone(),
             config: self.config.clone(),
-            codec: self.codec.clone(),
+            codec: self.codec,
             ack_notify: self.ack_notify.clone(),
         }
     }

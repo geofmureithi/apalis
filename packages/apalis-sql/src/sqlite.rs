@@ -56,7 +56,7 @@ impl<T> Clone for SqliteStorage<T> {
             job_type: PhantomData,
             controller: self.controller.clone(),
             config: self.config.clone(),
-            codec: self.codec.clone(),
+            codec: self.codec,
         }
     }
 }
@@ -484,7 +484,7 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
             .bind(ctx.id().to_string())
             .bind(ctx.lock_by().as_ref().unwrap().to_string())
             .bind(result)
-            .bind(calculate_status(&res).to_string())
+            .bind(calculate_status(res).to_string())
             .bind(ctx.attempts().current() as i64 + 1)
             .execute(&pool)
             .await?;
@@ -667,7 +667,7 @@ mod tests {
         assert!(ctx.done_at().is_none());
         assert!(ctx.lock_by().is_some());
         assert!(ctx.lock_at().is_some());
-        assert_eq!(*ctx.last_error(), Some("".to_string())); //TODO: Fix this
+        assert_eq!(*ctx.last_error(), None);
     }
 
     #[tokio::test]

@@ -20,7 +20,9 @@ pub async fn send_email(job: Email) -> Result<(), Error> {
         }
         Err(email_address::Error::InvalidCharacter) => {
             log::error!("Killed send email job. Invalid character {}", job.to);
-            Err(Error::Abort(String::from("Invalid character. Job killed")))
+            Err(Error::Abort(Arc::new(Box::new(
+                email_address::Error::InvalidCharacter,
+            ))))
         }
         Err(e) => Err(Error::Failed(Arc::new(Box::new(e)))),
     }

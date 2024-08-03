@@ -573,7 +573,7 @@ where
                         .key(self.config.job_data_hash())
                         .arg(ctx.id.to_string())
                         .arg(now)
-                        .arg(e)
+                        .arg(e.to_string())
                         .invoke_async(&mut self.conn)
                         .await
                 }

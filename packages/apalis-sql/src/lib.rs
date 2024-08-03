@@ -164,10 +164,7 @@ macro_rules! sql_storage_tests {
                 .unwrap();
 
             let (job_id, res) = storage.execute_next().await;
-            assert_eq!(
-                res,
-                Err("AbortError: Invalid character. Job killed".to_owned())
-            );
+            assert_eq!(res, Err("AbortError: Invalid character.".to_owned()));
             apalis_core::sleep(Duration::from_secs(1)).await;
             let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
             let ctx = job.get::<SqlContext>().unwrap();
@@ -175,7 +172,7 @@ macro_rules! sql_storage_tests {
             assert!(ctx.done_at().is_some());
             assert_eq!(
                 ctx.last_error().clone().unwrap(),
-                "{\"Err\":\"AbortError: Invalid character. Job killed\"}"
+                "{\"Err\":\"AbortError: Invalid character.\"}"
             );
         }
 

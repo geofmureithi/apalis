@@ -609,7 +609,13 @@ impl<E: Executor + Send + 'static + Clone> Context<E> {
         }
     }
 
-    /// Calling this function triggers shutting down the worker
+    /// Calling this function triggers shutting down the worker without waiting for any tasks to complete
+    pub fn force_stop(&self) {
+        self.task_count.store(WORKER_FUTURES, Ordering::Relaxed);
+        self.stop();
+    }
+
+    /// Calling this function triggers shutting down the worker while waiting for any tasks to complete
     pub fn stop(&self) {
         self.running.store(false, Ordering::Relaxed);
         self.wake()
@@ -643,7 +649,7 @@ impl<E: Executor + Send + 'static + Clone> Context<E> {
         self.context
             .as_ref()
             .map(|s| s.shutdown().is_shutting_down())
-            .unwrap_or(false)
+            .unwrap_or(!self.is_running())
     }
 
     fn add_waker(&self, cx: &mut TaskCtx<'_>) {
