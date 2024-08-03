@@ -133,8 +133,7 @@ define_bench!("redis", {
     let redis = RedisStorage::new_with_config(
         conn,
         apalis_redis::Config::default()
-            .set_buffer_size(100)
-            .set_poll_interval(Duration::from_millis(50)),
+            .set_buffer_size(100),
     );
     redis
 });
