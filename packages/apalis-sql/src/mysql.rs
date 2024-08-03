@@ -95,10 +95,9 @@ impl MysqlStorage<(), JsonCodec<Value>> {
     }
 }
 
-impl<T, C> MysqlStorage<T, C>
+impl<T> MysqlStorage<T>
 where
     T: Serialize + DeserializeOwned,
-    C: Codec,
 {
     /// Create a new instance from a pool
     pub fn new(pool: MySqlPool) -> Self {
@@ -120,12 +119,6 @@ where
     /// Expose the pool for other functionality, eg custom migrations
     pub fn pool(&self) -> &Pool<MySql> {
         &self.pool
-    }
-
-    /// Expose the codec
-    #[doc(hidden)]
-    pub fn codec(&self) -> &PhantomData<C> {
-        &self.codec
     }
 
     /// Get the config used by the storage
