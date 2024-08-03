@@ -12,9 +12,10 @@ use sqlx::MySqlPool;
 use sqlx::PgPool;
 use sqlx::SqlitePool;
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
+
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 use tokio::runtime::Runtime;
 macro_rules! define_bench {
     ($name:expr, $setup:expr ) => {
@@ -24,42 +25,25 @@ macro_rules! define_bench {
 
             let mut group = c.benchmark_group($name);
             group.sample_size(10);
-            group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &s| {
+            group.bench_function(BenchmarkId::new("consume", size),|b| {
                 b.to_async(Runtime::new().unwrap())
-                    .iter_custom(|iters| async move {
-                        let mut interval = tokio::time::interval(Duration::from_millis(150));
-                        let storage = { $setup };
-                        let mut s1 = storage.clone();
+                    .iter(|| async move {
+                        let mut storage = { $setup };
+                        let mut s = storage.clone();
                         let counter = Counter::default();
-                        let c = counter.clone();
                         tokio::spawn(async move {
-                            Monitor::<TokioExecutor>::new()
-                                .register({
-                                    let worker =
-                                        WorkerBuilder::new(format!("{}-bench", $name))
-                                            .data(c)
-                                            .backend(storage)
-                                            .build_fn(handle_test_job);
-                                    worker
-                                })
-                                .run()
-                                .await
-                                .unwrap();
+                            for _i in 0..1000 {
+                                let _ = s.push(TestJob).await;
+                            }
                         });
-
-                        let start = Instant::now();
-                        for _ in 0..iters {
-                            for _i in 0..s {
-                                let _ = s1.push(TestJob).await;
-                            }
-                            while (counter.0.load(Ordering::Relaxed) != s) || (s1.len().await.unwrap_or(-1) != 0) {
-                                interval.tick().await;
-                            }
-                            counter.0.store(0, Ordering::Relaxed);
-                        }
-                        let elapsed = start.elapsed();
-                        s1.cleanup().await;
-                        elapsed
+                        WorkerBuilder::new(format!("{}-bench", $name))
+                            .data(counter)
+                            .backend(storage.clone())
+                            .build_fn(handle_test_job)
+                            .with_executor(TokioExecutor)
+                            .run()
+                            .await;
+                        storage.cleanup().await;
                     })
             });
             group.bench_with_input(BenchmarkId::new("push", size), &size, |b, &s| {
@@ -81,8 +65,15 @@ struct TestJob;
 #[derive(Debug, Default, Clone)]
 struct Counter(Arc<AtomicUsize>);
 
-async fn handle_test_job(_req: TestJob, counter: Data<Counter>) -> Result<(), Error> {
-    counter.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+async fn handle_test_job(
+    _req: TestJob,
+    counter: Data<Counter>,
+    wrk: Context<TokioExecutor>,
+) -> Result<(), Error> {
+    let value = counter.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if value == 999 {
+        wrk.force_stop();
+    }
     Ok(())
 }
 
@@ -129,26 +120,45 @@ impl CleanUp for RedisStorage<TestJob> {
 define_bench!("sqlite_in_memory", {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
     let _ = SqliteStorage::setup(&pool).await;
-    SqliteStorage::new(pool)
+    SqliteStorage::new_with_config(
+        pool,
+        Config::default()
+            .set_buffer_size(100)
+            .set_poll_interval(Duration::from_millis(50)),
+    )
 });
 
 define_bench!("redis", {
     let conn = apalis_redis::connect(env!("REDIS_URL")).await.unwrap();
-    let redis =
-        RedisStorage::new_with_config(conn, apalis_redis::Config::default().set_buffer_size(1000));
+    let redis = RedisStorage::new_with_config(
+        conn,
+        apalis_redis::Config::default()
+            .set_buffer_size(100)
+            .set_poll_interval(Duration::from_millis(50)),
+    );
     redis
 });
 
 define_bench!("postgres", {
     let pool = PgPool::connect(env!("POSTGRES_URL")).await.unwrap();
     let _ = PostgresStorage::setup(&pool).await.unwrap();
-    PostgresStorage::new_with_config(pool, Config::new("postgres:bench").set_buffer_size(1000))
+    PostgresStorage::new_with_config(
+        pool,
+        Config::new("postgres:bench")
+            .set_buffer_size(100)
+            .set_poll_interval(Duration::from_millis(50)),
+    )
 });
 
 define_bench!("mysql", {
     let pool = MySqlPool::connect(env!("MYSQL_URL")).await.unwrap();
     let _ = MysqlStorage::setup(&pool).await.unwrap();
-    MysqlStorage::new_with_config(pool, Config::new("mysql:bench").set_buffer_size(1000))
+    MysqlStorage::new_with_config(
+        pool,
+        Config::new("mysql:bench")
+            .set_buffer_size(100)
+            .set_poll_interval(Duration::from_millis(50)),
+    )
 });
 
 criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
