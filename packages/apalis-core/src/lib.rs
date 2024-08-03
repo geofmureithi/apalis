@@ -22,10 +22,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //! # apalis-core
 //! Utilities for building job and message processing tools.
-use std::sync::Arc;
-
+use error::BoxDynError;
 use futures::Stream;
 use poller::Poller;
+use serde::{Deserialize, Serialize};
+use tower::Service;
 use worker::WorkerId;
 
 /// Represent utilities for creating worker instances.
@@ -72,7 +73,7 @@ pub mod codec;
 ///
 /// [`Storage`]: crate::storage::Storage
 /// [`MessageQueue`]: crate::mq::MessageQueue
-pub trait Backend<Req> {
+pub trait Backend<Req, Res> {
     /// The stream to be produced by the backend
     type Stream: Stream<Item = Result<Option<Req>, crate::error::Error>>;
 
@@ -80,24 +81,26 @@ pub trait Backend<Req> {
     type Layer;
 
     /// Returns a poller that is ready for streaming
-    fn poll(self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer>;
+    fn poll<Svc: Service<Req, Response = Res>>(
+        self,
+        worker: WorkerId,
+    ) -> Poller<Self::Stream, Self::Layer>;
 }
-
-/// This allows encoding and decoding of requests in different backends
-pub trait Codec<T, Compact> {
+/// A codec allows backends to encode and decode data
+pub trait Codec {
+    /// The mode of storage by the codec
+    type Compact;
     /// Error encountered by the codec
-    type Error;
-
-    /// Convert to the compact version
-    fn encode(&self, input: &T) -> Result<Compact, Self::Error>;
-
-    /// Decode back to our request type
-    fn decode(&self, compact: &Compact) -> Result<T, Self::Error>;
+    type Error: Into<BoxDynError>;
+    /// The encoding method
+    fn encode<I>(input: I) -> Result<Self::Compact, Self::Error>
+    where
+        I: Serialize;
+    /// The decoding method
+    fn decode<O>(input: Self::Compact) -> Result<O, Self::Error>
+    where
+        O: for<'de> Deserialize<'de>;
 }
-
-/// A boxed codec
-pub type BoxCodec<T, Compact, Error = error::Error> =
-    Arc<Box<dyn Codec<T, Compact, Error = Error> + Sync + Send + 'static>>;
 
 /// Sleep utilities
 #[cfg(feature = "sleep")]
@@ -209,10 +212,11 @@ pub mod test_utils {
 
     /// A generic backend wrapper that polls and executes jobs
     #[derive(Debug)]
-    pub struct TestWrapper<B, Req> {
+    pub struct TestWrapper<B, Req, Res> {
         stop_tx: Sender<()>,
         res_rx: Receiver<(TaskId, Result<String, String>)>,
         _p: PhantomData<Req>,
+        _r: PhantomData<Res>,
         backend: B,
     }
     /// A test wrapper to allow you to test without requiring a worker.
@@ -247,9 +251,9 @@ pub mod test_utils {
     ///    }
     ///}
     /// ````
-    impl<B, Req> TestWrapper<B, Req>
+    impl<B, Req, Res> TestWrapper<B, Req, Res>
     where
-        B: Backend<Request<Req>> + Send + Sync + 'static + Clone,
+        B: Backend<Request<Req>, Res> + Send + Sync + 'static + Clone,
         Req: Send + 'static,
         B::Stream: Send + 'static,
         B::Stream: Stream<Item = Result<Option<Request<Req>>, crate::error::Error>> + Unpin,
@@ -257,16 +261,23 @@ pub mod test_utils {
         /// Build a new instance provided a custom service
         pub fn new_with_service<S>(backend: B, service: S) -> (Self, BoxFuture<'static, ()>)
         where
-            S: Service<Request<Req>> + Send + 'static,
+            S: Service<Request<Req>, Response = Res> + Send + 'static,
             B::Layer: Layer<S>,
-            <<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service: Service<Request<Req>> + Send + 'static,
-            <<<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service as Service<Request<Req>>>::Response: Send + Debug,
-            <<<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service as Service<Request<Req>>>::Error: Send + Into<BoxDynError> + Sync,
-            <<<B as Backend<Request<Req>>>::Layer as Layer<S>>::Service as Service<Request<Req>>>::Future: Send + 'static,
+            <<B as Backend<Request<Req>, Res>>::Layer as Layer<S>>::Service:
+                Service<Request<Req>> + Send + 'static,
+            <<<B as Backend<Request<Req>, Res>>::Layer as Layer<S>>::Service as Service<
+                Request<Req>,
+            >>::Response: Send + Debug,
+            <<<B as Backend<Request<Req>, Res>>::Layer as Layer<S>>::Service as Service<
+                Request<Req>,
+            >>::Error: Send + Into<BoxDynError> + Sync,
+            <<<B as Backend<Request<Req>, Res>>::Layer as Layer<S>>::Service as Service<
+                Request<Req>,
+            >>::Future: Send + 'static,
         {
             let worker_id = WorkerId::new("test-worker");
             let b = backend.clone();
-            let mut poller = b.poll(worker_id);
+            let mut poller = b.poll::<S>(worker_id);
             let (stop_tx, mut stop_rx) = channel::<()>(1);
 
             let (mut res_tx, res_rx) = channel(10);
@@ -307,11 +318,12 @@ pub mod test_utils {
                 }
             };
             (
-                Self {
+                TestWrapper {
                     stop_tx,
                     res_rx,
                     _p: PhantomData,
                     backend,
+                    _r: PhantomData,
                 },
                 poller.boxed(),
             )
@@ -319,7 +331,7 @@ pub mod test_utils {
 
         /// Stop polling
         pub fn stop(mut self) {
-            let _ = self.stop_tx.send(());
+            self.stop_tx.try_send(()).unwrap();
         }
 
         /// Gets the current state of results
@@ -328,9 +340,9 @@ pub mod test_utils {
         }
     }
 
-    impl<B, Req> Deref for TestWrapper<B, Req>
+    impl<B, Req, Res> Deref for TestWrapper<B, Req, Res>
     where
-        B: Backend<Request<Req>>,
+        B: Backend<Request<Req>, Res>,
     {
         type Target = B;
 
@@ -339,9 +351,9 @@ pub mod test_utils {
         }
     }
 
-    impl<B, Req> DerefMut for TestWrapper<B, Req>
+    impl<B, Req, Res> DerefMut for TestWrapper<B, Req, Res>
     where
-        B: Backend<Request<Req>>,
+        B: Backend<Request<Req>, Res>,
     {
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.backend

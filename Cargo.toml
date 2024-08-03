@@ -1,15 +1,19 @@
+[workspace.package]
+edition = "2021"
+repository = "https://github.com/geofmureithi/apalis"
+
 [package]
 name = "apalis"
-version = "0.6.0-rc.4"
+version = "0.6.0-rc.5"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
-repository = "https://github.com/geofmureithi/apalis"
+edition.workspace = true
+repository.workspace = true
 documentation = "https://docs.rs/apalis"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["job", "task", "scheduler", "worker", "cron"]
 categories = ["database"]
-edition = "2021"
 
 [lib]
 bench = false
@@ -34,7 +38,7 @@ limit = ["tower/limit"]
 ## Support filtering jobs based on a predicate
 filter = ["tower/filter"]
 ## Captures panics in executions and convert them to errors
-catch-panic = ["dep:backtrace"]
+catch-panic = []
 ## Compatibility with async-std and smol runtimes
 async-std-comp = ["async-std"]
 ## Compatibility with tokio and actix runtimes
@@ -54,7 +58,7 @@ layers = [
 docsrs = ["document-features"]
 
 [dependencies.apalis-core]
-version = "0.6.0-rc.4"
+version = "0.6.0-rc.5"
 default-features = false
 path = "./packages/apalis-core"
 
@@ -90,7 +94,7 @@ redis = { version = "0.25.3", default-features = false, features = [
 ] }
 
 [dev-dependencies.sqlx]
-version = "0.7.4"
+version = "0.8.0"
 default-features = false
 features = ["chrono", "mysql", "sqlite", "postgres", "runtime-tokio"]
 
@@ -121,7 +125,7 @@ members = [
   "examples/redis-with-msg-pack",
   "examples/redis-deadpool",
   "examples/redis-mq-example",
-  "examples/cron",
+  "examples/cron", "examples/catch-panic", "examples/graceful-shutdown", "examples/unmonitored-worker", "examples/fn-args",
 ]
 
 
@@ -142,7 +146,6 @@ pin-project-lite = "0.2.14"
 uuid = { version = "1.8", optional = true }
 ulid = { version = "1", optional = true }
 serde = { version = "1.0", features = ["derive"] }
-backtrace = { version = "0.3", optional = true }
 
 [dependencies.tracing]
 default-features = false

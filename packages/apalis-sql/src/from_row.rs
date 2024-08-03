@@ -1,6 +1,6 @@
 use apalis_core::task::task_id::TaskId;
 use apalis_core::{data::Extensions, request::Request, worker::WorkerId};
-use chrono::Utc;
+
 use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Type};
 
@@ -129,6 +129,7 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
     sqlx::FromRow<'r, sqlx::postgres::PgRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        use chrono::Utc;
         use sqlx::Row;
         use std::str::FromStr;
 

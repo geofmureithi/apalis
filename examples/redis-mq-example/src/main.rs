@@ -1,58 +1,65 @@
-use std::{marker::PhantomData, time::Duration};
+use std::{fmt::Debug, marker::PhantomData, time::Duration};
 
-use anyhow::Result;
 use apalis::{layers::tracing::TraceLayer, prelude::*};
 
-use apalis_redis::{self, Config, RedisCodec, RedisJob};
+use apalis_redis::{self, Config, RedisJob};
 
 use apalis_core::{
     codec::json::JsonCodec,
-    layers::{Ack, AckLayer, AckResponse},
+    layers::{Ack, AckLayer},
 };
 use email_service::{send_email, Email};
 use futures::{channel::mpsc, SinkExt};
 use rsmq_async::{Rsmq, RsmqConnection, RsmqError};
+use serde::{de::DeserializeOwned, Serialize};
 use tokio::time::sleep;
 use tracing::{error, info};
 
-struct RedisMq<T> {
+struct RedisMq<T, C = JsonCodec<Vec<u8>>> {
     conn: Rsmq,
     msg_type: PhantomData<T>,
     config: Config,
-    codec: RedisCodec<T>,
+    codec: PhantomData<C>,
 }
 
 // Manually implement Clone for RedisMq
-impl<T> Clone for RedisMq<T> {
+impl<T, C> Clone for RedisMq<T, C> {
     fn clone(&self) -> Self {
         RedisMq {
             conn: self.conn.clone(),
             msg_type: PhantomData,
             config: self.config.clone(),
-            codec: self.codec.clone(),
+            codec: self.codec,
         }
     }
 }
 
-impl<M: Send + 'static> Backend<Request<M>> for RedisMq<M> {
+impl<M, C, Res> Backend<Request<M>, Res> for RedisMq<M, C>
+where
+    M: Send + DeserializeOwned + 'static,
+    C: Codec<Compact = Vec<u8>>,
+{
     type Stream = RequestStream<Request<M>>;
 
-    type Layer = AckLayer<Self, M>;
+    type Layer = AckLayer<Self, M, Res>;
 
-    fn poll(mut self, worker_id: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(mut self, _worker_id: WorkerId) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.get_buffer_size());
         let stream: RequestStream<Request<M>> = Box::pin(rx);
-        let layer = AckLayer::new(self.clone(), worker_id);
+        let layer = AckLayer::new(self.clone());
         let heartbeat = async move {
             loop {
                 sleep(*self.config.get_poll_interval()).await;
                 let msg: Option<Request<M>> = self
                     .conn
-                    .receive_message("email", None)
+                    .receive_message(self.config.get_namespace(), None)
                     .await
                     .unwrap()
                     .map(|r| {
-                        let mut req: Request<_> = self.codec.decode(&r.message).unwrap().into();
+                        let mut req: Request<M> = C::decode::<RedisJob<M>>(r.message)
+                            .map_err(Into::into)
+                            .unwrap()
+                            .into();
                         req.insert(r.id);
                         req
                     });
@@ -63,41 +70,62 @@ impl<M: Send + 'static> Backend<Request<M>> for RedisMq<M> {
     }
 }
 
-impl<T: Send> Ack<T> for RedisMq<T> {
-    type Acknowledger = String;
+impl<T, C, Res> Ack<T, Res> for RedisMq<T, C>
+where
+    T: Send,
+    Res: Debug + Send + Sync,
+    C: Send,
+{
+    type Context = String;
 
-    type Error = RsmqError;
+    type AckError = RsmqError;
 
-    async fn ack(&mut self, ack: AckResponse<String>) -> Result<(), Self::Error> {
-        println!("Attempting to ACK {}", ack.acknowledger);
-        self.conn.delete_message("email", &ack.acknowledger).await?;
+    async fn ack(
+        &mut self,
+        ctx: &Self::Context,
+        _res: &Result<Res, apalis_core::error::Error>,
+    ) -> Result<(), Self::AckError> {
+        self.conn
+            .delete_message(self.config.get_namespace(), ctx)
+            .await?;
         Ok(())
     }
 }
 
-impl<Message: Send + 'static> MessageQueue<Message> for RedisMq<Message> {
+impl<Message, C> MessageQueue<Message> for RedisMq<Message, C>
+where
+    Message: Send + Serialize + DeserializeOwned + 'static,
+    C: Codec<Compact = Vec<u8>> + Send,
+{
     type Error = RsmqError;
 
     async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
-        let bytes = self
-            .codec
-            .encode(&RedisJob::new(message, Default::default()))
+        let bytes = C::encode(&RedisJob::new(message, Default::default()))
+            .map_err(Into::into)
             .unwrap();
-        self.conn.send_message("email", bytes, None).await?;
+        self.conn
+            .send_message(self.config.get_namespace(), bytes, None)
+            .await?;
         Ok(())
     }
 
     async fn dequeue(&mut self) -> Result<Option<Message>, Self::Error> {
-        let codec = self.codec.clone();
-        Ok(self.conn.receive_message("email", None).await?.map(|r| {
-            let req: Request<Message> = codec.decode(&r.message).unwrap().into();
-            req.take()
-        }))
+        Ok(self
+            .conn
+            .receive_message(self.config.get_namespace(), None)
+            .await?
+            .map(|r| {
+                let req: Request<Message> = C::decode::<RedisJob<Message>>(r.message)
+                    .map_err(Into::into)
+                    .unwrap()
+                    .into();
+                req.take()
+            }))
     }
 
     async fn size(&mut self) -> Result<usize, Self::Error> {
         self.conn
-            .get_queue_attributes("email")
+            .get_queue_attributes(self.config.get_namespace())
             .await?
             .msgs
             .try_into()
@@ -105,7 +133,7 @@ impl<Message: Send + 'static> MessageQueue<Message> for RedisMq<Message> {
     }
 }
 
-async fn produce_jobs(mq: &mut RedisMq<Email>) -> Result<()> {
+async fn produce_jobs(mq: &mut RedisMq<Email>) -> anyhow::Result<()> {
     for index in 0..1 {
         mq.enqueue(Email {
             to: index.to_string(),
@@ -118,7 +146,7 @@ async fn produce_jobs(mq: &mut RedisMq<Email>) -> Result<()> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
 
     tracing_subscriber::fmt::init();
@@ -128,8 +156,8 @@ async fn main() -> Result<()> {
     let mut mq = RedisMq {
         conn,
         msg_type: PhantomData,
-        codec: RedisCodec::new(Box::new(JsonCodec)),
-        config: Config::default(),
+        codec: PhantomData,
+        config: Config::default().set_namespace("email"),
     };
     produce_jobs(&mut mq).await?;
 

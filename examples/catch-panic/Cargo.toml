@@ -1,18 +1,16 @@
 [package]
-name = "sqlite-example"
+name = "catch-panic"
 version = "0.1.0"
-authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
-edition = "2018"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
-apalis = { path = "../../", features = ["limit", "tracing", "tokio-comp"] }
+apalis = { path = "../../", features = ["limit", "tracing", "tokio-comp", "catch-panic"] }
 apalis-sql = { path = "../../packages/apalis-sql", features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 tracing-subscriber = "0.3.11"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
 email-service = { path = "../email-service" }
 
 
@@ -23,4 +21,4 @@ version = "0.1"
 [dependencies.sqlx]
 version = "0.8"
 default-features = false
-features = ["sqlite"]
+features = ["sqlite", "runtime-tokio"]

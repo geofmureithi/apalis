@@ -1,8 +1,4 @@
-use std::{
-    ops::Deref,
-    sync::{atomic::AtomicUsize, Arc},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use apalis::layers::limit::RateLimitLayer;
@@ -25,16 +21,6 @@ async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
     Ok(())
 }
 
-#[derive(Clone, Debug, Default)]
-struct Count(Arc<AtomicUsize>);
-
-impl Deref for Count {
-    type Target = Arc<AtomicUsize>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
@@ -50,7 +36,6 @@ async fn main() -> Result<()> {
         .chain(|svc| svc.map_err(|e| Error::Failed(Arc::new(e))))
         .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
         .layer(TimeoutLayer::new(Duration::from_millis(500)))
-        .data(Count::default())
         .backend(storage)
         .build_fn(send_email);
 

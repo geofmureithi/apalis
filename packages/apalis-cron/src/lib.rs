@@ -134,7 +134,7 @@ where
     }
 }
 
-impl<J, Tz> Backend<Request<J>> for CronStream<J, Tz>
+impl<J, Tz, Res> Backend<Request<J>, Res> for CronStream<J, Tz>
 where
     J: From<DateTime<Tz>> + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
@@ -144,7 +144,7 @@ where
 
     type Layer = Identity;
 
-    fn poll(self, _worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(self, _worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
         let stream = self.into_stream();
         Poller::new(stream, async {})
     }
