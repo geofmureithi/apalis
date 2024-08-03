@@ -7,7 +7,6 @@ use std::task::{Context, Poll};
 
 use apalis_core::error::Error;
 use apalis_core::request::Request;
-use backtrace::Backtrace;
 use tower::Layer;
 use tower::Service;
 
@@ -66,19 +65,18 @@ pin_project_lite::pin_project! {
     pub struct CatchPanicFuture<F> {
         #[pin]
         future: F,
-
     }
 }
 
 /// An error generated from a panic
 #[derive(Debug, Clone)]
-pub struct PanicError(pub String, pub Backtrace);
+pub struct PanicError(pub String);
 
 impl std::error::Error for PanicError {}
 
 impl fmt::Display for PanicError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PanicError: {}, Backtrace: {:?}", self.0, self.1)
+        write!(f, "PanicError: {}", self.0)
     }
 }
 
@@ -88,8 +86,8 @@ where
 {
     type Output = Result<Res, Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.as_mut().project();
 
         match catch_unwind(AssertUnwindSafe(|| this.future.poll(cx))) {
             Ok(res) => res,
@@ -101,9 +99,10 @@ where
                 } else {
                     "Unknown panic".to_string()
                 };
-                Poll::Ready(Err(Error::Failed(Arc::new(Box::new(PanicError(
+                // apalis assumes service functions are pure
+                // therefore a panic should ideally abort
+                Poll::Ready(Err(Error::Abort(Arc::new(Box::new(PanicError(
                     panic_info,
-                    Backtrace::new(),
                 ))))))
             }
         }

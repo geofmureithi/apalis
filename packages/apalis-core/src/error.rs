@@ -24,7 +24,7 @@ pub enum Error {
 
     /// Execution was aborted
     #[error("AbortError: {0}")]
-    Abort(String),
+    Abort(#[source] Arc<BoxDynError>),
 
     /// Encountered an error during worker execution
     #[error("WorkerError: {0}")]
