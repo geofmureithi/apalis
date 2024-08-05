@@ -39,7 +39,7 @@ macro_rules! define_bench {
                             wrk: Context<TokioExecutor>,
                         ) -> Result<(), Error> {
                             if req.0 == *size {
-                                wrk.force_stop();
+                                wrk.stop();
                             }
                             Ok(())
                         }
@@ -96,7 +96,9 @@ impl CleanUp for PostgresStorage<TestJob> {
 impl CleanUp for MysqlStorage<TestJob> {
     async fn cleanup(&mut self) {
         let pool = self.pool();
-        let query = "DELETE FROM jobs; DELETE from workers;";
+        let query = "DELETE FROM jobs;";
+        sqlx::query(query).execute(pool).await.unwrap();
+        let query = "DELETE from workers;";
         sqlx::query(query).execute(pool).await.unwrap();
     }
 }
@@ -155,5 +157,5 @@ define_bench!("mysql", {
     )
 });
 
-criterion_group!(benches, sqlite_in_memory, redis, mysql);
+criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
 criterion_main!(benches);
