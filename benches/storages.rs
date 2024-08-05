@@ -28,6 +28,7 @@ macro_rules! define_bench {
 
                         let mut storage = { $setup };
                         let mut s = storage.clone();
+                        storage.cleanup().await;
                         tokio::spawn(async move {
                             for i in 0..=size {
                                 let _ = s.push(TestJob(i)).await;
