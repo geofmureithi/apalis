@@ -1,15 +1,13 @@
 use anyhow::Result;
 use apalis::layers::retry::RetryPolicy;
-use apalis::postgres::PgPool;
+use apalis::layers::tracing::TraceLayer;
 use apalis::prelude::*;
-use apalis::{layers::tracing::TraceLayer, postgres::PostgresStorage};
+use apalis_sql::postgres::{PgListen, PgPool, PostgresStorage};
 use email_service::{send_email, Email};
 use tower::retry::RetryLayer;
 use tracing::{debug, info};
 
-async fn produce_jobs(storage: &PostgresStorage<Email>) -> Result<()> {
-    // The programmatic way
-    let mut storage = storage.clone();
+async fn produce_jobs(storage: &mut PostgresStorage<Email>) -> Result<()> {
     for index in 0..10 {
         storage
             .push(Email {
@@ -35,15 +33,23 @@ async fn main() -> Result<()> {
         .await
         .expect("unable to run migrations for postgres");
 
-    let pg = PostgresStorage::new(pool);
-    produce_jobs(&pg).await?;
+    let mut pg = PostgresStorage::new(pool.clone());
+    produce_jobs(&mut pg).await?;
+
+    let mut listener = PgListen::new(pool).await?;
+
+    listener.subscribe_with(&mut pg);
+
+    tokio::spawn(async move {
+        listener.listen().await.unwrap();
+    });
 
     Monitor::<TokioExecutor>::new()
         .register_with_count(4, {
             WorkerBuilder::new("tasty-orange")
                 .layer(TraceLayer::new())
                 .layer(RetryLayer::new(RetryPolicy::retries(5)))
-                .with_storage(pg.clone())
+                .backend(pg)
                 .build_fn(send_email)
         })
         .on_event(|e| debug!("{e:?}"))

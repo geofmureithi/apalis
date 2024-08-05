@@ -3,6 +3,7 @@ on:
     paths:
     - 'packages/**'
     - '.github/workflows/bench.yaml'
+    - 'benches/**'
 name: Benchmark
 jobs:
   storageBenchmark:

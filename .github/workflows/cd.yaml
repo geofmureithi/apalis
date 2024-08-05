@@ -31,10 +31,7 @@ jobs:
           # vX.Y.Z-foo is pre-release version
           VERSION=${GITHUB_REF#refs/tags/v}
           VERSION_NUMBER=${VERSION%-*}
-          PUBLISH_OPTS="--dry-run"
-          if [[ $VERSION == $VERSION_NUMBER ]]; then
-            PUBLISH_OPTS=""
-          fi
+          PUBLISH_OPTS=""
           echo VERSION=${VERSION} >> $GITHUB_ENV
           echo PUBLISH_OPTS=${PUBLISH_OPTS} >> $GITHUB_ENV
           echo VERSION_NUMBER=${VERSION_NUMBER} >> $GITHUB_ENV

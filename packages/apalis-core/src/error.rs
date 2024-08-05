@@ -1,4 +1,4 @@
-use std::error::Error as StdError;
+use std::{error::Error as StdError, sync::Arc};
 use thiserror::Error;
 
 use crate::worker::WorkerError;
@@ -7,38 +7,38 @@ use crate::worker::WorkerError;
 pub type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
 
 /// Represents a general error returned by a task or by internals of the platform
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 #[non_exhaustive]
 pub enum Error {
     /// An error occurred during execution.
-    #[error("Task Failed: {0}")]
-    Failed(#[source] BoxDynError),
+    #[error("FailedError: {0}")]
+    Failed(#[source] Arc<BoxDynError>),
 
     /// A generic IO error
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("IoError: {0}")]
+    Io(#[from] Arc<std::io::Error>),
 
     /// Missing some context and yet it was requested during execution.
-    #[error("MissingContext: {0}")]
-    InvalidContext(String),
+    #[error("MissingContextError: {0}")]
+    MissingContext(String),
 
     /// Execution was aborted
-    #[error("Execution was aborted")]
-    Abort,
+    #[error("AbortError: {0}")]
+    Abort(#[source] Arc<BoxDynError>),
 
     /// Encountered an error during worker execution
-    #[error("Encountered an error during worker execution")]
+    #[error("WorkerError: {0}")]
     WorkerError(WorkerError),
 
     #[doc(hidden)]
     /// Encountered an error during service execution
     /// This should not be used inside a task function
     #[error("Encountered an error during service execution")]
-    ServiceError(#[source] BoxDynError),
+    ServiceError(#[source] Arc<BoxDynError>),
 
     #[doc(hidden)]
     /// Encountered an error during service execution
     /// This should not be used inside a task function
     #[error("Encountered an error during streaming")]
-    SourceError(#[source] BoxDynError),
+    SourceError(#[source] Arc<BoxDynError>),
 }

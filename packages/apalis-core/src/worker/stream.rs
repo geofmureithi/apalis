@@ -4,7 +4,6 @@ use std::task::{Context, Poll};
 
 use super::WorkerNotify;
 
-// Define your struct
 pub(crate) struct WorkerStream<T, S>
 where
     S: Stream<Item = T>,
