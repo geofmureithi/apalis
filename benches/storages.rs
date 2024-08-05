@@ -155,5 +155,5 @@ define_bench!("mysql", {
     )
 });
 
-criterion_group!(benches, sqlite_in_memory, redis, postgres, mysql);
+criterion_group!(benches, sqlite_in_memory, redis, mysql);
 criterion_main!(benches);
