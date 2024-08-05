@@ -18,6 +18,8 @@ pub mod tracing;
 #[cfg(feature = "limit")]
 #[cfg_attr(docsrs, doc(cfg(feature = "limit")))]
 pub mod limit {
+    pub use tower::limit::ConcurrencyLimitLayer;
+    pub use tower::limit::GlobalConcurrencyLimitLayer;
     pub use tower::limit::RateLimitLayer;
 }
 
