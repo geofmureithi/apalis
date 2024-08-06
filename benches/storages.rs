@@ -25,10 +25,8 @@ macro_rules! define_bench {
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &size| {
                 b.to_async(Runtime::new().unwrap())
                     .iter(|| async move {
-
-                        let mut storage = { $setup };
+                        let storage = { $setup };
                         let mut s = storage.clone();
-                        storage.cleanup().await;
                         tokio::spawn(async move {
                             for i in 0..=size {
                                 let _ = s.push(TestJob(i)).await;
@@ -52,7 +50,6 @@ macro_rules! define_bench {
                             .with_executor(TokioExecutor)
                             .run()
                             .await;
-                        storage.cleanup().await;
                         start.elapsed()
                     })
             });
@@ -127,12 +124,14 @@ define_bench!("sqlite_in_memory", {
 
 define_bench!("redis", {
     let conn = apalis_redis::connect(env!("REDIS_URL")).await.unwrap();
-    let redis = RedisStorage::new_with_config(
+    let mut redis = RedisStorage::new_with_config(
         conn,
         apalis_redis::Config::default()
             .set_namespace("redis-bench")
             .set_buffer_size(100),
     );
+
+    redis.cleanup().await;
     redis
 });
 
