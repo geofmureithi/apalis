@@ -25,7 +25,6 @@ macro_rules! define_bench {
             group.bench_with_input(BenchmarkId::new("consume", size), &size, |b, &size| {
                 b.to_async(Runtime::new().unwrap())
                     .iter(|| async move {
-
                         let storage = { $setup };
                         let mut s = storage.clone();
                         tokio::spawn(async move {
@@ -131,6 +130,7 @@ define_bench!("redis", {
             .set_namespace("redis-bench")
             .set_buffer_size(100),
     );
+
     redis.cleanup().await;
     redis
 });
