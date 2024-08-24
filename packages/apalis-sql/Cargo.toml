@@ -19,7 +19,7 @@ async-std-comp = ["async-std", "sqlx/runtime-async-std-rustls"]
 tokio-comp = ["tokio", "sqlx/runtime-tokio-rustls"]
 
 [dependencies.sqlx]
-version = "0.7.4"
+version = "0.8.1"
 default-features = false
 features = ["chrono"]
 
