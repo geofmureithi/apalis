@@ -73,7 +73,7 @@ impl<B> MakeSpan<B> for DefaultMakeSpan {
                 tracing::span!(
                     parent: span,
                     $level,
-                    "job",
+                    "task",
                 )
             };
         }

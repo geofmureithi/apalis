@@ -7,7 +7,8 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1"
-apalis = { path = "../../", features = ["redis", "sentry"] }
+apalis = { path = "../../", features = ["sentry"] }
+apalis-redis = { path = "../../packages/apalis-redis" }
 serde = "1"
 env_logger = "0.10"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }

@@ -1,11 +1,4 @@
 on:
-  push:
-    paths:
-      - "packages/apalis-sql/src/lib.rs"
-      - "packages/apalis-sql/postgres.rs"
-      - "packages/apalis-sql/src/migrations/postgres/**"
-      - "packages/apalis-sql/src/Cargo.toml"
-      - ".github/workflows/postgres.yaml"
   pull_request:
     paths:
       - "packages/apalis-sql/src/lib.rs"

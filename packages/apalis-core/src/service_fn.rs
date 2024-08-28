@@ -67,7 +67,7 @@ macro_rules! impl_service_fn {
             }
 
             fn call(&mut self, task: Request<Req>) -> Self::Future {
-                let fut = (self.f)(task.req, $($K::get(&task.data)),+);
+                let fut = (self.f)(task.args, $($K::get(&task.data)),+);
 
                 fut.map(F::Output::into_response)
             }
@@ -90,7 +90,7 @@ where
     }
 
     fn call(&mut self, task: Request<Req>) -> Self::Future {
-        let fut = (self.f)(task.req);
+        let fut = (self.f)(task.args);
 
         fut.map(F::Output::into_response)
     }

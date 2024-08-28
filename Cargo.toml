@@ -4,7 +4,7 @@ repository = "https://github.com/geofmureithi/apalis"
 
 [package]
 name = "apalis"
-version = "0.5.3"
+version = "0.6.0-rc.5"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 edition.workspace = true
@@ -21,16 +21,6 @@ bench = false
 [features]
 default = ["tracing", "tokio-comp"]
 
-## Include redis storage
-redis = ["apalis-redis"]
-## Include Postgres storage
-postgres = ["apalis-sql/postgres"]
-## Include SQlite storage
-sqlite = ["apalis-sql/sqlite"]
-## Include MySql storage
-mysql = ["apalis-sql/mysql"]
-## Include Cron functionality
-cron = ["apalis-cron"]
 
 ## Support Tracing 👀
 tracing = ["dep:tracing", "dep:tracing-futures"]
@@ -47,20 +37,12 @@ timeout = ["tower/timeout"]
 limit = ["tower/limit"]
 ## Support filtering jobs based on a predicate
 filter = ["tower/filter"]
+## Captures panics in executions and convert them to errors
+catch-panic = []
 ## Compatibility with async-std and smol runtimes
-async-std-comp = [
-  "apalis-sql?/async-std-comp",
-  "apalis-redis?/async-std-comp",
-  "apalis-cron?/async-std-comp",
-  "async-std",
-]
+async-std-comp = ["async-std"]
 ## Compatibility with tokio and actix runtimes
-tokio-comp = [
-  "apalis-sql?/tokio-comp",
-  "apalis-redis?/tokio-comp",
-  "apalis-cron?/tokio-comp",
-  "tokio",
-]
+tokio-comp = ["tokio"]
 
 layers = [
   "sentry",
@@ -70,34 +52,16 @@ layers = [
   "timeout",
   "limit",
   "filter",
+  "catch-panic",
 ]
 
 docsrs = ["document-features"]
 
-[dependencies.apalis-redis]
-version = "0.5.3"
-optional = true
-path = "./packages/apalis-redis"
-default-features = false
-
-[dependencies.apalis-sql]
-
-version = "0.5.3"
-features = ["migrate"]
-optional = true
-default-features = false
-path = "./packages/apalis-sql"
-
 [dependencies.apalis-core]
-version = "0.5.3"
+version = "0.6.0-rc.5"
 default-features = false
 path = "./packages/apalis-core"
 
-[dependencies.apalis-cron]
-version = "0.5.3"
-optional = true
-default-features = false
-path = "./packages/apalis-cron"
 
 [dependencies.document-features]
 version = "0.2"
@@ -116,17 +80,24 @@ pprof = { version = "0.13", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-apalis = { path = ".", features = ["redis", "sqlite", "postgres", "mysql"] }
+apalis = { path = ".", features = ["limit"]}
+apalis-redis = { path = "./packages/apalis-redis" }
+apalis-sql = { path = "./packages/apalis-sql", features = [
+  "postgres",
+  "mysql",
+  "sqlite",
+] }
 redis = { version = "0.25.3", default-features = false, features = [
-    "script",
-    "aio",
-    "connection-manager",
+  "tokio-comp",
+  "script",
+  "aio",
+  "connection-manager",
 ] }
 
 [dev-dependencies.sqlx]
 version = "0.8.1"
 default-features = false
-features = ["chrono", "mysql", "sqlite", "postgres"]
+features = ["chrono", "mysql", "sqlite", "postgres", "runtime-tokio"]
 
 
 [[bench]]
@@ -150,9 +121,16 @@ members = [
   "examples/axum",
   "examples/prometheus",
   "examples/tracing",
-  # "examples/rest-api",
   "examples/async-std-runtime",
   "examples/basics",
+  "examples/redis-with-msg-pack",
+  "examples/redis-deadpool",
+  "examples/redis-mq-example",
+  "examples/cron",
+  "examples/catch-panic",
+  "examples/graceful-shutdown",
+  "examples/unmonitored-worker",
+  "examples/fn-args",
 ]
 
 

@@ -3,6 +3,7 @@ use std::{
     fmt::{self, Debug},
     ops::{Deref, DerefMut},
 };
+use tower::layer::util::Identity;
 
 /// Util for controlling pollers
 pub mod controller;
@@ -10,29 +11,46 @@ pub mod controller;
 pub mod stream;
 
 /// A poller type that allows fetching from a stream and a heartbeat future that can be used to do periodic tasks
-pub struct Poller<S> {
+pub struct Poller<S, L = Identity> {
     pub(crate) stream: S,
     pub(crate) heartbeat: BoxFuture<'static, ()>,
+    pub(crate) layer: L,
 }
 
-impl<S> Poller<S> {
+impl<S> Poller<S, Identity> {
     /// Build a new poller
     pub fn new(stream: S, heartbeat: impl Future<Output = ()> + Send + 'static) -> Self {
         Self {
             stream,
             heartbeat: heartbeat.boxed(),
+            layer: Identity::new(),
+        }
+    }
+
+    /// Build a poller with layer
+    pub fn new_with_layer<L>(
+        stream: S,
+        heartbeat: impl Future<Output = ()> + Send + 'static,
+        layer: L,
+    ) -> Poller<S, L> {
+        Poller {
+            stream,
+            heartbeat: heartbeat.boxed(),
+            layer,
         }
     }
 }
 
-impl<S> Debug for Poller<S>
+impl<S, L> Debug for Poller<S, L>
 where
     S: Debug,
+    L: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Poller")
             .field("stream", &self.stream)
             .field("heartbeat", &"...")
+            .field("layer", &self.layer)
             .finish()
     }
 }

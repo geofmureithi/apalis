@@ -2,11 +2,10 @@ use std::{future::Future, str::FromStr, time::Duration};
 
 use anyhow::Result;
 use apalis::{
-    cron::{CronStream, Schedule},
     layers::{retry::RetryLayer, retry::RetryPolicy, tracing::MakeSpan, tracing::TraceLayer},
     prelude::*,
 };
-
+use apalis_cron::{CronStream, Schedule};
 use chrono::{DateTime, Utc};
 use tracing::{debug, info, Instrument, Level, Span};
 
@@ -23,7 +22,7 @@ impl From<DateTime<Utc>> for Reminder {
 
 async fn send_in_background(reminder: Reminder) {
     apalis_core::sleep(Duration::from_secs(2)).await;
-    debug!("Called at {reminder:?}");
+    debug!("Called at {:?}", reminder.0);
 }
 async fn send_reminder(reminder: Reminder, worker: WorkerCtx) -> bool {
     // this will happen in the workers background and wont block the next tasks
@@ -45,7 +44,7 @@ async fn main() -> Result<()> {
     let worker = WorkerBuilder::new("daily-cron-worker")
         .layer(RetryLayer::new(RetryPolicy::retries(5)))
         .layer(TraceLayer::new().make_span_with(ReminderSpan::new()))
-        .stream(CronStream::new(schedule).into_stream())
+        .backend(CronStream::new(schedule))
         .build_fn(send_reminder);
 
     Monitor::<AsyncStdExecutor>::new()

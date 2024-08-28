@@ -1,16 +1,15 @@
 use anyhow::Result;
 
+use apalis::layers::tracing::TraceLayer;
+use apalis::{
+    prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
+    utils::TokioExecutor,
+};
+use apalis_redis::RedisStorage;
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 use tracing_subscriber::prelude::*;
-
-use apalis::{
-    layers::tracing::TraceLayer,
-    prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
-    redis::RedisStorage,
-    utils::TokioExecutor,
-};
 
 use tokio::time::sleep;
 
@@ -29,10 +28,11 @@ impl fmt::Display for InvalidEmailError {
 
 impl Error for InvalidEmailError {}
 
-async fn email_service(_email: Email) {
+async fn email_service(email: Email) -> Result<(), InvalidEmailError> {
     tracing::info!("Checking if dns configured");
     sleep(Duration::from_millis(1008)).await;
-    tracing::info!("Sent in 1 sec");
+    tracing::info!("Failed in 1 sec");
+    Err(InvalidEmailError { email: email.to })
 }
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
         .with(fmt_layer)
         .init();
 
-    let conn = apalis::redis::connect(redis_url)
+    let conn = apalis_redis::connect(redis_url)
         .await
         .expect("Could not connect to RedisStorage");
     let storage = RedisStorage::new(conn);
@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
         .register(
             WorkerBuilder::new("tasty-avocado")
                 .chain(|srv| srv.layer(TraceLayer::new()))
-                .with_storage(storage)
+                .backend(storage)
                 .build_fn(email_service),
         )
         .run()
