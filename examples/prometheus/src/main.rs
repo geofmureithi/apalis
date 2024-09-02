@@ -4,8 +4,9 @@
 //! cd examples && cargo run -p prometheus-example
 //! ```
 use anyhow::Result;
+use apalis::layers::prometheus::PrometheusLayer;
 use apalis::prelude::*;
-use apalis::{layers::prometheus::PrometheusLayer, redis::RedisStorage};
+use apalis_redis::RedisStorage;
 use axum::{
     extract::Form,
     http::StatusCode,
@@ -29,7 +30,7 @@ async fn main() -> Result<()> {
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
     let storage = RedisStorage::new(conn);
     // build our application with some routes
     let recorder_handle = setup_metrics_recorder();
@@ -51,7 +52,7 @@ async fn main() -> Result<()> {
             .register_with_count(2, {
                 WorkerBuilder::new("tasty-banana")
                     .layer(PrometheusLayer)
-                    .with_storage(storage.clone())
+                    .backend(storage.clone())
                     .build_fn(send_email)
             })
             .run()
@@ -87,7 +88,7 @@ async fn add_new_job<T>(
     Extension(mut storage): Extension<RedisStorage<T>>,
 ) -> impl IntoResponse
 where
-    T: 'static + Debug + Job + Serialize + DeserializeOwned + Unpin + Send + Sync,
+    T: 'static + Debug + Serialize + DeserializeOwned + Unpin + Send + Sync,
 {
     dbg!(&input);
     let new_job = storage.push(input).await;

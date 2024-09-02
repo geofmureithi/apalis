@@ -1,11 +1,4 @@
 on:
-  push:
-    paths:
-      - "packages/apalis-sql/src/lib.rs"
-      - "packages/apalis-sql/src/sqlite.rs"
-      - "packages/apalis-sql/src/migrations/sqlite/**"
-      - "packages/apalis-sql/src/Cargo.toml"
-      - ".github/workflows/sqlite.yaml"
   pull_request:
     paths:
       - "packages/apalis-sql/src/lib.rs"

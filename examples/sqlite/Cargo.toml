@@ -8,12 +8,8 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
-apalis = { path = "../../", features = [
-    "sqlite",
-    "limit",
-    "tracing",
-    "tokio-comp",
-] }
+apalis = { path = "../../", features = ["limit", "tracing", "tokio-comp"] }
+apalis-sql = { path = "../../packages/apalis-sql", features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 tracing-subscriber = "0.3.11"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -25,6 +21,6 @@ default-features = false
 version = "0.1"
 
 [dependencies.sqlx]
-version = "0.7.0"
+version = "0.8"
 default-features = false
 features = ["sqlite"]

@@ -1,13 +1,13 @@
 use apalis_core::error::Error;
 use apalis_core::task::{attempt::Attempt, task_id::TaskId};
 use apalis_core::worker::WorkerId;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::types::chrono::{DateTime, Utc};
 use std::{fmt, str::FromStr};
 
 /// The context for a job is represented here
-/// Used to provide a context when a job is defined through the [Job] trait
-#[derive(Debug, Clone)]
+/// Used to provide a context for a job with an sql backend
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlContext {
     id: TaskId,
     status: State,
@@ -117,8 +117,8 @@ impl SqlContext {
     }
 
     /// Set the last error
-    pub fn set_last_error(&mut self, error: String) {
-        self.last_error = Some(error);
+    pub fn set_last_error(&mut self, error: Option<String>) {
+        self.last_error = error;
     }
 
     /// Record an attempt to execute the request
@@ -127,7 +127,7 @@ impl SqlContext {
     }
 }
 
-/// Represents the state of a [Request]
+/// Represents the state of a job
 #[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
 pub enum State {
     /// Job is pending
@@ -137,8 +137,6 @@ pub enum State {
     Running,
     /// Job was done successfully
     Done,
-    /// Retry Job
-    Retry,
     /// Job has failed. Check `last_error`
     Failed,
     /// Job has been killed
@@ -159,10 +157,9 @@ impl FromStr for State {
             "Pending" | "Latest" => Ok(State::Pending),
             "Running" => Ok(State::Running),
             "Done" => Ok(State::Done),
-            "Retry" => Ok(State::Retry),
             "Failed" => Ok(State::Failed),
             "Killed" => Ok(State::Killed),
-            _ => Err(Error::InvalidContext("Invalid Job state".to_string())),
+            _ => Err(Error::MissingContext("Invalid Job state".to_string())),
         }
     }
 }
@@ -173,7 +170,6 @@ impl fmt::Display for State {
             State::Pending => write!(f, "Pending"),
             State::Running => write!(f, "Running"),
             State::Done => write!(f, "Done"),
-            State::Retry => write!(f, "Retry"),
             State::Failed => write!(f, "Failed"),
             State::Killed => write!(f, "Killed"),
         }

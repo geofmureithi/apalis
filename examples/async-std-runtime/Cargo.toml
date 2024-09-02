@@ -8,11 +8,11 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 apalis = { path = "../../", default-features = false, features = [
-    "cron",
     "async-std-comp",
     "tracing",
     "retry",
 ] }
+apalis-cron = { path = "../../packages/apalis-cron" }
 apalis-core = { path = "../../packages/apalis-core", default-features = false }
 async-std = { version = "1.12.0", features = ["attributes"] }
 serde = "1"

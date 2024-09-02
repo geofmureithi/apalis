@@ -15,17 +15,12 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! # use apalis_utils::layers::retry::RetryLayer;
-//! # use apalis_utils::layers::retry::DefaultRetryPolicy;
-//! # use apalis_core::extensions::Data;
-//! # use apalis_core::service_fn::service_fn;
+//! # use apalis::layers::retry::RetryLayer;
+//! # use apalis::layers::retry::RetryPolicy;
 //! use tower::ServiceBuilder;
 //! use apalis_cron::Schedule;
 //! use std::str::FromStr;
-//! # use apalis_core::monitor::Monitor;
-//! # use apalis_core::builder::WorkerBuilder;
-//! # use apalis_core::builder::WorkerFactoryFn;
-//! # use apalis_utils::TokioExecutor;
+//! # use apalis::prelude::*;
 //! use apalis_cron::CronStream;
 //! use chrono::{DateTime, Utc};
 //!
@@ -50,9 +45,9 @@
 //! async fn main() {
 //!     let schedule = Schedule::from_str("@daily").unwrap();
 //!     let worker = WorkerBuilder::new("morning-cereal")
-//!         .layer(RetryLayer::new(DefaultRetryPolicy))
+//!         .layer(RetryLayer::new(RetryPolicy::retries(5)))
 //!         .data(FakeService)
-//!         .stream(CronStream::new(schedule).into_stream())
+//!         .backend(CronStream::new(schedule))
 //!         .build_fn(send_reminder);
 //!     Monitor::<TokioExecutor>::new()
 //!         .register(worker)
@@ -63,12 +58,17 @@
 //! ```
 
 use apalis_core::data::Extensions;
+use apalis_core::layers::Identity;
+use apalis_core::poller::Poller;
 use apalis_core::request::RequestStream;
 use apalis_core::task::task_id::TaskId;
+use apalis_core::worker::WorkerId;
+use apalis_core::Backend;
 use apalis_core::{error::Error, request::Request};
 use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 /// Represents a stream from a cron schedule with a timezone
 #[derive(Clone, Debug)]
@@ -109,7 +109,7 @@ where
     Tz::Offset: Send + Sync,
 {
     /// Convert to consumable
-    pub fn into_stream(self) -> RequestStream<Request<J>> {
+    fn into_stream(self) -> RequestStream<Request<J>> {
         let timezone = self.timezone.clone();
         let stream = async_stream::stream! {
             let mut schedule = self.schedule.upcoming_owned(timezone.clone());
@@ -118,7 +118,7 @@ where
                 match next {
                     Some(next) => {
                         let to_sleep = next - timezone.from_utc_datetime(&Utc::now().naive_utc());
-                        let to_sleep = to_sleep.to_std().map_err(|e| Error::Failed(e.into()))?;
+                        let to_sleep = to_sleep.to_std().map_err(|e| Error::SourceError(Arc::new(e.into())))?;
                         apalis_core::sleep(to_sleep).await;
                         let mut data = Extensions::new();
                         data.insert(TaskId::new());
@@ -131,5 +131,21 @@ where
             }
         };
         Box::pin(stream)
+    }
+}
+
+impl<J, Tz, Res> Backend<Request<J>, Res> for CronStream<J, Tz>
+where
+    J: From<DateTime<Tz>> + Send + Sync + 'static,
+    Tz: TimeZone + Send + Sync + 'static,
+    Tz::Offset: Send + Sync,
+{
+    type Stream = RequestStream<Request<J>>;
+
+    type Layer = Identity;
+
+    fn poll<Svc>(self, _worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+        let stream = self.into_stream();
+        Poller::new(stream, async {})
     }
 }

@@ -4,8 +4,9 @@
 //! cd examples && cargo run -p axum-example
 //! ```
 use anyhow::Result;
+use apalis::layers::tracing::TraceLayer;
 use apalis::prelude::*;
-use apalis::{layers::tracing::TraceLayer, redis::RedisStorage};
+use apalis_redis::RedisStorage;
 use axum::{
     extract::Form,
     http::StatusCode,
@@ -29,7 +30,7 @@ async fn add_new_job<T>(
     Extension(mut storage): Extension<RedisStorage<T>>,
 ) -> impl IntoResponse
 where
-    T: 'static + Debug + Job + Serialize + DeserializeOwned + Send + Sync + Unpin,
+    T: 'static + Debug + Serialize + DeserializeOwned + Send + Sync + Unpin,
 {
     dbg!(&input);
     let new_job = storage.push(input).await;
@@ -55,7 +56,7 @@ async fn main() -> Result<()> {
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
     let storage = RedisStorage::new(conn);
     // build our application with some routes
     let app = Router::new()
@@ -76,7 +77,7 @@ async fn main() -> Result<()> {
             .register_with_count(2, {
                 WorkerBuilder::new("tasty-pear")
                     .layer(TraceLayer::new())
-                    .with_storage(storage.clone())
+                    .backend(storage.clone())
                     .build_fn(send_email)
             })
             .run()

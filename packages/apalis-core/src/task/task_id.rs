@@ -7,7 +7,7 @@ use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use ulid::Ulid;
 
 /// A wrapper type that defines a task id.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct TaskId(Ulid);
 
 impl TaskId {
