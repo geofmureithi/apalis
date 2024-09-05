@@ -146,6 +146,8 @@ impl<J> RedisJob<J> {
 impl<T> From<RedisJob<T>> for Request<T> {
     fn from(val: RedisJob<T>) -> Self {
         let mut data = Extensions::new();
+        data.insert(val.ctx.id.clone());
+        data.insert(val.ctx.attempts.clone());
         data.insert(val.ctx);
         Request::new_with_data(val.job, data)
     }
