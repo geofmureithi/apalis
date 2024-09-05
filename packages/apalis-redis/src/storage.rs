@@ -377,7 +377,7 @@ impl<T, Conn: Clone, C> Clone for RedisStorage<T, Conn, C> {
             scripts: self.scripts.clone(),
             controller: self.controller.clone(),
             config: self.config.clone(),
-            codec: self.codec.clone(),
+            codec: self.codec,
         }
     }
 }
