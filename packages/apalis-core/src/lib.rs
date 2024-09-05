@@ -370,7 +370,7 @@ pub mod test_utils {
             async fn it_works_as_an_mq_backend() {
                 let backend = $backend_instance;
                 let service = apalis_test_service_fn(|request: Request<u32>| async {
-                    Ok::<_, io::Error>(request)
+                    Ok::<_, std::io::Error>(request)
                 });
                 let (mut t, poller) = TestWrapper::new_with_service(backend, service);
                 tokio::spawn(poller);
@@ -389,7 +389,7 @@ pub mod test_utils {
             async fn integration_test_storage_push_and_consume() {
                 let backend = $setup().await;
                 let service = apalis_test_service_fn(|request: Request<u32>| async move {
-                    Ok::<_, io::Error>(request.take())
+                    Ok::<_, std::io::Error>(request.take())
                 });
                 let (mut t, poller) = TestWrapper::new_with_service(backend, service);
                 tokio::spawn(poller);
