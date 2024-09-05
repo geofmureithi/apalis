@@ -4,7 +4,7 @@ repository = "https://github.com/geofmureithi/apalis"
 
 [package]
 name = "apalis"
-version = "0.5.4"
+version = "0.5.5"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 edition.workspace = true
@@ -75,26 +75,26 @@ layers = [
 docsrs = ["document-features"]
 
 [dependencies.apalis-redis]
-version = "0.5.4"
+version = "0.5.5"
 optional = true
 path = "./packages/apalis-redis"
 default-features = false
 
 [dependencies.apalis-sql]
 
-version = "0.5.4"
+version = "0.5.5"
 features = ["migrate"]
 optional = true
 default-features = false
 path = "./packages/apalis-sql"
 
 [dependencies.apalis-core]
-version = "0.5.4"
+version = "0.5.5"
 default-features = false
 path = "./packages/apalis-core"
 
 [dependencies.apalis-cron]
-version = "0.5.4"
+version = "0.5.5"
 optional = true
 default-features = false
 path = "./packages/apalis-cron"
