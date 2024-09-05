@@ -23,7 +23,7 @@ impl From<DateTime<Utc>> for Reminder {
 
 async fn send_in_background(reminder: Reminder) {
     apalis_core::sleep(Duration::from_secs(2)).await;
-    debug!("Called at {reminder:?}");
+    debug!("Called at {:?}", reminder.0);
 }
 async fn send_reminder(reminder: Reminder, worker: WorkerCtx) -> bool {
     // this will happen in the workers background and wont block the next tasks

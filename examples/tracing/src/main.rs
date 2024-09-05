@@ -29,10 +29,11 @@ impl fmt::Display for InvalidEmailError {
 
 impl Error for InvalidEmailError {}
 
-async fn email_service(_email: Email) {
+async fn email_service(email: Email) -> Result<(), InvalidEmailError> {
     tracing::info!("Checking if dns configured");
     sleep(Duration::from_millis(1008)).await;
     tracing::info!("Sent in 1 sec");
+    Err(InvalidEmailError { email: email.to })
 }
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {

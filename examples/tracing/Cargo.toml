@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 anyhow = "1"
 apalis = { path = "../../", features = ["redis"] }
 serde = "1"
-tokio = { version ="1", features = ["macros"]}
+tokio = { version ="1", features = ["full"]}
 env_logger = "0.10"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

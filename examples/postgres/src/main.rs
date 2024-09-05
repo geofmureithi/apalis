@@ -2,9 +2,8 @@ use anyhow::Result;
 use apalis::layers::retry::RetryPolicy;
 use apalis::postgres::PgPool;
 use apalis::prelude::*;
-use apalis::{layers::tracing::TraceLayer, postgres::PostgresStorage};
+use apalis::{layers::retry::RetryLayer, layers::tracing::TraceLayer, postgres::PostgresStorage};
 use email_service::{send_email, Email};
-use tower::retry::RetryLayer;
 use tracing::{debug, info};
 
 async fn produce_jobs(storage: &PostgresStorage<Email>) -> Result<()> {
