@@ -5,7 +5,7 @@ use tower::layer::util::Identity;
 use std::{fmt::Debug, pin::Pin};
 
 use crate::{
-    data::Extensions, error::Error, poller::Poller, task::task_id::TaskId, worker::WorkerId,
+    data::Extensions, error::Error, poller::Poller, task::{attempt::Attempt, task_id::TaskId}, worker::WorkerId,
     Backend,
 };
 
@@ -24,6 +24,7 @@ impl<T> Request<T> {
         let id = TaskId::new();
         let mut data = Extensions::new();
         data.insert(id);
+        data.insert(Attempt::default());
         Self::new_with_data(req, data)
     }
 
