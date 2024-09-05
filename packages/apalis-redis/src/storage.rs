@@ -366,7 +366,7 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
         Box::pin(try_stream! {
             loop {
                 apalis_core::sleep(interval).await;
-                let result = fetch_jobs
+                let result: Result<Vec<Value>, _> = fetch_jobs
                     .key(&consumers_set)
                     .key(&active_jobs_list)
                     .key(&inflight_set)
@@ -374,7 +374,7 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
                     .key(&signal_list)
                     .arg(buffer_size) // No of jobs to fetch
                     .arg(&inflight_set)
-                    .invoke_async::<_, Vec<Value>>(&mut conn).await;
+                    .invoke_async(&mut conn).await;
                 match result {
                     Ok(jobs) => {
                         for job in jobs {
@@ -393,23 +393,13 @@ impl<T: DeserializeOwned + Send + Unpin + Send + Sync + 'static> RedisStorage<T>
 }
 
 fn deserialize_job(job: &Value) -> Option<&Vec<u8>> {
-    let job = match job {
-        job @ Value::Data(_) => Some(job),
-        Value::Bulk(val) => val.first(),
+    match job {
+        Value::BulkString(v) => Some(v),
         _ => {
             error!(
                 "Decoding Message Failed: {:?}",
-                "unknown result type for next message"
+                "Expected BulkString(&Vec<u8>)"
             );
-            None
-        }
-    };
-
-    match job {
-        Some(Value::Data(v)) => Some(v),
-        None => None,
-        _ => {
-            error!("Decoding Message Failed: {:?}", "Expected Data(&Vec<u8>)");
             None
         }
     }
