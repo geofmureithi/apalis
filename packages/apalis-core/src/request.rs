@@ -5,7 +5,11 @@ use tower::layer::util::Identity;
 use std::{fmt::Debug, pin::Pin};
 
 use crate::{
-    data::Extensions, error::Error, poller::Poller, task::{attempt::Attempt, task_id::TaskId}, worker::WorkerId,
+    data::Extensions,
+    error::Error,
+    poller::Poller,
+    task::{attempt::Attempt, task_id::TaskId},
+    worker::WorkerId,
     Backend,
 };
 
