@@ -88,10 +88,9 @@ where
             ("name", this.operation.to_string()),
             ("namespace", this.job_type.to_string()),
             ("status", status),
-            ("latency", latency.to_string()),
         ];
-        metrics::counter!("requests_total", &labels);
-        metrics::histogram!("request_duration_seconds", &labels);
+        metrics::counter!("requests_total", &labels).increment(1);
+        metrics::histogram!("request_duration_seconds", &labels).record(latency);
         Poll::Ready(response)
     }
 }

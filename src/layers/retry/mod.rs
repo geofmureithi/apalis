@@ -35,9 +35,9 @@ impl<T, Res> Policy<Req<T>, Res, Err> for RetryPolicy
 where
     T: Clone,
 {
-    type Future = future::Ready<Self>;
+    type Future = future::Ready<()>;
 
-    fn retry(&self, req: &Req<T>, result: Result<&Res, &Err>) -> Option<Self::Future> {
+    fn retry(&mut self, req: &mut Req<T>, result: &mut Result<Res, Err>) -> Option<Self::Future> {
         let ctx = req.get::<Attempt>().cloned().unwrap_or_default();
         match result {
             Ok(_) => {
@@ -45,12 +45,12 @@ where
                 // so don't retry...
                 None
             }
-            Err(_) if (self.retries - ctx.current() > 0) => Some(future::ready(self.clone())),
+            Err(_) if (self.retries - ctx.current() > 0) => Some(future::ready(())),
             Err(_) => None,
         }
     }
 
-    fn clone_request(&self, req: &Req<T>) -> Option<Req<T>> {
+    fn clone_request(&mut self, req: &Req<T>) -> Option<Req<T>> {
         let mut req = req.clone();
         let value = req
             .get::<Attempt>()

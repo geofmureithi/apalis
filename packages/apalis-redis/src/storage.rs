@@ -496,7 +496,7 @@ where
     async fn len(&self) -> Result<i64, RedisError> {
         let mut conn = self.conn.clone();
         let all_jobs: i64 = redis::cmd("HLEN")
-            .arg(&self.queue.job_data_hash.to_string())
+            .arg(self.queue.job_data_hash.to_string())
             .query_async(&mut conn)
             .await?;
         let done_jobs: i64 = redis::cmd("ZCOUNT")
@@ -511,7 +511,7 @@ where
     async fn fetch_by_id(&self, job_id: &TaskId) -> Result<Option<Request<Self::Job>>, RedisError> {
         let mut conn = self.conn.clone();
         let data: Value = redis::cmd("HMGET")
-            .arg(&self.queue.job_data_hash.to_string())
+            .arg(self.queue.job_data_hash.to_string())
             .arg(job_id.to_string())
             .query_async(&mut conn)
             .await?;
@@ -538,7 +538,7 @@ where
             .encode(&job)
             .map_err(|e| (ErrorKind::IoError, "Encode error", e.to_string()))?;
         let _: i64 = redis::cmd("HSET")
-            .arg(&self.queue.job_data_hash.to_string())
+            .arg(self.queue.job_data_hash.to_string())
             .arg(job.ctx.id.to_string())
             .arg(bytes)
             .query_async(&mut conn)
