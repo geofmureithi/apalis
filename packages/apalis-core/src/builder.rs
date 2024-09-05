@@ -56,10 +56,14 @@ impl<Serv> WorkerBuilder<(), (), Identity, Serv> {
 impl<J, M, Serv> WorkerBuilder<J, (), M, Serv> {
     /// Consume a stream directly
     #[deprecated(since = "0.6.0", note = "Consider using the `.backend`")]
-    pub fn stream<NS: Stream<Item = Result<Option<Request<NJ>>, Error>> + Send + 'static, NJ>(
+    pub fn stream<
+        NS: Stream<Item = Result<Option<Request<NJ, Ctx>>, Error>> + Send + 'static,
+        NJ,
+        Ctx,
+    >(
         self,
         stream: NS,
-    ) -> WorkerBuilder<NJ, NS, M, Serv> {
+    ) -> WorkerBuilder<Request<NJ, Ctx>, NS, M, Serv> {
         WorkerBuilder {
             request: PhantomData,
             layer: self.layer,
@@ -70,12 +74,12 @@ impl<J, M, Serv> WorkerBuilder<J, (), M, Serv> {
     }
 
     /// Set the source to a backend that implements [Backend]
-    pub fn backend<NB: Backend<Request<NJ>, Res>, NJ, Res: Send>(
+    pub fn backend<NB: Backend<Request<NJ, Ctx>, Res>, NJ, Res: Send, Ctx>(
         self,
         backend: NB,
     ) -> WorkerBuilder<NJ, NB, M, Serv>
     where
-        Serv: Service<Request<NJ>, Response = Res>,
+        Serv: Service<Request<NJ, Ctx>, Response = Res>,
     {
         WorkerBuilder {
             request: PhantomData,
@@ -87,13 +91,13 @@ impl<J, M, Serv> WorkerBuilder<J, (), M, Serv> {
     }
 }
 
-impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
+impl<Req, Stream, M, Serv, Ctx> WorkerBuilder<Request<Req, Ctx>, Stream, M, Serv> {
     /// Allows of decorating the service that consumes jobs.
     /// Allows adding multiple [`tower`] middleware
     pub fn chain<NewLayer>(
         self,
         f: impl Fn(ServiceBuilder<M>) -> ServiceBuilder<NewLayer>,
-    ) -> WorkerBuilder<Request, Stream, NewLayer, Serv> {
+    ) -> WorkerBuilder<Request<Req, Ctx>, Stream, NewLayer, Serv> {
         let middleware = f(self.layer);
 
         WorkerBuilder {
@@ -105,7 +109,7 @@ impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
         }
     }
     /// Allows adding a single layer [tower] middleware
-    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Request, Stream, Stack<U, M>, Serv>
+    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Request<Req, Ctx>, Stream, Stack<U, M>, Serv>
     where
         M: Layer<U>,
     {
@@ -120,7 +124,7 @@ impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
 
     /// Adds data to the context
     /// This will be shared by all requests
-    pub fn data<D>(self, data: D) -> WorkerBuilder<Request, Stream, Stack<Data<D>, M>, Serv>
+    pub fn data<D>(self, data: D) -> WorkerBuilder<Request<Req, Ctx>, Stream, Stack<Data<D>, M>, Serv>
     where
         M: Layer<Data<D>>,
     {
@@ -134,14 +138,10 @@ impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
     }
 }
 
-impl<
-        Req: Send + 'static + Sync,
-        P: Backend<Request<Req>, S::Response> + 'static,
-        M: 'static,
-        S,
-    > WorkerFactory<Req, S> for WorkerBuilder<Req, P, M, S>
+impl<Req: Send + 'static + Sync, P: Backend<Req, S::Response> + 'static, M: 'static, S, Ctx>
+    WorkerFactory<Request<Req, Ctx>, S> for WorkerBuilder<Request<Req, Ctx>, P, M, S>
 where
-    S: Service<Request<Req>> + Send + 'static + Clone + Sync,
+    S: Service<Request<Req, Ctx>> + Send + 'static + Sync,
     S::Future: Send,
 
     S::Response: 'static,
@@ -180,7 +180,7 @@ pub trait WorkerFactory<J, S> {
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
 
-pub trait WorkerFactoryFn<J, F, K> {
+pub trait WorkerFactoryFn<J, F> {
     /// The request source for the [`Worker`]
     type Source;
 
@@ -219,9 +219,9 @@ pub trait WorkerFactoryFn<J, F, K> {
     fn build_fn(self, f: F) -> Worker<Ready<Self::Service, Self::Source>>;
 }
 
-impl<J, W, F, K> WorkerFactoryFn<J, F, K> for W
+impl<Req, W, F, Ctx> WorkerFactoryFn<Request<Req, Ctx>, F> for W
 where
-    W: WorkerFactory<J, ServiceFn<F, K>>,
+    W: WorkerFactory<Request<Req, Ctx>, ServiceFn<F, Request<Req, Ctx>>>,
 {
     type Source = W::Source;
 

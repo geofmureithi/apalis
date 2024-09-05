@@ -1,11 +1,8 @@
 use std::time::Duration;
 
-use futures::{stream::BoxStream, Future};
+use futures::Future;
 
-use crate::request::Request;
-
-/// The result of sa stream produced by a [Storage]
-pub type StorageStream<T, E> = BoxStream<'static, Result<Option<Request<T>>, E>>;
+use crate::{request::Request, task::task_id::TaskId};
 
 /// Represents a [Storage] that can persist a request.
 pub trait Storage {
@@ -15,21 +12,29 @@ pub trait Storage {
     /// The error produced by the storage
     type Error;
 
-    /// Jobs must have Ids.
-    type Identifier;
+    /// This is the type that storages store as the metadata related to a job
+    type Context: Default;
 
     /// Pushes a job to a storage
     fn push(
         &mut self,
         job: Self::Job,
-    ) -> impl Future<Output = Result<Self::Identifier, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Self::Context, Self::Error>> + Send {
+        self.push_raw(Request::new(job))
+    }
+
+    /// Pushes a raw request to a storage
+    fn push_raw(
+        &mut self,
+        req: Request<Self::Job, Self::Context>,
+    ) -> impl Future<Output = Result<Self::Context, Self::Error>> + Send;
 
     /// Push a job into the scheduled set
     fn schedule(
         &mut self,
         job: Self::Job,
         on: i64,
-    ) -> impl Future<Output = Result<Self::Identifier, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Self::Context, Self::Error>> + Send;
 
     /// Return the number of pending jobs from the queue
     fn len(&mut self) -> impl Future<Output = Result<i64, Self::Error>> + Send;
@@ -37,19 +42,19 @@ pub trait Storage {
     /// Fetch a job given an id
     fn fetch_by_id(
         &mut self,
-        job_id: &Self::Identifier,
-    ) -> impl Future<Output = Result<Option<Request<Self::Job>>, Self::Error>> + Send;
+        job_id: &TaskId,
+    ) -> impl Future<Output = Result<Option<Request<Self::Job, Self::Context>>, Self::Error>> + Send;
 
     /// Update a job details
     fn update(
         &mut self,
-        job: Request<Self::Job>,
+        job: Request<Self::Job, Self::Context>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Reschedule a job
     fn reschedule(
         &mut self,
-        job: Request<Self::Job>,
+        job: Request<Self::Job, Self::Context>,
         wait: Duration,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 

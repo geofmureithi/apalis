@@ -226,7 +226,7 @@ where
 
     type Error = sqlx::Error;
 
-    type Identifier = TaskId;
+    type Context = TaskId;
 
     async fn push(&mut self, job: Self::Job) -> Result<TaskId, Self::Error> {
         let id = TaskId::new();

@@ -54,14 +54,14 @@ impl<T> SqlRequest<T> {
     }
 }
 
-impl<T> From<SqlRequest<T>> for Request<T> {
+impl<T> From<SqlRequest<T>> for Request<T, SqlContext> {
     fn from(val: SqlRequest<T>) -> Self {
         let mut data = Extensions::new();
-        data.insert(val.context.id().clone());
-        data.insert(val.context.attempts().clone());
-        data.insert(val.context);
+        // data.insert(val.context.id().clone());
+        // data.insert(val.context.attempts().clone());
+        // data.insert(val.context);
 
-        Request::new_with_data(val.req, data)
+        Request::new_with_data(val.req, data, val.context)
     }
 }
 

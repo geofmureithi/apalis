@@ -143,17 +143,17 @@ impl<J> RedisJob<J> {
     }
 }
 
-impl<T> From<RedisJob<T>> for Request<T> {
+impl<T> From<RedisJob<T>> for Request<T, Context> {
     fn from(val: RedisJob<T>) -> Self {
         let mut data = Extensions::new();
-        data.insert(val.ctx);
-        Request::new_with_data(val.job, data)
+        // data.insert(val.ctx);
+        Request::new_with_data(val.job, data, val.ctx)
     }
 }
 
-impl<T> TryFrom<Request<T>> for RedisJob<T> {
+impl<T> TryFrom<Request<T, Context>> for RedisJob<T> {
     type Error = RedisError;
-    fn try_from(val: Request<T>) -> Result<Self, Self::Error> {
+    fn try_from(val: Request<T, Context>) -> Result<Self, Self::Error> {
         let ctx = val
             .get::<Context>()
             .cloned()
@@ -167,7 +167,7 @@ impl<T> TryFrom<Request<T>> for RedisJob<T> {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Context {
-    id: TaskId,
+    pub(crate) id: TaskId,
     attempts: Attempt,
     max_attempts: usize,
     lock_by: Option<WorkerId>,
@@ -446,18 +446,18 @@ impl<T, Conn, C> RedisStorage<T, Conn, C> {
     }
 }
 
-impl<T, Conn, C, Res> Backend<Request<T>, Res> for RedisStorage<T, Conn, C>
+impl<T, Conn, C, Res> Backend<Request<T, Context>, Res> for RedisStorage<T, Conn, C>
 where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
     Res: Send + Serialize + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
 {
-    type Stream = BackendStream<RequestStream<Request<T>>>;
+    type Stream = BackendStream<RequestStream<Request<T, Context>>>;
 
     type Layer = AckLayer<Sender<(Context, Result<Res, Error>)>, T, Res>;
 
-    fn poll<Svc: Service<Request<T>>>(
+    fn poll<Svc: Service<Request<T, Context>>>(
         mut self,
         worker: WorkerId,
     ) -> Poller<Self::Stream, Self::Layer> {
@@ -466,7 +466,7 @@ where
         let layer = AckLayer::new(ack);
         let controller = self.controller.clone();
         let config = self.config.clone();
-        let stream: RequestStream<Request<T>> = Box::pin(rx);
+        let stream: RequestStream<Request<T, Context>> = Box::pin(rx);
         let heartbeat = async move {
             let mut keep_alive_stm = apalis_core::interval::interval(config.keep_alive).fuse();
 
@@ -602,7 +602,7 @@ where
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>>,
 {
-    async fn fetch_next(&mut self, worker_id: &WorkerId) -> Result<Vec<Request<T>>, RedisError> {
+    async fn fetch_next(&mut self, worker_id: &WorkerId) -> Result<Vec<Request<T, Context>>, RedisError> {
         let fetch_jobs = self.scripts.get_jobs.clone();
         let consumers_set = self.config.consumers_set();
         let active_jobs_list = self.config.active_jobs_list();
@@ -630,7 +630,7 @@ where
                     let mut request: RedisJob<T> = C::decode(bytes.to_vec())
                         .map_err(|e| build_error(&e.into().to_string()))?;
                     request.ctx_mut().lock_by = Some(worker_id.clone());
-                    let mut request: Request<T> = request.into();
+                    let mut request: Request<T, Context> = request.into();
                     request.insert(Namespace(namespace.clone()));
                     processed.push(request)
                 }
@@ -690,33 +690,32 @@ where
 {
     type Job = T;
     type Error = RedisError;
-    type Identifier = TaskId;
+    type Context = Context;
 
-    async fn push(&mut self, job: Self::Job) -> Result<TaskId, RedisError> {
+    async fn push_raw(&mut self, req: Request<T, Context>) -> Result<Context, RedisError> {
         let conn = &mut self.conn;
         let push_job = self.scripts.push_job.clone();
         let job_data_hash = self.config.job_data_hash();
         let active_jobs_list = self.config.active_jobs_list();
         let signal_list = self.config.signal_list();
-        let job_id = TaskId::new();
-        let ctx = Context {
-            id: job_id.clone(),
-            ..Default::default()
-        };
-        let job = C::encode(&RedisJob { ctx, job })
-            .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
+        let (job, ctx, _) = req.take_parts();
+        let job = C::encode(&RedisJob {
+            ctx: ctx.clone(),
+            job,
+        })
+        .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
         push_job
             .key(job_data_hash)
             .key(active_jobs_list)
             .key(signal_list)
-            .arg(job_id.to_string())
+            .arg(ctx.id.to_string())
             .arg(job)
             .invoke_async(conn)
             .await?;
-        Ok(job_id.clone())
+        Ok(ctx)
     }
 
-    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<TaskId, RedisError> {
+    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<Context, RedisError> {
         let schedule_job = self.scripts.schedule_job.clone();
         let job_data_hash = self.config.job_data_hash();
         let scheduled_jobs_set = self.config.scheduled_jobs_set();
@@ -725,7 +724,10 @@ where
             id: job_id.clone(),
             ..Default::default()
         };
-        let job = RedisJob { job, ctx };
+        let job = RedisJob {
+            job,
+            ctx: ctx.clone(),
+        };
         let job = C::encode(&job)
             .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
         schedule_job
@@ -736,7 +738,7 @@ where
             .arg(on)
             .invoke_async(&mut self.conn)
             .await?;
-        Ok(job_id.clone())
+        Ok(ctx)
     }
 
     async fn len(&mut self) -> Result<i64, RedisError> {
@@ -756,7 +758,7 @@ where
     async fn fetch_by_id(
         &mut self,
         job_id: &TaskId,
-    ) -> Result<Option<Request<Self::Job>>, RedisError> {
+    ) -> Result<Option<Request<Self::Job, Context>>, RedisError> {
         let data: Value = redis::cmd("HMGET")
             .arg(&self.config.job_data_hash())
             .arg(job_id.to_string())
@@ -768,7 +770,7 @@ where
             .map_err(|e| (ErrorKind::IoError, "Decode error", e.into().to_string()))?;
         Ok(Some(inner.into()))
     }
-    async fn update(&mut self, job: Request<T>) -> Result<(), RedisError> {
+    async fn update(&mut self, job: Request<T, Context>) -> Result<(), RedisError> {
         let job: RedisJob<T> = job.try_into()?;
         let bytes = C::encode(&job)
             .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
@@ -781,7 +783,11 @@ where
         Ok(())
     }
 
-    async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), RedisError> {
+    async fn reschedule(
+        &mut self,
+        job: Request<T, Context>,
+        wait: Duration,
+    ) -> Result<(), RedisError> {
         let schedule_job = self.scripts.schedule_job.clone();
         let job_id = job
             .get::<TaskId>()

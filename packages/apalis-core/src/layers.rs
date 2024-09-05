@@ -133,9 +133,9 @@ pub mod extensions {
         value: T,
     }
 
-    impl<S, T, Req> Service<Request<Req>> for AddExtension<S, T>
+    impl<S, T, Req, Ctx> Service<Request<Req, Ctx>> for AddExtension<S, T>
     where
-        S: Service<Request<Req>>,
+        S: Service<Request<Req, Ctx>>,
         T: Clone + Send + Sync + 'static,
     {
         type Response = S::Response;
@@ -147,7 +147,7 @@ pub mod extensions {
             self.inner.poll_ready(cx)
         }
 
-        fn call(&mut self, mut req: Request<Req>) -> Self::Future {
+        fn call(&mut self, mut req: Request<Req, Ctx>) -> Self::Future {
             req.data.insert(self.value.clone());
             self.inner.call(req)
         }
@@ -206,14 +206,14 @@ impl<A, J, Res> AckLayer<A, J, Res> {
     }
 }
 
-impl<A, J, S, Res> Layer<S> for AckLayer<A, J, Res>
+impl<A, Req, S, Res> Layer<S> for AckLayer<A, Req, Res>
 where
-    S: Service<Request<J>> + Send + 'static,
+    S: Service<Req> + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::Future: Send + 'static,
-    A: Ack<J, S::Response> + Clone + Send + Sync + 'static,
+    A: Ack<Req, S::Response> + Clone + Send + Sync + 'static,
 {
-    type Service = AckService<S, A, J, S::Response>;
+    type Service = AckService<S, A, Req, S::Response>;
 
     fn layer(&self, service: S) -> Self::Service {
         AckService {
@@ -245,15 +245,16 @@ impl<Sv: Clone, A: Clone, J, Res> Clone for AckService<Sv, A, J, Res> {
     }
 }
 
-impl<SV, A, T, Res> Service<Request<T>> for AckService<SV, A, T, Res>
+impl<SV, A, T, Res, Ctx> Service<Request<T, Ctx>> for AckService<SV, A, T, Res>
 where
-    SV: Service<Request<T>> + Send + Sync + 'static,
-    <SV as Service<Request<T>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
-    <SV as Service<Request<T>>>::Future: std::marker::Send + 'static,
-    A: Ack<T, <SV as Service<Request<T>>>::Response> + Send + 'static + Clone + Send + Sync,
+    SV: Service<Request<T, Ctx>> + Send + Sync + 'static,
+    <SV as Service<Request<T, Ctx>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    <SV as Service<Request<T, Ctx>>>::Future: std::marker::Send + 'static,
+    A: Ack<T, <SV as Service<Request<T, Ctx>>>::Response> + Send + 'static + Clone + Send + Sync,
     T: 'static + Send,
-    <SV as Service<Request<T>>>::Response: std::marker::Send + fmt::Debug + Sync + Serialize,
+    <SV as Service<Request<T, Ctx>>>::Response: std::marker::Send + fmt::Debug + Sync + Serialize,
     <A as Ack<T, SV::Response>>::Context: Sync + Send + Clone,
+    <A as Ack<T, <SV as Service<Request<T, Ctx>>>::Response>>::Context: 'static
 {
     type Response = SV::Response;
     type Error = Error;
@@ -268,7 +269,7 @@ where
             .map_err(|e| Error::Failed(Arc::new(e.into())))
     }
 
-    fn call(&mut self, request: Request<T>) -> Self::Future {
+    fn call(&mut self, request: Request<T, Ctx>) -> Self::Future {
         let mut ack = self.ack.clone();
         let data = request
             .get::<<A as Ack<T, SV::Response>>::Context>()

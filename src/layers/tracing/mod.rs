@@ -289,13 +289,13 @@ impl<S, MakeSpan, OnRequest, OnResponse, OnFailure>
     }
 }
 
-impl<J, S, OnRequestT, OnResponseT, OnFailureT, MakeSpanT, F, Res> Service<Request<J>>
+impl<J, S, OnRequestT, OnResponseT, OnFailureT, MakeSpanT, F, Res, Ctx> Service<Request<J, Ctx>>
     for Trace<S, MakeSpanT, OnRequestT, OnResponseT, OnFailureT>
 where
-    S: Service<Request<J>, Response = Res, Error = Error, Future = F> + Unpin + Send + 'static,
+    S: Service<Request<J, Ctx>, Response = Res, Error = Error, Future = F> + Unpin + Send + 'static,
     S::Error: fmt::Display + 'static,
-    MakeSpanT: MakeSpan<J>,
-    OnRequestT: OnRequest<J>,
+    MakeSpanT: MakeSpan<J, Ctx>,
+    OnRequestT: OnRequest<J, Ctx>,
     OnResponseT: OnResponse<Res> + Clone + 'static,
     F: Future<Output = Result<Res, Error>> + 'static,
     OnFailureT: OnFailure + Clone + 'static,
@@ -308,7 +308,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Request<J>) -> Self::Future {
+    fn call(&mut self, req: Request<J, Ctx>) -> Self::Future {
         let span = self.make_span.make_span(&req);
         let start = Instant::now();
         let job = {

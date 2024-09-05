@@ -12,24 +12,30 @@ use crate::{
 /// Represents a job which can be serialized and executed
 
 #[derive(Serialize, Debug, Deserialize, Clone)]
-pub struct Request<T> {
+pub struct Request<T, Ctx> {
     pub(crate) args: T,
     #[serde(skip)]
     pub(crate) data: Extensions,
+    pub(crate) ctx: Ctx,
 }
 
-impl<T> Request<T> {
+impl<T, Ctx> Request<T, Ctx> {
     /// Creates a new [Request]
-    pub fn new(req: T) -> Self {
-        let id = TaskId::new();
-        let mut data = Extensions::new();
-        data.insert(id);
-        Self::new_with_data(req, data)
+    pub fn new(req: T) -> Self
+    where
+        Ctx: Default,
+    {
+        let data = Extensions::new();
+        Self::new_with_data(req, data, Ctx::default())
     }
 
     /// Creates a request with context provided
-    pub fn new_with_data(req: T, data: Extensions) -> Self {
-        Self { args: req, data }
+    pub fn new_with_data(req: T, data: Extensions, ctx: Ctx) -> Self {
+        Self {
+            args: req,
+            data,
+            ctx,
+        }
     }
 
     /// Get the underlying reference of the request
@@ -41,16 +47,21 @@ impl<T> Request<T> {
     pub fn take(self) -> T {
         self.args
     }
+
+    /// Take the parts
+    pub fn take_parts(self) -> (T, Ctx, Extensions) {
+        (self.args, self.ctx, self.data)
+    }
 }
 
-impl<T> std::ops::Deref for Request<T> {
+impl<T, Ctx> std::ops::Deref for Request<T, Ctx> {
     type Target = Extensions;
     fn deref(&self) -> &Self::Target {
         &self.data
     }
 }
 
-impl<T> std::ops::DerefMut for Request<T> {
+impl<T, Ctx> std::ops::DerefMut for Request<T, Ctx> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.data
     }
@@ -64,7 +75,7 @@ pub type RequestFuture<T> = BoxFuture<'static, T>;
 /// Represents a stream for T.
 pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, Error>>;
 
-impl<T, Res> Backend<Request<T>, Res> for RequestStream<Request<T>> {
+impl<T, Res, Ctx> Backend<Request<T, Ctx>, Res> for RequestStream<Request<T, Ctx>> {
     type Stream = Self;
 
     type Layer = Identity;

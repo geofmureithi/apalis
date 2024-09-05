@@ -145,7 +145,7 @@ where
         interval: Duration,
         buffer_size: usize,
         config: &Config,
-    ) -> impl Stream<Item = Result<Option<Request<T>>, sqlx::Error>> {
+    ) -> impl Stream<Item = Result<Option<Request<T, SqlContext>>, sqlx::Error>> {
         let pool = self.pool.clone();
         let worker_id = worker_id.to_string();
         let config = config.clone();
@@ -192,7 +192,7 @@ where
                                 .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
                                 .unwrap();
                             let req = SqlRequest::new(req, ctx);
-                            let mut req: Request<T> = req.into();
+                            let mut req: Request<T, SqlContext> = req.into();
                             req.insert(Namespace(config.namespace.clone()));
                             Some(req)
                         }
@@ -235,7 +235,7 @@ where
 
     type Error = sqlx::Error;
 
-    type Identifier = TaskId;
+    type Context = SqlContext;
 
     async fn push(&mut self, job: Self::Job) -> Result<TaskId, sqlx::Error> {
         let id = TaskId::new();
@@ -278,7 +278,7 @@ where
     async fn fetch_by_id(
         &mut self,
         job_id: &TaskId,
-    ) -> Result<Option<Request<Self::Job>>, sqlx::Error> {
+    ) -> Result<Option<Request<Self::Job, SqlContext>>, sqlx::Error> {
         let pool = self.pool.clone();
 
         let fetch_query = "SELECT * FROM jobs WHERE id = ?";
@@ -293,7 +293,7 @@ where
                 let req = C::decode(req)
                     .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
                 let req = SqlRequest::new(req, ctx);
-                let mut req: Request<T> = req.into();
+                let mut req: Request<T, SqlContext> = req.into();
                 req.insert(Namespace(self.config.namespace.clone()));
                 req
             })),
@@ -379,12 +379,12 @@ where
     }
 }
 
-impl<T, Res, C> Backend<Request<T>, Res> for MysqlStorage<T, C>
+impl<T, Res, C> Backend<Request<T, SqlContext>, Res> for MysqlStorage<T, C>
 where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
     C: Debug + Codec<Compact = Value> + Clone + Send + 'static,
 {
-    type Stream = BackendStream<RequestStream<Request<T>>>;
+    type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
 
     type Layer = AckLayer<MysqlStorage<T, C>, T, Res>;
 

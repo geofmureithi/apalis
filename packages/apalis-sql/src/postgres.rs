@@ -409,7 +409,7 @@ where
 
     type Error = sqlx::Error;
 
-    type Identifier = TaskId;
+    type Context = TaskId;
 
     /// Push a job to Postgres [Storage]
     ///
