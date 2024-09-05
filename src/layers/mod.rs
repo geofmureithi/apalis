@@ -18,6 +18,8 @@ pub mod tracing;
 #[cfg(feature = "limit")]
 #[cfg_attr(docsrs, doc(cfg(feature = "limit")))]
 pub mod limit {
+    pub use tower::limit::ConcurrencyLimitLayer;
+    pub use tower::limit::GlobalConcurrencyLimitLayer;
     pub use tower::limit::RateLimitLayer;
 }
 
@@ -25,3 +27,8 @@ pub mod limit {
 #[cfg(feature = "timeout")]
 #[cfg_attr(docsrs, doc(cfg(feature = "timeout")))]
 pub use tower::timeout::TimeoutLayer;
+
+/// catch panic middleware for apalis
+#[cfg(feature = "catch-panic")]
+#[cfg_attr(docsrs, doc(cfg(feature = "catch-panic")))]
+pub mod catch_panic;

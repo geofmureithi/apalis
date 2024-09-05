@@ -1,4 +1,7 @@
+use std::{str::FromStr, sync::Arc};
+
 use apalis::prelude::*;
+use email_address::EmailAddress;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -8,12 +11,45 @@ pub struct Email {
     pub text: String,
 }
 
-impl Job for Email {
-    const NAME: &'static str = "apalis::Email";
+pub async fn send_email(job: Email) -> Result<(), Error> {
+    let validation = EmailAddress::from_str(&job.to);
+    match validation {
+        Ok(email) => {
+            log::info!("Attempting to send email to {}", email.as_str());
+            Ok(())
+        }
+        Err(email_address::Error::InvalidCharacter) => {
+            log::error!("Killed send email job. Invalid character {}", job.to);
+            Err(Error::Abort(Arc::new(Box::new(
+                email_address::Error::InvalidCharacter,
+            ))))
+        }
+        Err(e) => Err(Error::Failed(Arc::new(Box::new(e)))),
+    }
 }
 
-pub async fn send_email(job: Email) {
-    log::info!("Attempting to send email to {}", job.to);
+pub fn example_good_email() -> Email {
+    Email {
+        subject: "Test Subject".to_string(),
+        to: "example@gmail.com".to_string(),
+        text: "Some Text".to_string(),
+    }
+}
+
+pub fn example_killed_email() -> Email {
+    Email {
+        subject: "Test Subject".to_string(),
+        to: "example@©.com".to_string(), // killed because it has © which is invalid
+        text: "Some Text".to_string(),
+    }
+}
+
+pub fn example_retry_able_email() -> Email {
+    Email {
+        subject: "Test Subject".to_string(),
+        to: "example".to_string(),
+        text: "Some Text".to_string(),
+    }
 }
 
 pub const FORM_HTML: &str = r#"

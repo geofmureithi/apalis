@@ -8,17 +8,17 @@
 //! apalis storage using Redis as a backend
 //! ```rust,no_run
 //! use apalis::prelude::*;
-//! use apalis::redis::RedisStorage;
+//! use apalis_redis::{RedisStorage, Config};
 //! use email_service::send_email;
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let conn = apalis::redis::connect("redis://127.0.0.1/").await.unwrap();
+//!     let conn = apalis_redis::connect("redis://127.0.0.1/").await.unwrap();
 //!     let storage = RedisStorage::new(conn);
 //!     Monitor::<TokioExecutor>::new()
 //!        .register(
 //!            WorkerBuilder::new("tasty-pear")
-//!                .source(storage.clone())
+//!                .backend(storage.clone())
 //!                .build_fn(send_email),
 //!        )
 //!        .run()
@@ -28,6 +28,15 @@
 //! ```
 
 mod storage;
+use std::io;
+
+use redis::RedisError;
 pub use storage::connect;
 pub use storage::Config;
+pub use storage::RedisJob;
+pub use storage::RedisQueueInfo;
 pub use storage::RedisStorage;
+
+pub(crate) fn build_error(message: &str) -> RedisError {
+    RedisError::from(io::Error::new(io::ErrorKind::InvalidData, message))
+}
