@@ -11,10 +11,11 @@ use std::task::{Context, Poll};
 use tower::Service;
 
 /// A helper method to build functions
-pub fn service_fn<T, K>(f: T) -> ServiceFn<T, K> {
+pub fn service_fn<T, Req, Ctx, FnArgs>(f: T) -> ServiceFn<T, Req, Ctx, FnArgs> {
     ServiceFn {
         f,
         req: PhantomData,
+        fn_args: PhantomData,
     }
 }
 
@@ -22,12 +23,13 @@ pub fn service_fn<T, K>(f: T) -> ServiceFn<T, K> {
 ///
 /// See [`service_fn`] for more details.
 #[derive(Copy, Clone)]
-pub struct ServiceFn<T, Req> {
+pub struct ServiceFn<T, Req, Ctx, FnArgs> {
     f: T,
-    req: PhantomData<Req>,
+    req: PhantomData<Request<Req, Ctx>>,
+    fn_args: PhantomData<FnArgs>,
 }
 
-impl<T, K> fmt::Debug for ServiceFn<T, K> {
+impl<T, Req, Ctx, FnArgs> fmt::Debug for ServiceFn<T, Req, Ctx, FnArgs> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ServiceFn")
             .field("f", &format_args!("{}", std::any::type_name::<T>()))
@@ -46,25 +48,32 @@ pub trait FromRequest<Req>: Sized {
 
 impl<T: Clone + Send + Sync + 'static, Req, Ctx> FromRequest<Request<Req, Ctx>> for Data<T> {
     fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
-        req.data.get::<Self>().cloned().ok_or(Error::MissingContext(
-            std::any::type_name::<Self>().to_owned(),
-        ))
+        req.data
+            .get::<T>()
+            .cloned()
+            .ok_or({
+                let type_name = std::any::type_name::<T>();
+                Error::MissingContext(
+                format!("Missing the an entry for `{type_name}`. Did you forget to add `.data(<{type_name}>)", ),
+            )})
+            .map(Data::new)
     }
 }
 
 macro_rules! impl_service_fn {
     ($($K:ident),+) => {
         #[allow(unused_parens)]
-        impl<T, F, Req: Clone, E, R, Ctx, $($K),+> Service<Request<Req, Ctx>> for ServiceFn<T, ($($K),+)>
+        impl<T, F, Req, E, R, Ctx, $($K),+> Service<Request<Req, Ctx>> for ServiceFn<T, Req, Ctx, ($($K),+)>
         where
             T: FnMut(Req, $($K),+) -> F,
             F: Future,
             F::Output: IntoResponse<Result = std::result::Result<R, E>>,
             $($K: FromRequest<Request<Req, Ctx>>),+,
+            E: From<Error>
         {
             type Response = R;
             type Error = E;
-            type Future = FnFuture<F, F::Output, R, E>;
+            type Future = futures::future::Either<futures::future::Ready<Result<R, E>>, FnFuture<F, F::Output, R, E>>;
 
             fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
                 Poll::Ready(Ok(()))
@@ -74,19 +83,27 @@ macro_rules! impl_service_fn {
 
                 #[allow(non_snake_case)]
                 let fut = {
-                    let ($($K),+) = ($($K::from_request(&task).unwrap()),+);
-                    let req = task.args;
-                    (self.f)(req, $($K),+)
+                    let results: Result<($($K),+), E> = (|| {
+                        Ok(($($K::from_request(&task)?),+))
+                    })();
+
+                    match results {
+                        Ok(($($K),+)) => {
+                            let req = task.args;
+                            (self.f)(req, $($K),+)
+                        }
+                        Err(e) => return futures::future::Either::Left(futures::future::err(e).into()),
+                    }
                 };
 
 
-                fut.map(F::Output::into_response)
+                futures::future::Either::Right(fut.map(F::Output::into_response))
             }
         }
     };
 }
 
-impl<T, F, Req, E, R, Ctx> Service<Request<Req, Ctx>> for ServiceFn<T, ()>
+impl<T, F, Req, E, R, Ctx> Service<Request<Req, Ctx>> for ServiceFn<T, Req, Ctx, ()>
 where
     T: FnMut(Req) -> F,
     F: Future,

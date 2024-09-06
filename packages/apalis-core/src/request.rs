@@ -5,7 +5,11 @@ use tower::layer::util::Identity;
 use std::{fmt::Debug, pin::Pin};
 
 use crate::{
-    data::Extensions, error::Error, poller::Poller, task::task_id::TaskId, worker::WorkerId,
+    data::Extensions,
+    error::Error,
+    poller::Poller,
+    task::{attempt::Attempt, task_id::TaskId},
+    worker::WorkerId,
     Backend,
 };
 
@@ -19,13 +23,13 @@ pub struct Request<T, Ctx> {
     pub(crate) ctx: Ctx,
 }
 
-impl<T, Ctx> Request<T, Ctx> {
+impl<T, Ctx: Default> Request<T, Ctx> {
     /// Creates a new [Request]
-    pub fn new(req: T) -> Self
-    where
-        Ctx: Default,
-    {
-        let data = Extensions::new();
+    pub fn new(req: T) -> Self {
+        let id = TaskId::new();
+        let mut data = Extensions::new();
+        data.insert(id);
+        data.insert(Attempt::default());
         Self::new_with_data(req, data, Ctx::default())
     }
 
@@ -41,6 +45,11 @@ impl<T, Ctx> Request<T, Ctx> {
     /// Get the underlying reference of the request
     pub fn inner(&self) -> &T {
         &self.args
+    }
+
+    /// Get the underlying reference of the request
+    pub fn ctx(&self) -> &Ctx {
+        &self.ctx
     }
 
     /// Take the underlying reference of the request

@@ -9,7 +9,7 @@ pub use tower::retry::RetryLayer;
 use apalis_core::task::attempt::Attempt;
 use apalis_core::{error::Error, request::Request};
 
-type Req<T> = Request<T>;
+type Req<T, Ctx> = Request<T, Ctx>;
 type Err = Error;
 
 /// Retries a task instantly for `retries`
@@ -31,13 +31,14 @@ impl RetryPolicy {
     }
 }
 
-impl<T, Res> Policy<Req<T>, Res, Err> for RetryPolicy
+impl<T, Res, Ctx> Policy<Req<T, Ctx>, Res, Err> for RetryPolicy
 where
     T: Clone,
+    Ctx: Clone
 {
     type Future = future::Ready<Self>;
 
-    fn retry(&self, req: &Req<T>, result: Result<&Res, &Err>) -> Option<Self::Future> {
+    fn retry(&self, req: &Req<T, Ctx>, result: Result<&Res, &Err>) -> Option<Self::Future> {
         let ctx = req.get::<Attempt>().cloned().unwrap_or_default();
         match result {
             Ok(_) => {
@@ -51,7 +52,7 @@ where
         }
     }
 
-    fn clone_request(&self, req: &Req<T>) -> Option<Req<T>> {
+    fn clone_request(&self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
         let mut req = req.clone();
         let value = req
             .get::<Attempt>()

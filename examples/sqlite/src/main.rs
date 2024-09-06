@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
         })
         .register_with_count(10, {
             WorkerBuilder::new("tasty-mango")
-                .layer(TraceLayer::new())
+                // .layer(TraceLayer::new())
                 .backend(notification_storage)
                 .build_fn(job::notify)
         })

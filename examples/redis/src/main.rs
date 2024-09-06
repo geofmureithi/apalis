@@ -1,9 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
-use apalis::layers::limit::RateLimitLayer;
+use apalis::layers::limit::{ConcurrencyLimitLayer, RateLimitLayer};
+use apalis::layers::tracing::TraceLayer;
 use apalis::{layers::TimeoutLayer, prelude::*};
-use apalis_redis::RedisStorage;
+use apalis_redis::{RedisContext, RedisStorage};
 
 use email_service::{send_email, Email};
 use tracing::{error, info};
@@ -21,6 +22,20 @@ async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+pub struct Ttx;
+
+impl<Req> FromRequest<Request<Req, ()>> for Ttx {
+    fn from_request(_: &Request<Req, ()>) -> Result<Self, Error> {
+        Ok(Ttx)
+    }
+}
+
+pub async fn task(job: Email, d: Data<usize>) -> Result<(), Error> {
+    dbg!(job, d);
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
@@ -33,14 +48,15 @@ async fn main() -> Result<()> {
     produce_jobs(storage.clone()).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .chain(|svc| svc.map_err(|e| Error::Failed(Arc::new(e))))
-        .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
-        .layer(TimeoutLayer::new(Duration::from_millis(500)))
+        .layer(TraceLayer::new())
+        // .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
+        // .layer(TimeoutLayer::new(Duration::from_millis(500)))
+        .layer(ConcurrencyLimitLayer::new(2))
         .backend(storage)
-        .build_fn(send_email);
+        .build_fn(task);
 
     Monitor::<TokioExecutor>::new()
-        .register_with_count(2, worker)
+        .register(worker)
         .on_event(|e| {
             let worker_id = e.id();
             match e.inner() {

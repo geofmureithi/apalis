@@ -189,13 +189,13 @@ impl<T, Res: Clone + Send + Sync, Ctx: Clone + Send + Sync> Ack<T, Res>
 
 /// A layer that acknowledges a job completed successfully
 #[derive(Debug)]
-pub struct AckLayer<A, J, Res> {
+pub struct AckLayer<A, Req, Ctx, Res> {
     ack: A,
-    job_type: PhantomData<J>,
+    job_type: PhantomData<Request<Req, Ctx>>,
     res: PhantomData<Res>,
 }
 
-impl<A, J, Res> AckLayer<A, J, Res> {
+impl<A, Req, Ctx, Res> AckLayer<A, Req, Ctx, Res> {
     /// Build a new [AckLayer] for a job
     pub fn new(ack: A) -> Self {
         Self {
@@ -206,14 +206,14 @@ impl<A, J, Res> AckLayer<A, J, Res> {
     }
 }
 
-impl<A, Req, S, Res> Layer<S> for AckLayer<A, Req, Res>
+impl<A, Req, Ctx, S, Res> Layer<S> for AckLayer<A, Req, Ctx, Res>
 where
-    S: Service<Req> + Send + 'static,
+    S: Service<Request<Req, Ctx>> + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::Future: Send + 'static,
     A: Ack<Req, S::Response> + Clone + Send + Sync + 'static,
 {
-    type Service = AckService<S, A, Req, S::Response>;
+    type Service = AckService<S, A, Req, Ctx, S::Response>;
 
     fn layer(&self, service: S) -> Self::Service {
         AckService {
@@ -227,14 +227,14 @@ where
 
 /// The underlying service for an [AckLayer]
 #[derive(Debug)]
-pub struct AckService<SV, A, J, Res> {
+pub struct AckService<SV, A, Req, Ctx, Res> {
     service: SV,
     ack: A,
-    job_type: PhantomData<J>,
+    job_type: PhantomData<Request<Req, Ctx>>,
     res: PhantomData<Res>,
 }
 
-impl<Sv: Clone, A: Clone, J, Res> Clone for AckService<Sv, A, J, Res> {
+impl<Sv: Clone, A: Clone, Req, Ctx, Res> Clone for AckService<Sv, A, Req, Ctx, Res> {
     fn clone(&self) -> Self {
         Self {
             ack: self.ack.clone(),
@@ -245,16 +245,16 @@ impl<Sv: Clone, A: Clone, J, Res> Clone for AckService<Sv, A, J, Res> {
     }
 }
 
-impl<SV, A, T, Res, Ctx> Service<Request<T, Ctx>> for AckService<SV, A, T, Res>
+impl<SV, A, Req, Res, Ctx> Service<Request<Req, Ctx>> for AckService<SV, A, Req, Ctx,  Res>
 where
-    SV: Service<Request<T, Ctx>> + Send + Sync + 'static,
-    <SV as Service<Request<T, Ctx>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
-    <SV as Service<Request<T, Ctx>>>::Future: std::marker::Send + 'static,
-    A: Ack<T, <SV as Service<Request<T, Ctx>>>::Response> + Send + 'static + Clone + Send + Sync,
-    T: 'static + Send,
-    <SV as Service<Request<T, Ctx>>>::Response: std::marker::Send + fmt::Debug + Sync + Serialize,
-    <A as Ack<T, SV::Response>>::Context: Sync + Send + Clone,
-    <A as Ack<T, <SV as Service<Request<T, Ctx>>>::Response>>::Context: 'static
+    SV: Service<Request<Req, Ctx>> + Send + Sync + 'static,
+    <SV as Service<Request<Req, Ctx>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    <SV as Service<Request<Req, Ctx>>>::Future: std::marker::Send + 'static,
+    A: Ack<Req, <SV as Service<Request<Req, Ctx>>>::Response> + Send + 'static + Clone + Send + Sync,
+    Req: 'static + Send,
+    <SV as Service<Request<Req, Ctx>>>::Response: std::marker::Send + fmt::Debug + Sync + Serialize,
+    <A as Ack<Req, SV::Response>>::Context: Sync + Send + Clone,
+    <A as Ack<Req, <SV as Service<Request<Req, Ctx>>>::Response>>::Context: 'static,
 {
     type Response = SV::Response;
     type Error = Error;
@@ -269,10 +269,10 @@ where
             .map_err(|e| Error::Failed(Arc::new(e.into())))
     }
 
-    fn call(&mut self, request: Request<T, Ctx>) -> Self::Future {
+    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
         let mut ack = self.ack.clone();
         let data = request
-            .get::<<A as Ack<T, SV::Response>>::Context>()
+            .get::<<A as Ack<Req, SV::Response>>::Context>()
             .cloned();
 
         let fut = self.service.call(request);

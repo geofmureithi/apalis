@@ -33,3 +33,4 @@ pub use storage::Config;
 pub use storage::RedisJob;
 pub use storage::RedisQueueInfo;
 pub use storage::RedisStorage;
+pub use storage::RedisContext;

@@ -41,9 +41,9 @@ pub struct CatchPanicService<S> {
     service: S,
 }
 
-impl<S, J, Res> Service<Request<J>> for CatchPanicService<S>
+impl<S, Req, Res, Ctx> Service<Request<Req, Ctx>> for CatchPanicService<S>
 where
-    S: Service<Request<J>, Response = Res, Error = Error>,
+    S: Service<Request<Req, Ctx>, Response = Res, Error = Error>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -53,7 +53,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<J>) -> Self::Future {
+    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
         CatchPanicFuture {
             future: self.service.call(request),
         }

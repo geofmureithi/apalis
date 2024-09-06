@@ -178,7 +178,7 @@ where
         worker_id: &WorkerId,
         interval: Duration,
         buffer_size: usize,
-    ) -> impl Stream<Item = Result<Option<Request<T>>, sqlx::Error>> {
+    ) -> impl Stream<Item = Result<Option<Request<T, SqlContext>>, sqlx::Error>> {
         let pool = self.pool.clone();
         let worker_id = worker_id.clone();
         let config = self.config.clone();
@@ -199,13 +199,13 @@ where
                 for id in ids {
                     let res = fetch_next(&pool, &worker_id, id.0, &config).await?;
                     yield match res {
-                        None => None::<Request<T>>,
+                        None => None::<Request<T, SqlContext>>,
                         Some(job) => {
                             let (req, ctx) = job.into_tuple();
                             let req = C::decode(req)
                                 .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
                             let req = SqlRequest::new(req, ctx);
-                            let mut req: Request<T> = req.into();
+                            let mut req: Request<T, SqlContext> = req.into();
                             req.insert(Namespace(config.namespace.clone()));
                             Some(req)
                         }
@@ -226,46 +226,48 @@ where
 
     type Error = sqlx::Error;
 
-    type Context = TaskId;
+    type Context = SqlContext;
 
-    async fn push(&mut self, job: Self::Job) -> Result<TaskId, Self::Error> {
-        let id = TaskId::new();
+    async fn push_raw(
+        &mut self,
+        job: Request<Self::Job, SqlContext>,
+    ) -> Result<SqlContext, Self::Error> {
         let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, strftime('%s','now'), NULL, NULL, NULL, NULL)";
-
-        let job = C::encode(&job)
+        let (task, ctx, _) = job.take_parts();
+        let raw = C::encode(&task)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
-            .bind(job)
-            .bind(id.to_string())
+            .bind(raw)
+            .bind(ctx.id().to_string())
             .bind(job_type.to_string())
             .execute(&self.pool)
             .await?;
-        Ok(id)
+        Ok(ctx)
     }
 
-    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<TaskId, Self::Error> {
+    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<SqlContext, Self::Error> {
         let query =
             "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, ?4, NULL, NULL, NULL, NULL)";
 
-        let id = TaskId::new();
+        let ctx = SqlContext::default();
         let job = C::encode(&job)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(job)
-            .bind(id.to_string())
+            .bind(ctx.id().to_string())
             .bind(job_type)
             .bind(on)
             .execute(&self.pool)
             .await?;
-        Ok(id)
+        Ok(ctx)
     }
 
     async fn fetch_by_id(
         &mut self,
         job_id: &TaskId,
-    ) -> Result<Option<Request<Self::Job>>, Self::Error> {
+    ) -> Result<Option<Request<Self::Job, SqlContext>>, Self::Error> {
         let fetch_query = "SELECT * FROM Jobs WHERE id = ?1";
         let res: Option<SqlRequest<String>> = sqlx::query_as(fetch_query)
             .bind(job_id.to_string())
@@ -278,7 +280,7 @@ where
                 let req = C::decode(req)
                     .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
                 let req = SqlRequest::new(req, ctx);
-                let mut req: Request<T> = req.into();
+                let mut req: Request<T, SqlContext> = req.into();
                 req.insert(Namespace(self.config.namespace.clone()));
                 req
             })),
@@ -291,7 +293,11 @@ where
         record.try_get("count")
     }
 
-    async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), Self::Error> {
+    async fn reschedule(
+        &mut self,
+        job: Request<T, SqlContext>,
+        wait: Duration,
+    ) -> Result<(), Self::Error> {
         let task_id = job.get::<TaskId>().ok_or(sqlx::Error::Io(io::Error::new(
             io::ErrorKind::InvalidData,
             "Missing TaskId",
@@ -316,7 +322,7 @@ where
         Ok(())
     }
 
-    async fn update(&mut self, job: Request<Self::Job>) -> Result<(), Self::Error> {
+    async fn update(&mut self, job: Request<Self::Job, SqlContext>) -> Result<(), Self::Error> {
         let ctx = job
             .get::<SqlContext>()
             .ok_or(sqlx::Error::Io(io::Error::new(
@@ -439,11 +445,11 @@ impl<T> SqliteStorage<T> {
     }
 }
 
-impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res> Backend<Request<T>, Res>
+impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res> Backend<Request<T, SqlContext>, Res>
     for SqliteStorage<T>
 {
-    type Stream = BackendStream<RequestStream<Request<T>>>;
-    type Layer = AckLayer<SqliteStorage<T>, T, Res>;
+    type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
+    type Layer = AckLayer<SqliteStorage<T>, T, SqlContext, Res>;
 
     fn poll<Svc>(mut self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
@@ -544,7 +550,7 @@ mod tests {
     async fn consume_one(
         storage: &mut SqliteStorage<Email>,
         worker_id: &WorkerId,
-    ) -> Request<Email> {
+    ) -> Request<Email, SqlContext> {
         let mut stream = storage
             .stream_jobs(worker_id, std::time::Duration::from_secs(10), 1)
             .boxed();

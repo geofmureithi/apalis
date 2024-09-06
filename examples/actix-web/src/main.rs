@@ -17,7 +17,7 @@ async fn push_email(
     let mut storage = storage.clone();
     let res = storage.push(email.into_inner()).await;
     match res {
-        Ok(jid) => HttpResponse::Ok().body(format!("Email with job_id [{jid}] added to queue")),
+        Ok(ctx) => HttpResponse::Ok().json(ctx),
         Err(e) => HttpResponse::InternalServerError().body(format!("{e}")),
     }
 }
@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
     let worker = Monitor::<TokioExecutor>::new()
         .register_with_count(2, {
             WorkerBuilder::new("tasty-avocado")
-                .layer(TraceLayer::new())
+                // .layer(TraceLayer::new())
                 .backend(storage)
                 // .chain(|svc|svc.map_err(|e| Box::new(e)))
                 .build_fn(send_email)

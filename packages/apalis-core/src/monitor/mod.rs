@@ -119,11 +119,15 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     /// # Returns
     ///
     /// The monitor instance, with all workers added to the collection.
+    #[deprecated(
+        since = "0.6.0",
+        note = "Consider using `.register` and `.layer(ConcurrencyLimitLayer::new(count))` "
+    )]
     pub fn register_with_count<
         Req: Send + Sync + 'static,
-        S,
-        P,
-        Res: 'static + Send,
+        S: Service<Request<Req, Ctx>> + Send + 'static,
+        P: Backend<Request<Req, Ctx>, Res> + 'static,
+        Res: 'static,
         Ctx: Send + Sync + 'static,
     >(
         mut self,

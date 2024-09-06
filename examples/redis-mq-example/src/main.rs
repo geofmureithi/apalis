@@ -2,7 +2,7 @@ use std::{fmt::Debug, marker::PhantomData, time::Duration};
 
 use apalis::{layers::tracing::TraceLayer, prelude::*};
 
-use apalis_redis::{self, Config, RedisJob};
+use apalis_redis::{self, Config, RedisContext, RedisJob};
 
 use apalis_core::{
     codec::json::JsonCodec,
@@ -34,29 +34,29 @@ impl<T, C> Clone for RedisMq<T, C> {
     }
 }
 
-impl<M, C, Res> Backend<Request<M>, Res> for RedisMq<M, C>
+impl<Req, C, Res> Backend<Request<Req, RedisContext>, Res> for RedisMq<Req, C>
 where
-    M: Send + DeserializeOwned + 'static,
+    Req: Send + DeserializeOwned + 'static,
     C: Codec<Compact = Vec<u8>>,
 {
-    type Stream = RequestStream<Request<M>>;
+    type Stream = RequestStream<Request<Req, RedisContext>>;
 
-    type Layer = AckLayer<Self, M, Res>;
+    type Layer = AckLayer<Self, Req, RedisContext, Res>;
 
     fn poll<Svc>(mut self, _worker_id: WorkerId) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.get_buffer_size());
-        let stream: RequestStream<Request<M>> = Box::pin(rx);
+        let stream: RequestStream<Request<Req, RedisContext>> = Box::pin(rx);
         let layer = AckLayer::new(self.clone());
         let heartbeat = async move {
             loop {
                 sleep(*self.config.get_poll_interval()).await;
-                let msg: Option<Request<M>> = self
+                let msg: Option<Request<Req, RedisContext>> = self
                     .conn
                     .receive_message(self.config.get_namespace(), None)
                     .await
                     .unwrap()
                     .map(|r| {
-                        let mut req: Request<M> = C::decode::<RedisJob<M>>(r.message)
+                        let mut req: Request<Req, RedisContext> = C::decode::<RedisJob<Req>>(r.message)
                             .map_err(Into::into)
                             .unwrap()
                             .into();
@@ -115,7 +115,7 @@ where
             .receive_message(self.config.get_namespace(), None)
             .await?
             .map(|r| {
-                let req: Request<Message> = C::decode::<RedisJob<Message>>(r.message)
+                let req: Request<Message, RedisContext> = C::decode::<RedisJob<Message>>(r.message)
                     .map_err(Into::into)
                     .unwrap()
                     .into();

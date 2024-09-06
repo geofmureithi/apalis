@@ -95,10 +95,9 @@ impl MysqlStorage<(), JsonCodec<Value>> {
     }
 }
 
-impl<T, C> MysqlStorage<T, C>
+impl<T> MysqlStorage<T>
 where
     T: Serialize + DeserializeOwned,
-    C: Codec,
 {
     /// Create a new instance from a pool
     pub fn new(pool: MySqlPool) -> Self {
@@ -120,12 +119,6 @@ where
     /// Expose the pool for other functionality, eg custom migrations
     pub fn pool(&self) -> &Pool<MySql> {
         &self.pool
-    }
-
-    /// Expose the codec
-    #[doc(hidden)]
-    pub fn codec(&self) -> &PhantomData<C> {
-        &self.codec
     }
 
     /// Get the config used by the storage
@@ -237,7 +230,7 @@ where
 
     type Context = SqlContext;
 
-    async fn push(&mut self, job: Self::Job) -> Result<TaskId, sqlx::Error> {
+    async fn push_raw(&mut self, job: Request<Self::Job, SqlContext>) -> Result<SqlContext, sqlx::Error> {
         let id = TaskId::new();
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, now(), NULL, NULL, NULL, NULL)";
@@ -379,14 +372,14 @@ where
     }
 }
 
-impl<T, Res, C> Backend<Request<T, SqlContext>, Res> for MysqlStorage<T, C>
+impl<Req, Res, C> Backend<Request<Req, SqlContext>, Res> for MysqlStorage<Req, C>
 where
-    T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
+    Req: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
     C: Debug + Codec<Compact = Value> + Clone + Send + 'static,
 {
-    type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
+    type Stream = BackendStream<RequestStream<Request<Req, SqlContext>>>;
 
-    type Layer = AckLayer<MysqlStorage<T, C>, T, Res>;
+    type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, Res>;
 
     fn poll<Svc>(self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());

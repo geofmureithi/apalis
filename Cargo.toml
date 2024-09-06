@@ -4,7 +4,7 @@ repository = "https://github.com/geofmureithi/apalis"
 
 [package]
 name = "apalis"
-version = "0.6.0-rc.5"
+version = "0.6.0-rc.6"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 edition.workspace = true
@@ -58,7 +58,7 @@ layers = [
 docsrs = ["document-features"]
 
 [dependencies.apalis-core]
-version = "0.6.0-rc.5"
+version = "0.6.0-rc.6"
 default-features = false
 path = "./packages/apalis-core"
 
@@ -80,7 +80,13 @@ pprof = { version = "0.13", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+apalis = { path = ".", features = ["limit"] }
 apalis-redis = { path = "./packages/apalis-redis" }
+apalis-sql = { path = "./packages/apalis-sql", features = [
+  "postgres",
+  "mysql",
+  "sqlite",
+] }
 redis = { version = "0.25.3", default-features = false, features = [
   "tokio-comp",
   "script",
@@ -89,14 +95,9 @@ redis = { version = "0.25.3", default-features = false, features = [
 ] }
 
 [dev-dependencies.sqlx]
-version = "0.8.0"
+version = "0.8.1"
 default-features = false
-features = ["chrono", "mysql", "sqlite", "postgres"]
-
-
-[[bench]]
-name = "storages"
-harness = false
+features = ["chrono", "mysql", "sqlite", "postgres", "runtime-tokio"]
 
 [workspace]
 members = [
@@ -120,7 +121,11 @@ members = [
   "examples/redis-with-msg-pack",
   "examples/redis-deadpool",
   "examples/redis-mq-example",
-  "examples/cron", "examples/catch-panic", "examples/graceful-shutdown", "examples/unmonitored-worker", "examples/fn-args",
+  "examples/cron",
+  "examples/catch-panic",
+  "examples/graceful-shutdown",
+  "examples/unmonitored-worker",
+  "examples/fn-args",
 ]
 
 

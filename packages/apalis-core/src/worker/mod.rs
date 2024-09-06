@@ -1,5 +1,5 @@
 use self::stream::WorkerStream;
-use crate::error::{BoxDynError, Error};
+use crate::error::{BoxDynError, Error, ErrorHandlingLayer};
 use crate::executor::Executor;
 use crate::layers::extensions::Data;
 use crate::layers::CommonLayer;
@@ -426,6 +426,7 @@ impl<S, P> Worker<Ready<S, P>> {
             });
         };
         let worker_layers = ServiceBuilder::new()
+            .layer(ErrorHandlingLayer)
             .layer(Data::new(worker.id.clone()))
             .layer(Data::new(worker.state.clone()));
         let mut service = worker_layers.service(service);
@@ -454,12 +455,17 @@ impl<S, P> Worker<Ready<S, P>> {
                             Ok(Ok(Some(req))) => {
                                 let fut = service.call(req);
                                 let worker_id = worker_id.clone();
+                                let w = worker.clone();
                                 let state = worker.state.clone();
                                 worker.spawn(fut.map(move |res| {
                                     if let Err(e) = res {
+                                        if let Error::MissingContext(e) = &e {
+                                            w.force_stop();
+                                            unreachable!("Worker missing required context: {}", e);
+                                        }
                                         if let Some(ctx) = state.context.as_ref() {
                                             ctx.notify(Worker {
-                                                state: Event::Error(e.into()),
+                                                state: Event::Error(Box::new(e)),
                                                 id: WorkerId::new_with_instance(
                                                     worker_id.name(),
                                                     instance,
@@ -601,7 +607,7 @@ impl<E: Executor + Send + 'static + Clone> Context<E> {
     pub fn is_shutting_down(&self) -> bool {
         self.context
             .as_ref()
-            .map(|s| s.shutdown().is_shutting_down())
+            .map(|s| !self.is_running() || s.shutdown().is_shutting_down())
             .unwrap_or(!self.is_running())
     }
 
@@ -651,10 +657,12 @@ mod tests {
     }
 
     use crate::{
-        builder::{WorkerBuilder, WorkerFactoryFn},
+        builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
         layers::extensions::Data,
         memory::MemoryStorage,
         mq::MessageQueue,
+        response::IntoResponse,
+        service_fn::service_fn,
     };
 
     use super::*;
@@ -707,24 +715,23 @@ mod tests {
             }
         }
 
-        async fn task(job: u32, count: Data<Count>) -> Result<(), io::Error> {
+        async fn task(job: u32, count: Data<Count>) -> impl IntoResponse {
             count.fetch_add(1, Ordering::Relaxed);
             if job == ITEMS - 1 {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
-            Ok(())
         }
-        // let worker = WorkerBuilder::new("rango-tango")
-        //     // .data(Count::default())
-        //     .backend(in_memory);
-        // let worker = worker.build_fn(task);
-        // let worker = worker.with_executor(TokioTestExecutor);
-        // let w = worker.clone();
+        let worker = WorkerBuilder::new("rango-tango")
+            .data(Count::default())
+            .backend(in_memory);
+        let worker = worker.build_fn(task);
+        let worker = worker.with_executor(TokioTestExecutor);
+        let w = worker.clone();
 
-        // tokio::spawn(async move {
-        //     tokio::time::sleep(Duration::from_secs(3)).await;
-        //     w.stop();
-        // });
-        // worker.run().await;
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            w.stop();
+        });
+        worker.run().await;
     }
 }
