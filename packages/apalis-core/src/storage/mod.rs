@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use futures::Future;
 
-use crate::{request::Request, task::task_id::TaskId};
+use crate::{
+    request::{Parts, Request},
+    task::task_id::TaskId,
+};
 
 /// Represents a [Storage] that can persist a request.
 pub trait Storage {
@@ -19,22 +22,31 @@ pub trait Storage {
     fn push(
         &mut self,
         job: Self::Job,
-    ) -> impl Future<Output = Result<Self::Context, Self::Error>> + Send {
-        self.push_raw(Request::new(job))
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
+        self.push_request(Request::new(job))
     }
 
-    /// Pushes a raw request to a storage
-    fn push_raw(
+    /// Pushes a constructed request to a storage
+    fn push_request(
         &mut self,
         req: Request<Self::Job, Self::Context>,
-    ) -> impl Future<Output = Result<Self::Context, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send;
 
-    /// Push a job into the scheduled set
+    /// Push a job with defaults into the scheduled set
     fn schedule(
         &mut self,
         job: Self::Job,
         on: i64,
-    ) -> impl Future<Output = Result<Self::Context, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
+        self.schedule_request(Request::new(job), on)
+    }
+
+    /// Push a request into the scheduled set
+    fn schedule_request(
+        &mut self,
+        request: Request<Self::Job, Self::Context>,
+        on: i64,
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send;
 
     /// Return the number of pending jobs from the queue
     fn len(&mut self) -> impl Future<Output = Result<i64, Self::Error>> + Send;

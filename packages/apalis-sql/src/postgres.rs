@@ -47,7 +47,7 @@ use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
-use apalis_core::request::{Request, RequestStream};
+use apalis_core::request::{Parts, Request, RequestStream};
 use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
@@ -421,42 +421,45 @@ where
     /// ```sql
     /// Select apalis.push_job(job_type::text, job::json);
     /// ```
-    async fn push_raw(
+    async fn push_request(
         &mut self,
-        job: Request<Self::Job, SqlContext>,
-    ) -> Result<SqlContext, sqlx::Error> {
-        let ctx = SqlContext::default();
+        req: Request<Self::Job, SqlContext>,
+    ) -> Result<Parts<SqlContext>, sqlx::Error> {
         let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, 25, NOW() , NULL, NULL, NULL, NULL)";
 
-        let args = C::encode(&job.args)
+        let args = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(args)
-            .bind(job.parts.task_id.to_string())
+            .bind(&req.parts.task_id.to_string())
             .bind(&job_type)
             .execute(&self.pool)
             .await?;
-        Ok(ctx)
+        Ok(req.parts)
     }
 
-    async fn schedule(&mut self, job: Self::Job, on: Timestamp) -> Result<SqlContext, sqlx::Error> {
+    async fn schedule_request(
+        &mut self,
+        req: Request<Self::Job, SqlContext>,
+        on: Timestamp,
+    ) -> Result<Parts<Self::Context>, sqlx::Error> {
         let query =
             "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, 25, $4, NULL, NULL, NULL, NULL)";
-
-        let ctx = SqlContext::default();
+        let task_id = req.parts.task_id.to_string();
+        let parts = req.parts;
         let on = DateTime::from_timestamp(on, 0);
-        let job = C::encode(&job)
+        let job = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(job)
-            .bind(TaskId::new().to_string())
+            .bind(task_id)
             .bind(job_type)
             .bind(on)
             .execute(&self.pool)
             .await?;
-        Ok(ctx)
+        Ok(parts)
     }
 
     async fn fetch_by_id(

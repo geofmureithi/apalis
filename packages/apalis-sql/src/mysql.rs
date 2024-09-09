@@ -227,10 +227,10 @@ where
 
     type Context = SqlContext;
 
-    async fn push_raw(
+    async fn push_request(
         &mut self,
         job: Request<Self::Job, SqlContext>,
-    ) -> Result<SqlContext, sqlx::Error> {
+    ) -> Result<Parts<SqlContext>, sqlx::Error> {
         let (args, parts) = job.take_parts();
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, now(), NULL, NULL, NULL, NULL)";
@@ -245,27 +245,30 @@ where
             .bind(job_type.to_string())
             .execute(&pool)
             .await?;
-        Ok(parts.context)
+        Ok(parts)
     }
 
-    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<SqlContext, sqlx::Error> {
+    async fn schedule_request(
+        &mut self,
+        req: Request<Self::Job, SqlContext>,
+        on: i64,
+    ) -> Result<Parts<Self::Context>, sqlx::Error> {
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, ?, NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
-        let parts = Parts::<SqlContext>::default();
 
-        let args = C::encode(job)
+        let args = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(args)
-            .bind(parts.task_id.to_string())
+            .bind(req.parts.task_id.to_string())
             .bind(job_type)
             .bind(on)
             .execute(&pool)
             .await?;
-        Ok(parts.context)
+        Ok(req.parts)
     }
 
     async fn fetch_by_id(

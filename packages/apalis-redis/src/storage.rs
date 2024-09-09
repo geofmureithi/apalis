@@ -4,7 +4,7 @@ use apalis_core::layers::{Ack, AckLayer, Service};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
-use apalis_core::request::{Request, RequestStream};
+use apalis_core::request::{Parts, Request, RequestStream};
 use apalis_core::response::Response;
 use apalis_core::service_fn::FromRequest;
 use apalis_core::storage::Storage;
@@ -621,10 +621,10 @@ where
     type Error = RedisError;
     type Context = RedisContext;
 
-    async fn push_raw(
+    async fn push_request(
         &mut self,
         req: Request<T, RedisContext>,
-    ) -> Result<RedisContext, RedisError> {
+    ) -> Result<Parts<Self::Context>, RedisError> {
         let conn = &mut self.conn;
         let push_job = self.scripts.push_job.clone();
         let job_data_hash = self.config.job_data_hash();
@@ -641,14 +641,17 @@ where
             .arg(job)
             .invoke_async(conn)
             .await?;
-        Ok(req.parts.context)
+        Ok(req.parts)
     }
 
-    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<RedisContext, RedisError> {
+    async fn schedule_request(
+        &mut self,
+        req: Request<Self::Job, RedisContext>,
+        on: i64,
+    ) -> Result<Parts<Self::Context>, RedisError> {
         let schedule_job = self.scripts.schedule_job.clone();
         let job_data_hash = self.config.job_data_hash();
         let scheduled_jobs_set = self.config.scheduled_jobs_set();
-        let req = Request::new(job);
         let job = C::encode(&req)
             .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
         schedule_job
@@ -659,7 +662,7 @@ where
             .arg(on)
             .invoke_async(&mut self.conn)
             .await?;
-        Ok(req.parts.context)
+        Ok(req.parts)
     }
 
     async fn len(&mut self) -> Result<i64, RedisError> {

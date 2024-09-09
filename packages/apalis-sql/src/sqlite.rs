@@ -6,7 +6,7 @@ use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
-use apalis_core::request::{Request, RequestStream};
+use apalis_core::request::{Parts, Request, RequestStream};
 use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
@@ -229,10 +229,10 @@ where
 
     type Context = SqlContext;
 
-    async fn push_raw(
+    async fn push_request(
         &mut self,
         job: Request<Self::Job, SqlContext>,
-    ) -> Result<SqlContext, Self::Error> {
+    ) -> Result<Parts<SqlContext>, Self::Error> {
         let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, strftime('%s','now'), NULL, NULL, NULL, NULL)";
         let (task, parts) = job.take_parts();
         let raw = C::encode(&task)
@@ -240,19 +240,22 @@ where
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(raw)
-            .bind(parts.task_id.to_string())
+            .bind(&parts.task_id.to_string())
             .bind(job_type.to_string())
             .execute(&self.pool)
             .await?;
-        Ok(parts.context)
+        Ok(parts)
     }
 
-    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<SqlContext, Self::Error> {
+    async fn schedule_request(
+        &mut self,
+        req: Request<Self::Job, SqlContext>,
+        on: i64,
+    ) -> Result<Parts<SqlContext>, Self::Error> {
         let query =
             "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, ?4, NULL, NULL, NULL, NULL)";
-        let id = TaskId::new();
-        let ctx = SqlContext::default();
-        let job = C::encode(&job)
+        let id = &req.parts.task_id;
+        let job = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
@@ -262,7 +265,7 @@ where
             .bind(on)
             .execute(&self.pool)
             .await?;
-        Ok(ctx)
+        Ok(req.parts)
     }
 
     async fn fetch_by_id(
