@@ -604,10 +604,13 @@ mod tests {
         push_email(&mut storage, example_good_email()).await;
         let job = consume_one(&mut storage, &worker_id).await;
         let job_id = &job.parts.task_id;
-        let ctx = job.parts.context;
-
+        let ctx = &job.parts.context;
+        let res = 1usize;
         storage
-            .ack(ctx.as_ref().unwrap(), &Ok(()))
+            .ack(
+                ctx,
+                &Response::success(res, job_id.clone(), job.parts.attempt.clone()),
+            )
             .await
             .expect("failed to acknowledge the job");
 
@@ -627,8 +630,6 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let job_id = &job.parts.task_id;
-
-        let ctx = job.parts.context;
 
         storage
             .kill(&worker_id, job_id)
@@ -653,13 +654,12 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let job_id = &job.parts.task_id;
-        let ctx = job.parts.context;
         storage
             .reenqueue_orphaned(six_minutes_ago.timestamp())
             .await
             .expect("failed to heartbeat");
         let job = get_job(&mut storage, job_id).await;
-        let ctx = job.parts.context;
+        let ctx = &job.parts.context;
         assert_eq!(*ctx.status(), State::Running);
         assert!(ctx.done_at().is_none());
         assert!(ctx.lock_by().is_some());
@@ -678,14 +678,13 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let job_id = &job.parts.task_id;
-        let ctx = job.parts.context;
         storage
             .reenqueue_orphaned(four_minutes_ago.timestamp())
             .await
             .expect("failed to heartbeat");
 
         let job = get_job(&mut storage, job_id).await;
-
+        let ctx = &job.parts.context;
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker_id));
     }

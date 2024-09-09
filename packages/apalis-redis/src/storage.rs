@@ -1001,13 +1001,16 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
         let ctx = &job.parts.context;
-
+        let res = 42usize;
         storage
-            .ack(ctx, &Ok(()))
+            .ack(
+                ctx,
+                &Response::success(res, job.parts.task_id.clone(), job.parts.attempt.clone()),
+            )
             .await
             .expect("failed to acknowledge the job");
 
-        let _job = get_job(&mut storage, &ctx.id).await;
+        let _job = get_job(&mut storage, &job.parts.task_id).await;
     }
 
     #[tokio::test]

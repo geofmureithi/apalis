@@ -740,8 +740,8 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.parts.context;
-        let job_id = ctx.id();
+        let job_id = &job.parts.task_id;
+
         // Refresh our job
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.parts.context;
@@ -759,8 +759,7 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.parts.context;
-        let job_id = ctx.id();
+        let job_id = &job.parts.task_id;
 
         storage
             .kill(&worker_id, job_id)
@@ -808,7 +807,7 @@ mod tests {
         let worker_id = register_worker_at(&mut storage, four_minutes_ago.timestamp()).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.parts.context;
+        let ctx = &job.parts.context;
 
         assert_eq!(*ctx.status(), State::Running);
         storage
@@ -816,7 +815,7 @@ mod tests {
             .await
             .expect("failed to heartbeat");
 
-        let job_id = ctx.id();
+        let job_id = &job.parts.task_id;
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.parts.context;
 

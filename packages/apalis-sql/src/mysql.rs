@@ -523,7 +523,6 @@ mod tests {
     use crate::sql_storage_tests;
 
     use super::*;
-    use apalis_core::task::attempt::Attempt;
 
     use apalis_core::test_utils::DummyService;
     use email_service::Email;
@@ -575,12 +574,10 @@ mod tests {
         storage: &mut MysqlStorage<Email>,
         worker_id: &WorkerId,
     ) -> Request<Email, SqlContext> {
-        let mut stream = storage.clone().stream_jobs(
-            worker_id,
-            std::time::Duration::from_secs(10),
-            1,
-            &Config::default(),
-        );
+        let mut stream =
+            storage
+                .clone()
+                .stream_jobs(worker_id, std::time::Duration::from_secs(10), 1);
         stream
             .next()
             .await
@@ -658,8 +655,7 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
 
-        let ctx = job.parts.context;
-        let job_id = ctx.id();
+        let job_id = &job.parts.task_id;
 
         storage
             .kill(&worker_id, job_id)
@@ -702,7 +698,11 @@ mod tests {
         storage.reenqueue_orphaned(300).await.unwrap();
 
         // then, the job status has changed to Pending
-        let job = storage.fetch_by_id(ctx.id()).await.unwrap().unwrap();
+        let job = storage
+            .fetch_by_id(&job.parts.task_id)
+            .await
+            .unwrap()
+            .unwrap();
         let context = job.parts.context;
         assert_eq!(*context.status(), State::Pending);
         assert!(context.lock_by().is_none());
@@ -732,7 +732,7 @@ mod tests {
 
         // fetch job
         let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.parts.context;
+        let ctx = &job.parts.context;
 
         assert_eq!(*ctx.status(), State::Running);
 
@@ -740,7 +740,11 @@ mod tests {
         storage.reenqueue_orphaned(300).await.unwrap();
 
         // then, the job status is not changed
-        let job = storage.fetch_by_id(ctx.id()).await.unwrap().unwrap();
+        let job = storage
+            .fetch_by_id(&job.parts.task_id)
+            .await
+            .unwrap()
+            .unwrap();
         let context = job.parts.context;
         // TODO: Fix assertions
         assert_eq!(*context.status(), State::Running);

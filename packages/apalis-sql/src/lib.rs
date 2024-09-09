@@ -212,7 +212,7 @@ macro_rules! sql_storage_tests {
             let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
             let ctx = job.parts.context;
             assert_eq!(*ctx.status(), State::Failed);
-            assert!(ctx.attempts().current() >= 1);
+            assert!(job.parts.attempt.current() >= 1);
             assert_eq!(
                 ctx.last_error().clone().unwrap(),
                 "{\"Err\":\"FailedError: Missing separator character '@'.\"}"

@@ -655,7 +655,7 @@ impl<E: Executor + Send + Clone + 'static> Future for Context<E> {
 
 #[cfg(test)]
 mod tests {
-    use std::{io, ops::Deref, sync::atomic::AtomicUsize, time::Duration};
+    use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
     #[derive(Debug, Clone)]
     struct TokioTestExecutor;
