@@ -1,5 +1,6 @@
 use crate::error::{BoxDynError, Error};
 use crate::request::Request;
+use crate::response::Response;
 use futures::channel::mpsc::{SendError, Sender};
 use futures::SinkExt;
 use futures::{future::BoxFuture, Future, FutureExt};
@@ -148,7 +149,7 @@ pub mod extensions {
         }
 
         fn call(&mut self, mut req: Request<Req, Ctx>) -> Self::Future {
-            req.data.insert(self.value.clone());
+            req.parts.data.insert(self.value.clone());
             self.inner.call(req)
         }
     }
@@ -157,7 +158,7 @@ pub mod extensions {
 /// A trait for acknowledging successful processing
 /// This trait is called even when a task fails.
 /// This is a way of a [`Backend`] to save the result of a job or message
-pub trait Ack<Task, Response> {
+pub trait Ack<Task, Res> {
     /// The data to fetch from context to allow acknowledgement
     type Context;
     /// The error returned by the ack
@@ -167,19 +168,19 @@ pub trait Ack<Task, Response> {
     fn ack(
         &mut self,
         ctx: &Self::Context,
-        result: &Result<Response, Error>,
+        response: &Response<Res>,
     ) -> impl Future<Output = Result<(), Self::AckError>> + Send;
 }
 
 impl<T, Res: Clone + Send + Sync, Ctx: Clone + Send + Sync> Ack<T, Res>
-    for Sender<(Ctx, Result<Res, Error>)>
+    for Sender<(Ctx, Response<Res>)>
 {
     type AckError = SendError;
     type Context = Ctx;
     async fn ack(
         &mut self,
         ctx: &Self::Context,
-        result: &Result<Res, Error>,
+        result: &Response<Res>,
     ) -> Result<(), Self::AckError> {
         let ctx = ctx.clone();
         self.send((ctx, result.clone())).await.unwrap();
@@ -245,16 +246,22 @@ impl<Sv: Clone, A: Clone, Req, Ctx, Res> Clone for AckService<Sv, A, Req, Ctx, R
     }
 }
 
-impl<SV, A, Req, Res, Ctx> Service<Request<Req, Ctx>> for AckService<SV, A, Req, Ctx,  Res>
+impl<SV, A, Req, Res, Ctx> Service<Request<Req, Ctx>> for AckService<SV, A, Req, Ctx, Res>
 where
     SV: Service<Request<Req, Ctx>> + Send + Sync + 'static,
     <SV as Service<Request<Req, Ctx>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
     <SV as Service<Request<Req, Ctx>>>::Future: std::marker::Send + 'static,
-    A: Ack<Req, <SV as Service<Request<Req, Ctx>>>::Response> + Send + 'static + Clone + Send + Sync,
+    A: Ack<Req, <SV as Service<Request<Req, Ctx>>>::Response, Context = Ctx>
+        + Send
+        + 'static
+        + Clone
+        + Send
+        + Sync,
     Req: 'static + Send,
     <SV as Service<Request<Req, Ctx>>>::Response: std::marker::Send + fmt::Debug + Sync + Serialize,
     <A as Ack<Req, SV::Response>>::Context: Sync + Send + Clone,
     <A as Ack<Req, <SV as Service<Request<Req, Ctx>>>::Response>>::Context: 'static,
+    Ctx: Clone,
 {
     type Response = SV::Response;
     type Error = Error;
@@ -271,10 +278,9 @@ where
 
     fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
         let mut ack = self.ack.clone();
-        let data = request
-            .get::<<A as Ack<Req, SV::Response>>::Context>()
-            .cloned();
-
+        let ctx = request.parts.context.clone();
+        let attempt = request.parts.attempt.clone();
+        let task_id = request.parts.task_id.clone();
         let fut = self.service.call(request);
         let fut_with_ack = async move {
             let res = fut.await.map_err(|err| {
@@ -285,19 +291,17 @@ where
                 }
                 Error::Failed(Arc::new(e))
             });
-
-            if let Some(ctx) = data {
-                if let Err(_e) = ack.ack(&ctx, &res).await {
-                    // TODO: Implement tracing in apalis core
-                    // tracing::error!("Acknowledgement Failed: {}", e);
-                }
-            } else {
-                // tracing::error!(
-                //     "Acknowledgement could not be called due to missing ack data in context : {}",
-                //     &std::any::type_name::<<A as Ack<T>>::Acknowledger>()
-                // );
+            let response = Response {
+                attempt,
+                inner: res,
+                task_id,
+                _priv: (),
+            };
+            if let Err(_e) = ack.ack(&ctx, &response).await {
+                // TODO: Implement tracing in apalis core
+                // tracing::error!("Acknowledgement Failed: {}", e);
             }
-            res
+            response.inner
         };
         fut_with_ack.boxed()
     }

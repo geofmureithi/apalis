@@ -97,8 +97,8 @@ impl ReminderSpan {
 
 impl<B, Ctx> MakeSpan<B, Ctx> for ReminderSpan {
     fn make_span(&mut self, req: &Request<B, Ctx>) -> Span {
-        let task_id: &TaskId = req.get().unwrap();
-        let attempts: Attempt = req.get().cloned().unwrap_or_default();
+        let task_id: &TaskId = &req.parts.task_id;
+        let attempts: &Attempt = &req.parts.attempt;
         let span = Span::current();
         macro_rules! make_span {
             ($level:expr) => {

@@ -1,5 +1,7 @@
+use apalis_core::request::Parts;
+use apalis_core::task::attempt::Attempt;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::{data::Extensions, request::Request, worker::WorkerId};
+use apalis_core::{request::Request, worker::WorkerId};
 
 use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Type};
@@ -8,59 +10,43 @@ use crate::context::SqlContext;
 /// Wrapper for [Request]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlRequest<T> {
-    req: T,
-    context: SqlContext,
+    pub(crate) req: Request<T, SqlContext>,
 }
 
 impl<T> SqlRequest<T> {
     /// Creates a new SqlRequest.
-    pub fn new(req: T, context: SqlContext) -> Self {
-        SqlRequest { req, context }
+    pub fn new(req: Request<T, SqlContext>) -> Self {
+        SqlRequest { req }
     }
 
     /// Gets a reference to the request.
     pub fn req(&self) -> &T {
-        &self.req
+        &self.req.args
     }
 
     /// Gets a mutable reference to the request.
     pub fn req_mut(&mut self) -> &mut T {
-        &mut self.req
+        &mut self.req.args
     }
 
     /// Sets the request.
     pub fn set_req(&mut self, req: T) {
-        self.req = req;
+        self.req.args = req;
     }
 
     /// Gets a reference to the context.
     pub fn context(&self) -> &SqlContext {
-        &self.context
+        &self.req.parts.context
     }
 
     /// Gets a mutable reference to the context.
     pub fn context_mut(&mut self) -> &mut SqlContext {
-        &mut self.context
+        &mut self.req.parts.context
     }
 
     /// Sets the context.
     pub fn set_context(&mut self, context: SqlContext) {
-        self.context = context;
-    }
-
-    /// Combines request and context into a tuple.
-    pub fn into_tuple(self) -> (T, SqlContext) {
-        (self.req, self.context)
-    }
-}
-
-impl<T> From<SqlRequest<T>> for Request<T, SqlContext> {
-    fn from(val: SqlRequest<T>) -> Self {
-        let mut data = Extensions::new();
-        data.insert(val.context.id().clone());
-        data.insert(val.context.attempts().clone());
-        data.insert(val.context.clone());
-        Request::new_with_data(val.req, data, val.context)
+        self.req.parts.context = context;
     }
 }
 
@@ -75,18 +61,21 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
         use std::str::FromStr;
 
         let job: T = row.try_get("job")?;
-        let id: TaskId =
+        let task_id: TaskId =
             TaskId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut context = crate::context::SqlContext::new(id);
+        let mut parts = Parts::<SqlContext>::default();
+        parts.task_id = task_id;
+
+        let attempt: i32 = row.try_get("attempts").unwrap_or(0);
+        parts.attempt = Attempt::new_with_value(attempt as usize);
+
+        let mut context = crate::context::SqlContext::new();
 
         let run_at: i64 = row.try_get("run_at")?;
         context.set_run_at(DateTime::from_timestamp(run_at, 0).unwrap_or_default());
-
-        let attempts = row.try_get("attempts").unwrap_or(0);
-        context.set_attempts(attempts);
 
         let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
@@ -117,8 +106,10 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
                     source: "Could not parse lock_by as a WorkerId".into(),
                 })?,
         );
-
-        Ok(SqlRequest { context, req: job })
+        parts.context = context;
+        Ok(SqlRequest {
+            req: Request::new_with_parts(job, parts),
+        })
     }
 }
 
@@ -133,18 +124,20 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
         use std::str::FromStr;
 
         let job: T = row.try_get("job")?;
-        let id: TaskId =
+        let task_id: TaskId =
             TaskId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut context = SqlContext::new(id);
+        let mut parts = Parts::<SqlContext>::default();
+        parts.task_id = task_id;
+
+        let attempt: i32 = row.try_get("attempts").unwrap_or(0);
+        parts.attempt = Attempt::new_with_value(attempt as usize);
+        let mut context = SqlContext::new();
 
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
-
-        let attempts = row.try_get("attempts").unwrap_or(0);
-        context.set_attempts(attempts);
 
         let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
@@ -175,7 +168,10 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
                     source: "Could not parse lock_by as a WorkerId".into(),
                 })?,
         );
-        Ok(SqlRequest { context, req: job })
+        parts.context = context;
+        Ok(SqlRequest {
+            req: Request::new_with_parts(job, parts),
+        })
     }
 }
 
@@ -188,18 +184,21 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
         use sqlx::Row;
         use std::str::FromStr;
         let job: T = row.try_get("job")?;
-        let id: TaskId =
+        let task_id: TaskId =
             TaskId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut context = SqlContext::new(id);
+        let mut parts = Parts::<SqlContext>::default();
+        parts.task_id = task_id;
+
+        let attempt: i32 = row.try_get("attempts").unwrap_or(0);
+        parts.attempt = Attempt::new_with_value(attempt as usize);
+
+        let mut context = SqlContext::new();
 
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
-
-        let attempts = row.try_get("attempts").unwrap_or(0);
-        context.set_attempts(attempts);
 
         let max_attempts = row.try_get("max_attempts").unwrap_or(25);
         context.set_max_attempts(max_attempts);
@@ -230,7 +229,9 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
                     source: "Could not parse lock_by as a WorkerId".into(),
                 })?,
         );
-
-        Ok(SqlRequest { context, req: job })
+        parts.context = context;
+        Ok(SqlRequest {
+            req: Request::new_with_parts(job, parts),
+        })
     }
 }

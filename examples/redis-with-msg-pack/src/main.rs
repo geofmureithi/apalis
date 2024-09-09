@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
         .build_fn(send_email);
 
     Monitor::<TokioExecutor>::new()
-        .register_with_count(2, worker)
+        .register(worker)
         .shutdown_timeout(Duration::from_millis(5000))
         .run_with_signal(async {
             tokio::signal::ctrl_c().await?;

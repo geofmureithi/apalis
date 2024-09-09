@@ -8,71 +8,94 @@ use crate::{
     data::Extensions,
     error::Error,
     poller::Poller,
-    task::{attempt::Attempt, task_id::TaskId},
+    task::{attempt::Attempt, namespace::Namespace, task_id::TaskId},
     worker::WorkerId,
     Backend,
 };
 
 /// Represents a job which can be serialized and executed
 
-#[derive(Serialize, Debug, Deserialize, Clone)]
-pub struct Request<T, Ctx> {
-    pub(crate) args: T,
+#[derive(Serialize, Debug, Deserialize, Clone, Default)]
+pub struct Request<Args, Ctx> {
+    /// The inner request part
+    pub args: Args,
+    /// Parts of the request eg id, attempts and context
+    pub parts: Parts<Ctx>,
+}
+
+/// Component parts of a `Request`
+#[derive(Serialize, Debug, Deserialize, Clone, Default)]
+pub struct Parts<Ctx> {
+    /// The request's id
+    pub task_id: TaskId,
+
+    /// The request's extensions
     #[serde(skip)]
-    pub(crate) data: Extensions,
-    pub(crate) ctx: Ctx,
+    pub data: Extensions,
+
+    /// The request's attempts
+    pub attempt: Attempt,
+
+    /// The Context stored by the storage
+    pub context: Ctx,
+
+    /// Represents the namespace
+    #[serde(skip)]
+    pub namespace: Option<Namespace>,
+
+    _priv: (),
 }
 
 impl<T, Ctx: Default> Request<T, Ctx> {
     /// Creates a new [Request]
-    pub fn new(req: T) -> Self {
-        let id = TaskId::new();
-        let mut data = Extensions::new();
-        data.insert(id);
-        data.insert(Attempt::default());
-        Self::new_with_data(req, data, Ctx::default())
+    pub fn new(args: T) -> Self {
+        Self::new_with_data(args, Extensions::default(), Ctx::default())
+    }
+
+    /// Creates a request with all parts provided
+    pub fn new_with_parts(args: T, parts: Parts<Ctx>) -> Self {
+        Self { args, parts }
     }
 
     /// Creates a request with context provided
-    pub fn new_with_data(req: T, data: Extensions, ctx: Ctx) -> Self {
+    pub fn new_with_ctx(req: T, ctx: Ctx) -> Self {
         Self {
             args: req,
-            data,
-            ctx,
+            parts: Parts {
+                context: ctx,
+                ..Default::default()
+            },
         }
     }
 
-    /// Get the underlying reference of the request
-    pub fn inner(&self) -> &T {
-        &self.args
-    }
-
-    /// Get the underlying reference of the request
-    pub fn ctx(&self) -> &Ctx {
-        &self.ctx
-    }
-
-    /// Take the underlying reference of the request
-    pub fn take(self) -> T {
-        self.args
+    /// Creates a request with data and context provided
+    pub fn new_with_data(req: T, data: Extensions, ctx: Ctx) -> Self {
+        Self {
+            args: req,
+            parts: Parts {
+                context: ctx,
+                data,
+                ..Default::default()
+            },
+        }
     }
 
     /// Take the parts
-    pub fn take_parts(self) -> (T, Ctx, Extensions) {
-        (self.args, self.ctx, self.data)
+    pub fn take_parts(self) -> (T, Parts<Ctx>) {
+        (self.args, self.parts)
     }
 }
 
 impl<T, Ctx> std::ops::Deref for Request<T, Ctx> {
     type Target = Extensions;
     fn deref(&self) -> &Self::Target {
-        &self.data
+        &self.parts.data
     }
 }
 
 impl<T, Ctx> std::ops::DerefMut for Request<T, Ctx> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.data
+        &mut self.parts.data
     }
 }
 

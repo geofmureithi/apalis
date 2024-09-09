@@ -32,3 +32,5 @@ pub use tower::timeout::TimeoutLayer;
 #[cfg(feature = "catch-panic")]
 #[cfg_attr(docsrs, doc(cfg(feature = "catch-panic")))]
 pub mod catch_panic;
+
+pub use  apalis_core::error::ErrorHandlingLayer;

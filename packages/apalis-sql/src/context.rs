@@ -1,5 +1,6 @@
 use apalis_core::error::Error;
-use apalis_core::task::{attempt::Attempt, task_id::TaskId};
+use apalis_core::request::Request;
+use apalis_core::service_fn::FromRequest;
 use apalis_core::worker::WorkerId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -9,10 +10,8 @@ use std::{fmt, str::FromStr};
 /// Used to provide a context for a job with an sql backend
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SqlContext {
-    id: TaskId,
     status: State,
     run_at: DateTime<Utc>,
-    attempts: Attempt,
     max_attempts: i32,
     last_error: Option<String>,
     lock_at: Option<i64>,
@@ -21,15 +20,13 @@ pub struct SqlContext {
 }
 
 impl SqlContext {
-    /// Build a new context with defaults given an ID.
-    pub fn new(id: TaskId) -> Self {
+    /// Build a new context with defaults
+    pub fn new() -> Self {
         SqlContext {
-            id,
             status: State::Pending,
             run_at: Utc::now(),
             lock_at: None,
             done_at: None,
-            attempts: Default::default(),
             max_attempts: 25,
             last_error: None,
             lock_by: None,
@@ -44,21 +41,6 @@ impl SqlContext {
     /// Gets the maximum attempts for a job. Default 25
     pub fn max_attempts(&self) -> i32 {
         self.max_attempts
-    }
-
-    /// Get the id for a job
-    pub fn id(&self) -> &TaskId {
-        &self.id
-    }
-
-    /// Gets the current attempts for a job. Default 0
-    pub fn attempts(&self) -> &Attempt {
-        &self.attempts
-    }
-
-    /// Set the number of attempts
-    pub fn set_attempts(&mut self, attempts: i32) {
-        self.attempts = Attempt::new_with_value(attempts.try_into().unwrap());
     }
 
     /// Get the time a job was done
@@ -120,10 +102,11 @@ impl SqlContext {
     pub fn set_last_error(&mut self, error: Option<String>) {
         self.last_error = error;
     }
+}
 
-    /// Record an attempt to execute the request
-    pub fn record_attempt(&mut self) {
-        self.attempts.increment();
+impl<Req> FromRequest<Request<Req, SqlContext>> for SqlContext {
+    fn from_request(req: &Request<Req, SqlContext>) -> Result<Self, Error> {
+        Ok(req.parts.context.clone())
     }
 }
 
@@ -159,7 +142,7 @@ impl FromStr for State {
             "Done" => Ok(State::Done),
             "Failed" => Ok(State::Failed),
             "Killed" => Ok(State::Killed),
-            _ => Err(Error::MissingContext("Invalid Job state".to_string())),
+            _ => Err(Error::MissingData("Invalid Job state".to_string())),
         }
     }
 }

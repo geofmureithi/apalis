@@ -1,13 +1,11 @@
 use futures::future;
 use tower::retry::Policy;
 
+use apalis_core::{error::Error, request::Request};
 /// Re-export from [`RetryLayer`]
 ///
 /// [`RetryLayer`]: tower::retry::RetryLayer
 pub use tower::retry::RetryLayer;
-
-use apalis_core::task::attempt::Attempt;
-use apalis_core::{error::Error, request::Request};
 
 type Req<T, Ctx> = Request<T, Ctx>;
 type Err = Error;
@@ -34,12 +32,12 @@ impl RetryPolicy {
 impl<T, Res, Ctx> Policy<Req<T, Ctx>, Res, Err> for RetryPolicy
 where
     T: Clone,
-    Ctx: Clone
+    Ctx: Clone,
 {
     type Future = future::Ready<Self>;
 
     fn retry(&self, req: &Req<T, Ctx>, result: Result<&Res, &Err>) -> Option<Self::Future> {
-        let ctx = req.get::<Attempt>().cloned().unwrap_or_default();
+        let attempt = &req.parts.attempt;
         match result {
             Ok(_) => {
                 // Treat all `Response`s as success,
@@ -47,22 +45,14 @@ where
                 None
             }
             Err(_) if self.retries == 0 => None,
-            Err(_) if (self.retries - ctx.current() > 0) => Some(future::ready(self.clone())),
+            Err(_) if (self.retries - attempt.current() > 0) => Some(future::ready(self.clone())),
             Err(_) => None,
         }
     }
 
     fn clone_request(&self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
-        let mut req = req.clone();
-        let value = req
-            .get::<Attempt>()
-            .cloned()
-            .map(|attempt| {
-                attempt.increment();
-                attempt
-            })
-            .unwrap_or_default();
-        req.insert(value);
+        let req = req.clone();
+        req.parts.attempt.increment();
         Some(req)
     }
 }

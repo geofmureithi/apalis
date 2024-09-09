@@ -44,9 +44,8 @@ async fn main() -> Result<()> {
     let worker = Monitor::<TokioExecutor>::new()
         .register_with_count(2, {
             WorkerBuilder::new("tasty-avocado")
-                // .layer(TraceLayer::new())
+                .layer(TraceLayer::new())
                 .backend(storage)
-                // .chain(|svc|svc.map_err(|e| Box::new(e)))
                 .build_fn(send_email)
         })
         .run_with_signal(signal::ctrl_c());

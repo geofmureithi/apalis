@@ -1,8 +1,7 @@
 use self::stream::WorkerStream;
-use crate::error::{BoxDynError, Error, ErrorHandlingLayer};
+use crate::error::{BoxDynError, Error};
 use crate::executor::Executor;
 use crate::layers::extensions::Data;
-use crate::layers::CommonLayer;
 use crate::monitor::{Monitor, MonitorContext};
 use crate::notify::Notify;
 use crate::poller::FetchNext;
@@ -22,7 +21,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context as TaskCtx, Poll, Waker};
 use thiserror::Error;
-use tower::util::BoxService;
 use tower::{Layer, Service, ServiceBuilder, ServiceExt};
 
 mod buffer;
@@ -308,6 +306,7 @@ impl<S, P> Worker<Ready<S, P>> {
         worker
     }
 
+    /// Setup a worker with an executor
     pub fn with_executor<E, Req, Res: 'static, Ctx>(self, executor: E) -> Worker<Context<E>>
     where
         S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
@@ -328,6 +327,7 @@ impl<S, P> Worker<Ready<S, P>> {
         self.common_worker_setup(executor, None, 1).pop().unwrap()
     }
 
+    /// Setup a worker with the monitor
     pub fn with_monitor<E, Req, Res: 'static, Ctx>(self, monitor: &Monitor<E>) -> Worker<Context<E>>
     where
         S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
@@ -354,6 +354,7 @@ impl<S, P> Worker<Ready<S, P>> {
         .unwrap()
     }
 
+    /// Setup instances of the worker with the Monitor
     pub fn with_monitor_instances<E, Req, Res: 'static + Send, Ctx>(
         self,
         instances: usize,
@@ -382,6 +383,7 @@ impl<S, P> Worker<Ready<S, P>> {
         )
     }
 
+    /// Setup worker instances providing an executor
     pub fn with_executor_instances<E, Req, Res: 'static, Ctx>(
         self,
         instances: usize,
@@ -426,7 +428,6 @@ impl<S, P> Worker<Ready<S, P>> {
             });
         };
         let worker_layers = ServiceBuilder::new()
-            .layer(ErrorHandlingLayer)
             .layer(Data::new(worker.id.clone()))
             .layer(Data::new(worker.state.clone()));
         let mut service = worker_layers.service(service);
@@ -459,13 +460,16 @@ impl<S, P> Worker<Ready<S, P>> {
                                 let state = worker.state.clone();
                                 worker.spawn(fut.map(move |res| {
                                     if let Err(e) = res {
-                                        if let Error::MissingContext(e) = &e {
+                                        let error = e.into();
+                                        if let Some(Error::MissingData(e)) =
+                                            (&error).downcast_ref::<Error>()
+                                        {
                                             w.force_stop();
                                             unreachable!("Worker missing required context: {}", e);
                                         }
                                         if let Some(ctx) = state.context.as_ref() {
                                             ctx.notify(Worker {
-                                                state: Event::Error(Box::new(e)),
+                                                state: Event::Error(error),
                                                 id: WorkerId::new_with_instance(
                                                     worker_id.name(),
                                                     instance,
@@ -527,6 +531,12 @@ impl<E> fmt::Debug for Context<E> {
             .field("shutdown", &["Shutdown handle"])
             .field("instance", &self.instance)
             .finish()
+    }
+}
+
+impl<Req, Ctx, E: Send + Sync + Clone + 'static> FromRequest<Request<Req, Ctx>> for Context<E> {
+    fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
+        req.get_checked::<Self>().map(Clone::clone)
     }
 }
 
@@ -657,12 +667,10 @@ mod tests {
     }
 
     use crate::{
-        builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
+        builder::{WorkerBuilder, WorkerFactoryFn},
         layers::extensions::Data,
         memory::MemoryStorage,
         mq::MessageQueue,
-        response::IntoResponse,
-        service_fn::service_fn,
     };
 
     use super::*;
@@ -715,7 +723,7 @@ mod tests {
             }
         }
 
-        async fn task(job: u32, count: Data<Count>) -> impl IntoResponse {
+        async fn task(job: u32, count: Data<Count>) {
             count.fetch_add(1, Ordering::Relaxed);
             if job == ITEMS - 1 {
                 tokio::time::sleep(Duration::from_secs(1)).await;

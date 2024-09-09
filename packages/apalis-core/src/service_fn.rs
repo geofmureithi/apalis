@@ -48,15 +48,7 @@ pub trait FromRequest<Req>: Sized {
 
 impl<T: Clone + Send + Sync + 'static, Req, Ctx> FromRequest<Request<Req, Ctx>> for Data<T> {
     fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
-        req.data
-            .get::<T>()
-            .cloned()
-            .ok_or({
-                let type_name = std::any::type_name::<T>();
-                Error::MissingContext(
-                format!("Missing the an entry for `{type_name}`. Did you forget to add `.data(<{type_name}>)", ),
-            )})
-            .map(Data::new)
+        req.parts.data.get_checked().map(Clone::clone).map(Data::new)
     }
 }
 

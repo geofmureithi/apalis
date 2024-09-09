@@ -1,6 +1,7 @@
 use std::{
     error::Error as StdError,
     future::Future,
+    marker::PhantomData,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -25,9 +26,9 @@ pub enum Error {
     #[error("IoError: {0}")]
     Io(#[from] Arc<std::io::Error>),
 
-    /// Missing some context and yet it was requested during execution.
-    #[error("MissingContextError: {0}")]
-    MissingContext(String),
+    /// Missing some data and yet it was requested during execution.
+    #[error("MissingDataError: {0}")]
+    MissingData(String),
 
     /// Execution was aborted
     #[error("AbortError: {0}")]
@@ -70,7 +71,16 @@ impl From<BoxDynError> for Error {
 /// The service's error type must implement `Into<BoxDynError>`, allowing for flexible
 /// error handling, especially when dealing with trait objects or complex error chains.
 #[derive(Clone, Debug)]
-pub struct ErrorHandlingLayer;
+pub struct ErrorHandlingLayer {
+    _p: PhantomData<()>,
+}
+
+impl ErrorHandlingLayer {
+    /// Create a new ErrorHandlingLayer
+    pub fn new() -> Self {
+        Self { _p: PhantomData }
+    }
+}
 
 impl<S> tower::layer::Layer<S> for ErrorHandlingLayer {
     type Service = ErrorHandlingService<S>;

@@ -2,8 +2,10 @@ use std::convert::From;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
+use serde::{Deserialize, Serialize};
+
 /// A wrapper type that defines a task's namespace.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Namespace(pub String);
 
 impl Deref for Namespace {

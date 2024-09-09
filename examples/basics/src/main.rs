@@ -2,7 +2,7 @@ mod cache;
 mod layer;
 mod service;
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use apalis::{
     layers::{catch_panic::CatchPanicLayer, tracing::TraceLayer},
@@ -35,7 +35,7 @@ async fn produce_jobs(storage: &SqliteStorage<Email>) {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum ServiceError {
     #[error("data store disconnected")]
     Disconnect(#[from] std::io::Error),
     #[error("the data for key `{0}` is not available")]
@@ -46,15 +46,21 @@ pub enum Error {
     Unknown,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum PanicError {
+    #[error("{0}")]
+    Panic(String),
+}
+
 /// Quick solution to prevent spam.
 /// If email in cache, then send email else complete the job but let a validation process run in the background,
 async fn send_email(
     email: Email,
     svc: Data<EmailService>,
     worker_ctx: Data<WorkerCtx>,
-    worker_id: WorkerId,
+    worker_id: Data<WorkerId>,
     cache: Data<ValidEmailCache>,
-) -> Result<(), Error> {
+) -> Result<(), ServiceError> {
     info!("Job started in worker {:?}", worker_id);
     let cache_clone = cache.clone();
     let email_to = email.to.clone();
@@ -97,10 +103,19 @@ async fn main() -> Result<(), std::io::Error> {
     produce_jobs(&sqlite).await;
 
     Monitor::<TokioExecutor>::new()
-        .register_with_count(2, {
+        .register({
             WorkerBuilder::new("tasty-banana")
                 // This handles any panics that may occur in any of the layers below
-                .layer(CatchPanicLayer::new())
+                .layer(CatchPanicLayer::with_panic_handler(|e| {
+                    let panic_info = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown panic".to_string()
+                    };
+                    Error::Abort(Arc::new(Box::new(PanicError::Panic(panic_info))))
+                }))
                 .layer(TraceLayer::new())
                 .layer(LogLayer::new("some-log-example"))
                 // Add shared context to all jobs executed by this worker

@@ -5,6 +5,8 @@ use std::sync::{
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::{request::Request, service_fn::FromRequest};
+
 /// A wrapper to keep count of the attempts tried by a task
 #[derive(Debug, Clone)]
 pub struct Attempt(Arc<AtomicUsize>);
@@ -70,5 +72,11 @@ impl Attempt {
     /// Increase the current value
     pub fn increment(&self) -> usize {
         self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for Attempt {
+    fn from_request(req: &Request<Req, Ctx>) -> Result<Self, crate::error::Error> {
+        Ok(req.parts.attempt.clone())
     }
 }

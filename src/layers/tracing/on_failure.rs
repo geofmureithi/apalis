@@ -1,5 +1,3 @@
-use apalis_core::error::Error;
-
 use super::{LatencyUnit, DEFAULT_ERROR_LEVEL};
 
 use std::{fmt::Display, time::Duration};

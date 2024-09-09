@@ -36,9 +36,9 @@ where
     let new_job = storage.push(input).await;
 
     match new_job {
-        Ok(id) => (
+        Ok(ctx) => (
             StatusCode::CREATED,
-            format!("Job [{id}] was successfully added"),
+            format!("Job [{ctx:?}] was successfully added"),
         ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
     };
     let monitor = async {
         Monitor::<TokioExecutor>::new()
-            .register_with_count(2, {
+            .register({
                 WorkerBuilder::new("tasty-pear")
                     .layer(TraceLayer::new())
                     .backend(storage.clone())

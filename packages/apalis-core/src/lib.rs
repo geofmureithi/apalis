@@ -176,7 +176,6 @@ impl crate::executor::Executor for TestExecutor {
 /// Test utilities that allows you to test backends
 pub mod test_utils {
     use crate::error::BoxDynError;
-    use crate::request::Request;
     use crate::task::task_id::TaskId;
     use crate::worker::WorkerId;
     use crate::Backend;
@@ -385,7 +384,7 @@ pub mod test_utils {
             async fn integration_test_storage_push_and_consume() {
                 let backend = $setup().await;
                 let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
-                    Ok::<_, io::Error>(request.take())
+                    Ok::<_, io::Error>(request.args)
                 });
                 let (mut t, poller) = TestWrapper::new_with_service(backend, service);
                 tokio::spawn(poller);
