@@ -21,7 +21,7 @@ chrono = { version = "0.4.38", default-features = false, features = [
     "serde",
 ] }
 async-stream = "0.3.5"
-async-std = { version = "1.12.0", optional = true }
+async-std = { version = "1.13.0", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
