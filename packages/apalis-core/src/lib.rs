@@ -176,6 +176,7 @@ impl crate::executor::Executor for TestExecutor {
 /// Test utilities that allows you to test backends
 pub mod test_utils {
     use crate::error::BoxDynError;
+    use crate::request::Request;
     use crate::task::task_id::TaskId;
     use crate::worker::WorkerId;
     use crate::Backend;
@@ -250,24 +251,25 @@ pub mod test_utils {
     ///    }
     ///}
     /// ````
-    impl<B, Req, Res> TestWrapper<B, Req, Res>
+    impl<B, Req, Res, Ctx> TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Req, Res> + Send + Sync + 'static + Clone,
+        B: Backend<Request<Req, Ctx>, Res> + Send + Sync + 'static + Clone,
         Req: Send + 'static,
+        Ctx: Send,
         B::Stream: Send + 'static,
-        B::Stream: Stream<Item = Result<Option<Req>, crate::error::Error>> + Unpin,
+        B::Stream: Stream<Item = Result<Option<Request<Req, Ctx>>, crate::error::Error>> + Unpin,
     {
         /// Build a new instance provided a custom service
         pub fn new_with_service<S>(backend: B, service: S) -> (Self, BoxFuture<'static, ()>)
         where
-            S: Service<Req, Response = Res> + Send + 'static,
+            S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
             B::Layer: Layer<S>,
-            <<B as Backend<Req, Res>>::Layer as Layer<S>>::Service: Service<Req> + Send + 'static,
-            <<<B as Backend<Req, Res>>::Layer as Layer<S>>::Service as Service<Req>>::Response:
+            <<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>> + Send + 'static,
+            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Response:
                 Send + Debug,
-            <<<B as Backend<Req, Res>>::Layer as Layer<S>>::Service as Service<Req>>::Error:
+            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
                 Send + Into<BoxDynError> + Sync,
-            <<<B as Backend<Req, Res>>::Layer as Layer<S>>::Service as Service<Req>>::Future:
+            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future:
                 Send + 'static,
         {
             let worker_id = WorkerId::new("test-worker");
@@ -286,10 +288,7 @@ pub mod test_utils {
 
                         item = poller.stream.next().fuse() => match item {
                             Some(Ok(Some(req))) => {
-
-                                let task_id = TaskId::new(); // Todo: use request
-                                // .expect("Request does not contain Task_ID");
-                                // handle request
+                                let task_id = req.parts.task_id.clone();
                                 match service.call(req).await {
                                     Ok(res) => {
                                         res_tx.send((task_id, Ok(format!("{res:?}")))).await.unwrap();
@@ -335,9 +334,9 @@ pub mod test_utils {
         }
     }
 
-    impl<B, Req, Res> Deref for TestWrapper<B, Req, Res>
+    impl<B, Req, Res, Ctx> Deref for TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Req, Res>,
+        B: Backend<Request<Req, Ctx>, Res>,
     {
         type Target = B;
 
@@ -346,9 +345,9 @@ pub mod test_utils {
         }
     }
 
-    impl<B, Req, Res> DerefMut for TestWrapper<B, Req, Res>
+    impl<B, Req, Ctx, Res,> DerefMut for TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Req, Res>,
+        B: Backend<Request<Req, Ctx>, Res>,
     {
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.backend

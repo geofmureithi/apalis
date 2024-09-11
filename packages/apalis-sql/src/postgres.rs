@@ -466,7 +466,7 @@ where
         &mut self,
         job_id: &TaskId,
     ) -> Result<Option<Request<Self::Job, SqlContext>>, sqlx::Error> {
-        let fetch_query = "SELECT * FROM apalis.jobs WHERE id = $1";
+        let fetch_query = "SELECT * FROM apalis.jobs WHERE id = $1 LIMIT 1";
         let res: Option<SqlRequest<serde_json::Value>> = sqlx::query_as(fetch_query)
             .bind(job_id.to_string())
             .fetch_optional(&self.pool)
