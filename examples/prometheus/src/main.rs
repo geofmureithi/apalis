@@ -49,9 +49,9 @@ async fn main() -> Result<()> {
     };
     let monitor = async {
         Monitor::<TokioExecutor>::new()
-            .register_with_count(2, {
+            .register({
                 WorkerBuilder::new("tasty-banana")
-                    .layer(PrometheusLayer)
+                    .layer(PrometheusLayer::default())
                     .backend(storage.clone())
                     .build_fn(send_email)
             })
@@ -94,9 +94,9 @@ where
     let new_job = storage.push(input).await;
 
     match new_job {
-        Ok(jid) => (
+        Ok(ctx) => (
             StatusCode::CREATED,
-            format!("Job [{jid}] was successfully added"),
+            format!("Job [{ctx:?}] was successfully added"),
         ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

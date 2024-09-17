@@ -79,27 +79,24 @@ impl<E> Debug for Monitor<E> {
 
 impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     /// Registers a single instance of a [Worker]
-    pub fn register<
-        J: Send + Sync + 'static,
-        S: Service<Request<J>> + Send + 'static,
-        P: Backend<Request<J>, Res> + 'static,
-        Res: 'static
-    >(
-        mut self,
-        worker: Worker<Ready<S, P>>,
-    ) -> Self
+    pub fn register<Req, S, P, Res, Ctx>(mut self, worker: Worker<Ready<S, P>>) -> Self
     where
         S::Future: Send,
         S::Response: 'static + Send + Sync + Serialize,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        <P as Backend<Request<J>, Res>>::Stream: Unpin + Send + 'static,
+        P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S>,
-        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Service<Request<J>, Response = Res>,
-        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Send,
-        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
-            Send,
-        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>, Response = Res>,
+        <P::Layer as Layer<S>>::Service: Send,
+        <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
+        <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
             Send + Into<BoxDynError> + Sync,
+        S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
+        Ctx: Send + Sync + 'static,
+        Req: Send + Sync + 'static,
+        P: Backend<Request<Req, Ctx>, Res> + 'static,
+        Res: 'static,
+        Ctx: Send + Sync + 'static,
     {
         self.workers.push(worker.with_monitor(&self));
 
@@ -116,12 +113,7 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
     /// # Returns
     ///
     /// The monitor instance, with all workers added to the collection.
-    pub fn register_with_count<
-        J: Send + Sync + 'static,
-        S: Service<Request<J>> + Send + 'static,
-        P: Backend<Request<J>, Res> + 'static,
-        Res: 'static + Send,
-    >(
+    pub fn register_with_count<Req, S, P, Res, Ctx>(
         mut self,
         count: usize,
         worker: Worker<Ready<S, P>>,
@@ -130,14 +122,21 @@ impl<E: Executor + Clone + Send + 'static + Sync> Monitor<E> {
         S::Future: Send,
         S::Response: 'static + Send + Sync + Serialize,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        <P as Backend<Request<J>, Res>>::Stream: Unpin + Send + 'static,
+        P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S>,
-        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Service<Request<J>, Response = Res>,
-        <<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service: Send,
-        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Future:
-            Send,
-        <<<P as Backend<Request<J>, Res>>::Layer as Layer<S>>::Service as Service<Request<J>>>::Error:
+        P: Backend<Request<Req, Ctx>, Res> + 'static,
+        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>, Response = Res>,
+        <P::Layer as Layer<S>>::Service: Send,
+        <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
+        <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
             Send + Into<BoxDynError> + Sync,
+        S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
+        Ctx: Send + Sync + 'static,
+        Req: Send + Sync + 'static,
+        S: Service<Request<Req, Ctx>> + Send + 'static,
+        P: Backend<Request<Req, Ctx>, Res> + 'static,
+        Res: 'static,
+        Ctx: Send + Sync + 'static,
     {
         let workers = worker.with_monitor_instances(count, &self);
         self.workers.extend(workers);
@@ -328,7 +327,7 @@ mod tests {
                 handle.enqueue(i).await.unwrap();
             }
         });
-        let service = tower::service_fn(|request: Request<u32>| async {
+        let service = tower::service_fn(|request: Request<u32, ()>| async {
             tokio::time::sleep(Duration::from_secs(1)).await;
             Ok::<_, io::Error>(request)
         });
@@ -354,7 +353,7 @@ mod tests {
                 handle.enqueue(i).await.unwrap();
             }
         });
-        let service = tower::service_fn(|request: Request<u32>| async {
+        let service = tower::service_fn(|request: Request<u32, _>| async {
             tokio::time::sleep(Duration::from_secs(1)).await;
             Ok::<_, io::Error>(request)
         });

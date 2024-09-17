@@ -2,16 +2,17 @@ use std::{fmt::Debug, marker::PhantomData, time::Duration};
 
 use apalis::{layers::tracing::TraceLayer, prelude::*};
 
-use apalis_redis::{self, Config, RedisJob};
+use apalis_redis::{self, Config};
 
 use apalis_core::{
     codec::json::JsonCodec,
     layers::{Ack, AckLayer},
+    response::Response,
 };
 use email_service::{send_email, Email};
 use futures::{channel::mpsc, SinkExt};
 use rsmq_async::{Rsmq, RsmqConnection, RsmqError};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::time::sleep;
 use tracing::{error, info};
 
@@ -20,6 +21,18 @@ struct RedisMq<T, C = JsonCodec<Vec<u8>>> {
     msg_type: PhantomData<T>,
     config: Config,
     codec: PhantomData<C>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct RedisMqContext {
+    max_attempts: usize,
+    message_id: String,
+}
+
+impl<Req> FromRequest<Request<Req, RedisMqContext>> for RedisMqContext {
+    fn from_request(req: &Request<Req, RedisMqContext>) -> Result<Self, Error> {
+        Ok(req.parts.context.clone())
+    }
 }
 
 // Manually implement Clone for RedisMq
@@ -34,32 +47,30 @@ impl<T, C> Clone for RedisMq<T, C> {
     }
 }
 
-impl<M, C, Res> Backend<Request<M>, Res> for RedisMq<M, C>
+impl<Req, C, Res> Backend<Request<Req, RedisMqContext>, Res> for RedisMq<Req, C>
 where
-    M: Send + DeserializeOwned + 'static,
+    Req: Send + DeserializeOwned + 'static,
     C: Codec<Compact = Vec<u8>>,
 {
-    type Stream = RequestStream<Request<M>>;
+    type Stream = RequestStream<Request<Req, RedisMqContext>>;
 
-    type Layer = AckLayer<Self, M, Res>;
+    type Layer = AckLayer<Self, Req, RedisMqContext, Res>;
 
     fn poll<Svc>(mut self, _worker_id: WorkerId) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.get_buffer_size());
-        let stream: RequestStream<Request<M>> = Box::pin(rx);
+        let stream: RequestStream<Request<Req, RedisMqContext>> = Box::pin(rx);
         let layer = AckLayer::new(self.clone());
         let heartbeat = async move {
             loop {
                 sleep(*self.config.get_poll_interval()).await;
-                let msg: Option<Request<M>> = self
+                let msg: Option<Request<Req, RedisMqContext>> = self
                     .conn
                     .receive_message(self.config.get_namespace(), None)
                     .await
                     .unwrap()
                     .map(|r| {
-                        let mut req: Request<M> = C::decode::<RedisJob<M>>(r.message)
-                            .map_err(Into::into)
-                            .unwrap()
-                            .into();
+                        let mut req: Request<Req, RedisMqContext> =
+                            C::decode(r.message).map_err(Into::into).unwrap();
                         req.insert(r.id);
                         req
                     });
@@ -76,18 +87,20 @@ where
     Res: Debug + Send + Sync,
     C: Send,
 {
-    type Context = String;
+    type Context = RedisMqContext;
 
     type AckError = RsmqError;
 
     async fn ack(
         &mut self,
         ctx: &Self::Context,
-        _res: &Result<Res, apalis_core::error::Error>,
+        res: &Response<Res>,
     ) -> Result<(), Self::AckError> {
-        self.conn
-            .delete_message(self.config.get_namespace(), ctx)
-            .await?;
+        if res.is_success() || res.attempt.current() >= ctx.max_attempts {
+            self.conn
+                .delete_message(self.config.get_namespace(), &ctx.message_id)
+                .await?;
+        }
         Ok(())
     }
 }
@@ -100,7 +113,7 @@ where
     type Error = RsmqError;
 
     async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
-        let bytes = C::encode(&RedisJob::new(message, Default::default()))
+        let bytes = C::encode(&Request::<Message, RedisMqContext>::new(message))
             .map_err(Into::into)
             .unwrap();
         self.conn
@@ -115,11 +128,9 @@ where
             .receive_message(self.config.get_namespace(), None)
             .await?
             .map(|r| {
-                let req: Request<Message> = C::decode::<RedisJob<Message>>(r.message)
-                    .map_err(Into::into)
-                    .unwrap()
-                    .into();
-                req.take()
+                let req: Request<Message, RedisMqContext> =
+                    C::decode(r.message).map_err(Into::into).unwrap();
+                req.args
             }))
     }
 

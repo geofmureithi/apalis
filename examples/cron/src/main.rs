@@ -1,3 +1,4 @@
+use apalis::layers::tracing::TraceLayer;
 use apalis::prelude::*;
 use apalis::utils::TokioExecutor;
 use apalis_cron::CronStream;
@@ -31,13 +32,14 @@ async fn send_reminder(job: Reminder, svc: Data<FakeService>) {
 async fn main() {
     let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
     let worker = WorkerBuilder::new("morning-cereal")
+        .layer(TraceLayer::new())
         .layer(LoadShedLayer::new()) // Important when you have layers that block the service
         .layer(RateLimitLayer::new(1, Duration::from_secs(2)))
         .data(FakeService)
         .backend(CronStream::new(schedule))
         .build_fn(send_reminder);
     Monitor::<TokioExecutor>::new()
-        .register(worker)
+        .register_with_count(2, worker)
         .run()
         .await
         .unwrap();

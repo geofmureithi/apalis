@@ -1,13 +1,13 @@
 use apalis_core::codec::json::JsonCodec;
-use apalis_core::data::Extensions;
 use apalis_core::error::Error;
 use apalis_core::layers::{Ack, AckLayer, Service};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
-use apalis_core::request::{Request, RequestStream};
+use apalis_core::request::{Parts, Request, RequestStream};
+use apalis_core::response::Response;
+use apalis_core::service_fn::FromRequest;
 use apalis_core::storage::Storage;
-use apalis_core::task::attempt::Attempt;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
@@ -92,88 +92,18 @@ struct RedisScript {
     vacuum: Script,
 }
 
-/// The actual structure of a Redis job
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RedisJob<J> {
-    /// The job context
-    ctx: Context,
-    /// The inner job
-    job: J,
-}
-
-impl<J> RedisJob<J> {
-    /// Creates a new RedisJob.
-    pub fn new(job: J, ctx: Context) -> Self {
-        RedisJob { ctx, job }
-    }
-
-    /// Gets a reference to the context.
-    pub fn ctx(&self) -> &Context {
-        &self.ctx
-    }
-
-    /// Gets a mutable reference to the context.
-    pub fn ctx_mut(&mut self) -> &mut Context {
-        &mut self.ctx
-    }
-
-    /// Sets the context.
-    pub fn set_ctx(&mut self, ctx: Context) {
-        self.ctx = ctx;
-    }
-
-    /// Gets a reference to the job.
-    pub fn job(&self) -> &J {
-        &self.job
-    }
-
-    /// Gets a mutable reference to the job.
-    pub fn job_mut(&mut self) -> &mut J {
-        &mut self.job
-    }
-
-    /// Sets the job.
-    pub fn set_job(&mut self, job: J) {
-        self.job = job;
-    }
-
-    /// Combines context and job into a tuple.
-    pub fn into_tuple(self) -> (Context, J) {
-        (self.ctx, self.job)
-    }
-}
-
-impl<T> From<RedisJob<T>> for Request<T> {
-    fn from(val: RedisJob<T>) -> Self {
-        let mut data = Extensions::new();
-        data.insert(val.ctx.id.clone());
-        data.insert(val.ctx.attempts.clone());
-        data.insert(val.ctx);
-        Request::new_with_data(val.job, data)
-    }
-}
-
-impl<T> TryFrom<Request<T>> for RedisJob<T> {
-    type Error = RedisError;
-    fn try_from(val: Request<T>) -> Result<Self, Self::Error> {
-        let ctx = val
-            .get::<Context>()
-            .cloned()
-            .ok_or((ErrorKind::IoError, "Missing Context"))?;
-        Ok(RedisJob {
-            job: val.take(),
-            ctx,
-        })
-    }
-}
-
+/// The context for a redis storage job
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct Context {
-    id: TaskId,
-    attempts: Attempt,
+pub struct RedisContext {
     max_attempts: usize,
     lock_by: Option<WorkerId>,
     run_at: Option<SystemTime>,
+}
+
+impl<Req> FromRequest<Request<Req, RedisContext>> for RedisContext {
+    fn from_request(req: &Request<Req, RedisContext>) -> Result<Self, Error> {
+        Ok(req.parts.context.clone())
+    }
 }
 
 /// Config for a [RedisStorage]
@@ -448,18 +378,18 @@ impl<T, Conn, C> RedisStorage<T, Conn, C> {
     }
 }
 
-impl<T, Conn, C, Res> Backend<Request<T>, Res> for RedisStorage<T, Conn, C>
+impl<T, Conn, C, Res> Backend<Request<T, RedisContext>, Res> for RedisStorage<T, Conn, C>
 where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
     Res: Send + Serialize + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
 {
-    type Stream = BackendStream<RequestStream<Request<T>>>;
+    type Stream = BackendStream<RequestStream<Request<T, RedisContext>>>;
 
-    type Layer = AckLayer<Sender<(Context, Result<Res, Error>)>, T, Res>;
+    type Layer = AckLayer<Sender<(RedisContext, Response<Res>)>, T, RedisContext, Res>;
 
-    fn poll<Svc: Service<Request<T>>>(
+    fn poll<Svc: Service<Request<T, RedisContext>>>(
         mut self,
         worker: WorkerId,
     ) -> Poller<Self::Stream, Self::Layer> {
@@ -468,7 +398,7 @@ where
         let layer = AckLayer::new(ack);
         let controller = self.controller.clone();
         let config = self.config.clone();
-        let stream: RequestStream<Request<T>> = Box::pin(rx);
+        let stream: RequestStream<Request<T, RedisContext>> = Box::pin(rx);
         let heartbeat = async move {
             let mut keep_alive_stm = apalis_core::interval::interval(config.keep_alive).fuse();
 
@@ -536,13 +466,9 @@ where
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send,
 {
-    type Context = Context;
+    type Context = RedisContext;
     type AckError = RedisError;
-    async fn ack(
-        &mut self,
-        ctx: &Self::Context,
-        res: &Result<Res, Error>,
-    ) -> Result<(), RedisError> {
+    async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), RedisError> {
         let inflight_set = format!(
             "{}:{}",
             self.config.inflight_jobs_set(),
@@ -550,8 +476,8 @@ where
         );
 
         let now: i64 = Utc::now().timestamp();
-
-        match res {
+        let task_id = res.task_id.to_string();
+        match &res.inner {
             Ok(success_res) => {
                 let done_job = self.scripts.done_job.clone();
                 let done_jobs_set = &self.config.done_jobs_set();
@@ -559,7 +485,7 @@ where
                     .key(inflight_set)
                     .key(done_jobs_set)
                     .key(self.config.job_data_hash())
-                    .arg(ctx.id.to_string())
+                    .arg(task_id)
                     .arg(now)
                     .arg(C::encode(success_res).map_err(Into::into).unwrap())
                     .invoke_async(&mut self.conn)
@@ -567,27 +493,26 @@ where
             }
             Err(e) => match e {
                 Error::Abort(e) => {
-                    let retry_job = self.scripts.retry_job.clone();
-                    let retry_jobs_set = &self.config.scheduled_jobs_set();
-                    retry_job
-                        .key(inflight_set)
-                        .key(retry_jobs_set)
-                        .key(self.config.job_data_hash())
-                        .arg(ctx.id.to_string())
-                        .arg(now)
-                        .arg(e.to_string())
-                        .invoke_async(&mut self.conn)
-                        .await
-                }
-
-                _ => {
                     let kill_job = self.scripts.kill_job.clone();
                     let kill_jobs_set = &self.config.dead_jobs_set();
                     kill_job
                         .key(inflight_set)
                         .key(kill_jobs_set)
                         .key(self.config.job_data_hash())
-                        .arg(ctx.id.to_string())
+                        .arg(task_id)
+                        .arg(now)
+                        .arg(e.to_string())
+                        .invoke_async(&mut self.conn)
+                        .await
+                }
+                _ => {
+                    let retry_job = self.scripts.retry_job.clone();
+                    let retry_jobs_set = &self.config.scheduled_jobs_set();
+                    retry_job
+                        .key(inflight_set)
+                        .key(retry_jobs_set)
+                        .key(self.config.job_data_hash())
+                        .arg(task_id)
                         .arg(now)
                         .arg(e.to_string())
                         .invoke_async(&mut self.conn)
@@ -604,14 +529,17 @@ where
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>>,
 {
-    async fn fetch_next(&mut self, worker_id: &WorkerId) -> Result<Vec<Request<T>>, RedisError> {
+    async fn fetch_next(
+        &mut self,
+        worker_id: &WorkerId,
+    ) -> Result<Vec<Request<T, RedisContext>>, RedisError> {
         let fetch_jobs = self.scripts.get_jobs.clone();
         let consumers_set = self.config.consumers_set();
         let active_jobs_list = self.config.active_jobs_list();
         let job_data_hash = self.config.job_data_hash();
         let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
         let signal_list = self.config.signal_list();
-        let namespace = self.config.namespace.clone();
+        let namespace = &self.config.namespace;
 
         let result = fetch_jobs
             .key(&consumers_set)
@@ -629,11 +557,10 @@ where
                 let mut processed = vec![];
                 for job in jobs {
                     let bytes = deserialize_job(&job)?;
-                    let mut request: RedisJob<T> = C::decode(bytes.to_vec())
+                    let mut request: Request<T, RedisContext> = C::decode(bytes.to_vec())
                         .map_err(|e| build_error(&e.into().to_string()))?;
-                    request.ctx_mut().lock_by = Some(worker_id.clone());
-                    let mut request: Request<T> = request.into();
-                    request.insert(Namespace(namespace.clone()));
+                    request.parts.context.lock_by = Some(worker_id.clone());
+                    request.parts.namespace = Some(Namespace(namespace.clone()));
                     processed.push(request)
                 }
                 Ok(processed)
@@ -692,53 +619,50 @@ where
 {
     type Job = T;
     type Error = RedisError;
-    type Identifier = TaskId;
+    type Context = RedisContext;
 
-    async fn push(&mut self, job: Self::Job) -> Result<TaskId, RedisError> {
+    async fn push_request(
+        &mut self,
+        req: Request<T, RedisContext>,
+    ) -> Result<Parts<Self::Context>, RedisError> {
         let conn = &mut self.conn;
         let push_job = self.scripts.push_job.clone();
         let job_data_hash = self.config.job_data_hash();
         let active_jobs_list = self.config.active_jobs_list();
         let signal_list = self.config.signal_list();
-        let job_id = TaskId::new();
-        let ctx = Context {
-            id: job_id.clone(),
-            ..Default::default()
-        };
-        let job = C::encode(&RedisJob { ctx, job })
+
+        let job = C::encode(&req)
             .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
         push_job
             .key(job_data_hash)
             .key(active_jobs_list)
             .key(signal_list)
-            .arg(job_id.to_string())
+            .arg(req.parts.task_id.to_string())
             .arg(job)
             .invoke_async(conn)
             .await?;
-        Ok(job_id.clone())
+        Ok(req.parts)
     }
 
-    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<TaskId, RedisError> {
+    async fn schedule_request(
+        &mut self,
+        req: Request<Self::Job, RedisContext>,
+        on: i64,
+    ) -> Result<Parts<Self::Context>, RedisError> {
         let schedule_job = self.scripts.schedule_job.clone();
         let job_data_hash = self.config.job_data_hash();
         let scheduled_jobs_set = self.config.scheduled_jobs_set();
-        let job_id = TaskId::new();
-        let ctx = Context {
-            id: job_id.clone(),
-            ..Default::default()
-        };
-        let job = RedisJob { job, ctx };
-        let job = C::encode(&job)
+        let job = C::encode(&req)
             .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
         schedule_job
             .key(job_data_hash)
             .key(scheduled_jobs_set)
-            .arg(job_id.to_string())
+            .arg(req.parts.task_id.to_string())
             .arg(job)
             .arg(on)
             .invoke_async(&mut self.conn)
             .await?;
-        Ok(job_id.clone())
+        Ok(req.parts)
     }
 
     async fn len(&mut self) -> Result<i64, RedisError> {
@@ -758,7 +682,7 @@ where
     async fn fetch_by_id(
         &mut self,
         job_id: &TaskId,
-    ) -> Result<Option<Request<Self::Job>>, RedisError> {
+    ) -> Result<Option<Request<Self::Job, RedisContext>>, RedisError> {
         let data: Value = redis::cmd("HMGET")
             .arg(&self.config.job_data_hash())
             .arg(job_id.to_string())
@@ -766,34 +690,32 @@ where
             .await?;
         let bytes = deserialize_job(&data)?;
 
-        let inner: RedisJob<T> = C::decode(bytes.to_vec())
+        let inner: Request<T, RedisContext> = C::decode(bytes.to_vec())
             .map_err(|e| (ErrorKind::IoError, "Decode error", e.into().to_string()))?;
-        Ok(Some(inner.into()))
+        Ok(Some(inner))
     }
-    async fn update(&mut self, job: Request<T>) -> Result<(), RedisError> {
-        let job: RedisJob<T> = job.try_into()?;
+    async fn update(&mut self, job: Request<T, RedisContext>) -> Result<(), RedisError> {
+        let task_id = job.parts.task_id.to_string();
         let bytes = C::encode(&job)
             .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
         let _: i64 = redis::cmd("HSET")
             .arg(&self.config.job_data_hash())
-            .arg(job.ctx.id.to_string())
+            .arg(task_id)
             .arg(bytes)
             .query_async(&mut self.conn)
             .await?;
         Ok(())
     }
 
-    async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), RedisError> {
+    async fn reschedule(
+        &mut self,
+        job: Request<T, RedisContext>,
+        wait: Duration,
+    ) -> Result<(), RedisError> {
         let schedule_job = self.scripts.schedule_job.clone();
-        let job_id = job
-            .get::<TaskId>()
-            .cloned()
-            .ok_or((ErrorKind::IoError, "Missing TaskId"))?;
-        let worker_id = job
-            .get::<WorkerId>()
-            .cloned()
-            .ok_or((ErrorKind::IoError, "Missing WorkerId"))?;
-        let job = C::encode::<RedisJob<T>>(job.try_into()?)
+        let job_id = &job.parts.task_id;
+        let worker_id = &job.parts.context.lock_by.clone().unwrap();
+        let job = C::encode(&job)
             .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
         let job_data_hash = self.config.job_data_hash();
         let scheduled_jobs_set = self.config.scheduled_jobs_set();
@@ -859,7 +781,7 @@ where
         let conn = &mut self.conn;
         match res {
             Some(job) => {
-                let attempt = job.get::<Attempt>().cloned().unwrap_or_default();
+                let attempt = &job.parts.attempt;
                 if attempt.current() >= self.config.max_retries {
                     redis::cmd("ZADD")
                         .arg(failed_jobs_set)
@@ -870,7 +792,7 @@ where
                     self.kill(worker_id, task_id).await?;
                     return Ok(1);
                 }
-                let job = C::encode::<RedisJob<T>>(job.try_into()?)
+                let job = C::encode(job)
                     .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
 
                 let res: Result<i32, RedisError> = retry_job
@@ -1024,7 +946,7 @@ mod tests {
     async fn consume_one(
         storage: &mut RedisStorage<Email>,
         worker_id: &WorkerId,
-    ) -> Request<Email> {
+    ) -> Request<Email, RedisContext> {
         let stream = storage.fetch_next(worker_id);
         stream
             .await
@@ -1052,7 +974,10 @@ mod tests {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job(storage: &mut RedisStorage<Email>, job_id: &TaskId) -> Request<Email> {
+    async fn get_job(
+        storage: &mut RedisStorage<Email>,
+        job_id: &TaskId,
+    ) -> Request<Email, RedisContext> {
         storage
             .fetch_by_id(job_id)
             .await
@@ -1078,14 +1003,17 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.get::<Context>().unwrap();
-
+        let ctx = &job.parts.context;
+        let res = 42usize;
         storage
-            .ack(ctx, &Ok(()))
+            .ack(
+                ctx,
+                &Response::success(res, job.parts.task_id.clone(), job.parts.attempt.clone()),
+            )
             .await
             .expect("failed to acknowledge the job");
 
-        let _job = get_job(&mut storage, &ctx.id).await;
+        let _job = get_job(&mut storage, &job.parts.task_id).await;
     }
 
     #[tokio::test]
@@ -1097,7 +1025,7 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-        let job_id = &job.get::<Context>().unwrap().id;
+        let job_id = &job.parts.task_id;
 
         storage
             .kill(&worker_id, &job_id)

@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use apalis_core::{error::Error, request::Request, task::namespace::Namespace};
+use apalis_core::{error::Error, request::Request};
 use futures::Future;
 use pin_project_lite::pin_project;
 use tower::{Layer, Service};
@@ -27,25 +27,30 @@ pub struct PrometheusService<S> {
     service: S,
 }
 
-impl<S, J, F, Res> Service<Request<J>> for PrometheusService<S>
+impl<Svc, Fut, Req, Ctx, Res> Service<Request<Req, Ctx>> for PrometheusService<Svc>
 where
-    S: Service<Request<J>, Response = Res, Error = Error, Future = F>,
-    F: Future<Output = Result<Res, Error>> + 'static,
+    Svc: Service<Request<Req, Ctx>, Response = Res, Error = Error, Future = Fut>,
+    Fut: Future<Output = Result<Res, Error>> + 'static,
 {
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = ResponseFuture<F>;
+    type Response = Svc::Response;
+    type Error = Svc::Error;
+    type Future = ResponseFuture<Fut>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<J>) -> Self::Future {
+    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
         let start = Instant::now();
-        let namespace = request.get::<Namespace>().unwrap().to_string();
+        let namespace = request
+            .parts
+            .namespace
+            .as_ref()
+            .map(|ns| ns.0.to_string())
+            .unwrap_or(std::any::type_name::<Svc>().to_string());
 
         let req = self.service.call(request);
-        let job_type = std::any::type_name::<J>().to_string();
+        let job_type = std::any::type_name::<Req>().to_string();
 
         ResponseFuture {
             inner: req,

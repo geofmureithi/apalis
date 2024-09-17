@@ -3,7 +3,7 @@ mod on_failure;
 mod on_request;
 mod on_response;
 
-use apalis_core::{error::Error, request::Request};
+use apalis_core::request::Request;
 use std::{
     fmt::{self, Debug},
     pin::Pin,
@@ -289,26 +289,26 @@ impl<S, MakeSpan, OnRequest, OnResponse, OnFailure>
     }
 }
 
-impl<J, S, OnRequestT, OnResponseT, OnFailureT, MakeSpanT, F, Res> Service<Request<J>>
+impl<Req, S, OnRequestT, OnResponseT, OnFailureT, MakeSpanT, F, Res, Ctx> Service<Request<Req, Ctx>>
     for Trace<S, MakeSpanT, OnRequestT, OnResponseT, OnFailureT>
 where
-    S: Service<Request<J>, Response = Res, Error = Error, Future = F> + Unpin + Send + 'static,
+    S: Service<Request<Req, Ctx>, Response = Res, Future = F> + Unpin + Send + 'static,
     S::Error: fmt::Display + 'static,
-    MakeSpanT: MakeSpan<J>,
-    OnRequestT: OnRequest<J>,
+    MakeSpanT: MakeSpan<Req, Ctx>,
+    OnRequestT: OnRequest<Req, Ctx>,
     OnResponseT: OnResponse<Res> + Clone + 'static,
-    F: Future<Output = Result<Res, Error>> + 'static,
-    OnFailureT: OnFailure + Clone + 'static,
+    F: Future<Output = Result<Res, S::Error>> + 'static,
+    OnFailureT: OnFailure<S::Error> + Clone + 'static,
 {
     type Response = Res;
-    type Error = Error;
+    type Error = S::Error;
     type Future = ResponseFuture<F, OnResponseT, OnFailureT>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Request<J>) -> Self::Future {
+    fn call(&mut self, req: Request<Req, Ctx>) -> Self::Future {
         let span = self.make_span.make_span(&req);
         let start = Instant::now();
         let job = {
@@ -339,14 +339,14 @@ pin_project! {
     }
 }
 
-impl<Fut, OnResponseT, OnFailureT, Res> Future for ResponseFuture<Fut, OnResponseT, OnFailureT>
+impl<Fut, OnResponseT, OnFailureT, Res, E> Future for ResponseFuture<Fut, OnResponseT, OnFailureT>
 where
-    Fut: Future<Output = Result<Res, Error>>,
+    Fut: Future<Output = Result<Res, E>>,
 
     OnResponseT: OnResponse<Res>,
-    OnFailureT: OnFailure,
+    OnFailureT: OnFailure<E>,
 {
-    type Output = Result<Res, Error>;
+    type Output = Result<Res, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();

@@ -251,28 +251,29 @@ pub mod test_utils {
     ///    }
     ///}
     /// ````
-    impl<B, Req, Res> TestWrapper<B, Req, Res>
+    impl<B, Req, Res, Ctx> TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req>, Res> + Send + Sync + 'static + Clone,
+        B: Backend<Request<Req, Ctx>, Res> + Send + Sync + 'static + Clone,
         Req: Send + 'static,
+        Ctx: Send,
         B::Stream: Send + 'static,
-        B::Stream: Stream<Item = Result<Option<Request<Req>>, crate::error::Error>> + Unpin,
+        B::Stream: Stream<Item = Result<Option<Request<Req, Ctx>>, crate::error::Error>> + Unpin,
     {
         /// Build a new instance provided a custom service
         pub fn new_with_service<S>(backend: B, service: S) -> (Self, BoxFuture<'static, ()>)
         where
-            S: Service<Request<Req>, Response = Res> + Send + 'static,
+            S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
             B::Layer: Layer<S>,
-            <<B as Backend<Request<Req>, Res>>::Layer as Layer<S>>::Service:
-                Service<Request<Req>> + Send + 'static,
-            <<<B as Backend<Request<Req>, Res>>::Layer as Layer<S>>::Service as Service<
-                Request<Req>,
+            <<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service:
+                Service<Request<Req, Ctx>> + Send + 'static,
+            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
+                Request<Req, Ctx>,
             >>::Response: Send + Debug,
-            <<<B as Backend<Request<Req>, Res>>::Layer as Layer<S>>::Service as Service<
-                Request<Req>,
+            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
+                Request<Req, Ctx>,
             >>::Error: Send + Into<BoxDynError> + Sync,
-            <<<B as Backend<Request<Req>, Res>>::Layer as Layer<S>>::Service as Service<
-                Request<Req>,
+            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
+                Request<Req, Ctx>,
             >>::Future: Send + 'static,
         {
             let worker_id = WorkerId::new("test-worker");
@@ -291,10 +292,7 @@ pub mod test_utils {
 
                         item = poller.stream.next().fuse() => match item {
                             Some(Ok(Some(req))) => {
-
-                                let task_id = req.get::<TaskId>().cloned().unwrap_or_default();
-                                // .expect("Request does not contain Task_ID");
-                                // handle request
+                                let task_id = req.parts.task_id.clone();
                                 match service.call(req).await {
                                     Ok(res) => {
                                         res_tx.send((task_id, Ok(format!("{res:?}")))).await.unwrap();
@@ -340,9 +338,9 @@ pub mod test_utils {
         }
     }
 
-    impl<B, Req, Res> Deref for TestWrapper<B, Req, Res>
+    impl<B, Req, Res, Ctx> Deref for TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req>, Res>,
+        B: Backend<Request<Req, Ctx>, Res>,
     {
         type Target = B;
 
@@ -351,9 +349,9 @@ pub mod test_utils {
         }
     }
 
-    impl<B, Req, Res> DerefMut for TestWrapper<B, Req, Res>
+    impl<B, Req, Ctx, Res> DerefMut for TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req>, Res>,
+        B: Backend<Request<Req, Ctx>, Res>,
     {
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.backend
@@ -369,7 +367,7 @@ pub mod test_utils {
             #[tokio::test]
             async fn it_works_as_an_mq_backend() {
                 let backend = $backend_instance;
-                let service = apalis_test_service_fn(|request: Request<u32>| async {
+                let service = apalis_test_service_fn(|request: Request<u32, ()>| async {
                     Ok::<_, io::Error>(request)
                 });
                 let (mut t, poller) = TestWrapper::new_with_service(backend, service);
@@ -388,8 +386,8 @@ pub mod test_utils {
             #[tokio::test]
             async fn integration_test_storage_push_and_consume() {
                 let backend = $setup().await;
-                let service = apalis_test_service_fn(|request: Request<u32>| async move {
-                    Ok::<_, io::Error>(request.take())
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Ok::<_, io::Error>(request.args)
                 });
                 let (mut t, poller) = TestWrapper::new_with_service(backend, service);
                 tokio::spawn(poller);

@@ -1,7 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use anyhow::Result;
-use apalis::layers::limit::RateLimitLayer;
+use apalis::layers::limit::{ConcurrencyLimitLayer, RateLimitLayer};
+use apalis::layers::tracing::TraceLayer;
+use apalis::layers::ErrorHandlingLayer;
 use apalis::{layers::TimeoutLayer, prelude::*};
 use apalis_redis::RedisStorage;
 
@@ -33,14 +35,16 @@ async fn main() -> Result<()> {
     produce_jobs(storage.clone()).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .chain(|svc| svc.map_err(|e| Error::Failed(Arc::new(e))))
+        .layer(ErrorHandlingLayer::new())
+        .layer(TraceLayer::new())
         .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
         .layer(TimeoutLayer::new(Duration::from_millis(500)))
+        .layer(ConcurrencyLimitLayer::new(2))
         .backend(storage)
         .build_fn(send_email);
 
     Monitor::<TokioExecutor>::new()
-        .register_with_count(2, worker)
+        .register(worker)
         .on_event(|e| {
             let worker_id = e.id();
             match e.inner() {

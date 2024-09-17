@@ -20,16 +20,16 @@ struct SimpleJob {}
 // A task can have up to 16 arguments
 async fn simple_job(
     _: SimpleJob,                        // Required, must be of the type of the job/message
-    worker_id: WorkerId,                 // The worker running the job, added by worker
+    worker_id: Data<WorkerId>,           // The worker running the job, added by worker
     _worker_ctx: Context<TokioExecutor>, // The worker context, added by worker
     _sqlite: Data<SqliteStorage<SimpleJob>>, // The source, added by storage
     task_id: Data<TaskId>,               // The task id, added by storage
-    ctx: Data<SqlContext>,               // The task context, added by storage
+    ctx: SqlContext,                     // The task context
     count: Data<Count>,                  // Our custom data added via layer
 ) {
     // increment the counter
     let current = count.fetch_add(1, Ordering::Relaxed);
-    info!("worker: {worker_id}; task_id: {task_id:?}, ctx: {ctx:?}, count: {current:?}");
+    info!("worker: {worker_id:?}; task_id: {task_id:?}, ctx: {ctx:?}, count: {current:?}");
 }
 
 async fn produce_jobs(storage: &mut SqliteStorage<SimpleJob>) {

@@ -57,14 +57,13 @@
 //! }
 //! ```
 
-use apalis_core::data::Extensions;
 use apalis_core::layers::Identity;
 use apalis_core::poller::Poller;
 use apalis_core::request::RequestStream;
-use apalis_core::task::task_id::TaskId;
+use apalis_core::task::namespace::Namespace;
 use apalis_core::worker::WorkerId;
 use apalis_core::Backend;
-use apalis_core::{error::Error, request::Request, task::attempt::Attempt};
+use apalis_core::{error::Error, request::Request};
 use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
 use std::marker::PhantomData;
@@ -102,14 +101,14 @@ where
         }
     }
 }
-impl<J, Tz> CronStream<J, Tz>
+impl<Req, Tz> CronStream<Req, Tz>
 where
-    J: From<DateTime<Tz>> + Send + Sync + 'static,
+    Req: From<DateTime<Tz>> + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync,
 {
     /// Convert to consumable
-    fn into_stream(self) -> RequestStream<Request<J>> {
+    fn into_stream(self) -> RequestStream<Request<Req, ()>> {
         let timezone = self.timezone.clone();
         let stream = async_stream::stream! {
             let mut schedule = self.schedule.upcoming_owned(timezone.clone());
@@ -120,10 +119,11 @@ where
                         let to_sleep = next - timezone.from_utc_datetime(&Utc::now().naive_utc());
                         let to_sleep = to_sleep.to_std().map_err(|e| Error::SourceError(Arc::new(e.into())))?;
                         apalis_core::sleep(to_sleep).await;
-                        let mut data = Extensions::new();
-                        data.insert(TaskId::new());
-                        data.insert(Attempt::default());
-                        yield Ok(Some(Request::new_with_data(J::from(timezone.from_utc_datetime(&Utc::now().naive_utc())), data)));
+                        let timestamp = timezone.from_utc_datetime(&Utc::now().naive_utc());
+                        let namespace = Namespace(format!("{}:{timestamp:?}", self.schedule));
+                        let mut req = Request::new(Req::from(timestamp));
+                        req.parts.namespace = Some(namespace);
+                        yield Ok(Some(req));
                     },
                     None => {
                         yield Ok(None);
@@ -135,13 +135,13 @@ where
     }
 }
 
-impl<J, Tz, Res> Backend<Request<J>, Res> for CronStream<J, Tz>
+impl<Req, Tz, Res> Backend<Request<Req, ()>, Res> for CronStream<Req, Tz>
 where
-    J: From<DateTime<Tz>> + Send + Sync + 'static,
+    Req: From<DateTime<Tz>> + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync,
 {
-    type Stream = RequestStream<Request<J>>;
+    type Stream = RequestStream<Request<Req, ()>>;
 
     type Layer = Identity;
 

@@ -52,8 +52,8 @@ impl<T> Clone for MemoryStorage<T> {
 /// In-memory queue that implements [Stream]
 #[derive(Debug)]
 pub struct MemoryWrapper<T> {
-    sender: Sender<Request<T>>,
-    receiver: Arc<futures::lock::Mutex<Receiver<Request<T>>>>,
+    sender: Sender<Request<T, ()>>,
+    receiver: Arc<futures::lock::Mutex<Receiver<Request<T, ()>>>>,
 }
 
 impl<T> Clone for MemoryWrapper<T> {
@@ -84,7 +84,7 @@ impl<T> Default for MemoryWrapper<T> {
 }
 
 impl<T> Stream for MemoryWrapper<T> {
-    type Item = Request<T>;
+    type Item = Request<T, ()>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Some(mut receiver) = self.receiver.try_lock() {
@@ -96,8 +96,8 @@ impl<T> Stream for MemoryWrapper<T> {
 }
 
 // MemoryStorage as a Backend
-impl<T: Send + 'static + Sync, Res> Backend<Request<T>, Res> for MemoryStorage<T> {
-    type Stream = BackendStream<RequestStream<Request<T>>>;
+impl<T: Send + 'static + Sync, Res> Backend<Request<T, ()>, Res> for MemoryStorage<T> {
+    type Stream = BackendStream<RequestStream<Request<T, ()>>>;
 
     type Layer = Identity;
 

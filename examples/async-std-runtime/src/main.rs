@@ -9,7 +9,7 @@ use apalis_cron::{CronStream, Schedule};
 use chrono::{DateTime, Utc};
 use tracing::{debug, info, Instrument, Level, Span};
 
-type WorkerCtx = Context<AsyncStdExecutor>;
+type WorkerCtx = Data<Context<AsyncStdExecutor>>;
 
 #[derive(Default, Debug, Clone)]
 struct Reminder(DateTime<Utc>);
@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
         .build_fn(send_reminder);
 
     Monitor::<AsyncStdExecutor>::new()
-        .register_with_count(2, worker)
+        .register(worker)
         .on_event(|e| debug!("Worker event: {e:?}"))
         .run_with_signal(async {
             ctrl_c.recv().await.ok();
@@ -95,10 +95,10 @@ impl ReminderSpan {
     }
 }
 
-impl<B> MakeSpan<B> for ReminderSpan {
-    fn make_span(&mut self, req: &Request<B>) -> Span {
-        let task_id: &TaskId = req.get().unwrap();
-        let attempts: Attempt = req.get().cloned().unwrap_or_default();
+impl<B, Ctx> MakeSpan<B, Ctx> for ReminderSpan {
+    fn make_span(&mut self, req: &Request<B, Ctx>) -> Span {
+        let task_id: &TaskId = &req.parts.task_id;
+        let attempts: &Attempt = &req.parts.attempt;
         let span = Span::current();
         macro_rules! make_span {
             ($level:expr) => {

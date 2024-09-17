@@ -9,6 +9,7 @@ apalis = { path = "../../", default-features = false, features = [
     "tokio-comp",
     "tracing",
     "limit",
+    "catch-panic"
 ] }
 apalis-cron = { path = "../../packages/apalis-cron" }
 tokio = { version = "1", features = ["full"] }
