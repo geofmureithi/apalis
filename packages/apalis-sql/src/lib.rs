@@ -12,6 +12,7 @@
 
 use std::time::Duration;
 
+use apalis_core::error::Error;
 use context::State;
 
 /// The context of the sql job
@@ -130,11 +131,11 @@ impl Config {
 }
 
 /// Calculates the status from a result
-pub fn calculate_status<Res>(res: &Result<Res, apalis_core::error::Error>) -> State {
+pub fn calculate_status<Res>(res: &Result<Res, Error>) -> State {
     match res {
         Ok(_) => State::Done,
         Err(e) => match &e {
-            _ if e.to_string().starts_with("AbortError") => State::Killed,
+            Error::Abort(_) => State::Killed,
             _ => State::Failed,
         },
     }

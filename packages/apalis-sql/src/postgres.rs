@@ -394,7 +394,7 @@ where
                 let req = C::decode(req)
                     .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
                     .unwrap();
-                let mut req = Request::new_with_ctx(req, parts.context);
+                let mut req = Request::new_with_parts(req, parts);
                 req.parts.namespace = Some(Namespace(self.config.namespace.clone()));
                 req
             })

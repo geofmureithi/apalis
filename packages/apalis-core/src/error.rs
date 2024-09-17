@@ -22,21 +22,20 @@ pub enum Error {
     #[error("FailedError: {0}")]
     Failed(#[source] Arc<BoxDynError>),
 
-    /// A generic IO error
-    #[error("IoError: {0}")]
-    Io(#[from] Arc<std::io::Error>),
-
-    /// Missing some data and yet it was requested during execution.
-    #[error("MissingDataError: {0}")]
-    MissingData(String),
-
     /// Execution was aborted
     #[error("AbortError: {0}")]
     Abort(#[source] Arc<BoxDynError>),
 
+    #[doc(hidden)]
     /// Encountered an error during worker execution
+    /// This should not be used inside a task function
     #[error("WorkerError: {0}")]
     WorkerError(WorkerError),
+
+    /// Missing some data and yet it was requested during execution.
+    /// This should not be used inside a task function
+    #[error("MissingDataError: {0}")]
+    MissingData(String),
 
     #[doc(hidden)]
     /// Encountered an error during service execution
