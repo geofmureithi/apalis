@@ -1,6 +1,6 @@
 [package]
 name = "apalis-redis"
-version = "0.6.0-rc.6"
+version = "0.6.0-rc.7"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition.workspace = true
 repository.workspace = true
@@ -12,7 +12,7 @@ description = "Redis Storage for apalis: use Redis for background jobs and messa
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.6.0-rc.6", default-features = false, features = [
+apalis-core = { path = "../../packages/apalis-core", version = "0.6.0-rc.7", default-features = false, features = [
     "sleep",
     "json",
 ] }
