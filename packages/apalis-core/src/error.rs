@@ -82,6 +82,12 @@ impl ErrorHandlingLayer {
     }
 }
 
+impl Default for ErrorHandlingLayer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<S> tower::layer::Layer<S> for ErrorHandlingLayer {
     type Service = ErrorHandlingService<S>;
 

@@ -462,7 +462,7 @@ impl<S, P> Worker<Ready<S, P>> {
                                     if let Err(e) = res {
                                         let error = e.into();
                                         if let Some(Error::MissingData(e)) =
-                                            (&error).downcast_ref::<Error>()
+                                            error.downcast_ref::<Error>()
                                         {
                                             w.force_stop();
                                             unreachable!("Worker missing required context: {}", e);
@@ -536,7 +536,7 @@ impl<E> fmt::Debug for Context<E> {
 
 impl<Req, Ctx, E: Send + Sync + Clone + 'static> FromRequest<Request<Req, Ctx>> for Context<E> {
     fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
-        req.get_checked::<Self>().map(Clone::clone)
+        req.get_checked::<Self>().cloned()
     }
 }
 

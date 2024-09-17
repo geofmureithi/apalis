@@ -167,7 +167,11 @@ macro_rules! sql_storage_tests {
             let (job_id, res) = storage.execute_next().await;
             assert_eq!(res, Err("AbortError: Invalid character.".to_owned()));
             apalis_core::sleep(Duration::from_secs(1)).await;
-            let job = storage.fetch_by_id(&job_id).await.unwrap().expect("No job found");
+            let job = storage
+                .fetch_by_id(&job_id)
+                .await
+                .unwrap()
+                .expect("No job found");
             let ctx = job.parts.context;
             assert_eq!(*ctx.status(), State::Killed);
             // assert!(ctx.done_at().is_some());

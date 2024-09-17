@@ -264,13 +264,17 @@ pub mod test_utils {
         where
             S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
             B::Layer: Layer<S>,
-            <<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>> + Send + 'static,
-            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Response:
-                Send + Debug,
-            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
-                Send + Into<BoxDynError> + Sync,
-            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future:
-                Send + 'static,
+            <<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service:
+                Service<Request<Req, Ctx>> + Send + 'static,
+            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
+                Request<Req, Ctx>,
+            >>::Response: Send + Debug,
+            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
+                Request<Req, Ctx>,
+            >>::Error: Send + Into<BoxDynError> + Sync,
+            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
+                Request<Req, Ctx>,
+            >>::Future: Send + 'static,
         {
             let worker_id = WorkerId::new("test-worker");
             let b = backend.clone();
@@ -345,7 +349,7 @@ pub mod test_utils {
         }
     }
 
-    impl<B, Req, Ctx, Res,> DerefMut for TestWrapper<B, Request<Req, Ctx>, Res>
+    impl<B, Req, Ctx, Res> DerefMut for TestWrapper<B, Request<Req, Ctx>, Res>
     where
         B: Backend<Request<Req, Ctx>, Res>,
     {

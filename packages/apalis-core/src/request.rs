@@ -24,6 +24,7 @@ pub struct Request<Args, Ctx> {
 }
 
 /// Component parts of a `Request`
+#[non_exhaustive]
 #[derive(Serialize, Debug, Deserialize, Clone, Default)]
 pub struct Parts<Ctx> {
     /// The request's id
@@ -42,8 +43,6 @@ pub struct Parts<Ctx> {
     /// Represents the namespace
     #[serde(skip)]
     pub namespace: Option<Namespace>,
-
-    _priv: (),
 }
 
 impl<T, Ctx: Default> Request<T, Ctx> {

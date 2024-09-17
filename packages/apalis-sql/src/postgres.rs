@@ -655,7 +655,8 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         PostgresStorage::setup(&pool).await.unwrap();
-        let mut storage = PostgresStorage::new(pool);
+        let config = Config::new("apalis-ci-tests").set_buffer_size(1);
+        let mut storage = PostgresStorage::new_with_config(pool, config);
         cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage
     }
