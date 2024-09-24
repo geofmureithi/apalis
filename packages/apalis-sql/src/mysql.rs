@@ -25,7 +25,7 @@ use std::{marker::PhantomData, ops::Add, time::Duration};
 
 use crate::context::SqlContext;
 use crate::from_row::SqlRequest;
-use crate::Config;
+pub use crate::Config;
 
 pub use sqlx::mysql::MySqlPool;
 
