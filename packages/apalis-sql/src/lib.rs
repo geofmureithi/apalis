@@ -90,7 +90,7 @@ impl Config {
     ///
     /// Defaults to "apalis::sql"
     pub fn set_namespace(mut self, namespace: &str) -> Self {
-        self.namespace = namespace.to_owned();
+        self.namespace = namespace.to_string();
         self
     }
 
@@ -222,6 +222,58 @@ macro_rules! sql_storage_tests {
                 ctx.last_error().clone().unwrap(),
                 "{\"Err\":\"FailedError: Missing separator character '@'.\"}"
             );
+        }
+
+        #[tokio::test]
+        async fn worker_consume() {
+            use apalis_core::builder::WorkerBuilder;
+            use apalis_core::builder::WorkerFactoryFn;
+            use apalis_core::executor::Executor;
+            use std::future::Future;
+
+            #[derive(Debug, Clone)]
+            struct TokioTestExecutor;
+
+            impl Executor for TokioTestExecutor {
+                fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
+                    tokio::spawn(future);
+                }
+            }
+
+            let storage = $setup().await;
+            let mut handle = storage.clone();
+
+            let parts = handle
+                .push(email_service::example_good_email())
+                .await
+                .unwrap();
+
+            async fn task(_job: Email) -> &'static str {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                "Job well done"
+            }
+            let worker = WorkerBuilder::new("rango-tango").backend(storage);
+            let worker = worker.build_fn(task);
+            let worker = worker.with_executor(TokioTestExecutor);
+            let w = worker.clone();
+
+            let runner = async move {
+                apalis_core::sleep(Duration::from_secs(3)).await;
+                let job_id = &parts.task_id;
+                let job = get_job(&mut handle, job_id).await;
+                let ctx = job.parts.context;
+
+                assert_eq!(*ctx.status(), State::Done);
+                assert!(ctx.done_at().is_some());
+                assert!(ctx.lock_by().is_some());
+                assert!(ctx.lock_at().is_some());
+                assert!(ctx.last_error().is_some()); // TODO: rename last_error to last_result
+
+                w.stop();
+            };
+
+            let wkr = worker.run();
+            tokio::join!(runner, wkr);
         }
     };
 }

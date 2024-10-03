@@ -182,7 +182,7 @@ where
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
                             let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(ctx, res)| {
-                                (res.task_id.to_string(), ctx.lock_by().clone().unwrap().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).unwrap(), calculate_status(&res.inner).to_string(), (res.attempt.current() + 1) as u64 )
+                                (res.task_id.to_string(), ctx.lock_by().clone().unwrap().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(&res.inner).to_string(), (res.attempt.current() + 1) as u64 )
                             }).collect();
                             let query =
                                 "UPDATE apalis.jobs
@@ -567,6 +567,7 @@ where
                 .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::Interrupted, e)))
                 .unwrap()
         });
+
         self.ack_notify
             .notify((ctx.clone(), res))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::Interrupted, e)))?;

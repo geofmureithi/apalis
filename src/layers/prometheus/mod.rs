@@ -11,7 +11,8 @@ use tower::{Layer, Service};
 
 /// A layer to support prometheus metrics
 #[derive(Debug, Default)]
-pub struct PrometheusLayer;
+#[non_exhaustive]
+pub struct PrometheusLayer {}
 
 impl<S> Layer<S> for PrometheusLayer {
     type Service = PrometheusService<S>;

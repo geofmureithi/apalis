@@ -239,11 +239,12 @@ impl<S, P> Worker<Ready<S, P>> {
         Ctx: Send + 'static + Sync,
     {
         let notifier = Notify::new();
-        let service = self.state.service;
-
-        let (service, poll_worker) = Buffer::pair(service, instances);
         let backend = self.state.backend;
+        let service = self.state.service;
         let poller = backend.poll::<S>(self.id.clone());
+        let layer = poller.layer;
+        let service = ServiceBuilder::new().layer(layer).service(service);
+        let (service, poll_worker) = Buffer::pair(service, instances);
         let polling = poller.heartbeat.shared();
         let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
             .into_future()
