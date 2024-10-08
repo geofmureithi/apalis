@@ -26,6 +26,12 @@ impl CatchPanicLayer<fn(Box<dyn Any + Send>) -> Error> {
     }
 }
 
+impl Default for CatchPanicLayer<fn(Box<dyn Any + Send>) -> Error> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<F> CatchPanicLayer<F>
 where
     F: FnMut(Box<dyn Any + Send>) -> Error + Clone,

@@ -6,7 +6,6 @@ use crate::monitor::{Monitor, MonitorContext};
 use crate::notify::Notify;
 use crate::poller::FetchNext;
 use crate::request::Request;
-use crate::service_fn::FromRequest;
 use crate::Backend;
 use futures::future::Shared;
 use futures::{Future, FutureExt};
@@ -239,11 +238,12 @@ impl<S, P> Worker<Ready<S, P>> {
         Ctx: Send + 'static + Sync,
     {
         let notifier = Notify::new();
-        let service = self.state.service;
-
-        let (service, poll_worker) = Buffer::pair(service, instances);
         let backend = self.state.backend;
+        let service = self.state.service;
         let poller = backend.poll::<S>(self.id.clone());
+        let layer = poller.layer;
+        let service = ServiceBuilder::new().layer(layer).service(service);
+        let (service, poll_worker) = Buffer::pair(service, instances);
         let polling = poller.heartbeat.shared();
         let worker_stream = WorkerStream::new(poller.stream, notifier.clone())
             .into_future()
@@ -531,12 +531,6 @@ impl<E> fmt::Debug for Context<E> {
             .field("shutdown", &["Shutdown handle"])
             .field("instance", &self.instance)
             .finish()
-    }
-}
-
-impl<Req, Ctx, E: Send + Sync + Clone + 'static> FromRequest<Request<Req, Ctx>> for Context<E> {
-    fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
-        req.get_checked::<Self>().cloned()
     }
 }
 

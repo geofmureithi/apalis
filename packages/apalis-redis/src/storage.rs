@@ -193,7 +193,7 @@ impl Config {
 
     /// set the namespace for the Storage
     pub fn set_namespace(mut self, namespace: &str) -> Self {
-        self.namespace = namespace.to_owned();
+        self.namespace = namespace.to_string();
         self
     }
 
@@ -308,7 +308,7 @@ impl<T, Conn: Clone, C> Clone for RedisStorage<T, Conn, C> {
             scripts: self.scripts.clone(),
             controller: self.controller.clone(),
             config: self.config.clone(),
-            codec: self.codec.clone(),
+            codec: self.codec,
         }
     }
 }
