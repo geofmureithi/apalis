@@ -1,6 +1,5 @@
 use anyhow::Result;
-
-use apalis::layers::tracing::TraceLayer;
+use apalis::layers::WorkerBuilderExt;
 use apalis::{
     prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
     utils::TokioExecutor,
@@ -72,7 +71,7 @@ async fn main() -> Result<()> {
     Monitor::<TokioExecutor>::new()
         .register(
             WorkerBuilder::new("tasty-avocado")
-                .chain(|srv| srv.layer(TraceLayer::new()))
+                .enable_tracing()
                 .backend(storage)
                 .build_fn(email_service),
         )

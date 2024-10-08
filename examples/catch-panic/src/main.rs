@@ -1,7 +1,6 @@
 use anyhow::Result;
-use apalis::layers::catch_panic::CatchPanicLayer;
+use apalis::prelude::*;
 use apalis::utils::TokioExecutor;
-use apalis::{layers::tracing::TraceLayer, prelude::*};
 use apalis_sql::sqlite::SqliteStorage;
 
 use email_service::Email;
@@ -40,10 +39,11 @@ async fn main() -> Result<()> {
     produce_emails(&mut email_storage).await?;
 
     Monitor::<TokioExecutor>::new()
-        .register_with_count(2, {
+        .register({
             WorkerBuilder::new("tasty-banana")
-                .layer(CatchPanicLayer::new())
-                .layer(TraceLayer::new())
+                .catch_panic()
+                .enable_tracing()
+                .concurrency(2)
                 .backend(email_storage)
                 .build_fn(send_email)
         })

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use apalis::layers::tracing::TraceLayer;
+
 use apalis::prelude::*;
 use apalis_sql::mysql::MySqlPool;
 use apalis_sql::mysql::MysqlStorage;
@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
     Monitor::new_with_executor(TokioExecutor)
         .register_with_count(1, {
             WorkerBuilder::new("tasty-avocado")
-                .layer(TraceLayer::new())
+                .enable_tracing()
                 .backend(mysql)
                 .build_fn(send_email)
         })

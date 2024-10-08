@@ -2,7 +2,7 @@ use std::{future::Future, str::FromStr, time::Duration};
 
 use anyhow::Result;
 use apalis::{
-    layers::{retry::RetryLayer, retry::RetryPolicy, tracing::MakeSpan, tracing::TraceLayer},
+    layers::{retry::RetryPolicy, tracing::MakeSpan, tracing::TraceLayer},
     prelude::*,
 };
 use apalis_cron::{CronStream, Schedule};
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
 
     let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
     let worker = WorkerBuilder::new("daily-cron-worker")
-        .layer(RetryLayer::new(RetryPolicy::retries(5)))
+        .retry(RetryPolicy::retries(5))
         .layer(TraceLayer::new().make_span_with(ReminderSpan::new()))
         .backend(CronStream::new(schedule))
         .build_fn(send_reminder);

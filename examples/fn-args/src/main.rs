@@ -59,9 +59,10 @@ async fn main() -> Result<(), std::io::Error> {
     let mut sqlite: SqliteStorage<SimpleJob> = SqliteStorage::new(pool);
     produce_jobs(&mut sqlite).await;
     Monitor::<TokioExecutor>::new()
-        .register_with_count(2, {
+        .register({
             WorkerBuilder::new("tasty-banana")
                 .data(Count::default())
+                .concurrency(2)
                 .backend(sqlite)
                 .build_fn(simple_job)
         })

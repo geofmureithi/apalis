@@ -4,10 +4,7 @@ mod service;
 
 use std::{sync::Arc, time::Duration};
 
-use apalis::{
-    layers::{catch_panic::CatchPanicLayer, tracing::TraceLayer},
-    prelude::*,
-};
+use apalis::{layers::catch_panic::CatchPanicLayer, prelude::*};
 use apalis_sql::sqlite::{SqlitePool, SqliteStorage};
 
 use email_service::Email;
@@ -106,6 +103,8 @@ async fn main() -> Result<(), std::io::Error> {
         .register({
             WorkerBuilder::new("tasty-banana")
                 // This handles any panics that may occur in any of the layers below
+                // .catch_panic()
+                // Or just to customize
                 .layer(CatchPanicLayer::with_panic_handler(|e| {
                     let panic_info = if let Some(s) = e.downcast_ref::<&str>() {
                         s.to_string()
@@ -114,9 +113,10 @@ async fn main() -> Result<(), std::io::Error> {
                     } else {
                         "Unknown panic".to_string()
                     };
+                    // Abort tells the backend to kill job
                     Error::Abort(Arc::new(Box::new(PanicError::Panic(panic_info))))
                 }))
-                .layer(TraceLayer::new())
+                .enable_tracing()
                 .layer(LogLayer::new("some-log-example"))
                 // Add shared context to all jobs executed by this worker
                 .data(EmailService::new())

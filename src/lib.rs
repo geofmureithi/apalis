@@ -36,8 +36,9 @@
 //!     let conn = apalis_redis::connect(redis).await.unwrap();
 //!     let storage = RedisStorage::new(conn);
 //!     Monitor::<TokioExecutor>::new()
-//!         .register_with_count(2, {
+//!         .register({
 //!             WorkerBuilder::new(&format!("quick-sand"))
+//!                 .concurrency(2)
 //!                 .data(0usize)
 //!                 .backend(storage.clone())
 //!                 .build_fn(send_email)
@@ -94,6 +95,7 @@ pub mod utils {
 
 /// Common imports
 pub mod prelude {
+    pub use crate::layers::WorkerBuilderExt;
     #[cfg(feature = "tokio-comp")]
     pub use crate::utils::TokioExecutor;
     pub use apalis_core::{

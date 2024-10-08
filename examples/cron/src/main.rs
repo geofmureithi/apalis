@@ -1,4 +1,3 @@
-use apalis::layers::tracing::TraceLayer;
 use apalis::prelude::*;
 use apalis::utils::TokioExecutor;
 use apalis_cron::CronStream;
@@ -6,7 +5,6 @@ use apalis_cron::Schedule;
 use chrono::{DateTime, Utc};
 use std::str::FromStr;
 use std::time::Duration;
-use tower::limit::RateLimitLayer;
 use tower::load_shed::LoadShedLayer;
 
 #[derive(Clone)]
@@ -32,9 +30,9 @@ async fn send_reminder(job: Reminder, svc: Data<FakeService>) {
 async fn main() {
     let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
     let worker = WorkerBuilder::new("morning-cereal")
-        .layer(TraceLayer::new())
+        .enable_tracing()
         .layer(LoadShedLayer::new()) // Important when you have layers that block the service
-        .layer(RateLimitLayer::new(1, Duration::from_secs(2)))
+        .rate_limit(1, Duration::from_secs(2))
         .data(FakeService)
         .backend(CronStream::new(schedule))
         .build_fn(send_reminder);

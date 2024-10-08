@@ -1,7 +1,6 @@
 use actix_web::rt::signal;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use anyhow::Result;
-use apalis::layers::tracing::TraceLayer;
 use apalis::prelude::*;
 use apalis::utils::TokioExecutor;
 use apalis_redis::RedisStorage;
@@ -42,9 +41,10 @@ async fn main() -> Result<()> {
         Ok(())
     };
     let worker = Monitor::<TokioExecutor>::new()
-        .register_with_count(2, {
+        .register({
             WorkerBuilder::new("tasty-avocado")
-                .layer(TraceLayer::new())
+                .enable_tracing()
+                .concurrency(2)
                 .backend(storage)
                 .build_fn(send_email)
         })
