@@ -1,10 +1,9 @@
 use anyhow::Result;
 use apalis::layers::retry::RetryPolicy;
-use apalis::layers::tracing::TraceLayer;
+
 use apalis::prelude::*;
 use apalis_sql::postgres::{PgListen, PgPool, PostgresStorage};
 use email_service::{send_email, Email};
-use tower::retry::RetryLayer;
 use tracing::{debug, info};
 
 async fn produce_jobs(storage: &mut PostgresStorage<Email>) -> Result<()> {
@@ -47,8 +46,8 @@ async fn main() -> Result<()> {
     Monitor::<TokioExecutor>::new()
         .register_with_count(4, {
             WorkerBuilder::new("tasty-orange")
-                .layer(TraceLayer::new())
-                .layer(RetryLayer::new(RetryPolicy::retries(5)))
+                .enable_tracing()
+                .retry(RetryPolicy::retries(5))
                 .backend(pg)
                 .build_fn(send_email)
         })

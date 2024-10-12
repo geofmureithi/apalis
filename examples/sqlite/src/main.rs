@@ -1,8 +1,8 @@
 mod job;
 
 use anyhow::Result;
+use apalis::prelude::*;
 use apalis::utils::TokioExecutor;
-use apalis::{layers::tracing::TraceLayer, prelude::*};
 use apalis_sql::sqlite::SqliteStorage;
 use chrono::Utc;
 use email_service::{send_email, Email};
@@ -61,13 +61,13 @@ async fn main() -> Result<()> {
     Monitor::<TokioExecutor>::new()
         .register({
             WorkerBuilder::new("tasty-banana")
-                .layer(TraceLayer::new())
+                .enable_tracing()
                 .backend(email_storage)
                 .build_fn(send_email)
         })
         .register({
             WorkerBuilder::new("tasty-mango")
-                // .layer(TraceLayer::new())
+                // .enable_tracing()
                 .backend(notification_storage)
                 .build_fn(job::notify)
         })

@@ -1,6 +1,6 @@
 use std::{fmt::Debug, marker::PhantomData, time::Duration};
 
-use apalis::{layers::tracing::TraceLayer, prelude::*};
+use apalis::prelude::*;
 
 use apalis_redis::{self, Config};
 
@@ -173,7 +173,7 @@ async fn main() -> anyhow::Result<()> {
     produce_jobs(&mut mq).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .layer(TraceLayer::new())
+        .enable_tracing()
         .backend(mq)
         .build_fn(send_email);
 
