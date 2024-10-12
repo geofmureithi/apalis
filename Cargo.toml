@@ -165,7 +165,7 @@ tower = { version = "0.5", features = ["util"], default-features = false }
 tracing-futures = { version = "0.2.5", optional = true, default-features = false }
 sentry-core = { version = "0.34.0", optional = true, default-features = false }
 metrics = { version = "0.23.0", optional = true, default-features = false }
-metrics-exporter-prometheus = { version = "0.15", optional = true, default-features = false }
+metrics-exporter-prometheus = { version = "0.16", optional = true, default-features = false }
 thiserror = "1.0.59"
 futures = "0.3.30"
 pin-project-lite = "0.2.14"
