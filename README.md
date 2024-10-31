@@ -175,6 +175,7 @@ sequenceDiagram
 - [Ryot](https://github.com/IgnisDa/ryot): A self hosted platform for tracking various facets of your life - media, fitness etc.
 - [Summarizer](https://github.com/akhildevelops/summarizer): Podcast summarizer
 - [Universal Inbox](https://github.com/universal-inbox/universal-inbox): Universal Inbox is a solution that centralizes all your notifications and tasks in one place to create a unique inbox.
+- [Hatsu](https://github.com/importantimport/hatsu): Self-hosted and fully-automated ActivityPub bridge for static sites.
 
 ## Resources
 
