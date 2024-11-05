@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-deadpool-redis = { version = "0.15.1" }
+deadpool-redis = { version = "0.18" }
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 apalis = { path = "../../", features = ["timeout"] }

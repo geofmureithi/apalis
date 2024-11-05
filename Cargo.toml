@@ -87,7 +87,7 @@ apalis-sql = { path = "./packages/apalis-sql", features = [
   "mysql",
   "sqlite",
 ] }
-redis = { version = "0.25.3", default-features = false, features = [
+redis = { version = "0.27", default-features = false, features = [
   "tokio-comp",
   "script",
   "aio",
