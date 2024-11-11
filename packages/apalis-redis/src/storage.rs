@@ -599,7 +599,7 @@ where
         let mut conn = self.conn.clone();
 
         vacuum_script
-            .key(self.queue.dead_jobs_set.clone())
+            .key(self.queue.done_jobs_set.clone())
             .key(self.queue.job_data_hash.clone())
             .invoke_async(&mut conn)
             .await
