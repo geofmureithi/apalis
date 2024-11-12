@@ -8,7 +8,7 @@ use std::{fmt, str::FromStr};
 
 /// The context for a job is represented here
 /// Used to provide a context for a job with an sql backend
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlContext {
     status: State,
     run_at: DateTime<Utc>,
@@ -17,6 +17,12 @@ pub struct SqlContext {
     lock_at: Option<i64>,
     lock_by: Option<WorkerId>,
     done_at: Option<i64>,
+}
+
+impl Default for SqlContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SqlContext {

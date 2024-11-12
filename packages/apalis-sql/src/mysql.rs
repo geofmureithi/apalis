@@ -233,7 +233,7 @@ where
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
         let (args, parts) = job.take_parts();
         let query =
-            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, now(), NULL, NULL, NULL, NULL)";
+            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
 
         let job = C::encode(args)
@@ -243,6 +243,7 @@ where
             .bind(job)
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
+            .bind(parts.context.max_attempts())
             .execute(&pool)
             .await?;
         Ok(parts)
@@ -253,8 +254,7 @@ where
         req: Request<Self::Job, SqlContext>,
         on: i64,
     ) -> Result<Parts<Self::Context>, sqlx::Error> {
-        let query =
-            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, ?, NULL, NULL, NULL, NULL)";
+        let query = "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, ?, NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
 
         let args = C::encode(&req.args)
@@ -265,6 +265,7 @@ where
             .bind(args)
             .bind(req.parts.task_id.to_string())
             .bind(job_type)
+            .bind(req.parts.context.max_attempts())
             .bind(on)
             .execute(&pool)
             .await?;

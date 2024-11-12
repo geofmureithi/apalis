@@ -77,8 +77,9 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
         let run_at: i64 = row.try_get("run_at")?;
         context.set_run_at(DateTime::from_timestamp(run_at, 0).unwrap_or_default());
 
-        let max_attempts = row.try_get("max_attempts").unwrap_or(25);
-        context.set_max_attempts(max_attempts);
+        if let Ok(max_attempts) = row.try_get("max_attempts") {
+            context.set_max_attempts(max_attempts)
+        }
 
         let done_at: Option<i64> = row.try_get("done_at").unwrap_or_default();
         context.set_done_at(done_at);
@@ -139,8 +140,9 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
 
-        let max_attempts = row.try_get("max_attempts").unwrap_or(25);
-        context.set_max_attempts(max_attempts);
+        if let Ok(max_attempts) = row.try_get("max_attempts") {
+            context.set_max_attempts(max_attempts)
+        }
 
         let done_at: Option<chrono::DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();
         context.set_done_at(done_at.map(|d| d.timestamp()));
@@ -200,8 +202,9 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
 
-        let max_attempts = row.try_get("max_attempts").unwrap_or(25);
-        context.set_max_attempts(max_attempts);
+        if let Ok(max_attempts) = row.try_get("max_attempts") {
+            context.set_max_attempts(max_attempts)
+        }
 
         let done_at: Option<chrono::NaiveDateTime> = row.try_get("done_at").unwrap_or_default();
         context.set_done_at(done_at.map(|d| d.and_utc().timestamp()));
