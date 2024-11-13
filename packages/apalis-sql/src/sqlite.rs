@@ -233,7 +233,7 @@ where
         &mut self,
         job: Request<Self::Job, SqlContext>,
     ) -> Result<Parts<SqlContext>, Self::Error> {
-        let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, strftime('%s','now'), NULL, NULL, NULL, NULL)";
+        let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, strftime('%s','now'), NULL, NULL, NULL, NULL)";
         let (task, parts) = job.take_parts();
         let raw = C::encode(&task)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
@@ -242,6 +242,7 @@ where
             .bind(raw)
             .bind(&parts.task_id.to_string())
             .bind(job_type.to_string())
+            .bind(&parts.context.max_attempts())
             .execute(&self.pool)
             .await?;
         Ok(parts)
@@ -253,7 +254,7 @@ where
         on: i64,
     ) -> Result<Parts<SqlContext>, Self::Error> {
         let query =
-            "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, 25, ?4, NULL, NULL, NULL, NULL)";
+            "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, ?5, NULL, NULL, NULL, NULL)";
         let id = &req.parts.task_id;
         let job = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
@@ -262,6 +263,7 @@ where
             .bind(job)
             .bind(id.to_string())
             .bind(job_type)
+            .bind(&req.parts.context.max_attempts())
             .bind(on)
             .execute(&self.pool)
             .await?;
