@@ -549,7 +549,7 @@ where
             .key(&signal_list)
             .arg(self.config.buffer_size) // No of jobs to fetch
             .arg(&inflight_set)
-            .invoke_async::<_, Vec<Value>>(&mut self.conn)
+            .invoke_async::<Vec<Value>>(&mut self.conn)
             .await;
 
         match result {
@@ -579,11 +579,11 @@ fn build_error(message: &str) -> RedisError {
 
 fn deserialize_job(job: &Value) -> Result<&Vec<u8>, RedisError> {
     match job {
-        Value::Data(bytes) => Ok(bytes),
-        Value::Bulk(val) => val
+        Value::BulkString(bytes) => Ok(bytes),
+        Value::Array(val) | Value::Set(val) => val
             .first()
             .and_then(|val| {
-                if let Value::Data(bytes) = val {
+                if let Value::BulkString(bytes) = val {
                     Some(bytes)
                 } else {
                     None
