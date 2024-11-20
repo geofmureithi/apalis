@@ -177,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
         .backend(mq)
         .build_fn(send_email);
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register_with_count(2, worker)
         .on_event(|e| {
             let worker_id = e.id();

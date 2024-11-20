@@ -40,7 +40,7 @@ async fn main() {
         .data(FakeService)
         .stream(CronStream::new(schedule).into_stream())
         .build_fn(send_reminder);
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register(worker)
         .run()
         .await

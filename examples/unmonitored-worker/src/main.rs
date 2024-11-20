@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use apalis::{prelude::*, utils::TokioExecutor};
+use apalis::prelude::*;
 use apalis_sql::sqlite::{SqlitePool, SqliteStorage};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -8,11 +8,13 @@ use tracing::info;
 #[derive(Debug, Serialize, Deserialize)]
 struct SelfMonitoringJob {}
 
-async fn self_monitoring_task(task: SelfMonitoringJob, worker_ctx: Context<TokioExecutor>) {
+async fn self_monitoring_task(task: SelfMonitoringJob, worker_ctx: Data<Context>) {
     info!("task: {:?}, {:?}", task, worker_ctx);
-    tokio::time::sleep(Duration::from_secs(5)).await; // Do some hard thing
     info!("done with task, stopping worker gracefully");
-    // use worker_ctx.force_stop() to stop immediately
+    tokio::spawn(worker_ctx.track(async {
+        tokio::time::sleep(Duration::from_secs(5)).await; // Do some hard thing
+        info!("done with task, stopping worker gracefully");
+    }));
     worker_ctx.stop();
 }
 
@@ -34,7 +36,6 @@ async fn main() -> Result<(), std::io::Error> {
     WorkerBuilder::new("tasty-banana")
         .backend(sqlite)
         .build_fn(self_monitoring_task)
-        .with_executor(TokioExecutor)
         .run()
         .await;
     Ok(())

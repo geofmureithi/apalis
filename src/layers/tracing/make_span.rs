@@ -63,10 +63,12 @@ impl Default for DefaultMakeSpan {
 }
 
 impl<B, Ctx> MakeSpan<B, Ctx> for DefaultMakeSpan {
-    fn make_span(&mut self, _req: &Request<B, Ctx>) -> Span {
+    fn make_span(&mut self, req: &Request<B, Ctx>) -> Span {
         // This ugly macro is needed, unfortunately, because `tracing::span!`
         // required the level argument to be static. Meaning we can't just pass
         // `self.level`.
+        let task_id = req.parts.task_id.to_string();
+        let attempt = req.parts.attempt.current();
         let span = Span::current();
         macro_rules! make_span {
             ($level:expr) => {
@@ -74,6 +76,8 @@ impl<B, Ctx> MakeSpan<B, Ctx> for DefaultMakeSpan {
                     parent: span,
                     $level,
                     "task",
+                    task_id = task_id,
+                    attempt = attempt
                 )
             };
         }

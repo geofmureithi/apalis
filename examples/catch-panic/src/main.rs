@@ -1,6 +1,6 @@
 use anyhow::Result;
 use apalis::prelude::*;
-use apalis::utils::TokioExecutor;
+
 use apalis_sql::sqlite::SqliteStorage;
 
 use email_service::Email;
@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
 
     produce_emails(&mut email_storage).await?;
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register({
             WorkerBuilder::new("tasty-banana")
                 .catch_panic()

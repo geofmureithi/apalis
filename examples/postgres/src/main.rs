@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
         listener.listen().await.unwrap();
     });
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register_with_count(4, {
             WorkerBuilder::new("tasty-orange")
                 .enable_tracing()

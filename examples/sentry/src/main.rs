@@ -132,7 +132,7 @@ async fn main() -> Result<()> {
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register({
             WorkerBuilder::new("tasty-avocado")
                 .layer(NewSentryLayer::new_from_top())

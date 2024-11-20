@@ -27,7 +27,7 @@
 //!     // let query = "Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));";
 //!     // pg.execute(query).await.unwrap();
 //!
-//!      Monitor::<TokioExecutor>::new()
+//!      Monitor::new()
 //!          .register_with_count(4, {
 //!              WorkerBuilder::new(&format!("tasty-avocado"))
 //!                  .data(0usize)

@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
         .backend(storage)
         .build_fn(send_email);
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register(worker)
         .shutdown_timeout(Duration::from_millis(5000))
         .run_with_signal(async {

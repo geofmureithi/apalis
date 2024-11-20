@@ -1,9 +1,6 @@
 use anyhow::Result;
 use apalis::layers::WorkerBuilderExt;
-use apalis::{
-    prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
-    utils::TokioExecutor,
-};
+use apalis::prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn};
 use apalis_redis::RedisStorage;
 use std::error::Error;
 use std::fmt;
@@ -68,7 +65,7 @@ async fn main() -> Result<()> {
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register(
             WorkerBuilder::new("tasty-avocado")
                 .enable_tracing()

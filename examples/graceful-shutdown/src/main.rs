@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use apalis::{prelude::*, utils::TokioExecutor};
+use apalis::prelude::*;
 use apalis_sql::sqlite::{SqlitePool, SqliteStorage};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -8,15 +8,17 @@ use tracing::info;
 #[derive(Debug, Serialize, Deserialize)]
 struct LongRunningJob {}
 
-async fn long_running_task(_task: LongRunningJob, worker_ctx: Context<TokioExecutor>) {
+async fn long_running_task(_task: LongRunningJob, worker_ctx: Data<Context>) {
     loop {
-        tokio::time::sleep(Duration::from_secs(1)).await; // Do some hard thing
+        
         info!("is_shutting_down: {}", worker_ctx.is_shutting_down(),);
         if worker_ctx.is_shutting_down() {
             info!("saving the job state");
             break;
         }
+        tokio::time::sleep(Duration::from_secs(1)).await; // Do some hard thing
     }
+    info!("saving the job state");
 }
 
 async fn produce_jobs(storage: &mut SqliteStorage<LongRunningJob>) {
@@ -33,7 +35,7 @@ async fn main() -> Result<(), std::io::Error> {
         .expect("unable to run migrations for sqlite");
     let mut sqlite: SqliteStorage<LongRunningJob> = SqliteStorage::new(pool);
     produce_jobs(&mut sqlite).await;
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register({
             WorkerBuilder::new("tasty-banana")
                 .concurrency(2)
@@ -41,7 +43,7 @@ async fn main() -> Result<(), std::io::Error> {
                 .build_fn(long_running_task)
         })
         // Wait 10 seconds after shutdown is triggered to allow any incomplete jobs to complete
-        .shutdown_timeout(Duration::from_secs(10))
+        .shutdown_timeout(Duration::from_secs(5))
         // Use .run() if you don't want without signals
         .run_with_signal(tokio::signal::ctrl_c()) // This will wait for ctrl+c then gracefully shutdown
         .await?;

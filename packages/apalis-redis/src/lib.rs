@@ -15,7 +15,7 @@
 //! async fn main() {
 //!     let conn = apalis_redis::connect("redis://127.0.0.1/").await.unwrap();
 //!     let storage = RedisStorage::new(conn);
-//!     Monitor::<TokioExecutor>::new()
+//!     Monitor::new()
 //!        .register(
 //!            WorkerBuilder::new("tasty-pear")
 //!                .backend(storage.clone())

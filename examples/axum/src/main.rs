@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
             .map_err(|e| Error::new(std::io::ErrorKind::Interrupted, e))
     };
     let monitor = async {
-        Monitor::<TokioExecutor>::new()
+        Monitor::new()
             .register({
                 WorkerBuilder::new("tasty-pear")
                     .enable_tracing()

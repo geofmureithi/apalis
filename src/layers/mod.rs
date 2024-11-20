@@ -24,7 +24,7 @@ pub mod limit {
 }
 
 use apalis_core::{builder::WorkerBuilder, layers::Identity};
-#[cfg(feature = "tracing")]
+#[cfg(feature = "catch-panic")]
 use catch_panic::CatchPanicLayer;
 use tower::layer::util::Stack;
 /// Timeout middleware for apalis
@@ -182,6 +182,7 @@ impl<Req, Ctx, Source, Middleware, Serv> WorkerBuilderExt<Req, Ctx, Source, Midd
         self.chain(|sb| sb.layer_fn(f))
     }
 
+    #[cfg(feature = "limit")]
     fn concurrency(
         self,
         max: usize,
@@ -190,6 +191,7 @@ impl<Req, Ctx, Source, Middleware, Serv> WorkerBuilderExt<Req, Ctx, Source, Midd
         self.chain(|sb| sb.concurrency_limit(max))
     }
 
+    #[cfg(feature = "limit")]
     fn rate_limit(
         self,
         num: u64,
@@ -199,6 +201,7 @@ impl<Req, Ctx, Source, Middleware, Serv> WorkerBuilderExt<Req, Ctx, Source, Midd
         self.chain(|sb| sb.rate_limit(num, per))
     }
 
+    #[cfg(feature = "retry")]
     fn retry<P>(
         self,
         policy: P,
@@ -206,6 +209,7 @@ impl<Req, Ctx, Source, Middleware, Serv> WorkerBuilderExt<Req, Ctx, Source, Midd
         self.chain(|sb| sb.retry(policy))
     }
 
+    #[cfg(feature = "timeout")]
     fn timeout(
         self,
         timeout: std::time::Duration,

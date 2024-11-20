@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
     let mysql: MysqlStorage<Email> = MysqlStorage::new(pool);
     produce_jobs(&mysql).await?;
 
-    Monitor::new_with_executor(TokioExecutor)
+    Monitor::new()
         .register_with_count(1, {
             WorkerBuilder::new("tasty-avocado")
                 .enable_tracing()

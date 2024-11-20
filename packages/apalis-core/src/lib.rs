@@ -33,8 +33,6 @@ use worker::WorkerId;
 pub mod builder;
 /// Includes all possible error types.
 pub mod error;
-/// Represents an executor.
-pub mod executor;
 /// Represents middleware offered through [`tower`]
 pub mod layers;
 /// Represents monitoring of running workers

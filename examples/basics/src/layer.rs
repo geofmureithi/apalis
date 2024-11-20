@@ -8,6 +8,7 @@ use tower::{Layer, Service};
 use tracing::info;
 
 /// A layer that logs a job info before it starts
+#[derive(Debug, Clone)]
 pub struct LogLayer {
     target: &'static str,
 }

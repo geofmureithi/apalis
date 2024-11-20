@@ -49,7 +49,7 @@
 //!         .data(FakeService)
 //!         .backend(CronStream::new(schedule))
 //!         .build_fn(send_reminder);
-//!     Monitor::<TokioExecutor>::new()
+//!     Monitor::new()
 //!         .register(worker)
 //!         .run()
 //!         .await

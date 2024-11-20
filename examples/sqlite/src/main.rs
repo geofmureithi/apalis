@@ -2,7 +2,7 @@ mod job;
 
 use anyhow::Result;
 use apalis::prelude::*;
-use apalis::utils::TokioExecutor;
+
 use apalis_sql::sqlite::SqliteStorage;
 use chrono::Utc;
 use email_service::{send_email, Email};
@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
 
     produce_notifications(&notification_storage).await?;
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register({
             WorkerBuilder::new("tasty-banana")
                 .enable_tracing()

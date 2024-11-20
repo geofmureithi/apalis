@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
         .backend(storage)
         .build_fn(send_email);
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register(worker)
         .on_event(|e| {
             let worker_id = e.id();
