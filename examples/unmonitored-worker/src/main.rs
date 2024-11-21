@@ -10,15 +10,15 @@ struct SelfMonitoringJob {
     id: i32,
 }
 
-async fn self_monitoring_task(task: SelfMonitoringJob, worker_ctx: Data<Context>) {
-    info!("task: {:?}, {:?}", task, worker_ctx);
+async fn self_monitoring_task(task: SelfMonitoringJob, worker: Worker<Context>) {
+    info!("task: {:?}, {:?}", task, worker);
     if task.id == 1 {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                if !worker_ctx.has_pending_tasks() {
+                if !worker.has_pending_tasks() {
                     info!("done with all tasks, stopping worker");
-                    worker_ctx.stop();
+                    worker.stop();
                     break;
                 }
             }

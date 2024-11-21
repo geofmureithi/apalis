@@ -13,7 +13,7 @@ pub mod shutdown;
 use crate::{
     error::BoxDynError,
     request::Request,
-    worker::{Event, EventHandler, Ready, Worker, WorkerId},
+    worker::{Context, Event, EventHandler, Ready, Worker, WorkerId},
     Backend,
 };
 
@@ -21,7 +21,8 @@ use self::shutdown::Shutdown;
 
 /// A monitor for coordinating and managing a collection of workers.
 pub struct Monitor {
-    workers: Vec<BoxFuture<'static, ()>>,
+    futures: Vec<BoxFuture<'static, ()>>,
+    workers: Vec<Worker<Context>>,
     terminator: Option<BoxFuture<'static, ()>>,
     shutdown: Shutdown,
     event_handler: EventHandler,
@@ -31,7 +32,7 @@ impl Debug for Monitor {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("Monitor")
             .field("shutdown", &"[Graceful shutdown listener]")
-            .field("workers", &self.workers.len())
+            .field("workers", &self.futures.len())
             .finish()
     }
 }
@@ -57,7 +58,10 @@ impl Monitor {
     {
         worker.state.shutdown = Some(self.shutdown.clone());
         worker.state.event_handler = self.event_handler.clone();
-        self.workers.push(worker.run().boxed());
+        let runnable = worker.run();
+        let handle = runnable.get_handle();
+        self.workers.push(handle);
+        self.futures.push(runnable.boxed());
         self
     }
 
@@ -128,12 +132,10 @@ impl Monitor {
         S: Send,
     {
         let shutdown = self.shutdown.clone();
-        // let shutdown_future = self.shutdown.clone().boxed().map(|_| ());
-
         let shutdown_after = self.shutdown.shutdown_after(signal);
         if let Some(terminator) = self.terminator {
             let _res = futures::future::select(
-                futures::future::join_all(self.workers)
+                futures::future::join_all(self.futures)
                     .map(|_| shutdown.start_shutdown())
                     .boxed(),
                 async {
@@ -163,7 +165,7 @@ impl Monitor {
         let shutdown = self.shutdown.clone();
         let shutdown_future = self.shutdown.boxed().map(|_| ());
         futures::join!(
-            futures::future::join_all(self.workers).map(|_| shutdown.start_shutdown()),
+            futures::future::join_all(self.futures).map(|_| shutdown.start_shutdown()),
             shutdown_future,
         );
 
@@ -183,9 +185,10 @@ impl Default for Monitor {
     fn default() -> Self {
         Self {
             shutdown: Shutdown::new(),
-            workers: Vec::new(),
+            futures: Vec::new(),
             terminator: None,
             event_handler: Arc::default(),
+            workers: Vec::new()
         }
     }
 }
@@ -294,7 +297,7 @@ mod tests {
             println!("{e:?}");
         });
         let monitor = monitor.register(worker);
-        assert_eq!(monitor.workers.len(), 1);
+        assert_eq!(monitor.futures.len(), 1);
         let shutdown = monitor.shutdown.clone();
         tokio::spawn(async move {
             sleep(Duration::from_millis(1000)).await;

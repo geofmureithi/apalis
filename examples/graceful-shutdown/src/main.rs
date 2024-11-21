@@ -8,10 +8,10 @@ use tracing::info;
 #[derive(Debug, Serialize, Deserialize)]
 struct LongRunningJob {}
 
-async fn long_running_task(_task: LongRunningJob, worker_ctx: Data<Context>) {
+async fn long_running_task(_task: LongRunningJob, worker: Worker<Context>) {
     loop {
-        info!("is_shutting_down: {}", worker_ctx.is_shutting_down());
-        if worker_ctx.is_shutting_down() {
+        info!("is_shutting_down: {}", worker.is_shutting_down());
+        if worker.is_shutting_down() {
             info!("saving the job state");
             break;
         }

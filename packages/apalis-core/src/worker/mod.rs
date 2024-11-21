@@ -2,6 +2,7 @@ use crate::error::{BoxDynError, Error};
 use crate::layers::extensions::Data;
 use crate::monitor::shutdown::Shutdown;
 use crate::request::Request;
+use crate::service_fn::FromRequest;
 use crate::task::task_id::TaskId;
 use crate::Backend;
 use futures::future::{join, select, BoxFuture};
@@ -210,6 +211,12 @@ impl Worker<Context> {
     }
 }
 
+impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for Worker<Context> {
+    fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
+        req.parts.data.get_checked().cloned()
+    }
+}
+
 impl<S, P> Worker<Ready<S, P>> {
     /// Add an event handler to the worker
     pub fn on_event<F: Fn(Worker<Event>) + Send + Sync + 'static>(self, f: F) -> Self {
@@ -218,7 +225,7 @@ impl<S, P> Worker<Ready<S, P>> {
         });
         self
     }
-    
+
     fn poll_jobs<Svc, Stm, Req, Res, Ctx>(
         worker: Worker<Context>,
         service: Svc,
@@ -303,8 +310,7 @@ impl<S, P> Worker<Ready<S, P>> {
         let layer = poller.layer;
         let service = ServiceBuilder::new()
             .layer(TrackerLayer::new(worker.state.clone()))
-            .layer(Data::new(worker.id.clone()))
-            .layer(Data::new(worker.state.clone()))
+            .layer(Data::new(worker.clone()))
             .layer(layer)
             .service(service);
 
@@ -328,6 +334,13 @@ pub struct Runnable {
     heartbeat: BoxFuture<'static, ()>,
     worker: Worker<Context>,
     running: bool,
+}
+
+impl Runnable {
+    /// Returns a handle to the worker, allowing control and functionality like stopping
+    pub fn get_handle(&self) -> Worker<Context> {
+        self.worker.clone()
+    }
 }
 
 impl fmt::Debug for Runnable {
@@ -600,10 +613,9 @@ mod tests {
             }
         }
 
-        async fn task(job: u32, count: Data<Count>, worker: Data<Context>) {
+        async fn task(job: u32, count: Data<Count>, worker: Worker<Context>) {
             count.fetch_add(1, Ordering::Relaxed);
             if job == ITEMS - 1 {
-                // panic!("done");
                 worker.stop();
             }
         }
