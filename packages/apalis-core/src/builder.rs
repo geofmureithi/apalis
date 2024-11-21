@@ -91,13 +91,13 @@ impl<M, Serv> WorkerBuilder<(), (), (), M, Serv> {
     }
 }
 
-impl<Req, M, Serv, Ctx, Src> WorkerBuilder<Req, Ctx, Src, M, Serv> {
+impl<Req, M, Serv, Ctx> WorkerBuilder<Req, Ctx, (), M, Serv> {
     /// Allows of decorating the service that consumes jobs.
     /// Allows adding multiple [`tower`] middleware
     pub fn chain<NewLayer>(
         self,
         f: impl FnOnce(ServiceBuilder<M>) -> ServiceBuilder<NewLayer>,
-    ) -> WorkerBuilder<Req, Ctx, Src, NewLayer, Serv> {
+    ) -> WorkerBuilder<Req, Ctx, (), NewLayer, Serv> {
         let middleware = f(self.layer);
 
         WorkerBuilder {
@@ -109,7 +109,7 @@ impl<Req, M, Serv, Ctx, Src> WorkerBuilder<Req, Ctx, Src, M, Serv> {
         }
     }
     /// Allows adding a single layer [tower] middleware
-    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Req, Ctx, Src, Stack<U, M>, Serv>
+    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Req, Ctx, (), Stack<U, M>, Serv>
     where
         M: Layer<U>,
     {
@@ -124,7 +124,7 @@ impl<Req, M, Serv, Ctx, Src> WorkerBuilder<Req, Ctx, Src, M, Serv> {
 
     /// Adds data to the context
     /// This will be shared by all requests
-    pub fn data<D>(self, data: D) -> WorkerBuilder<Req, Ctx, Src, Stack<Data<D>, M>, Serv>
+    pub fn data<D>(self, data: D) -> WorkerBuilder<Req, Ctx, (), Stack<Data<D>, M>, Serv>
     where
         M: Layer<Data<D>>,
     {

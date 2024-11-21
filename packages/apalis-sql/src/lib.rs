@@ -228,18 +228,7 @@ macro_rules! sql_storage_tests {
         async fn worker_consume() {
             use apalis_core::builder::WorkerBuilder;
             use apalis_core::builder::WorkerFactoryFn;
-            use apalis_core::executor::Executor;
             use std::future::Future;
-
-            #[derive(Debug, Clone)]
-            struct TokioTestExecutor;
-
-            impl Executor for TokioTestExecutor {
-                fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
-                    tokio::spawn(future);
-                }
-            }
-
             let storage = $setup().await;
             let mut handle = storage.clone();
 
@@ -254,8 +243,7 @@ macro_rules! sql_storage_tests {
             }
             let worker = WorkerBuilder::new("rango-tango").backend(storage);
             let worker = worker.build_fn(task);
-            let worker = worker.with_executor(TokioTestExecutor);
-            let w = worker.clone();
+            let wkr = worker.run();
 
             let runner = async move {
                 apalis_core::sleep(Duration::from_secs(3)).await;
@@ -269,10 +257,10 @@ macro_rules! sql_storage_tests {
                 assert!(ctx.lock_at().is_some());
                 assert!(ctx.last_error().is_some()); // TODO: rename last_error to last_result
 
-                w.stop();
+                // w.stop();
             };
 
-            let wkr = worker.run();
+            
             tokio::join!(runner, wkr);
         }
     };

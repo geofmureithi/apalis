@@ -45,8 +45,8 @@ async fn main() -> Result<(), std::io::Error> {
     produce_jobs(&mut sqlite).await;
 
     WorkerBuilder::new("tasty-banana")
-        .backend(sqlite)
         .concurrency(2)
+        .backend(sqlite)
         .build_fn(self_monitoring_task)
         .run()
         .await;

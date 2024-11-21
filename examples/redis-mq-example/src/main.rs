@@ -14,7 +14,7 @@ use futures::{channel::mpsc, SinkExt};
 use rsmq_async::{Rsmq, RsmqConnection, RsmqError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::time::sleep;
-use tracing::{error, info};
+use tracing::info;
 
 struct RedisMq<T, C = JsonCodec<Vec<u8>>> {
     conn: Rsmq,
@@ -178,23 +178,8 @@ async fn main() -> anyhow::Result<()> {
         .build_fn(send_email);
 
     Monitor::new()
-        .register_with_count(2, worker)
-        .on_event(|e| {
-            let worker_id = e.id();
-            match e.inner() {
-                Event::Start => {
-                    info!("Worker [{worker_id}] started");
-                }
-                Event::Error(e) => {
-                    error!("Worker [{worker_id}] encountered an error: {e}");
-                }
-
-                Event::Exit => {
-                    info!("Worker [{worker_id}] exited");
-                }
-                _ => {}
-            }
-        })
+        .register(worker)
+        .on_event(|e| info!("{e}"))
         .shutdown_timeout(Duration::from_millis(5000))
         .run_with_signal(async {
             tokio::signal::ctrl_c().await?;

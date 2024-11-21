@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
     produce_jobs(&mysql).await?;
 
     Monitor::new()
-        .register_with_count(1, {
+        .register({
             WorkerBuilder::new("tasty-avocado")
                 .enable_tracing()
                 .backend(mysql)

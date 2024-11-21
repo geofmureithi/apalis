@@ -44,14 +44,14 @@ async fn main() -> Result<()> {
     });
 
     Monitor::new()
-        .register_with_count(4, {
+        .register({
             WorkerBuilder::new("tasty-orange")
                 .enable_tracing()
                 .retry(RetryPolicy::retries(5))
                 .backend(pg)
                 .build_fn(send_email)
         })
-        .on_event(|e| debug!("{e:?}"))
+        .on_event(|e| debug!("{e}"))
         .run_with_signal(async {
             tokio::signal::ctrl_c().await?;
             info!("Shutting down the system");

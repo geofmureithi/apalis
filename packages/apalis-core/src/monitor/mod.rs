@@ -40,22 +40,20 @@ impl Monitor {
     /// Registers a single instance of a [Worker]
     pub fn register<Req, S, P, Res, Ctx>(mut self, mut worker: Worker<Ready<S, P>>) -> Self
     where
+        S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
         S::Future: Send,
-        S::Response: 'static + Send + Sync + Serialize,
+        S::Response: Send + Sync + Serialize + 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
+        P: Backend<Request<Req, Ctx>, Res> + Send + 'static,
         P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S> + Send,
-        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>, Response = Res>,
-        <P::Layer as Layer<S>>::Service: Send,
+        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>, Response = Res> + Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
-            Send + Into<BoxDynError> + Sync,
-        S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
-        Ctx: Send + Sync + 'static,
+            Send + Sync + Into<BoxDynError>,
         Req: Send + Sync + 'static,
-        P: Backend<Request<Req, Ctx>, Res> + 'static + Send,
-        Res: 'static,
         Ctx: Send + Sync + 'static,
+        Res: 'static,
     {
         worker.state.shutdown = Some(self.shutdown.clone());
         worker.state.event_handler = self.event_handler.clone();
@@ -73,30 +71,30 @@ impl Monitor {
     /// # Returns
     ///
     /// The monitor instance, with all workers added to the collection.
+    #[deprecated(
+        since = "0.6.0",
+        note = "Consider using the `.register` as workers now offer concurrency by default"
+    )]
     pub fn register_with_count<Req, S, P, Res, Ctx>(
         mut self,
         count: usize,
         worker: Worker<Ready<S, P>>,
     ) -> Self
     where
+        S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static + Clone,
         S::Future: Send,
-        S::Response: 'static + Send + Sync + Serialize,
+        S::Response: Send + Sync + Serialize + 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
+        P: Backend<Request<Req, Ctx>, Res> + Send + 'static + Clone,
         P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S> + Send,
-        P: Backend<Request<Req, Ctx>, Res> + 'static + Clone,
-        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>, Response = Res>,
-        <P::Layer as Layer<S>>::Service: Send,
+        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>, Response = Res> + Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
-            Send + Into<BoxDynError> + Sync,
-        S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
-        Ctx: Send + Sync + 'static,
+            Send + Sync + Into<BoxDynError>,
         Req: Send + Sync + 'static,
-        S: Service<Request<Req, Ctx>> + Send + 'static + Clone,
-        P: Backend<Request<Req, Ctx>, Res> + 'static + Send,
-        Res: 'static,
         Ctx: Send + Sync + 'static,
+        Res: 'static,
     {
         for index in 0..count {
             let mut worker = worker.clone();
