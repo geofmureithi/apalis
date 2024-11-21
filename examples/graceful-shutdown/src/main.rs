@@ -10,15 +10,14 @@ struct LongRunningJob {}
 
 async fn long_running_task(_task: LongRunningJob, worker_ctx: Data<Context>) {
     loop {
-        
-        info!("is_shutting_down: {}", worker_ctx.is_shutting_down(),);
+        info!("is_shutting_down: {}", worker_ctx.is_shutting_down());
         if worker_ctx.is_shutting_down() {
             info!("saving the job state");
             break;
         }
-        tokio::time::sleep(Duration::from_secs(1)).await; // Do some hard thing
+        tokio::time::sleep(Duration::from_secs(3)).await; // Do some hard thing
     }
-    info!("saving the job state");
+    info!("Shutdown complete!");
 }
 
 async fn produce_jobs(storage: &mut SqliteStorage<LongRunningJob>) {
@@ -39,10 +38,12 @@ async fn main() -> Result<(), std::io::Error> {
         .register({
             WorkerBuilder::new("tasty-banana")
                 .concurrency(2)
+                .enable_tracing()
                 .backend(sqlite)
                 .build_fn(long_running_task)
         })
-        // Wait 10 seconds after shutdown is triggered to allow any incomplete jobs to complete
+        .on_event(|e| info!("{e}"))
+        // Wait 5 seconds after shutdown is triggered to allow any incomplete jobs to complete
         .shutdown_timeout(Duration::from_secs(5))
         // Use .run() if you don't want without signals
         .run_with_signal(tokio::signal::ctrl_c()) // This will wait for ctrl+c then gracefully shutdown

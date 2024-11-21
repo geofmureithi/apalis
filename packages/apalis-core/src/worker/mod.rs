@@ -2,12 +2,16 @@ use crate::error::{BoxDynError, Error};
 use crate::layers::extensions::Data;
 use crate::monitor::shutdown::Shutdown;
 use crate::request::Request;
+use crate::task::task_id::TaskId;
 use crate::Backend;
+use futures::future::{join, select, BoxFuture};
+use futures::stream::BoxStream;
 use futures::{Future, FutureExt, Stream, StreamExt};
 use pin_project_lite::pin_project;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::fmt::{self, Display};
+use std::future::IntoFuture;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str::FromStr;
@@ -15,7 +19,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::task::{Context as TaskCtx, Poll, Waker};
 use thiserror::Error;
-use tower::{Layer, Service, ServiceBuilder, ServiceExt};
+use tower::util::CallAllUnordered;
+use tower::{Layer, Service, ServiceBuilder};
 
 /// A worker name wrapper usually used by Worker builder
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -61,15 +66,33 @@ pub enum Event {
     /// Worker started
     Start,
     /// Worker got a job
-    Engage,
+    Engage(TaskId),
     /// Worker is idle, stream has no new request for now
     Idle,
+    /// A custom event
+    Custom(String),
     /// Worker encountered an error
     Error(BoxDynError),
     /// Worker stopped
     Stop,
     /// Worker completed all pending tasks
     Exit,
+}
+
+impl fmt::Display for Worker<Event> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let event_description = match &self.state {
+            Event::Start => "Worker started".to_string(),
+            Event::Engage(task_id) => format!("Worker engaged with Task ID: {}", task_id),
+            Event::Idle => "Worker is idle".to_string(),
+            Event::Custom(msg) => format!("Custom event: {}", msg),
+            Event::Error(err) => format!("Worker encountered an error: {}", err),
+            Event::Stop => "Worker stopped".to_string(),
+            Event::Exit => "Worker completed all pending tasks and exited".to_string(),
+        };
+
+        write!(f, "Worker [{}]: {}", self.id.name, event_description)
+    }
 }
 
 /// Possible errors that can occur when starting a worker.
@@ -173,24 +196,27 @@ impl<T> DerefMut for Worker<T> {
     }
 }
 
-// impl WorkerRunner for
+impl Worker<Context> {
+    /// Allows workers to emit events
+    pub fn emit(&self, event: Event) -> bool {
+        if let Some(handler) = self.state.event_handler.read().unwrap().as_ref() {
+            handler(Worker {
+                id: self.id().clone(),
+                state: event,
+            });
+            return true;
+        }
+        false
+    }
+}
 
 impl<S, P> Worker<Ready<S, P>> {
-    fn emit(event_handler: &EventHandler, id: &WorkerId, event: Event) {
-        if let Some(handler) = event_handler.read().unwrap().as_ref() {
-            handler(Worker {
-                id: id.clone(),
-                state: event,
-            })
-        }
-    }
-
-    async fn poll_jobs<Svc, Stm, Req, Res, Ctx>(
+    fn poll_jobs<Svc, Stm, Req, Res, Ctx>(
         worker: Worker<Context>,
-        service: &mut Svc,
-        stream: &mut Stm,
-        event_handler: &EventHandler,
-    ) where
+        service: Svc,
+        stream: Stm,
+    ) -> BoxStream<'static, ()>
+    where
         Svc: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
         Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, Error>> + Send + Unpin + 'static,
         Req: Send + 'static + Sync,
@@ -200,42 +226,39 @@ impl<S, P> Worker<Ready<S, P>> {
         Ctx: Send + 'static + Sync,
         Res: 'static,
     {
-        match service.ready().await {
-            Ok(service) => match stream.next().await {
-                Some(Ok(Some(req))) => {
-                    let fut = service.call(req);
-                    let w = worker.clone();
-                    let event_handler = event_handler.clone();
-                    worker
-                        .track(fut.map(move |res| {
-                            if let Err(e) = res {
-                                let error = e.into();
-                                if let Some(Error::MissingData(_)) = error.downcast_ref::<Error>() {
-                                    w.stop();
-                                }
-                                Self::emit(&event_handler, w.id(), Event::Error(error));
-                            }
-                        }))
-                        .await;
+        let w = worker.clone();
+        let stream = stream.filter_map(move |result| {
+            let worker = worker.clone();
+
+            async move {
+                match result {
+                    Ok(Some(request)) => {
+                        worker.emit(Event::Engage(request.parts.task_id.clone()));
+                        Some(request)
+                    }
+                    Ok(None) => {
+                        worker.emit(Event::Idle);
+                        None
+                    }
+                    Err(err) => {
+                        worker.emit(Event::Error(Box::new(err)));
+                        None
+                    }
                 }
-                Some(Err(e)) => {
-                    Self::emit(&event_handler, worker.id(), Event::Error(Box::new(e)));
-                }
-                Some(Ok(None)) => {
-                    Self::emit(&event_handler, worker.id(), Event::Idle);
-                }
-                None => {
-                    // Self::emit(&event_handler, worker.id(), Event::Stop);
-                    // worker.stop();
-                }
-            },
-            Err(e) => {
-                Self::emit(&event_handler, worker.id(), Event::Error(e.into()));
             }
-        }
+        });
+        let stream = CallAllUnordered::new(service, stream).map(move |res| {
+            if let Err(error) = res {
+                if let Some(Error::MissingData(_)) = error.downcast_ref::<Error>() {
+                    w.stop();
+                }
+                w.emit(Event::Error(error));
+            }
+        });
+        stream.boxed()
     }
     /// Start a worker
-    pub async fn run<Req, Res, Ctx>(self)
+    pub fn run<Req, Res, Ctx>(self) -> Runnable
     where
         S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
         P: Backend<Request<Req, Ctx>, Res> + 'static,
@@ -258,6 +281,7 @@ impl<S, P> Worker<Ready<S, P>> {
             task_count: Arc::default(),
             wakers: Arc::default(),
             shutdown: self.state.shutdown,
+            event_handler: self.state.event_handler.clone(),
         };
         let worker = Worker {
             id: worker_id.clone(),
@@ -265,29 +289,83 @@ impl<S, P> Worker<Ready<S, P>> {
         };
         let backend = self.state.backend;
         let service = self.state.service;
-        let emitter = self.state.event_handler;
         let poller = backend.poll::<S>(worker_id.clone());
-        let mut stream = poller.stream;
-        let mut heartbeat = poller.heartbeat.fuse();
+        let stream = poller.stream;
+        let heartbeat = poller.heartbeat.boxed();
         let layer = poller.layer;
-        let mut service = ServiceBuilder::new()
+        let service = ServiceBuilder::new()
+            .layer(TrackerLayer::new(worker.state.clone()))
             .layer(Data::new(worker.id.clone()))
             .layer(Data::new(worker.state.clone()))
             .layer(layer)
             .service(service);
-        worker.running.store(true, Ordering::Relaxed);
-        let mut worker_run = ctx.fuse();
-        loop {
-            let w = worker.clone();
 
-            futures::select! {
-                _ = Self::poll_jobs(worker.clone(), &mut service, &mut stream, &emitter).fuse() => {}
-                _ = heartbeat => {}
-                _ = worker_run => {
-                    Self::emit(&emitter, w.id(), Event::Stop);
-                    break;
-                }
+        Runnable {
+            poller: Self::poll_jobs(worker.clone(), service, stream),
+            heartbeat,
+            worker,
+            running: false,
+        }
+    }
+}
+
+/// A `Runnable` represents a unit of work that manages a worker's lifecycle and execution flow.
+///
+/// The `Runnable` struct is responsible for coordinating the core tasks of a worker, such as polling for jobs,
+/// maintaining heartbeats, and tracking its running state. It integrates various components required for
+/// the worker to operate effectively within an asynchronous runtime.
+#[must_use = "A Runnable must be awaited of no jobs will be consumed"]
+pub struct Runnable {
+    poller: BoxStream<'static, ()>,
+    heartbeat: BoxFuture<'static, ()>,
+    worker: Worker<Context>,
+    running: bool,
+}
+
+impl fmt::Debug for Runnable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Runnable")
+            .field("poller", &"<stream>")
+            .field("heartbeat", &"<future>")
+            .field("worker", &self.worker)
+            .field("running", &self.running)
+            .finish()
+    }
+}
+
+impl Future for Runnable {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let poller = &mut this.poller;
+        let heartbeat = &mut this.heartbeat;
+        let worker = &mut this.worker;
+
+        let poller_future = async { while let Some(_) = poller.next().await {} };
+
+        if !this.running {
+            worker.running.store(true, Ordering::Relaxed);
+            this.running = true;
+            worker.emit(Event::Start);
+        }
+        let combined = Box::pin(join(poller_future, heartbeat.as_mut()));
+
+        let mut combined = select(
+            combined,
+            worker
+                .state
+                .clone()
+                .into_future()
+                .map(|_| worker.emit(Event::Stop)),
+        )
+        .boxed();
+        match Pin::new(&mut combined).poll(cx) {
+            Poll::Ready(_) => {
+                worker.emit(Event::Exit);
+                Poll::Ready(())
             }
+            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -299,6 +377,7 @@ pub struct Context {
     wakers: Arc<Mutex<Vec<Waker>>>,
     running: Arc<AtomicBool>,
     shutdown: Option<Shutdown>,
+    event_handler: EventHandler,
 }
 
 impl fmt::Debug for Context {
@@ -338,7 +417,7 @@ impl<F: Future> Future for Tracked<F> {
 
 impl Context {
     /// Start a task that is tracked by the worker
-    pub fn track<F: Future<Output = ()>>(&self, task: F) -> Tracked<F> {
+    pub fn track<F: Future>(&self, task: F) -> Tracked<F> {
         self.start_task();
         Tracked {
             ctx: self.clone(),
@@ -354,11 +433,9 @@ impl Context {
 
     fn start_task(&self) {
         self.task_count.fetch_add(1, Ordering::Relaxed);
-        dbg!(&self.task_count);
     }
 
     fn end_task(&self) {
-        dbg!(&self.task_count);
         if self.task_count.fetch_sub(1, Ordering::Relaxed) == 1 {
             self.wake();
         }
@@ -375,6 +452,11 @@ impl Context {
     /// Returns whether the worker is running
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
+    }
+
+    /// Returns whether the worker has pending tasks
+    pub fn has_pending_tasks(&self) -> bool {
+        self.task_count.load(Ordering::Relaxed) > 0
     }
 
     /// Is the shutdown token called
@@ -398,21 +480,57 @@ impl Future for Context {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut TaskCtx<'_>) -> Poll<()> {
-        let running = self.is_running();
         let task_count = self.task_count.load(Ordering::Relaxed);
-        dbg!(task_count, running);
-        if self.is_shutting_down() || !running {
-            if task_count == 0 {
-                self.stop();
-                Poll::Ready(())
-            } else {
-                self.add_waker(cx);
-                Poll::Pending
-            }
+        if self.is_shutting_down() && task_count == 0 {
+            Poll::Ready(())
         } else {
             self.add_waker(cx);
             Poll::Pending
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TrackerLayer {
+    ctx: Context,
+}
+
+impl TrackerLayer {
+    fn new(ctx: Context) -> Self {
+        Self { ctx }
+    }
+}
+
+impl<S> Layer<S> for TrackerLayer {
+    type Service = TrackerService<S>;
+
+    fn layer(&self, service: S) -> Self::Service {
+        TrackerService {
+            ctx: self.ctx.clone(),
+            service,
+        }
+    }
+}
+#[derive(Debug, Clone)]
+struct TrackerService<S> {
+    ctx: Context,
+    service: S,
+}
+
+impl<S, Req, Ctx> Service<Request<Req, Ctx>> for TrackerService<S>
+where
+    S: Service<Request<Req, Ctx>>,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = Tracked<S::Future>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
+        self.ctx.track(self.service.call(request))
     }
 }
 
@@ -474,9 +592,12 @@ mod tests {
             }
         }
 
-        async fn task(job: u32, count: Data<Count>) {
+        async fn task(job: u32, count: Data<Count>, worker: Data<Context>) {
             count.fetch_add(1, Ordering::Relaxed);
-            if job == ITEMS - 1 {}
+            if job == ITEMS - 1 {
+                // panic!("done");
+                worker.stop();
+            }
         }
         let worker = WorkerBuilder::new("rango-tango")
             .data(Count::default())

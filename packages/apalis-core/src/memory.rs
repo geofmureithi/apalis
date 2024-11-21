@@ -105,7 +105,7 @@ impl<T: Send + 'static + Sync, Res> Backend<Request<T, ()>, Res> for MemoryStora
         let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         Poller {
             stream: BackendStream::new(stream, self.controller),
-            heartbeat: Box::pin(async {}),
+            heartbeat: Box::pin(futures::future::pending()),
             layer: Identity::new(),
         }
     }

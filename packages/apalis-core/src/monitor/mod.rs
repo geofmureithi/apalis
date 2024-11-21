@@ -1,6 +1,5 @@
 use std::{
     fmt::{self, Debug, Formatter},
-    future::IntoFuture,
     sync::Arc,
 };
 
@@ -116,25 +115,39 @@ impl Monitor {
     /// # Errors
     ///
     /// If the monitor fails to shutdown gracefully, an `std::io::Error` will be returned.
+    ///
+    /// # Remarks
+    ///
+    /// If a timeout has been set using the `Monitor::shutdown_timeout` method, the monitor
+    /// will wait for all workers to complete up to the timeout duration before exiting.
+    /// If the timeout is reached and workers have not completed, the monitor will exit forcefully.
 
     pub async fn run_with_signal<S: Future<Output = std::io::Result<()>>>(
         self,
         signal: S,
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<()>
+    where
+        S: Send,
+    {
         let shutdown = self.shutdown.clone();
+        // let shutdown_future = self.shutdown.clone().boxed().map(|_| ());
+
         let shutdown_after = self.shutdown.shutdown_after(signal);
         if let Some(terminator) = self.terminator {
-            let shutdown_future = self.shutdown.boxed().map(|_| ());
-            futures::join!(
-                futures::future::join_all(self.workers).map(|_| ()),
-                shutdown_future,
-                shutdown_after,
-                shutdown,
-                terminator
-            );
+            let _res = futures::future::select(
+                futures::future::join_all(self.workers)
+                    .map(|_| shutdown.start_shutdown())
+                    .boxed(),
+                async {
+                    let _res = shutdown_after.await;
+                    terminator.await;
+                }
+                .boxed(),
+            )
+            .await;
         } else {
             let runner = self.run();
-            futures::join!(shutdown_after, runner, shutdown);
+            let _res = futures::join!(shutdown_after, runner); // If no terminator is provided, we wait for both the shutdown call and all workers to complete
         }
         Ok(())
     }
@@ -143,17 +156,16 @@ impl Monitor {
     ///
     /// # Errors
     ///
-    /// If the monitor fails to shutdown gracefully, an `std::io::Error` will be returned.
+    /// If the monitor fails to run gracefully, an `std::io::Error` will be returned.
     ///
     /// # Remarks
     ///
-    /// If a timeout has been set using the `shutdown_timeout` method, the monitor
-    /// will wait for all workers to complete up to the timeout duration before exiting.
-    /// If the timeout is reached and workers have not completed, the monitor will exit forcefully.
+    /// If all workers have completed execution, then by default the monitor will start a shutdown
     pub async fn run(self) -> std::io::Result<()> {
+        let shutdown = self.shutdown.clone();
         let shutdown_future = self.shutdown.boxed().map(|_| ());
         futures::join!(
-            futures::future::join_all(self.workers).map(|_| ()),
+            futures::future::join_all(self.workers).map(|_| shutdown.start_shutdown()),
             shutdown_future,
         );
 
@@ -232,7 +244,6 @@ mod tests {
         request::Request,
         test_message_queue,
         test_utils::TestWrapper,
-        TestExecutor,
     };
 
     test_message_queue!(MemoryStorage::new());
@@ -254,12 +265,12 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(backend)
             .build(service);
-        let monitor: Monitor<TestExecutor> = Monitor::new();
+        let monitor: Monitor = Monitor::new();
         let monitor = monitor.register(worker);
-        let shutdown = monitor.context.shutdown.clone();
+        let shutdown = monitor.shutdown.clone();
         tokio::spawn(async move {
             sleep(Duration::from_millis(1500)).await;
-            shutdown.shutdown();
+            shutdown.start_shutdown();
         });
         monitor.run().await.unwrap();
     }
@@ -280,16 +291,16 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(backend)
             .build(service);
-        let monitor: Monitor<TestExecutor> = Monitor::new();
+        let monitor: Monitor = Monitor::new();
         let monitor = monitor.on_event(|e| {
             println!("{e:?}");
         });
         let monitor = monitor.register_with_count(5, worker);
         assert_eq!(monitor.workers.len(), 5);
-        let shutdown = monitor.context.shutdown.clone();
+        let shutdown = monitor.shutdown.clone();
         tokio::spawn(async move {
             sleep(Duration::from_millis(1000)).await;
-            shutdown.shutdown();
+            shutdown.start_shutdown();
         });
 
         let result = monitor.run().await;

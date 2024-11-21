@@ -53,8 +53,6 @@ impl ShutdownCtx {
         }
     }
     fn shutdown(&self) {
-        dbg!("called shutdown");
-        // Set the shutdown state to true
         self.state.store(true, Ordering::Relaxed);
         self.wake();
     }

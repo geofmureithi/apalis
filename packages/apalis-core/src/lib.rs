@@ -159,16 +159,6 @@ pub mod interval {
     }
 }
 
-#[cfg(test)]
-#[doc(hidden)]
-#[derive(Debug, Default, Clone)]
-pub(crate) struct TestExecutor;
-#[cfg(test)]
-impl crate::executor::Executor for TestExecutor {
-    fn spawn(&self, future: impl futures::prelude::Future<Output = ()> + Send + 'static) {
-        tokio::spawn(future);
-    }
-}
 
 #[cfg(feature = "test-utils")]
 /// Test utilities that allows you to test backends
