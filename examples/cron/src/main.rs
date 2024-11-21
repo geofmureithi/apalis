@@ -37,9 +37,5 @@ async fn main() {
         .data(FakeService)
         .backend(CronStream::new(schedule))
         .build_fn(send_reminder);
-    Monitor::new()
-        .register(worker)
-        .run()
-        .await
-        .unwrap();
+    Monitor::new().register(worker).run().await.unwrap();
 }

@@ -159,7 +159,6 @@ pub mod interval {
     }
 }
 
-
 #[cfg(feature = "test-utils")]
 /// Test utilities that allows you to test backends
 pub mod test_utils {

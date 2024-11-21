@@ -144,6 +144,7 @@ pub trait WorkerBuilderExt<Req, Ctx, Source, Middleware, Serv> {
     /// Catch panics in execution and pipe them as errors
     #[cfg(feature = "catch-panic")]
     #[cfg_attr(docsrs, doc(cfg(feature = "catch-panic")))]
+    #[allow(clippy::type_complexity)]
     fn catch_panic(
         self,
     ) -> WorkerBuilder<

@@ -12,7 +12,6 @@ use pin_project_lite::pin_project;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::fmt::{self, Display};
-use std::future::IntoFuture;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str::FromStr;
@@ -363,7 +362,7 @@ impl Future for Runnable {
         let heartbeat = &mut this.heartbeat;
         let worker = &mut this.worker;
 
-        let poller_future = async { while let Some(_) = poller.next().await {} };
+        let poller_future = async { while (poller.next().await).is_some() {} };
 
         if !this.running {
             worker.running.store(true, Ordering::Relaxed);
@@ -374,11 +373,7 @@ impl Future for Runnable {
 
         let mut combined = select(
             combined,
-            worker
-                .state
-                .clone()
-                .into_future()
-                .map(|_| worker.emit(Event::Stop)),
+            worker.state.clone().map(|_| worker.emit(Event::Stop)),
         )
         .boxed();
         match Pin::new(&mut combined).poll(cx) {

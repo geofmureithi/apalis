@@ -260,7 +260,6 @@ macro_rules! sql_storage_tests {
                 // w.stop();
             };
 
-            
             tokio::join!(runner, wkr);
         }
     };

@@ -124,12 +124,9 @@ impl Monitor {
     /// will wait for all workers to complete up to the timeout duration before exiting.
     /// If the timeout is reached and workers have not completed, the monitor will exit forcefully.
 
-    pub async fn run_with_signal<S: Future<Output = std::io::Result<()>>>(
-        self,
-        signal: S,
-    ) -> std::io::Result<()>
+    pub async fn run_with_signal<S>(self, signal: S) -> std::io::Result<()>
     where
-        S: Send,
+        S: Send + Future<Output = std::io::Result<()>>,
     {
         let shutdown = self.shutdown.clone();
         let shutdown_after = self.shutdown.shutdown_after(signal);
@@ -188,7 +185,7 @@ impl Default for Monitor {
             futures: Vec::new(),
             terminator: None,
             event_handler: Arc::default(),
-            workers: Vec::new()
+            workers: Vec::new(),
         }
     }
 }

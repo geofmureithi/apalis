@@ -113,7 +113,7 @@ where
     type Error = RsmqError;
 
     async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
-        let bytes = C::encode(&Request::<Message, RedisMqContext>::new(message))
+        let bytes = C::encode(Request::<Message, RedisMqContext>::new(message))
             .map_err(Into::into)
             .unwrap();
         self.conn

@@ -240,7 +240,7 @@ where
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(raw)
-            .bind(&parts.task_id.to_string())
+            .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
             .execute(&self.pool)
             .await?;
