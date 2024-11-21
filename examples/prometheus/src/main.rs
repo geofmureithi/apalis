@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))
     };
     let monitor = async {
-        Monitor::<TokioExecutor>::new()
+        Monitor::new()
             .register({
                 WorkerBuilder::new("tasty-banana")
                     .layer(PrometheusLayer::default())

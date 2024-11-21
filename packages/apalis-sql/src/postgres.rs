@@ -27,8 +27,8 @@
 //!     // let query = "Select apalis.push_job('apalis::Email', json_build_object('subject', 'Test apalis', 'to', 'test1@example.com', 'text', 'Lorem Ipsum'));";
 //!     // pg.execute(query).await.unwrap();
 //!
-//!      Monitor::<TokioExecutor>::new()
-//!          .register_with_count(4, {
+//!      Monitor::new()
+//!          .register({
 //!              WorkerBuilder::new(&format!("tasty-avocado"))
 //!                  .data(0usize)
 //!                  .backend(pg)
@@ -432,7 +432,7 @@ where
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(args)
-            .bind(&req.parts.task_id.to_string())
+            .bind(req.parts.task_id.to_string())
             .bind(&job_type)
             .bind(&req.parts.context.max_attempts())
             .execute(&self.pool)

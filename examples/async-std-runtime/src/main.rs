@@ -1,15 +1,15 @@
-use std::{future::Future, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 
 use anyhow::Result;
 use apalis::{
-    layers::{retry::RetryLayer, retry::RetryPolicy, tracing::MakeSpan, tracing::TraceLayer},
+    layers::{retry::RetryPolicy, tracing::MakeSpan, tracing::TraceLayer},
     prelude::*,
 };
 use apalis_cron::{CronStream, Schedule};
 use chrono::{DateTime, Utc};
 use tracing::{debug, info, Instrument, Level, Span};
 
-type WorkerCtx = Data<Context<AsyncStdExecutor>>;
+type WorkerCtx = Worker<Context>;
 
 #[derive(Default, Debug, Clone)]
 struct Reminder(DateTime<Utc>);
@@ -26,7 +26,7 @@ async fn send_in_background(reminder: Reminder) {
 }
 async fn send_reminder(reminder: Reminder, worker: WorkerCtx) -> bool {
     // this will happen in the workers background and wont block the next tasks
-    worker.spawn(send_in_background(reminder).in_current_span());
+    async_std::task::spawn(worker.track(send_in_background(reminder).in_current_span()));
     false
 }
 
@@ -42,12 +42,12 @@ async fn main() -> Result<()> {
 
     let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
     let worker = WorkerBuilder::new("daily-cron-worker")
-        .layer(RetryLayer::new(RetryPolicy::retries(5)))
+        .retry(RetryPolicy::retries(5))
         .layer(TraceLayer::new().make_span_with(ReminderSpan::new()))
         .backend(CronStream::new(schedule))
         .build_fn(send_reminder);
 
-    Monitor::<AsyncStdExecutor>::new()
+    Monitor::new()
         .register(worker)
         .on_event(|e| debug!("Worker event: {e:?}"))
         .run_with_signal(async {
@@ -57,22 +57,6 @@ async fn main() -> Result<()> {
         })
         .await?;
     Ok(())
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct AsyncStdExecutor;
-
-impl AsyncStdExecutor {
-    /// A new async-std executor
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Executor for AsyncStdExecutor {
-    fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) {
-        async_std::task::spawn(fut);
-    }
 }
 
 #[derive(Debug, Clone)]

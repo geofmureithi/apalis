@@ -33,8 +33,6 @@ use worker::WorkerId;
 pub mod builder;
 /// Includes all possible error types.
 pub mod error;
-/// Represents an executor.
-pub mod executor;
 /// Represents middleware offered through [`tower`]
 pub mod layers;
 /// Represents monitoring of running workers
@@ -158,17 +156,6 @@ pub mod interval {
             drop(fut);
             Poll::Ready(Some(()))
         }
-    }
-}
-
-#[cfg(test)]
-#[doc(hidden)]
-#[derive(Debug, Default, Clone)]
-pub(crate) struct TestExecutor;
-#[cfg(test)]
-impl crate::executor::Executor for TestExecutor {
-    fn spawn(&self, future: impl futures::prelude::Future<Output = ()> + Send + 'static) {
-        tokio::spawn(future);
     }
 }
 

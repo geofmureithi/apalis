@@ -6,7 +6,7 @@ use std::time::Duration;
 use tracing_subscriber::prelude::*;
 
 use anyhow::Result;
-use apalis::layers::tracing::TraceLayer;
+
 use apalis::{layers::sentry::SentryLayer, prelude::*};
 use apalis_redis::RedisStorage;
 use email_service::Email;
@@ -132,12 +132,13 @@ async fn main() -> Result<()> {
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
-    Monitor::<TokioExecutor>::new()
-        .register_with_count(2, {
+    Monitor::new()
+        .register({
             WorkerBuilder::new("tasty-avocado")
                 .layer(NewSentryLayer::new_from_top())
                 .layer(SentryLayer::new())
-                .layer(TraceLayer::new())
+                .enable_tracing()
+                .concurrency(2)
                 .backend(storage.clone())
                 .build_fn(email_service)
         })

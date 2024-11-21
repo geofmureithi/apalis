@@ -96,7 +96,7 @@ impl<Req, M, Serv, Ctx> WorkerBuilder<Req, Ctx, (), M, Serv> {
     /// Allows adding multiple [`tower`] middleware
     pub fn chain<NewLayer>(
         self,
-        f: impl Fn(ServiceBuilder<M>) -> ServiceBuilder<NewLayer>,
+        f: impl FnOnce(ServiceBuilder<M>) -> ServiceBuilder<NewLayer>,
     ) -> WorkerBuilder<Req, Ctx, (), NewLayer, Serv> {
         let middleware = f(self.layer);
 

@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use apalis::{prelude::*, utils::TokioExecutor};
+use apalis::prelude::*;
 use apalis_sql::{
     context::SqlContext,
     sqlite::{SqlitePool, SqliteStorage},
@@ -19,18 +19,17 @@ struct SimpleJob {}
 
 // A task can have up to 16 arguments
 async fn simple_job(
-    _: SimpleJob,              // Required, must be of the type of the job/message
-    worker_id: Data<WorkerId>, // The worker running the job, added by worker
-    _worker_ctx: Data<Context<TokioExecutor>>, // The worker context, added by worker
+    _: SimpleJob,            // Required, must be of the type of the job/message
+    worker: Worker<Context>, // The worker and its context, added by worker
     _sqlite: Data<SqliteStorage<SimpleJob>>, // The source, added by storage
-    task_id: TaskId,           // The task id, added by storage
-    attempt: Attempt,          // The current attempt
-    ctx: SqlContext,           // The task context provided by the backend
-    count: Data<Count>,        // Our custom data added via layer
+    task_id: TaskId,         // The task id, added by storage
+    attempt: Attempt,        // The current attempt
+    ctx: SqlContext,         // The task context provided by the backend
+    count: Data<Count>,      // Our custom data added via layer
 ) {
     // increment the counter
     let current = count.fetch_add(1, Ordering::Relaxed);
-    info!("worker: {worker_id:?}; task_id: {task_id:?}, ctx: {ctx:?}, attempt:{attempt:?} count: {current:?}");
+    info!("worker: {worker:?}; task_id: {task_id:?}, ctx: {ctx:?}, attempt:{attempt:?} count: {current:?}");
 }
 
 async fn produce_jobs(storage: &mut SqliteStorage<SimpleJob>) {
@@ -59,11 +58,12 @@ async fn main() -> Result<(), std::io::Error> {
         .expect("unable to run migrations for sqlite");
     let mut sqlite: SqliteStorage<SimpleJob> = SqliteStorage::new(pool);
     produce_jobs(&mut sqlite).await;
-    Monitor::<TokioExecutor>::new()
-        .register_with_count(2, {
+    Monitor::new()
+        .register({
             WorkerBuilder::new("tasty-banana")
                 .data(Count::default())
                 .data(sqlite.clone())
+                .concurrency(2)
                 .backend(sqlite)
                 .build_fn(simple_job)
         })

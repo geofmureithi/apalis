@@ -4,7 +4,7 @@
 //! cd examples && cargo run -p axum-example
 //! ```
 use anyhow::Result;
-use apalis::layers::tracing::TraceLayer;
+
 use apalis::prelude::*;
 use apalis_redis::RedisStorage;
 use axum::{
@@ -73,10 +73,10 @@ async fn main() -> Result<()> {
             .map_err(|e| Error::new(std::io::ErrorKind::Interrupted, e))
     };
     let monitor = async {
-        Monitor::<TokioExecutor>::new()
+        Monitor::new()
             .register({
                 WorkerBuilder::new("tasty-pear")
-                    .layer(TraceLayer::new())
+                    .enable_tracing()
                     .backend(storage.clone())
                     .build_fn(send_email)
             })

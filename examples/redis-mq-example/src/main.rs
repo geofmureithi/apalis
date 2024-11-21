@@ -1,6 +1,6 @@
 use std::{fmt::Debug, marker::PhantomData, time::Duration};
 
-use apalis::{layers::tracing::TraceLayer, prelude::*};
+use apalis::prelude::*;
 
 use apalis_redis::{self, Config};
 
@@ -14,7 +14,7 @@ use futures::{channel::mpsc, SinkExt};
 use rsmq_async::{Rsmq, RsmqConnection, RsmqError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::time::sleep;
-use tracing::{error, info};
+use tracing::info;
 
 struct RedisMq<T, C = JsonCodec<Vec<u8>>> {
     conn: Rsmq,
@@ -113,7 +113,7 @@ where
     type Error = RsmqError;
 
     async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
-        let bytes = C::encode(&Request::<Message, RedisMqContext>::new(message))
+        let bytes = C::encode(Request::<Message, RedisMqContext>::new(message))
             .map_err(Into::into)
             .unwrap();
         self.conn
@@ -173,28 +173,13 @@ async fn main() -> anyhow::Result<()> {
     produce_jobs(&mut mq).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .layer(TraceLayer::new())
+        .enable_tracing()
         .backend(mq)
         .build_fn(send_email);
 
-    Monitor::<TokioExecutor>::new()
-        .register_with_count(2, worker)
-        .on_event(|e| {
-            let worker_id = e.id();
-            match e.inner() {
-                Event::Start => {
-                    info!("Worker [{worker_id}] started");
-                }
-                Event::Error(e) => {
-                    error!("Worker [{worker_id}] encountered an error: {e}");
-                }
-
-                Event::Exit => {
-                    info!("Worker [{worker_id}] exited");
-                }
-                _ => {}
-            }
-        })
+    Monitor::new()
+        .register(worker)
+        .on_event(|e| info!("{e}"))
         .shutdown_timeout(Duration::from_millis(5000))
         .run_with_signal(async {
             tokio::signal::ctrl_c().await?;

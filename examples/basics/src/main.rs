@@ -4,10 +4,7 @@ mod service;
 
 use std::{sync::Arc, time::Duration};
 
-use apalis::{
-    layers::{catch_panic::CatchPanicLayer, tracing::TraceLayer},
-    prelude::*,
-};
+use apalis::{layers::catch_panic::CatchPanicLayer, prelude::*};
 use apalis_sql::sqlite::{SqlitePool, SqliteStorage};
 
 use email_service::Email;
@@ -15,7 +12,7 @@ use layer::LogLayer;
 
 use tracing::{log::info, Instrument, Span};
 
-type WorkerCtx = Context<TokioExecutor>;
+type WorkerCtx = Context;
 
 use crate::{cache::ValidEmailCache, service::EmailService};
 
@@ -72,14 +69,16 @@ async fn send_email(
             // This can be important for starting long running jobs that don't block the queue
             // Its also possible to acquire context types and clone them into the futures context.
             // They will also be gracefully shutdown if [`Monitor`] has a shutdown signal
-            worker_ctx.spawn(
-                async move {
-                    if cache::fetch_validity(email_to, &cache_clone).await {
-                        svc.send(email).await;
-                        info!("Email added to cache")
+            tokio::spawn(
+                worker_ctx.track(
+                    async move {
+                        if cache::fetch_validity(email_to, &cache_clone).await {
+                            svc.send(email).await;
+                            info!("Email added to cache")
+                        }
                     }
-                }
-                .instrument(Span::current()), // Its still gonna use the jobs current tracing span. Important eg using sentry.
+                    .instrument(Span::current()),
+                ), // Its still gonna use the jobs current tracing span. Important eg using sentry.
             );
         }
 
@@ -102,10 +101,12 @@ async fn main() -> Result<(), std::io::Error> {
     let sqlite: SqliteStorage<Email> = SqliteStorage::new(pool);
     produce_jobs(&sqlite).await;
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register({
             WorkerBuilder::new("tasty-banana")
                 // This handles any panics that may occur in any of the layers below
+                // .catch_panic()
+                // Or just to customize
                 .layer(CatchPanicLayer::with_panic_handler(|e| {
                     let panic_info = if let Some(s) = e.downcast_ref::<&str>() {
                         s.to_string()
@@ -114,9 +115,10 @@ async fn main() -> Result<(), std::io::Error> {
                     } else {
                         "Unknown panic".to_string()
                     };
+                    // Abort tells the backend to kill job
                     Error::Abort(Arc::new(Box::new(PanicError::Panic(panic_info))))
                 }))
-                .layer(TraceLayer::new())
+                .enable_tracing()
                 .layer(LogLayer::new("some-log-example"))
                 // Add shared context to all jobs executed by this worker
                 .data(EmailService::new())

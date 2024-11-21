@@ -1,10 +1,8 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use apalis::layers::limit::{ConcurrencyLimitLayer, RateLimitLayer};
-use apalis::layers::tracing::TraceLayer;
 use apalis::layers::ErrorHandlingLayer;
-use apalis::{layers::TimeoutLayer, prelude::*};
+use apalis::prelude::*;
 use apalis_redis::RedisStorage;
 
 use email_service::{send_email, Email};
@@ -36,14 +34,14 @@ async fn main() -> Result<()> {
 
     let worker = WorkerBuilder::new("rango-tango")
         .layer(ErrorHandlingLayer::new())
-        .layer(TraceLayer::new())
-        .layer(RateLimitLayer::new(5, Duration::from_secs(1)))
-        .layer(TimeoutLayer::new(Duration::from_millis(500)))
-        .layer(ConcurrencyLimitLayer::new(2))
+        .enable_tracing()
+        .rate_limit(5, Duration::from_secs(1))
+        .timeout(Duration::from_millis(500))
+        .concurrency(2)
         .backend(storage)
         .build_fn(send_email);
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register(worker)
         .on_event(|e| {
             let worker_id = e.id();

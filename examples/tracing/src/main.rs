@@ -1,10 +1,6 @@
 use anyhow::Result;
-
-use apalis::layers::tracing::TraceLayer;
-use apalis::{
-    prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn},
-    utils::TokioExecutor,
-};
+use apalis::layers::WorkerBuilderExt;
+use apalis::prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn};
 use apalis_redis::RedisStorage;
 use std::error::Error;
 use std::fmt;
@@ -69,10 +65,10 @@ async fn main() -> Result<()> {
     //This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
-    Monitor::<TokioExecutor>::new()
+    Monitor::new()
         .register(
             WorkerBuilder::new("tasty-avocado")
-                .chain(|srv| srv.layer(TraceLayer::new()))
+                .enable_tracing()
                 .backend(storage)
                 .build_fn(email_service),
         )

@@ -90,8 +90,9 @@ async fn main() -> {
     let conn = apalis_redis::connect(redis_url).await.expect("Could not connect");
     let storage = RedisStorage::new(conn);
     Monitor::new()
-        .register_with_count(2, {
+        .register({
             WorkerBuilder::new(format!("email-worker"))
+                .concurrency(2)
                 .data(0usize)
                 .backend(storage)
                 .build_fn(send_email)

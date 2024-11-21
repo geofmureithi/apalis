@@ -45,11 +45,11 @@
 //! async fn main() {
 //!     let schedule = Schedule::from_str("@daily").unwrap();
 //!     let worker = WorkerBuilder::new("morning-cereal")
-//!         .layer(RetryLayer::new(RetryPolicy::retries(5)))
+//!         .retry(RetryPolicy::retries(5))
 //!         .data(FakeService)
 //!         .backend(CronStream::new(schedule))
 //!         .build_fn(send_reminder);
-//!     Monitor::<TokioExecutor>::new()
+//!     Monitor::new()
 //!         .register(worker)
 //!         .run()
 //!         .await

@@ -16,17 +16,19 @@ pub struct Shutdown {
 }
 
 impl Shutdown {
+    /// Create a new shutdown handle
     pub fn new() -> Shutdown {
         Shutdown {
             inner: Arc::new(ShutdownCtx::new()),
         }
     }
 
+    /// Set the future to await before shutting down
     pub fn shutdown_after<F: Future>(&self, f: F) -> impl Future<Output = F::Output> {
         let handle = self.clone();
         async move {
             let result = f.await;
-            handle.shutdown();
+            handle.start_shutdown();
             result
         }
     }
@@ -51,7 +53,6 @@ impl ShutdownCtx {
         }
     }
     fn shutdown(&self) {
-        // Set the shutdown state to true
         self.state.store(true, Ordering::Relaxed);
         self.wake();
     }
@@ -68,11 +69,13 @@ impl ShutdownCtx {
 }
 
 impl Shutdown {
+    /// Check if the system is shutting down
     pub fn is_shutting_down(&self) -> bool {
         self.inner.is_shutting_down()
     }
 
-    pub fn shutdown(&self) {
+    /// Start the shutdown process
+    pub fn start_shutdown(&self) {
         self.inner.shutdown()
     }
 }

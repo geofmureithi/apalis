@@ -35,9 +35,10 @@
 //!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
 //!     let conn = apalis_redis::connect(redis).await.unwrap();
 //!     let storage = RedisStorage::new(conn);
-//!     Monitor::<TokioExecutor>::new()
-//!         .register_with_count(2, {
+//!     Monitor::new()
+//!         .register({
 //!             WorkerBuilder::new(&format!("quick-sand"))
+//!                 .concurrency(2)
 //!                 .data(0usize)
 //!                 .backend(storage.clone())
 //!                 .build_fn(send_email)
@@ -65,49 +66,20 @@
 /// apalis fully supports middleware via [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html)
 pub mod layers;
 
-/// Utilities for working with apalis
-pub mod utils {
-    /// Executor for [`tokio`]
-    #[cfg(feature = "tokio-comp")]
-    #[derive(Clone, Debug, Default)]
-    pub struct TokioExecutor;
-
-    #[cfg(feature = "tokio-comp")]
-    impl apalis_core::executor::Executor for TokioExecutor {
-        fn spawn(&self, future: impl std::future::Future<Output = ()> + Send + 'static) {
-            tokio::spawn(future);
-        }
-    }
-
-    /// Executor for [`async_std`]
-    #[cfg(feature = "async-std-comp")]
-    #[derive(Clone, Debug, Default)]
-    pub struct AsyncStdExecutor;
-
-    #[cfg(feature = "async-std-comp")]
-    impl apalis_core::executor::Executor for AsyncStdExecutor {
-        fn spawn(&self, future: impl std::future::Future<Output = ()> + Send + 'static) {
-            async_std::task::spawn(future);
-        }
-    }
-}
-
 /// Common imports
 pub mod prelude {
-    #[cfg(feature = "tokio-comp")]
-    pub use crate::utils::TokioExecutor;
+    pub use crate::layers::WorkerBuilderExt;
     pub use apalis_core::{
         builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
         data::Extensions,
         error::{BoxDynError, Error},
-        executor::Executor,
         layers::extensions::{AddExtension, Data},
         memory::{MemoryStorage, MemoryWrapper},
-        monitor::{Monitor, MonitorContext},
+        monitor::Monitor,
         mq::MessageQueue,
         notify::Notify,
         poller::stream::BackendStream,
-        poller::{controller::Controller, FetchNext, Poller},
+        poller::{controller::Controller, Poller},
         request::{Request, RequestStream},
         response::IntoResponse,
         service_fn::{service_fn, FromRequest, ServiceFn},

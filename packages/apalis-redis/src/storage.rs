@@ -667,7 +667,7 @@ where
 
     async fn len(&mut self) -> Result<i64, RedisError> {
         let all_jobs: i64 = redis::cmd("HLEN")
-            .arg(&self.config.job_data_hash())
+            .arg(self.config.job_data_hash())
             .query_async(&mut self.conn)
             .await?;
         let done_jobs: i64 = redis::cmd("ZCOUNT")
@@ -684,7 +684,7 @@ where
         job_id: &TaskId,
     ) -> Result<Option<Request<Self::Job, RedisContext>>, RedisError> {
         let data: Value = redis::cmd("HMGET")
-            .arg(&self.config.job_data_hash())
+            .arg(self.config.job_data_hash())
             .arg(job_id.to_string())
             .query_async(&mut self.conn)
             .await?;
@@ -699,7 +699,7 @@ where
         let bytes = C::encode(&job)
             .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
         let _: i64 = redis::cmd("HSET")
-            .arg(&self.config.job_data_hash())
+            .arg(self.config.job_data_hash())
             .arg(task_id)
             .arg(bytes)
             .query_async(&mut self.conn)

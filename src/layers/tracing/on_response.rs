@@ -106,7 +106,7 @@ macro_rules! log_pattern_match {
                         Level::$level,
                         done_in = format_args!("{}s", $done_in.as_secs_f64()),
                         result = format_args!("{:?}", $res),
-                        "job.done"
+                        "task.done"
                     );
                 }
                 (Level::$level, LatencyUnit::Millis) => {
@@ -114,7 +114,7 @@ macro_rules! log_pattern_match {
                         Level::$level,
                         done_in = format_args!("{}ms", $done_in.as_millis()),
                         result = format_args!("{:?}", $res),
-                        "job.done"
+                        "task.done"
                     );
                 }
                 (Level::$level, LatencyUnit::Micros) => {
@@ -122,7 +122,7 @@ macro_rules! log_pattern_match {
                         Level::$level,
                         done_in = format_args!("{}μs", $done_in.as_micros()),
                         result = format_args!("{:?}", $res),
-                        "job.done"
+                        "task.done"
                     );
                 }
                 (Level::$level, LatencyUnit::Nanos) => {
@@ -130,7 +130,7 @@ macro_rules! log_pattern_match {
                         Level::$level,
                         done_in = format_args!("{}ns", $done_in.as_nanos()),
                         result = format_args!("{:?}", $res),
-                        "job.done"
+                        "task.done"
                     );
                 }
 
