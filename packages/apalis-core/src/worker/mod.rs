@@ -211,6 +211,14 @@ impl Worker<Context> {
 }
 
 impl<S, P> Worker<Ready<S, P>> {
+    /// Add an event handler to the worker
+    pub fn on_event<F: Fn(Worker<Event>) + Send + Sync + 'static>(self, f: F) -> Self {
+        let _ = self.event_handler.write().map(|mut res| {
+            let _ = res.insert(Box::new(f));
+        });
+        self
+    }
+    
     fn poll_jobs<Svc, Stm, Req, Res, Ctx>(
         worker: Worker<Context>,
         service: Svc,

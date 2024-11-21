@@ -28,7 +28,7 @@
 //!     // pg.execute(query).await.unwrap();
 //!
 //!      Monitor::new()
-//!          .register_with_count(4, {
+//!          .register({
 //!              WorkerBuilder::new(&format!("tasty-avocado"))
 //!                  .data(0usize)
 //!                  .backend(pg)

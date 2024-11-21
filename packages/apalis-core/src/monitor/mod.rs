@@ -293,8 +293,8 @@ mod tests {
         let monitor = monitor.on_event(|e| {
             println!("{e:?}");
         });
-        let monitor = monitor.register_with_count(5, worker);
-        assert_eq!(monitor.workers.len(), 5);
+        let monitor = monitor.register(worker);
+        assert_eq!(monitor.workers.len(), 1);
         let shutdown = monitor.shutdown.clone();
         tokio::spawn(async move {
             sleep(Duration::from_millis(1000)).await;

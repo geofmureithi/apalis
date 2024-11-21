@@ -48,6 +48,7 @@ async fn main() -> Result<(), std::io::Error> {
         .concurrency(2)
         .backend(sqlite)
         .build_fn(self_monitoring_task)
+        .on_event(|e| info!("{e}"))
         .run()
         .await;
     Ok(())
