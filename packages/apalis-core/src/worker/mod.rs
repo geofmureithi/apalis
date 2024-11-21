@@ -475,6 +475,12 @@ impl Context {
         self.running.load(Ordering::Relaxed)
     }
 
+    /// Returns the current futures in the worker domain
+    /// This include futures spawned via `worker.track`
+    pub fn task_count(&self) -> usize {
+        self.task_count.load(Ordering::Relaxed)
+    }
+
     /// Returns whether the worker has pending tasks
     pub fn has_pending_tasks(&self) -> bool {
         self.task_count.load(Ordering::Relaxed) > 0
