@@ -36,6 +36,9 @@ pub mod sqlite;
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;
 
+// Re-exports
+pub use sqlx;
+
 /// Config for sql storages
 #[derive(Debug, Clone)]
 pub struct Config {
