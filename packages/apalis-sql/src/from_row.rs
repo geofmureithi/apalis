@@ -10,7 +10,7 @@ use crate::context::SqlContext;
 /// Wrapper for [Request]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlRequest<T> {
-    // The inner request
+    /// The inner request
     pub req: Request<T, SqlContext>,
     pub(crate) _priv: (),
 }
@@ -82,7 +82,7 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
         parts.context = context;
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),
-            _priv: ()
+            _priv: (),
         })
     }
 }
@@ -146,7 +146,7 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
         parts.context = context;
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),
-            _priv: ()
+            _priv: (),
         })
     }
 }
@@ -209,7 +209,7 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
         parts.context = context;
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),
-            _priv: ()
+            _priv: (),
         })
     }
 }
