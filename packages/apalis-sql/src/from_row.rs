@@ -10,43 +10,15 @@ use crate::context::SqlContext;
 /// Wrapper for [Request]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlRequest<T> {
-    pub(crate) req: Request<T, SqlContext>,
+    // The inner request
+    pub req: Request<T, SqlContext>,
+    pub(crate) _priv: (),
 }
 
 impl<T> SqlRequest<T> {
     /// Creates a new SqlRequest.
     pub fn new(req: Request<T, SqlContext>) -> Self {
-        SqlRequest { req }
-    }
-
-    /// Gets a reference to the request.
-    pub fn req(&self) -> &T {
-        &self.req.args
-    }
-
-    /// Gets a mutable reference to the request.
-    pub fn req_mut(&mut self) -> &mut T {
-        &mut self.req.args
-    }
-
-    /// Sets the request.
-    pub fn set_req(&mut self, req: T) {
-        self.req.args = req;
-    }
-
-    /// Gets a reference to the context.
-    pub fn context(&self) -> &SqlContext {
-        &self.req.parts.context
-    }
-
-    /// Gets a mutable reference to the context.
-    pub fn context_mut(&mut self) -> &mut SqlContext {
-        &mut self.req.parts.context
-    }
-
-    /// Sets the context.
-    pub fn set_context(&mut self, context: SqlContext) {
-        self.req.parts.context = context;
+        SqlRequest { req, _priv: () }
     }
 }
 
@@ -110,6 +82,7 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
         parts.context = context;
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),
+            _priv: ()
         })
     }
 }
@@ -173,6 +146,7 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
         parts.context = context;
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),
+            _priv: ()
         })
     }
 }
@@ -235,6 +209,7 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
         parts.context = context;
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),
+            _priv: ()
         })
     }
 }
