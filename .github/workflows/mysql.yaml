@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mysql:
-        image: mysql:8
+        image: mysql:9
         env:
           MYSQL_DATABASE: test
           MYSQL_USER: test
