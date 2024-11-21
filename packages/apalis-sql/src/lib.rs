@@ -228,7 +228,6 @@ macro_rules! sql_storage_tests {
         async fn worker_consume() {
             use apalis_core::builder::WorkerBuilder;
             use apalis_core::builder::WorkerFactoryFn;
-            use std::future::Future;
             let storage = $setup().await;
             let mut handle = storage.clone();
 
@@ -245,6 +244,8 @@ macro_rules! sql_storage_tests {
             let worker = worker.build_fn(task);
             let wkr = worker.run();
 
+            let w = wkr.get_handle();
+
             let runner = async move {
                 apalis_core::sleep(Duration::from_secs(3)).await;
                 let job_id = &parts.task_id;
@@ -257,7 +258,7 @@ macro_rules! sql_storage_tests {
                 assert!(ctx.lock_at().is_some());
                 assert!(ctx.last_error().is_some()); // TODO: rename last_error to last_result
 
-                // w.stop();
+                w.stop();
             };
 
             tokio::join!(runner, wkr);
