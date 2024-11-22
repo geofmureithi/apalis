@@ -694,6 +694,8 @@ mod tests {
         // register a worker not responding since 6 minutes ago
         let worker_id = WorkerId::new("test-worker");
 
+        let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
+
         let six_minutes_ago = Utc::now() - Duration::from_secs(60 * 6);
 
         storage
@@ -708,7 +710,7 @@ mod tests {
         assert_eq!(*ctx.status(), State::Running);
 
         storage
-            .reenqueue_orphaned(1, six_minutes_ago)
+            .reenqueue_orphaned(1, five_minutes_ago)
             .await
             .unwrap();
 

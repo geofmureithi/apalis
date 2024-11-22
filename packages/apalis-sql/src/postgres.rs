@@ -803,11 +803,13 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
         let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
+        let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
+
         let worker_id = register_worker_at(&mut storage, six_minutes_ago.timestamp()).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         storage
-            .reenqueue_orphaned(1, six_minutes_ago)
+            .reenqueue_orphaned(1, five_minutes_ago)
             .await
             .expect("failed to heartbeat");
         let job_id = &job.parts.task_id;
