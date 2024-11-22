@@ -137,6 +137,8 @@ where
         let pool = self.pool.clone();
         let heartbeat = async move {
             let mut keep_alive_stm = apalis_core::interval::interval(config.keep_alive).fuse();
+            let mut reenqueue_orphaned_stm =
+                apalis_core::interval::interval(config.poll_interval).fuse();
             let mut ack_stream = ack_notify.clone().ready_chunks(config.buffer_size).fuse();
 
             let mut poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
@@ -219,6 +221,13 @@ where
                     _ = pg_notification.next() => {
                         if let Err(e) = fetch_next_batch(&mut self, &worker, &mut tx).await {
                             error!("PgNotificationError: {e}");
+                        }
+                    }
+                    _ = reenqueue_orphaned_stm.next() => {
+                        let dead_since = Utc::now()
+                            - chrono::Duration::from_std(config.reenqueue_orphaned_after).unwrap();
+                        if let Err(e) = self.reenqueue_orphaned((config.buffer_size * 10) as i32, dead_since).await {
+                            error!("ReenqueueOrphanedError: {}", e);
                         }
                     }
 
@@ -615,18 +624,27 @@ impl<T, C: Codec> PostgresStorage<T, C> {
     }
 
     /// Reenqueue jobs that have been abandoned by their workers
-    pub async fn reenqueue_orphaned(&mut self, count: i32) -> Result<(), sqlx::Error> {
+    pub async fn reenqueue_orphaned(
+        &mut self,
+        count: i32,
+        dead_since: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error> {
         let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
-        let query = "Update apalis.jobs
-                            SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ='Job was abandoned'
-                            WHERE id in
-                                (SELECT jobs.id from apalis.jobs INNER join apalis.workers ON lock_by = workers.id
-                                    WHERE status= 'Running' AND workers.last_seen < (NOW() - INTERVAL '300 seconds')
-                                    AND workers.worker_type = $1 ORDER BY lock_at ASC LIMIT $2);";
+        let query = "UPDATE apalis.jobs
+                            SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, last_error = 'Job was abandoned'
+                            WHERE id IN
+                                (SELECT jobs.id FROM apalis.jobs INNER JOIN apalis.workers ON lock_by = workers.id
+                                    WHERE status = 'Running' 
+                                    AND workers.last_seen < ($3::timestamp)
+                                    AND workers.worker_type = $1 
+                                    ORDER BY lock_at ASC 
+                                    LIMIT $2);";
+
         sqlx::query(query)
             .bind(job_type)
             .bind(count)
+            .bind(dead_since)
             .execute(&mut *tx)
             .await?;
         Ok(())
@@ -785,11 +803,13 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
         let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
+        let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
+
         let worker_id = register_worker_at(&mut storage, six_minutes_ago.timestamp()).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         storage
-            .reenqueue_orphaned(5)
+            .reenqueue_orphaned(1, five_minutes_ago)
             .await
             .expect("failed to heartbeat");
         let job_id = &job.parts.task_id;
@@ -800,7 +820,8 @@ mod tests {
         assert!(ctx.done_at().is_none());
         assert!(ctx.lock_by().is_none());
         assert!(ctx.lock_at().is_none());
-        assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_string()));
+        assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_owned()));
+        assert_eq!(job.parts.attempt.current(), 0); // TODO: update get_jobs to increase attempts
     }
 
     #[tokio::test]
@@ -810,6 +831,7 @@ mod tests {
         push_email(&mut storage, example_email()).await;
 
         let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
+        let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
 
         let worker_id = register_worker_at(&mut storage, four_minutes_ago.timestamp()).await;
 
@@ -818,15 +840,17 @@ mod tests {
 
         assert_eq!(*ctx.status(), State::Running);
         storage
-            .reenqueue_orphaned(5)
+            .reenqueue_orphaned(1, six_minutes_ago)
             .await
             .expect("failed to heartbeat");
 
         let job_id = &job.parts.task_id;
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.parts.context;
-
         assert_eq!(*ctx.status(), State::Running);
-        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
+        assert_eq!(*ctx.lock_by(), Some(worker_id));
+        assert!(ctx.lock_at().is_some());
+        assert_eq!(*ctx.last_error(), None);
+        assert_eq!(job.parts.attempt.current(), 0);
     }
 }

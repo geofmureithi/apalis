@@ -374,7 +374,7 @@ where
 impl<Req, Res, C> Backend<Request<Req, SqlContext>, Res> for MysqlStorage<Req, C>
 where
     Req: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
-    C: Debug + Codec<Compact = Value> + Clone + Send + 'static,
+    C: Debug + Codec<Compact = Value> + Clone + Send + 'static + Sync,
 {
     type Stream = BackendStream<RequestStream<Request<Req, SqlContext>>>;
 
@@ -387,6 +387,7 @@ where
         let pool = self.pool.clone();
         let ack_notify = self.ack_notify.clone();
         let mut hb_storage = self.clone();
+        let requeue_storage = self.clone();
         let stream = self
             .stream_jobs(&worker, config.poll_interval, config.buffer_size)
             .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
@@ -400,7 +401,7 @@ where
                 .await
             {
                 for (ctx, res) in ids {
-                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ?, attempts = ? WHERE id = ? AND lock_by = ?";
+                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ? WHERE id = ? AND lock_by = ?";
                     let query = sqlx::query(query);
                     let query = query
                         .bind(calculate_status(&res.inner).to_string())
@@ -408,7 +409,6 @@ where
                             serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string()))
                                 .unwrap(),
                         )
-                        .bind(res.attempt.current() as u64 + 1)
                         .bind(res.task_id.to_string())
                         .bind(ctx.lock_by().as_ref().unwrap().to_string());
                     if let Err(e) = query.execute(&pool).await {
@@ -429,10 +429,23 @@ where
                 apalis_core::sleep(config.keep_alive).await;
             }
         };
+        let reenqueue_beat = async move {
+            loop {
+                let dead_since = Utc::now()
+                    - chrono::Duration::from_std(config.reenqueue_orphaned_after).unwrap();
+                if let Err(e) = requeue_storage
+                    .reenqueue_orphaned(config.buffer_size.try_into().unwrap(), dead_since)
+                    .await
+                {
+                    error!("ReenqueueOrphaned failed: {e}");
+                }
+                apalis_core::sleep(config.poll_interval).await;
+            }
+        };
         Poller::new_with_layer(
             stream,
             async {
-                futures::join!(heartbeat, ack_heartbeat);
+                futures::join!(heartbeat, ack_heartbeat, reenqueue_beat);
             },
             layer,
         )
@@ -493,27 +506,22 @@ impl<T, C: Codec> MysqlStorage<T, C> {
     }
 
     /// Readd jobs that are abandoned to the queue
-    pub async fn reenqueue_orphaned(&self, timeout: i64) -> Result<bool, sqlx::Error> {
+    pub async fn reenqueue_orphaned(
+        &self,
+        count: i32,
+        dead_since: DateTime<Utc>,
+    ) -> Result<bool, sqlx::Error> {
         let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update jobs
                         INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
                         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
-        let now = Utc::now().timestamp();
-        let seconds_ago = DateTime::from_timestamp(now - timeout, 0).ok_or(sqlx::Error::Io(
-            io::Error::new(io::ErrorKind::InvalidData, "Invalid timeout"),
-        ))?;
 
         sqlx::query(query)
-            .bind(seconds_ago)
+            .bind(dead_since)
             .bind(job_type)
-            .bind::<i64>(
-                self.config
-                    .buffer_size
-                    .try_into()
-                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?,
-            )
+            .bind(count)
             .execute(&mut *tx)
             .await?;
         Ok(true)
@@ -686,6 +694,8 @@ mod tests {
         // register a worker not responding since 6 minutes ago
         let worker_id = WorkerId::new("test-worker");
 
+        let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
+
         let six_minutes_ago = Utc::now() - Duration::from_secs(60 * 6);
 
         storage
@@ -699,7 +709,10 @@ mod tests {
 
         assert_eq!(*ctx.status(), State::Running);
 
-        storage.reenqueue_orphaned(300).await.unwrap();
+        storage
+            .reenqueue_orphaned(1, five_minutes_ago)
+            .await
+            .unwrap();
 
         // then, the job status has changed to Pending
         let job = storage
@@ -707,12 +720,13 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let context = job.parts.context;
-        assert_eq!(*context.status(), State::Pending);
-        assert!(context.lock_by().is_none());
-        assert!(context.lock_at().is_none());
-        assert!(context.done_at().is_none());
-        assert_eq!(*context.last_error(), Some("Job was abandoned".to_string()));
+        let ctx = job.parts.context;
+        assert_eq!(*ctx.status(), State::Pending);
+        assert!(ctx.done_at().is_none());
+        assert!(ctx.lock_by().is_none());
+        assert!(ctx.lock_at().is_none());
+        assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_owned()));
+        assert_eq!(job.parts.attempt.current(), 1);
     }
 
     #[tokio::test]
@@ -727,6 +741,7 @@ mod tests {
 
         // register a worker responding at 4 minutes ago
         let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
+        let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
 
         let worker_id = WorkerId::new("test-worker");
         storage
@@ -741,7 +756,10 @@ mod tests {
         assert_eq!(*ctx.status(), State::Running);
 
         // heartbeat with ReenqueueOrpharned pulse
-        storage.reenqueue_orphaned(300).await.unwrap();
+        storage
+            .reenqueue_orphaned(1, six_minutes_ago)
+            .await
+            .unwrap();
 
         // then, the job status is not changed
         let job = storage
@@ -749,9 +767,11 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let context = job.parts.context;
-        // TODO: Fix assertions
-        assert_eq!(*context.status(), State::Running);
-        assert_eq!(*context.lock_by(), Some(worker_id.clone()));
+        let ctx = job.parts.context;
+        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.lock_by(), Some(worker_id));
+        assert!(ctx.lock_at().is_some());
+        assert_eq!(*ctx.last_error(), None);
+        assert_eq!(job.parts.attempt.current(), 1);
     }
 }

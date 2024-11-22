@@ -12,7 +12,7 @@ use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::channel::mpsc::{self, Sender};
 use futures::{select, FutureExt, SinkExt, StreamExt, TryFutureExt};
 use log::*;
@@ -114,6 +114,7 @@ pub struct Config {
     max_retries: usize,
     keep_alive: Duration,
     enqueue_scheduled: Duration,
+    reenqueue_orphaned_after: Duration,
     namespace: String,
 }
 
@@ -125,6 +126,7 @@ impl Default for Config {
             max_retries: 5,
             keep_alive: Duration::from_secs(30),
             enqueue_scheduled: Duration::from_secs(30),
+            reenqueue_orphaned_after: Duration::from_secs(300),
             namespace: String::from("apalis_redis"),
         }
     }
@@ -277,6 +279,25 @@ impl Config {
     pub fn signal_list(&self) -> String {
         SIGNAL_LIST.replace("{queue}", &self.namespace)
     }
+
+    /// Gets the reenqueue_orphaned_after duration.
+    pub fn reenqueue_orphaned_after(&self) -> Duration {
+        self.reenqueue_orphaned_after
+    }
+
+    /// Gets a mutable reference to the reenqueue_orphaned_after.
+    pub fn reenqueue_orphaned_after_mut(&mut self) -> &mut Duration {
+        &mut self.reenqueue_orphaned_after
+    }
+
+    /// Occasionally some workers die, or abandon jobs because of panics.
+    /// This is the time a task takes before its back to the queue
+    ///
+    /// Defaults to 5 minutes
+    pub fn set_reenqueue_orphaned_after(mut self, after: Duration) -> Self {
+        self.reenqueue_orphaned_after = after;
+        self
+    }
 }
 
 /// Represents a [Storage] that uses Redis for storage.
@@ -400,6 +421,9 @@ where
         let config = self.config.clone();
         let stream: RequestStream<Request<T, RedisContext>> = Box::pin(rx);
         let heartbeat = async move {
+            let mut reenqueue_orphaned_stm =
+                apalis_core::interval::interval(config.poll_interval).fuse();
+
             let mut keep_alive_stm = apalis_core::interval::interval(config.keep_alive).fuse();
 
             let mut enqueue_scheduled_stm =
@@ -446,6 +470,13 @@ where
                             if let Err(e) = self.ack(&ctx, &res).await {
                                 error!("AckError: {}", e);
                             }
+                        }
+                    }
+                    _ = reenqueue_orphaned_stm.next() => {
+                        let dead_since = Utc::now()
+                            - chrono::Duration::from_std(config.reenqueue_orphaned_after).unwrap();
+                        if let Err(e) = self.reenqueue_orphaned((config.buffer_size * 10) as i32, dead_since).await {
+                            error!("ReenqueueOrphanedError: {}", e);
                         }
                     }
                 };
@@ -875,16 +906,20 @@ where
             .invoke_async(&mut self.conn)
             .await
     }
-    /// Re-enqueue some jobs that might be orphaned.
+    /// Re-enqueue some jobs that might be orphaned after a number of seconds
     pub async fn reenqueue_orphaned(
         &mut self,
-        count: usize,
-        dead_since: i64,
+        count: i32,
+        dead_since: DateTime<Utc>,
     ) -> Result<usize, RedisError> {
         let reenqueue_orphaned = self.scripts.reenqueue_orphaned.clone();
         let consumers_set = self.config.consumers_set();
         let active_jobs_list = self.config.active_jobs_list();
         let signal_list = self.config.signal_list();
+
+        let now = Utc::now();
+        let duration = now.signed_duration_since(dead_since);
+        let dead_since = duration.num_seconds();
 
         let res: Result<usize, RedisError> = reenqueue_orphaned
             .key(consumers_set)
@@ -1043,11 +1078,21 @@ mod tests {
 
         let worker_id = register_worker_at(&mut storage).await;
 
-        let _job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker_id).await;
+        let dead_since = Utc::now() - chrono::Duration::from_std(Duration::from_secs(300)).unwrap();
         storage
-            .reenqueue_orphaned(5, 300)
+            .reenqueue_orphaned(1, dead_since)
             .await
             .expect("failed to reenqueue_orphaned");
+        let job = get_job(&mut storage, &job.parts.task_id).await;
+        let ctx = &job.parts.context;
+        // assert_eq!(*ctx.status(), State::Pending);
+        // assert!(ctx.done_at().is_none());
+        assert!(ctx.lock_by.is_none());
+        // assert!(ctx.lock_at().is_none());
+        // assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_owned()));
+        // TODO: Redis should store context aside
+        // assert_eq!(job.parts.attempt.current(), 1);
     }
 
     #[tokio::test]
@@ -1058,10 +1103,19 @@ mod tests {
 
         let worker_id = register_worker_at(&mut storage).await;
 
-        let _job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker_id).await;
+        let dead_since = Utc::now() - chrono::Duration::from_std(Duration::from_secs(300)).unwrap();
         storage
-            .reenqueue_orphaned(5, 300)
+            .reenqueue_orphaned(1, dead_since)
             .await
             .expect("failed to reenqueue_orphaned");
+        let job = get_job(&mut storage, &job.parts.task_id).await;
+        let _ctx = &job.parts.context;
+        // assert_eq!(*ctx.status(), State::Running);
+        // TODO: update redis context
+        // assert_eq!(ctx.lock_by, Some(worker_id));
+        // assert!(ctx.lock_at().is_some());
+        // assert_eq!(*ctx.last_error(), None);
+        assert_eq!(job.parts.attempt.current(), 0);
     }
 }
