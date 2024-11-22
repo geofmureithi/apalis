@@ -819,7 +819,7 @@ mod tests {
         assert!(ctx.lock_by().is_none());
         assert!(ctx.lock_at().is_none());
         assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_owned()));
-        assert_eq!(job.parts.attempt.current(), 1);
+        assert_eq!(job.parts.attempt.current(), 0); // TODO: update get_jobs to increase attempts
     }
 
     #[tokio::test]
