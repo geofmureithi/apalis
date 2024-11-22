@@ -1102,13 +1102,13 @@ mod tests {
 
         let worker_id = register_worker_at(&mut storage).await;
 
-        let _job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker_id).await;
         let dead_since = Utc::now() - chrono::Duration::from_std(Duration::from_secs(300)).unwrap();
         storage
             .reenqueue_orphaned(1, dead_since)
             .await
             .expect("failed to reenqueue_orphaned");
-        let job = get_job(&mut storage, job_id).await;
+        let job = get_job(&mut storage, &job.parts.task_id).await;
         let ctx = &job.parts.context;
         // assert_eq!(*ctx.status(), State::Running);
         assert_eq!(ctx.lock_by, Some(worker_id));
