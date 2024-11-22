@@ -401,7 +401,7 @@ where
                 .await
             {
                 for (ctx, res) in ids {
-                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ?, attempts = ? WHERE id = ? AND lock_by = ?";
+                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ? WHERE id = ? AND lock_by = ?";
                     let query = sqlx::query(query);
                     let query = query
                         .bind(calculate_status(&res.inner).to_string())
@@ -409,7 +409,6 @@ where
                             serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string()))
                                 .unwrap(),
                         )
-                        .bind(res.attempt.current() as u64 + 1)
                         .bind(res.task_id.to_string())
                         .bind(ctx.lock_by().as_ref().unwrap().to_string());
                     if let Err(e) = query.execute(&pool).await {
@@ -740,6 +739,7 @@ mod tests {
 
         // register a worker responding at 4 minutes ago
         let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
+        let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
 
         let worker_id = WorkerId::new("test-worker");
         storage
@@ -755,7 +755,7 @@ mod tests {
 
         // heartbeat with ReenqueueOrpharned pulse
         storage
-            .reenqueue_orphaned(1, four_minutes_ago)
+            .reenqueue_orphaned(1, six_minutes_ago)
             .await
             .unwrap();
 
@@ -766,7 +766,6 @@ mod tests {
             .unwrap()
             .unwrap();
         let ctx = job.parts.context;
-        // TODO: Fix assertions
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker_id));
         assert!(ctx.lock_at().is_some());
