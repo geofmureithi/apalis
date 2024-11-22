@@ -640,7 +640,7 @@ impl<T, C: Codec> PostgresStorage<T, C> {
                                     AND workers.worker_type = $1 
                                     ORDER BY lock_at ASC 
                                     LIMIT $2);";
-    
+
         sqlx::query(query)
             .bind(job_type)
             .bind(count)
