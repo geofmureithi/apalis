@@ -517,7 +517,7 @@ impl<T, C: Codec> MysqlStorage<T, C> {
         let query = r#"Update jobs
                         INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
-                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
+                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned", attempts = attempts + 1;"#;
 
         sqlx::query(query)
             .bind(dead_since)
@@ -709,7 +709,7 @@ mod tests {
         assert_eq!(*ctx.status(), State::Running);
 
         storage
-            .reenqueue_orphaned(5, six_minutes_ago)
+            .reenqueue_orphaned(1, six_minutes_ago)
             .await
             .unwrap();
 
@@ -719,12 +719,13 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let context = job.parts.context;
-        assert_eq!(*context.status(), State::Pending);
-        assert!(context.lock_by().is_none());
-        assert!(context.lock_at().is_none());
-        assert!(context.done_at().is_none());
-        assert_eq!(*context.last_error(), Some("Job was abandoned".to_string()));
+        let ctx = job.parts.context;
+        assert_eq!(*ctx.status(), State::Pending);
+        assert!(ctx.done_at().is_none());
+        assert!(ctx.lock_by().is_none());
+        assert!(ctx.lock_at().is_none());
+        assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_owned()));
+        assert_eq!(job.parts.attempt.current(), 1);
     }
 
     #[tokio::test]
@@ -754,7 +755,7 @@ mod tests {
 
         // heartbeat with ReenqueueOrpharned pulse
         storage
-            .reenqueue_orphaned(5, four_minutes_ago)
+            .reenqueue_orphaned(1, four_minutes_ago)
             .await
             .unwrap();
 
@@ -764,9 +765,12 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let context = job.parts.context;
+        let ctx = job.parts.context;
         // TODO: Fix assertions
-        assert_eq!(*context.status(), State::Running);
-        assert_eq!(*context.lock_by(), Some(worker_id.clone()));
+        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.lock_by(), Some(worker_id));
+        assert!(ctx.lock_at().is_some());
+        assert_eq!(*ctx.last_error(), None);
+        assert_eq!(job.parts.attempt.current(), 0);
     }
 }

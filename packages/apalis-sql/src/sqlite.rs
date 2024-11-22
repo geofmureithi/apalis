@@ -432,14 +432,14 @@ impl<T> SqliteStorage<T> {
         let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update Jobs
-                            SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
+                            SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned", attempts = attempts + 1
                             WHERE id in
                                 (SELECT Jobs.id from Jobs INNER join Workers ON lock_by = Workers.id
                                     WHERE status= "Running" AND workers.last_seen < ?1
                                     AND Workers.worker_type = ?2 ORDER BY lock_at ASC LIMIT ?3);"#;
 
         sqlx::query(query)
-            .bind(dead_since)
+            .bind(dead_since.timestamp())
             .bind(job_type)
             .bind(count)
             .execute(&mut *tx)
@@ -680,21 +680,23 @@ mod tests {
 
         let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
 
+        let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
         let worker_id = register_worker_at(&mut storage, six_minutes_ago.timestamp()).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         let job_id = &job.parts.task_id;
         storage
-            .reenqueue_orphaned(5, six_minutes_ago)
+            .reenqueue_orphaned(1, five_minutes_ago)
             .await
             .expect("failed to heartbeat");
         let job = get_job(&mut storage, job_id).await;
         let ctx = &job.parts.context;
-        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.status(), State::Pending);
         assert!(ctx.done_at().is_none());
-        assert!(ctx.lock_by().is_some());
-        assert!(ctx.lock_at().is_some());
-        assert_eq!(*ctx.last_error(), None);
+        assert!(ctx.lock_by().is_none());
+        assert!(ctx.lock_at().is_none());
+        assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_owned()));
+        assert_eq!(job.parts.attempt.current(), 1);
     }
 
     #[tokio::test]
@@ -703,13 +705,14 @@ mod tests {
 
         push_email(&mut storage, example_good_email()).await;
 
+        let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
         let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
         let worker_id = register_worker_at(&mut storage, four_minutes_ago.timestamp()).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
         let job_id = &job.parts.task_id;
         storage
-            .reenqueue_orphaned(5, four_minutes_ago)
+            .reenqueue_orphaned(1, six_minutes_ago)
             .await
             .expect("failed to heartbeat");
 
@@ -717,5 +720,8 @@ mod tests {
         let ctx = &job.parts.context;
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker_id));
+        assert!(ctx.lock_at().is_some());
+        assert_eq!(*ctx.last_error(), None);
+        assert_eq!(job.parts.attempt.current(), 0);
     }
 }
