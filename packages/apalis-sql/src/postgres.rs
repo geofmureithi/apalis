@@ -632,7 +632,7 @@ impl<T, C: Codec> PostgresStorage<T, C> {
         let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = "UPDATE apalis.jobs
-                            SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, last_error = 'Job was abandoned', attempts = attempts + 1
+                            SET status = 'Pending', done_at = NULL, lock_by = NULL, lock_at = NULL, last_error = 'Job was abandoned'
                             WHERE id IN
                                 (SELECT jobs.id FROM apalis.jobs INNER JOIN apalis.workers ON lock_by = workers.id
                                     WHERE status = 'Running' 

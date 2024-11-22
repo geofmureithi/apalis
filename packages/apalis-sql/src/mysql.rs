@@ -516,7 +516,7 @@ impl<T, C: Codec> MysqlStorage<T, C> {
         let query = r#"Update jobs
                         INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
-                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned", attempts = attempts + 1;"#;
+                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
 
         sqlx::query(query)
             .bind(dead_since)
@@ -770,6 +770,6 @@ mod tests {
         assert_eq!(*ctx.lock_by(), Some(worker_id));
         assert!(ctx.lock_at().is_some());
         assert_eq!(*ctx.last_error(), None);
-        assert_eq!(job.parts.attempt.current(), 0);
+        assert_eq!(job.parts.attempt.current(), 1);
     }
 }

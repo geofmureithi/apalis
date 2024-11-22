@@ -158,7 +158,7 @@ async fn fetch_next(
     config: &Config,
 ) -> Result<Option<SqlRequest<String>>, sqlx::Error> {
     let now: i64 = Utc::now().timestamp();
-    let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
+    let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3, attempts = attempts + 1 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
     let job: Option<SqlRequest<String>> = sqlx::query_as(update_query)
         .bind(id.to_string())
         .bind(worker_id.to_string())
@@ -432,7 +432,7 @@ impl<T> SqliteStorage<T> {
         let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update Jobs
-                            SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned", attempts = attempts + 1
+                            SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
                             WHERE id in
                                 (SELECT Jobs.id from Jobs INNER join Workers ON lock_by = Workers.id
                                     WHERE status= "Running" AND workers.last_seen < ?1
@@ -502,7 +502,7 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let query =
-                "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3, attempts =?5 WHERE id = ?1 AND lock_by = ?2";
+                "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
         let result = serde_json::to_string(&res.inner.as_ref().map_err(|r| r.to_string()))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         sqlx::query(query)
@@ -510,7 +510,6 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
             .bind(ctx.lock_by().as_ref().unwrap().to_string())
             .bind(result)
             .bind(calculate_status(&res.inner).to_string())
-            .bind(res.attempt.current() as i64 + 1)
             .execute(&pool)
             .await?;
         Ok(())
@@ -722,6 +721,6 @@ mod tests {
         assert_eq!(*ctx.lock_by(), Some(worker_id));
         assert!(ctx.lock_at().is_some());
         assert_eq!(*ctx.last_error(), None);
-        assert_eq!(job.parts.attempt.current(), 0);
+        assert_eq!(job.parts.attempt.current(), 1);
     }
 }
