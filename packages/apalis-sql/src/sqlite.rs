@@ -14,8 +14,9 @@ use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::WorkerId;
 use apalis_core::{Backend, Codec};
 use async_stream::try_stream;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{Pool, Row, Sqlite};
 use std::any::type_name;
@@ -423,7 +424,11 @@ impl<T> SqliteStorage<T> {
     }
 
     /// Add jobs that workers have disappeared to the queue
-    pub async fn reenqueue_orphaned(&self, timeout: i64) -> Result<(), sqlx::Error> {
+    pub async fn reenqueue_orphaned(
+        &self,
+        count: i32,
+        dead_since: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error> {
         let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update Jobs
@@ -434,9 +439,9 @@ impl<T> SqliteStorage<T> {
                                     AND Workers.worker_type = ?2 ORDER BY lock_at ASC LIMIT ?3);"#;
 
         sqlx::query(query)
-            .bind(timeout)
+            .bind(dead_since)
             .bind(job_type)
-            .bind::<u32>(self.config.buffer_size.try_into().unwrap())
+            .bind(count)
             .execute(&mut *tx)
             .await?;
         Ok(())
@@ -457,6 +462,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
             .stream_jobs(&worker, config.poll_interval, config.buffer_size)
             .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
+        let requeue_storage = self.clone();
         let heartbeat = async move {
             loop {
                 let now: i64 = Utc::now().timestamp();
@@ -467,7 +473,26 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
             }
         }
         .boxed();
-        Poller::new_with_layer(stream, heartbeat, layer)
+        let reenqueue_beat = async move {
+            loop {
+                let dead_since = Utc::now()
+                    - chrono::Duration::from_std(config.reenqueue_orphaned_after).unwrap();
+                if let Err(e) = requeue_storage
+                    .reenqueue_orphaned(config.buffer_size.try_into().unwrap(), dead_since)
+                    .await
+                {
+                    error!("ReenqueueOrphaned failed: {e}");
+                }
+                apalis_core::sleep(config.poll_interval).await;
+            }
+        };
+        Poller::new_with_layer(
+            stream,
+            async {
+                futures::join!(heartbeat, reenqueue_beat);
+            },
+            layer,
+        )
     }
 }
 
@@ -660,7 +685,7 @@ mod tests {
         let job = consume_one(&mut storage, &worker_id).await;
         let job_id = &job.parts.task_id;
         storage
-            .reenqueue_orphaned(six_minutes_ago.timestamp())
+            .reenqueue_orphaned(5, six_minutes_ago)
             .await
             .expect("failed to heartbeat");
         let job = get_job(&mut storage, job_id).await;
@@ -684,7 +709,7 @@ mod tests {
         let job = consume_one(&mut storage, &worker_id).await;
         let job_id = &job.parts.task_id;
         storage
-            .reenqueue_orphaned(four_minutes_ago.timestamp())
+            .reenqueue_orphaned(5, four_minutes_ago)
             .await
             .expect("failed to heartbeat");
 

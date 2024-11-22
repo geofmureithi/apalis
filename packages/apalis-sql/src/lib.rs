@@ -45,6 +45,7 @@ pub struct Config {
     keep_alive: Duration,
     buffer_size: usize,
     poll_interval: Duration,
+    reenqueue_orphaned_after: Duration,
     namespace: String,
 }
 
@@ -54,6 +55,7 @@ impl Default for Config {
             keep_alive: Duration::from_secs(30),
             buffer_size: 10,
             poll_interval: Duration::from_millis(100),
+            reenqueue_orphaned_after: Duration::from_secs(300), // 5 minutes
             namespace: String::from("apalis::sql"),
         }
     }
@@ -131,6 +133,26 @@ impl Config {
     pub fn namespace_mut(&mut self) -> &mut String {
         &mut self.namespace
     }
+
+    /// Gets the reenqueue_orphaned_after duration.
+    pub fn reenqueue_orphaned_after(&self) -> Duration {
+        self.reenqueue_orphaned_after
+    }
+
+    /// Gets a mutable reference to the reenqueue_orphaned_after.
+    pub fn reenqueue_orphaned_after_mut(&mut self) -> &mut Duration {
+        &mut self.reenqueue_orphaned_after
+    }
+
+    /// Occasionally some workers die, or abandon jobs because of panics. 
+    /// This is the time a task takes before its back to the queue
+    ///
+    /// Defaults to 5 minutes
+    pub fn set_reenqueue_orphaned_after(mut self, after: Duration) -> Self {
+        self.reenqueue_orphaned_after = after;
+        self
+    }
+
 }
 
 /// Calculates the status from a result

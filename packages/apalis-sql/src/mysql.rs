@@ -374,7 +374,7 @@ where
 impl<Req, Res, C> Backend<Request<Req, SqlContext>, Res> for MysqlStorage<Req, C>
 where
     Req: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
-    C: Debug + Codec<Compact = Value> + Clone + Send + 'static,
+    C: Debug + Codec<Compact = Value> + Clone + Send + 'static + Sync,
 {
     type Stream = BackendStream<RequestStream<Request<Req, SqlContext>>>;
 
@@ -387,6 +387,7 @@ where
         let pool = self.pool.clone();
         let ack_notify = self.ack_notify.clone();
         let mut hb_storage = self.clone();
+        let requeue_storage = self.clone();
         let stream = self
             .stream_jobs(&worker, config.poll_interval, config.buffer_size)
             .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
@@ -429,10 +430,23 @@ where
                 apalis_core::sleep(config.keep_alive).await;
             }
         };
+        let reenqueue_beat = async move {
+            loop {
+                let dead_since = Utc::now()
+                    - chrono::Duration::from_std(config.reenqueue_orphaned_after).unwrap();
+                if let Err(e) = requeue_storage
+                    .reenqueue_orphaned(config.buffer_size.try_into().unwrap(), dead_since)
+                    .await
+                {
+                    error!("ReenqueueOrphaned failed: {e}");
+                }
+                apalis_core::sleep(config.poll_interval).await;
+            }
+        };
         Poller::new_with_layer(
             stream,
             async {
-                futures::join!(heartbeat, ack_heartbeat);
+                futures::join!(heartbeat, ack_heartbeat, reenqueue_beat);
             },
             layer,
         )
@@ -493,27 +507,22 @@ impl<T, C: Codec> MysqlStorage<T, C> {
     }
 
     /// Readd jobs that are abandoned to the queue
-    pub async fn reenqueue_orphaned(&self, timeout: i64) -> Result<bool, sqlx::Error> {
+    pub async fn reenqueue_orphaned(
+        &self,
+        count: i32,
+        dead_since: DateTime<Utc>,
+    ) -> Result<bool, sqlx::Error> {
         let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update jobs
                         INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
                         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
-        let now = Utc::now().timestamp();
-        let seconds_ago = DateTime::from_timestamp(now - timeout, 0).ok_or(sqlx::Error::Io(
-            io::Error::new(io::ErrorKind::InvalidData, "Invalid timeout"),
-        ))?;
 
         sqlx::query(query)
-            .bind(seconds_ago)
+            .bind(dead_since)
             .bind(job_type)
-            .bind::<i64>(
-                self.config
-                    .buffer_size
-                    .try_into()
-                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?,
-            )
+            .bind(count)
             .execute(&mut *tx)
             .await?;
         Ok(true)
@@ -699,7 +708,10 @@ mod tests {
 
         assert_eq!(*ctx.status(), State::Running);
 
-        storage.reenqueue_orphaned(300).await.unwrap();
+        storage
+            .reenqueue_orphaned(5, six_minutes_ago)
+            .await
+            .unwrap();
 
         // then, the job status has changed to Pending
         let job = storage
@@ -741,7 +753,10 @@ mod tests {
         assert_eq!(*ctx.status(), State::Running);
 
         // heartbeat with ReenqueueOrpharned pulse
-        storage.reenqueue_orphaned(300).await.unwrap();
+        storage
+            .reenqueue_orphaned(5, four_minutes_ago)
+            .await
+            .unwrap();
 
         // then, the job status is not changed
         let job = storage
