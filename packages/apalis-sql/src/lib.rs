@@ -144,7 +144,7 @@ impl Config {
         &mut self.reenqueue_orphaned_after
     }
 
-    /// Occasionally some workers die, or abandon jobs because of panics. 
+    /// Occasionally some workers die, or abandon jobs because of panics.
     /// This is the time a task takes before its back to the queue
     ///
     /// Defaults to 5 minutes
@@ -152,7 +152,6 @@ impl Config {
         self.reenqueue_orphaned_after = after;
         self
     }
-
 }
 
 /// Calculates the status from a result
