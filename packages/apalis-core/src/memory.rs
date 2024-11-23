@@ -107,6 +107,7 @@ impl<T: Send + 'static + Sync, Res> Backend<Request<T, ()>, Res> for MemoryStora
             stream: BackendStream::new(stream, self.controller),
             heartbeat: Box::pin(futures::future::pending()),
             layer: Identity::new(),
+            _priv: (),
         }
     }
 }
