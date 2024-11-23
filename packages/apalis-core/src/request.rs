@@ -116,6 +116,7 @@ impl<T, Res, Ctx> Backend<Request<T, Ctx>, Res> for RequestStream<Request<T, Ctx
             stream: self,
             heartbeat: Box::pin(futures::future::pending()),
             layer: Identity::new(),
+            _priv: ()
         }
     }
 }

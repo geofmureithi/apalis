@@ -9,19 +9,19 @@ pub mod stream;
 
 /// A poller type that allows fetching from a stream and a heartbeat future that can be used to do periodic tasks
 pub struct Poller<S, L = Identity> {
-    pub(crate) stream: S,
-    pub(crate) heartbeat: BoxFuture<'static, ()>,
-    pub(crate) layer: L,
+    /// The stream of jobs
+    pub stream: S,
+    /// The heartbeat for the backend
+    pub heartbeat: BoxFuture<'static, ()>,
+    /// The tower middleware provided by the backend
+    pub layer: L,
+    pub(crate) _priv: (),
 }
 
 impl<S> Poller<S, Identity> {
     /// Build a new poller
     pub fn new(stream: S, heartbeat: impl Future<Output = ()> + Send + 'static) -> Self {
-        Self {
-            stream,
-            heartbeat: heartbeat.boxed(),
-            layer: Identity::new(),
-        }
+        Self::new_with_layer(stream, heartbeat, Identity::new())
     }
 
     /// Build a poller with layer
@@ -34,6 +34,7 @@ impl<S> Poller<S, Identity> {
             stream,
             heartbeat: heartbeat.boxed(),
             layer,
+            _priv: ()
         }
     }
 }

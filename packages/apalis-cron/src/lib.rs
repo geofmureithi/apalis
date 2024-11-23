@@ -57,17 +57,25 @@
 //! }
 //! ```
 
+use apalis_core::error::BoxDynError;
 use apalis_core::layers::Identity;
+use apalis_core::mq::MessageQueue;
 use apalis_core::poller::Poller;
 use apalis_core::request::RequestStream;
+use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::worker::{Context, Worker};
 use apalis_core::Backend;
 use apalis_core::{error::Error, request::Request};
 use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
+use futures::StreamExt;
+use pipe::CronPipe;
 use std::marker::PhantomData;
 use std::sync::Arc;
+
+/// Allows piping of cronjobs to a Storage or MessageQueue
+pub mod pipe;
 
 /// Represents a stream from a cron schedule with a timezone
 #[derive(Clone, Debug)]
@@ -132,6 +140,66 @@ where
             }
         };
         Box::pin(stream)
+    }
+
+    /// Push cron job events to a storage and get a consumable Backend
+    pub fn pipe_to_storage<S, Ctx>(self, storage: S) -> CronPipe<S>
+    where
+        S: Storage<Job = Req, Context = Ctx> + Clone + Send + Sync + 'static,
+        S::Error: std::error::Error + Send + Sync + 'static,
+    {
+        let stream = self
+            .into_stream()
+            .then({
+                let storage = storage.clone();
+                move |res| {
+                    let mut storage = storage.clone();
+                    async move {
+                        match res {
+                            Ok(Some(req)) => storage
+                                .push(req.args)
+                                .await
+                                .map(|_| ())
+                                .map_err(|e| Box::new(e) as BoxDynError),
+                            _ => Ok(()),
+                        }
+                    }
+                }
+            })
+            .boxed();
+
+        CronPipe {
+            stream,
+            inner: storage,
+        }
+    }
+    /// Push cron job events to a message queue and get a consumable Backend
+    pub fn pipe_to_mq<Mq>(self, mq: Mq) -> CronPipe<Mq>
+    where
+        Mq: MessageQueue<Req> + Clone + Send + Sync + 'static,
+        Mq::Error: std::error::Error + Send + Sync + 'static,
+    {
+        let stream = self
+            .into_stream()
+            .then({
+                let mq = mq.clone();
+                move |res| {
+                    let mut mq = mq.clone();
+                    async move {
+                        match res {
+                            Ok(Some(req)) => mq
+                                .enqueue(req.args)
+                                .await
+                                .map(|_| ())
+                                .map_err(|e| Box::new(e) as BoxDynError),
+                            _ => Ok(()),
+                        }
+                    }
+                }
+            })
+            .boxed();
+
+        CronPipe { stream, inner: mq }
     }
 }
 
