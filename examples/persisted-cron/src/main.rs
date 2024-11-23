@@ -10,7 +10,6 @@ use serde::Serialize;
 use std::str::FromStr;
 use std::time::Duration;
 
-
 #[derive(Clone)]
 struct FakeService;
 impl FakeService {
@@ -47,7 +46,7 @@ async fn main() {
     let sqlite = SqliteStorage::new(pool);
 
     let backend = cron_stream.pipe_to_storage(sqlite);
-    
+
     let worker = WorkerBuilder::new("morning-cereal")
         .enable_tracing()
         .rate_limit(1, Duration::from_secs(2))

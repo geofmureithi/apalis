@@ -34,7 +34,7 @@ impl<S> Poller<S, Identity> {
             stream,
             heartbeat: heartbeat.boxed(),
             layer,
-            _priv: ()
+            _priv: (),
         }
     }
 }
