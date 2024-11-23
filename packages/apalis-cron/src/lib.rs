@@ -57,11 +57,11 @@
 //! }
 //! ```
 
-use apalis_core::worker::{Context, Worker};
 use apalis_core::layers::Identity;
 use apalis_core::poller::Poller;
 use apalis_core::request::RequestStream;
 use apalis_core::task::namespace::Namespace;
+use apalis_core::worker::{Context, Worker};
 use apalis_core::Backend;
 use apalis_core::{error::Error, request::Request};
 use chrono::{DateTime, TimeZone, Utc};
