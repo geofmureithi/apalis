@@ -2,7 +2,7 @@ use crate::{
     mq::MessageQueue,
     poller::{controller::Controller, stream::BackendStream},
     request::{Request, RequestStream},
-    worker::WorkerId,
+    worker::{self, Worker},
     Backend, Poller,
 };
 use futures::{
@@ -101,7 +101,7 @@ impl<T: Send + 'static + Sync, Res> Backend<Request<T, ()>, Res> for MemoryStora
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, _worker: WorkerId) -> Poller<Self::Stream> {
+    fn poll<Svc>(self, _worker: &Worker<worker::Context>) -> Poller<Self::Stream> {
         let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         Poller {
             stream: BackendStream::new(stream, self.controller),

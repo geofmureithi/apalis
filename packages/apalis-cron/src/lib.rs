@@ -61,7 +61,7 @@ use apalis_core::layers::Identity;
 use apalis_core::poller::Poller;
 use apalis_core::request::RequestStream;
 use apalis_core::task::namespace::Namespace;
-use apalis_core::worker::WorkerId;
+use apalis_core::worker::{Context, Worker};
 use apalis_core::Backend;
 use apalis_core::{error::Error, request::Request};
 use chrono::{DateTime, TimeZone, Utc};
@@ -145,8 +145,8 @@ where
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, _worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let stream = self.into_stream();
-        Poller::new(stream, async {})
+        Poller::new(stream, futures::future::pending())
     }
 }

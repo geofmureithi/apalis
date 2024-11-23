@@ -56,7 +56,7 @@ where
 
     type Layer = AckLayer<Self, Req, RedisMqContext, Res>;
 
-    fn poll<Svc>(mut self, _worker_id: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(mut self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.get_buffer_size());
         let stream: RequestStream<Request<Req, RedisMqContext>> = Box::pin(rx);
         let layer = AckLayer::new(self.clone());

@@ -27,7 +27,7 @@ use futures::Stream;
 use poller::Poller;
 use serde::{Deserialize, Serialize};
 use tower::Service;
-use worker::WorkerId;
+use worker::{Context, Worker};
 
 /// Represent utilities for creating worker instances.
 pub mod builder;
@@ -81,7 +81,7 @@ pub trait Backend<Req, Res> {
     /// Returns a poller that is ready for streaming
     fn poll<Svc: Service<Req, Response = Res>>(
         self,
-        worker: WorkerId,
+        worker: &Worker<Context>,
     ) -> Poller<Self::Stream, Self::Layer>;
 }
 /// A codec allows backends to encode and decode data
@@ -165,7 +165,7 @@ pub mod test_utils {
     use crate::error::BoxDynError;
     use crate::request::Request;
     use crate::task::task_id::TaskId;
-    use crate::worker::WorkerId;
+    use crate::worker::{Worker, WorkerId};
     use crate::Backend;
     use futures::channel::mpsc::{channel, Receiver, Sender};
     use futures::future::BoxFuture;
@@ -264,8 +264,9 @@ pub mod test_utils {
             >>::Future: Send + 'static,
         {
             let worker_id = WorkerId::new("test-worker");
+            let worker = Worker::new(worker_id, crate::worker::Context::default());
             let b = backend.clone();
-            let mut poller = b.poll::<S>(worker_id);
+            let mut poller = b.poll::<S>(&worker);
             let (stop_tx, mut stop_rx) = channel::<()>(1);
 
             let (mut res_tx, res_rx) = channel(10);

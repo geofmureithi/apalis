@@ -9,7 +9,7 @@ use crate::{
     error::Error,
     poller::Poller,
     task::{attempt::Attempt, namespace::Namespace, task_id::TaskId},
-    worker::WorkerId,
+    worker::{Context, Worker},
     Backend,
 };
 
@@ -111,10 +111,10 @@ impl<T, Res, Ctx> Backend<Request<T, Ctx>, Res> for RequestStream<Request<T, Ctx
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, _worker: WorkerId) -> Poller<Self::Stream> {
+    fn poll<Svc>(self, _worker: &Worker<Context>) -> Poller<Self::Stream> {
         Poller {
             stream: self,
-            heartbeat: Box::pin(async {}),
+            heartbeat: Box::pin(futures::future::pending()),
             layer: Identity::new(),
         }
     }

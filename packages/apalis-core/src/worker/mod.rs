@@ -303,7 +303,7 @@ impl<S, P> Worker<Ready<S, P>> {
         };
         let backend = self.state.backend;
         let service = self.state.service;
-        let poller = backend.poll::<S>(worker_id.clone());
+        let poller = backend.poll::<S>(&worker);
         let stream = poller.stream;
         let heartbeat = poller.heartbeat.boxed();
         let layer = poller.layer;
@@ -387,7 +387,7 @@ impl Future for Runnable {
 }
 
 /// Stores the Workers context
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Context {
     task_count: Arc<AtomicUsize>,
     wakers: Arc<Mutex<Vec<Waker>>>,

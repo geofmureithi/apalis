@@ -11,7 +11,7 @@ use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::worker::WorkerId;
+use apalis_core::worker::{Context, Event, Worker, WorkerId};
 use apalis_core::{Backend, Codec};
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -448,40 +448,62 @@ impl<T> SqliteStorage<T> {
     }
 }
 
+/// Errors that can occur while polling an SQLite database.
+#[derive(thiserror::Error, Debug)]
+pub enum SqlitePollError {
+    /// Error during a keep-alive heartbeat.
+    #[error("Encountered an error during KeepAlive heartbeat: `{0}`")]
+    KeepAliveError(sqlx::Error),
+
+    /// Error during re-enqueuing orphaned tasks.
+    #[error("Encountered an error during ReenqueueOrphaned heartbeat: `{0}`")]
+    ReenqueueOrphanedError(sqlx::Error),
+}
+
 impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
     Backend<Request<T, SqlContext>, Res> for SqliteStorage<T>
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
     type Layer = AckLayer<SqliteStorage<T>, T, SqlContext, Res>;
 
-    fn poll<Svc>(mut self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
         let stream = self
-            .stream_jobs(&worker, config.poll_interval, config.buffer_size)
+            .stream_jobs(worker.id(), config.poll_interval, config.buffer_size)
             .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
         let requeue_storage = self.clone();
+        let w = worker.clone();
         let heartbeat = async move {
             loop {
                 let now: i64 = Utc::now().timestamp();
-                self.keep_alive_at::<Self::Layer>(&worker, now)
-                    .await
-                    .unwrap();
+                if let Err(e) = self.keep_alive_at::<Self::Layer>(w.id(), now).await {
+                    w.emit(Event::Error(Box::new(SqlitePollError::KeepAliveError(e))));
+                }
                 apalis_core::sleep(Duration::from_secs(30)).await;
             }
         }
         .boxed();
+        let w = worker.clone();
         let reenqueue_beat = async move {
             loop {
                 let dead_since = Utc::now()
                     - chrono::Duration::from_std(config.reenqueue_orphaned_after).unwrap();
                 if let Err(e) = requeue_storage
-                    .reenqueue_orphaned(config.buffer_size.try_into().unwrap(), dead_since)
+                    .reenqueue_orphaned(
+                        config
+                            .buffer_size
+                            .try_into()
+                            .expect("could not convert usize to i32"),
+                        dead_since,
+                    )
                     .await
                 {
-                    error!("ReenqueueOrphaned failed: {e}");
+                    w.emit(Event::Error(Box::new(
+                        SqlitePollError::ReenqueueOrphanedError(e),
+                    )));
                 }
                 apalis_core::sleep(config.poll_interval).await;
             }
@@ -507,7 +529,12 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         sqlx::query(query)
             .bind(res.task_id.to_string())
-            .bind(ctx.lock_by().as_ref().unwrap().to_string())
+            .bind(
+                ctx.lock_by()
+                    .as_ref()
+                    .expect("Task is not locked")
+                    .to_string(),
+            )
             .bind(result)
             .bind(calculate_status(&res.inner).to_string())
             .execute(&pool)

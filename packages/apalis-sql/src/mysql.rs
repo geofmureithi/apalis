@@ -1,5 +1,5 @@
 use apalis_core::codec::json::JsonCodec;
-use apalis_core::error::Error;
+use apalis_core::error::{BoxDynError, Error};
 use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
@@ -10,7 +10,7 @@ use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::worker::WorkerId;
+use apalis_core::worker::{Context, Event, Worker, WorkerId};
 use apalis_core::{Backend, Codec};
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -180,8 +180,7 @@ where
                         yield {
                             let (req, ctx) = job.req.take_parts();
                             let req = C::decode(req)
-                                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
-                                .unwrap();
+                                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
                             let mut req: Request<T, SqlContext> = Request::new_with_parts(req, ctx);
                             req.parts.namespace = Some(Namespace(self.config.namespace.clone()));
                             Some(req)
@@ -371,16 +370,37 @@ where
     }
 }
 
+/// Errors that can occur while polling a MySQL database.
+#[derive(thiserror::Error, Debug)]
+pub enum MysqlPollError {
+    /// Error during task acknowledgment.
+    #[error("Encountered an error during ACK: `{0}`")]
+    AckError(sqlx::Error),
+
+    /// Error during result encoding.
+    #[error("Encountered an error during encoding the result: {0}")]
+    CodecError(BoxDynError),
+
+    /// Error during a keep-alive heartbeat.
+    #[error("Encountered an error during KeepAlive heartbeat: `{0}`")]
+    KeepAliveError(sqlx::Error),
+
+    /// Error during re-enqueuing orphaned tasks.
+    #[error("Encountered an error during ReenqueueOrphaned heartbeat: `{0}`")]
+    ReenqueueOrphanedError(sqlx::Error),
+}
+
 impl<Req, Res, C> Backend<Request<Req, SqlContext>, Res> for MysqlStorage<Req, C>
 where
     Req: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
     C: Debug + Codec<Compact = Value> + Clone + Send + 'static + Sync,
+    C::Error: std::error::Error + 'static + Send + Sync,
 {
     type Stream = BackendStream<RequestStream<Request<Req, SqlContext>>>;
 
     type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, Res>;
 
-    fn poll<Svc>(self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
@@ -389,9 +409,10 @@ where
         let mut hb_storage = self.clone();
         let requeue_storage = self.clone();
         let stream = self
-            .stream_jobs(&worker, config.poll_interval, config.buffer_size)
+            .stream_jobs(worker.id(), config.poll_interval, config.buffer_size)
             .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
+        let w = worker.clone();
 
         let ack_heartbeat = async move {
             while let Some(ids) = ack_notify
@@ -403,41 +424,62 @@ where
                 for (ctx, res) in ids {
                     let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ? WHERE id = ? AND lock_by = ?";
                     let query = sqlx::query(query);
-                    let query = query
-                        .bind(calculate_status(&res.inner).to_string())
-                        .bind(
-                            serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string()))
-                                .unwrap(),
-                        )
-                        .bind(res.task_id.to_string())
-                        .bind(ctx.lock_by().as_ref().unwrap().to_string());
-                    if let Err(e) = query.execute(&pool).await {
-                        error!("Ack failed: {e}");
+                    let last_result =
+                        C::encode(res.inner.as_ref().map_err(|e| e.to_string())).map_err(Box::new);
+                    match (last_result, ctx.lock_by()) {
+                        (Ok(val), Some(worker_id)) => {
+                            let query = query
+                                .bind(calculate_status(&res.inner).to_string())
+                                .bind(val)
+                                .bind(res.task_id.to_string())
+                                .bind(worker_id.to_string());
+                            if let Err(e) = query.execute(&pool).await {
+                                w.emit(Event::Error(Box::new(MysqlPollError::AckError(e))));
+                            }
+                        }
+                        (Err(error), Some(_)) => {
+                            w.emit(Event::Error(Box::new(MysqlPollError::CodecError(error))));
+                        }
+                        _ => {
+                            unreachable!(
+                                "Attempted to ACK without a worker attached. This is a bug, File it on the repo"
+                            );
+                        }
                     }
                 }
 
                 apalis_core::sleep(config.poll_interval).await;
             }
         };
-
+        let w = worker.clone();
         let heartbeat = async move {
             loop {
                 let now = Utc::now();
-                if let Err(e) = hb_storage.keep_alive_at::<Self::Layer>(&worker, now).await {
-                    error!("Heartbeat failed: {e}");
+                if let Err(e) = hb_storage.keep_alive_at::<Self::Layer>(w.id(), now).await {
+                    w.emit(Event::Error(Box::new(MysqlPollError::KeepAliveError(e))));
                 }
                 apalis_core::sleep(config.keep_alive).await;
             }
         };
+        let w = worker.clone();
         let reenqueue_beat = async move {
             loop {
                 let dead_since = Utc::now()
-                    - chrono::Duration::from_std(config.reenqueue_orphaned_after).unwrap();
+                    - chrono::Duration::from_std(config.reenqueue_orphaned_after)
+                        .expect("Could not calculate dead since");
                 if let Err(e) = requeue_storage
-                    .reenqueue_orphaned(config.buffer_size.try_into().unwrap(), dead_since)
+                    .reenqueue_orphaned(
+                        config
+                            .buffer_size
+                            .try_into()
+                            .expect("Could not convert usize to i32"),
+                        dead_since,
+                    )
                     .await
                 {
-                    error!("ReenqueueOrphaned failed: {e}");
+                    w.emit(Event::Error(Box::new(
+                        MysqlPollError::ReenqueueOrphanedError(e),
+                    )));
                 }
                 apalis_core::sleep(config.poll_interval).await;
             }
@@ -463,7 +505,10 @@ where
     type AckError = sqlx::Error;
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {
         self.ack_notify
-            .notify((ctx.clone(), res.map(|res| C::encode(res).unwrap())))
+            .notify((
+                ctx.clone(),
+                res.map(|res| C::encode(res).expect("Could not encode result")),
+            ))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::BrokenPipe, e)))?;
 
         Ok(())
