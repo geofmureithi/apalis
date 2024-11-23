@@ -41,7 +41,7 @@
 use crate::context::SqlContext;
 use crate::{calculate_status, Config};
 use apalis_core::codec::json::JsonCodec;
-use apalis_core::error::Error;
+use apalis_core::error::{BoxDynError, Error};
 use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
@@ -52,7 +52,7 @@ use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::worker::WorkerId;
+use apalis_core::worker::{Context, Event, Worker, WorkerId};
 use apalis_core::{Backend, Codec};
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
@@ -118,16 +118,45 @@ impl<T, C: Codec> fmt::Debug for PostgresStorage<T, C> {
     }
 }
 
+/// Errors that can occur while polling a PostgreSQL database.
+#[derive(thiserror::Error, Debug)]
+pub enum PgPollError {
+    /// Error during task acknowledgment.
+    #[error("Encountered an error during ACK: `{0}`")]
+    AckError(sqlx::Error),
+
+    /// Error while fetching the next item.
+    #[error("Encountered an error during FetchNext: `{0}`")]
+    FetchNextError(apalis_core::error::Error),
+
+    /// Error while listening to PostgreSQL notifications.
+    #[error("Encountered an error during listening to PgNotification: {0}")]
+    PgNotificationError(apalis_core::error::Error),
+
+    /// Error during a keep-alive heartbeat.
+    #[error("Encountered an error during KeepAlive heartbeat: `{0}`")]
+    KeepAliveError(sqlx::Error),
+
+    /// Error during re-enqueuing orphaned tasks.
+    #[error("Encountered an error during ReenqueueOrphaned heartbeat: `{0}`")]
+    ReenqueueOrphanedError(sqlx::Error),
+
+    /// Error during result encoding.
+    #[error("Encountered an error during encoding the result: {0}")]
+    CodecError(BoxDynError),
+}
+
 impl<T, C, Res> Backend<Request<T, SqlContext>, Res> for PostgresStorage<T, C>
 where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
     C: Codec<Compact = serde_json::Value> + Send + 'static,
+    C::Error: std::error::Error + 'static + Send + Sync,
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
 
     type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, Res>;
 
-    fn poll<Svc>(mut self, worker: WorkerId) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(mut self, worker: Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let subscription = self.subscription.clone();
         let config = self.config.clone();
@@ -168,23 +197,23 @@ where
             }
 
             if let Err(e) = self
-                .keep_alive_at::<Self::Layer>(&worker, Utc::now().timestamp())
+                .keep_alive_at::<Self::Layer>(worker.id(), Utc::now().timestamp())
                 .await
             {
-                error!("KeepAliveError: {}", e);
+                worker.emit(Event::Error(Box::new(PgPollError::KeepAliveError(e))));
             }
 
             loop {
                 select! {
                     _ = keep_alive_stm.next() => {
-                        if let Err(e) = self.keep_alive_at::<Self::Layer>(&worker, Utc::now().timestamp()).await {
-                            error!("KeepAliveError: {}", e);
+                        if let Err(e) = self.keep_alive_at::<Self::Layer>(worker.id(), Utc::now().timestamp()).await {
+                            worker.emit(Event::Error(Box::new(PgPollError::KeepAliveError(e))));
                         }
                     }
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
-                            let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(ctx, res)| {
-                                (res.task_id.to_string(), ctx.lock_by().clone().unwrap().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(&res.inner).to_string(), (res.attempt.current() + 1) as u64 )
+                            let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(_ctx, res)| {
+                                (res.task_id.to_string(), worker.id().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(&res.inner).to_string(), (res.attempt.current() + 1) as u64 )
                             }).collect();
                             let query =
                                 "UPDATE apalis.jobs
@@ -203,31 +232,41 @@ where
                                     ) Q
                                     WHERE apalis.jobs.id = Q.id;
                                     ";
-                            if let Err(e) = sqlx::query(query)
-                                .bind(serde_json::to_value(&ack_ids).unwrap())
-                                .execute(&pool)
-                                .await
-                            {
-                                panic!("AckError: {e}");
+                            let codec_res = C::encode(&ack_ids);
+                            match codec_res {
+                                Ok(val) => {
+                                    if let Err(e) = sqlx::query(query)
+                                        .bind(val)
+                                        .execute(&pool)
+                                        .await
+                                    {
+                                        worker.emit(Event::Error(Box::new(PgPollError::AckError(e))));
+                                    }
+                                }
+                                Err(e) => {
+                                    worker.emit(Event::Error(Box::new(PgPollError::CodecError(e.into()))));
+                                }
                             }
+
                         }
                     }
                     _ = poll_next_stm.next() => {
-                        if let Err(e) = fetch_next_batch(&mut self, &worker, &mut tx).await {
-                            error!("FetchNextError: {e}");
+                        if let Err(e) = fetch_next_batch(&mut self, worker.id(), &mut tx).await {
+                            worker.emit(Event::Error(Box::new(PgPollError::FetchNextError(e))));
 
                         }
                     }
                     _ = pg_notification.next() => {
-                        if let Err(e) = fetch_next_batch(&mut self, &worker, &mut tx).await {
-                            error!("PgNotificationError: {e}");
+                        if let Err(e) = fetch_next_batch(&mut self, worker.id(), &mut tx).await {
+                            worker.emit(Event::Error(Box::new(PgPollError::PgNotificationError(e))));
+
                         }
                     }
                     _ = reenqueue_orphaned_stm.next() => {
                         let dead_since = Utc::now()
-                            - chrono::Duration::from_std(config.reenqueue_orphaned_after).unwrap();
+                            - chrono::Duration::from_std(config.reenqueue_orphaned_after).expect("could not build dead_since");
                         if let Err(e) = self.reenqueue_orphaned((config.buffer_size * 10) as i32, dead_since).await {
-                            error!("ReenqueueOrphanedError: {}", e);
+                            worker.emit(Event::Error(Box::new(PgPollError::ReenqueueOrphanedError(e))));
                         }
                     }
 
@@ -402,7 +441,7 @@ where
                 let (req, parts) = job.req.take_parts();
                 let req = C::decode(req)
                     .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
-                    .unwrap();
+                    .expect("Unable to decode");
                 let mut req = Request::new_with_parts(req, parts);
                 req.parts.namespace = Some(Namespace(self.config.namespace.clone()));
                 req
@@ -576,7 +615,7 @@ where
         let res = res.clone().map(|r| {
             C::encode(r)
                 .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::Interrupted, e)))
-                .unwrap()
+                .expect("Could not encode result")
         });
 
         self.ack_notify

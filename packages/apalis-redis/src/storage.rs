@@ -10,10 +10,10 @@ use apalis_core::service_fn::FromRequest;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::worker::WorkerId;
+use apalis_core::worker::{Event, Worker, WorkerId};
 use apalis_core::{Backend, Codec};
 use chrono::{DateTime, Utc};
-use futures::channel::mpsc::{self, Sender};
+use futures::channel::mpsc::{self, SendError, Sender};
 use futures::{select, FutureExt, SinkExt, StreamExt, TryFutureExt};
 use log::*;
 use redis::aio::ConnectionLike;
@@ -104,6 +104,34 @@ impl<Req> FromRequest<Request<Req, RedisContext>> for RedisContext {
     fn from_request(req: &Request<Req, RedisContext>) -> Result<Self, Error> {
         Ok(req.parts.context.clone())
     }
+}
+
+/// Errors that can occur while polling a Redis backend.
+#[derive(thiserror::Error, Debug)]
+pub enum RedisPollError {
+    /// Error during a keep-alive heartbeat.
+    #[error("KeepAlive heartbeat encountered an error: `{0}`")]
+    KeepAliveError(RedisError),
+
+    /// Error during enqueueing scheduled tasks.
+    #[error("EnqueueScheduled heartbeat encountered an error: `{0}`")]
+    EnqueueScheduledError(RedisError),
+
+    /// Error during polling for the next task or message.
+    #[error("PollNext heartbeat encountered an error: `{0}`")]
+    PollNextError(RedisError),
+
+    /// Error during enqueueing tasks for worker consumption.
+    #[error("Enqueue for worker consumption encountered an error: `{0}`")]
+    EnqueueError(SendError),
+
+    /// Error during acknowledgment of tasks.
+    #[error("Ack heartbeat encountered an error: `{0}`")]
+    AckError(RedisError),
+
+    /// Error during re-enqueuing orphaned tasks.
+    #[error("ReenqueueOrphaned heartbeat encountered an error: `{0}`")]
+    ReenqueueOrphanedError(RedisError),
 }
 
 /// Config for a [RedisStorage]
@@ -412,7 +440,7 @@ where
 
     fn poll<Svc: Service<Request<T, RedisContext>>>(
         mut self,
-        worker: WorkerId,
+        worker: Worker<apalis_core::worker::Context>,
     ) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
         let (ack, ack_rx) = mpsc::channel(self.config.buffer_size);
@@ -433,32 +461,32 @@ where
 
             let mut ack_stream = ack_rx.fuse();
 
-            if let Err(e) = self.keep_alive(&worker).await {
-                error!("RegistrationError: {}", e);
+            if let Err(e) = self.keep_alive(worker.id()).await {
+                worker.emit(Event::Error(Box::new(RedisPollError::KeepAliveError(e))));
             }
 
             loop {
                 select! {
                     _ = keep_alive_stm.next() => {
-                        if let Err(e) = self.keep_alive(&worker).await {
-                            error!("KeepAliveError: {}", e);
+                        if let Err(e) = self.keep_alive(worker.id()).await {
+                            worker.emit(Event::Error(Box::new(RedisPollError::KeepAliveError(e))));
                         }
                     }
                     _ = enqueue_scheduled_stm.next() => {
                         if let Err(e) = self.enqueue_scheduled(config.buffer_size).await {
-                            error!("EnqueueScheduledError: {}", e);
+                            worker.emit(Event::Error(Box::new(RedisPollError::EnqueueScheduledError(e))));
                         }
                     }
                     _ = poll_next_stm.next() => {
-                        let res = self.fetch_next(&worker).await;
+                        let res = self.fetch_next(worker.id()).await;
                         match res {
                             Err(e) => {
-                                error!("PollNextError: {}", e);
+                                worker.emit(Event::Error(Box::new(RedisPollError::PollNextError(e))));
                             }
                             Ok(res) => {
                                 for job in res {
                                     if let Err(e) = tx.send(Ok(Some(job))).await {
-                                        error!("EnqueueError: {}", e);
+                                        worker.emit(Event::Error(Box::new(RedisPollError::EnqueueError(e))));
                                     }
                                 }
                             }
@@ -468,7 +496,7 @@ where
                     id_to_ack = ack_stream.next() => {
                         if let Some((ctx, res)) = id_to_ack {
                             if let Err(e) = self.ack(&ctx, &res).await {
-                                error!("AckError: {}", e);
+                                worker.emit(Event::Error(Box::new(RedisPollError::AckError(e))));
                             }
                         }
                     }
@@ -476,7 +504,7 @@ where
                         let dead_since = Utc::now()
                             - chrono::Duration::from_std(config.reenqueue_orphaned_after).unwrap();
                         if let Err(e) = self.reenqueue_orphaned((config.buffer_size * 10) as i32, dead_since).await {
-                            error!("ReenqueueOrphanedError: {}", e);
+                            worker.emit(Event::Error(Box::new(RedisPollError::ReenqueueOrphanedError(e))));
                         }
                     }
                 };
