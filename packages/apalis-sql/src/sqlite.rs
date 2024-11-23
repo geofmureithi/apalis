@@ -466,7 +466,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
     type Layer = AckLayer<SqliteStorage<T>, T, SqlContext, Res>;
 
-    fn poll<Svc>(mut self, worker: Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
@@ -479,14 +479,14 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
         let heartbeat = async move {
             loop {
                 let now: i64 = Utc::now().timestamp();
-                if let Err(e) = self.keep_alive_at::<Self::Layer>(worker.id(), now).await {
-                    worker.emit(Event::Error(Box::new(SqlitePollError::KeepAliveError(e))));
+                if let Err(e) = self.keep_alive_at::<Self::Layer>(w.id(), now).await {
+                    w.emit(Event::Error(Box::new(SqlitePollError::KeepAliveError(e))));
                 }
                 apalis_core::sleep(Duration::from_secs(30)).await;
             }
         }
         .boxed();
-
+        let w = worker.clone();
         let reenqueue_beat = async move {
             loop {
                 let dead_since = Utc::now()

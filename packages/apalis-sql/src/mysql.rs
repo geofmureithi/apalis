@@ -400,7 +400,7 @@ where
 
     type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, Res>;
 
-    fn poll<Svc>(self, worker: Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
@@ -461,6 +461,7 @@ where
                 apalis_core::sleep(config.keep_alive).await;
             }
         };
+        let w = worker.clone();
         let reenqueue_beat = async move {
             loop {
                 let dead_since = Utc::now()
@@ -476,7 +477,7 @@ where
                     )
                     .await
                 {
-                    worker.emit(Event::Error(Box::new(
+                    w.emit(Event::Error(Box::new(
                         MysqlPollError::ReenqueueOrphanedError(e),
                     )));
                 }

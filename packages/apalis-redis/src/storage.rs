@@ -440,7 +440,7 @@ where
 
     fn poll<Svc: Service<Request<T, RedisContext>>>(
         mut self,
-        worker: Worker<apalis_core::worker::Context>,
+        worker: &Worker<apalis_core::worker::Context>,
     ) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
         let (ack, ack_rx) = mpsc::channel(self.config.buffer_size);
@@ -448,6 +448,7 @@ where
         let controller = self.controller.clone();
         let config = self.config.clone();
         let stream: RequestStream<Request<T, RedisContext>> = Box::pin(rx);
+        let worker = worker.clone();
         let heartbeat = async move {
             let mut reenqueue_orphaned_stm =
                 apalis_core::interval::interval(config.poll_interval).fuse();

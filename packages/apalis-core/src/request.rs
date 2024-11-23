@@ -111,7 +111,7 @@ impl<T, Res, Ctx> Backend<Request<T, Ctx>, Res> for RequestStream<Request<T, Ctx
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, _worker: Worker<Context>) -> Poller<Self::Stream> {
+    fn poll<Svc>(self, _worker: &Worker<Context>) -> Poller<Self::Stream> {
         Poller {
             stream: self,
             heartbeat: Box::pin(futures::future::pending()),

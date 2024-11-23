@@ -303,7 +303,7 @@ impl<S, P> Worker<Ready<S, P>> {
         };
         let backend = self.state.backend;
         let service = self.state.service;
-        let poller = backend.poll::<S>(worker.clone());
+        let poller = backend.poll::<S>(&worker);
         let stream = poller.stream;
         let heartbeat = poller.heartbeat.boxed();
         let layer = poller.layer;

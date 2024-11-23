@@ -81,7 +81,7 @@ pub trait Backend<Req, Res> {
     /// Returns a poller that is ready for streaming
     fn poll<Svc: Service<Req, Response = Res>>(
         self,
-        worker: Worker<Context>,
+        worker: &Worker<Context>,
     ) -> Poller<Self::Stream, Self::Layer>;
 }
 /// A codec allows backends to encode and decode data
@@ -266,7 +266,7 @@ pub mod test_utils {
             let worker_id = WorkerId::new("test-worker");
             let worker = Worker::new(worker_id, crate::worker::Context::default());
             let b = backend.clone();
-            let mut poller = b.poll::<S>(worker);
+            let mut poller = b.poll::<S>(&worker);
             let (stop_tx, mut stop_rx) = channel::<()>(1);
 
             let (mut res_tx, res_rx) = channel(10);

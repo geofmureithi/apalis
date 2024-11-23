@@ -145,7 +145,7 @@ where
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, _worker: Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let stream = self.into_stream();
         Poller::new(stream, futures::future::pending())
     }

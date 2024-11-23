@@ -156,7 +156,7 @@ where
 
     type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, Res>;
 
-    fn poll<Svc>(mut self, worker: Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let subscription = self.subscription.clone();
         let config = self.config.clone();
@@ -164,6 +164,7 @@ where
         let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
         let ack_notify = self.ack_notify.clone();
         let pool = self.pool.clone();
+        let worker = worker.clone();
         let heartbeat = async move {
             let mut keep_alive_stm = apalis_core::interval::interval(config.keep_alive).fuse();
             let mut reenqueue_orphaned_stm =
