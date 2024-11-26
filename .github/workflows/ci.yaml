@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [master, develop]
+    branches: [main, develop]
   pull_request:
   workflow_call:
 

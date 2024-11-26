@@ -24,7 +24,7 @@
       alt="docs.rs docs" />
   </a>
   <a href="https://github.com/geofmureithi/apalis/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/geofmureithi/apalis/ci.yaml?branch=master&style=flat-square"
+    <img src="https://img.shields.io/github/actions/workflow/status/geofmureithi/apalis/ci.yaml?branch=main&style=flat-square"
       alt="CI" />
   </a>
 </div>
@@ -45,12 +45,12 @@ apalis has support for:
 
 | Source       | Crate                                                                                                                 | Example                                                                                                                                                                                  |
 | ------------ | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cron Jobs    | <a href="https://docs.rs/apalis-cron"><img src="https://img.shields.io/crates/v/apalis-cron?style=flat-square"></a>   | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/async-std-runtime"><img src="https://img.shields.io/badge/-basic_example-black?style=flat-square&logo=github"/></a> |
-| Redis        | <a href="https://docs.rs/apalis-redis"><img src="https://img.shields.io/crates/v/apalis-redis?style=flat-square"></a> | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/redis"><img src="https://img.shields.io/badge/-basic_example-black?style=flat-square&logo=redis"/></a>              |
-| Sqlite       | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/sqlite"><img src="https://img.shields.io/badge/-sqlite_example-black?style=flat-square&logo=sqlite"/></a>           |
-| Postgres     | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/postgres"><img src="https://img.shields.io/badge/-postgres_example-black?style=flat-square&logo=postgres"/></a>     |
-| MySQL        | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/geofmureithi/apalis/tree/master/examples/mysql"><img src="https://img.shields.io/badge/-mysql_example-black?style=flat-square&logo=mysql"/></a>              |
-| Amqp         | <a href="https://docs.rs/apalis-amqp"><img src="https://img.shields.io/crates/v/apalis-amqp?style=flat-square"></a>   | <a href="https://github.com/geofmureithi/apalis-amqp/tree/master/examples/basic.rs"><img src="https://img.shields.io/badge/-rabbitmq_example-black?style=flat-square&logo=github"/></a>  |
+| Cron Jobs    | <a href="https://docs.rs/apalis-cron"><img src="https://img.shields.io/crates/v/apalis-cron?style=flat-square"></a>   | <a href="https://github.com/geofmureithi/apalis/tree/main/examples/async-std-runtime"><img src="https://img.shields.io/badge/-basic_example-black?style=flat-square&logo=github"/></a> |
+| Redis        | <a href="https://docs.rs/apalis-redis"><img src="https://img.shields.io/crates/v/apalis-redis?style=flat-square"></a> | <a href="https://github.com/geofmureithi/apalis/tree/main/examples/redis"><img src="https://img.shields.io/badge/-basic_example-black?style=flat-square&logo=redis"/></a>              |
+| Sqlite       | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/geofmureithi/apalis/tree/main/examples/sqlite"><img src="https://img.shields.io/badge/-sqlite_example-black?style=flat-square&logo=sqlite"/></a>           |
+| Postgres     | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/geofmureithi/apalis/tree/main/examples/postgres"><img src="https://img.shields.io/badge/-postgres_example-black?style=flat-square&logo=postgres"/></a>     |
+| MySQL        | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/geofmureithi/apalis/tree/main/examples/mysql"><img src="https://img.shields.io/badge/-mysql_example-black?style=flat-square&logo=mysql"/></a>              |
+| Amqp         | <a href="https://docs.rs/apalis-amqp"><img src="https://img.shields.io/crates/v/apalis-amqp?style=flat-square"></a>   | <a href="https://github.com/geofmureithi/apalis-amqp/tree/main/examples/basic.rs"><img src="https://img.shields.io/badge/-rabbitmq_example-black?style=flat-square&logo=github"/></a>  |
 | From Scratch | <a href="https://docs.rs/apalis-core"><img src="https://img.shields.io/crates/v/apalis-core?style=flat-square"></a>   |                                                                                                                                                                                          |
 
 ## Getting Started
@@ -180,10 +180,12 @@ sequenceDiagram
 ## Resources
 
 - [Background job processing with rust using actix and redis](https://mureithi.me/blog/background-job-processing-with-rust-actix-redis)
+- [Feasibility of implementing cronjob with Rust programming language](https://tpbabparn.medium.com/feasibility-of-implementing-cronjob-with-rust-programming-language-186eaed0a7d8)
+- [How to schedule and run cron jobs in Rust using apalis](https://dev.to/njugunamureithi/how-to-schedule-and-run-cron-jobs-in-rust-5106)
 
 ### Web UI
 
-If you are running [apalis Board](https://github.com/geofmureithi/apalis-board), you can easily manage your jobs. See a working [rest API example here](https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
+If you are running [apalis Board](https://github.com/geofmureithi/apalis-board), you can easily manage your jobs. See a working [rest API example here](https://github.com/geofmureithi/apalis/tree/main/examples/rest-api)
 
 <img src="https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png" width="100%">
 
@@ -192,46 +194,6 @@ If you are running [apalis Board](https://github.com/geofmureithi/apalis-board),
 - [tower] - Tower is a library of modular and reusable components for building robust networking clients and servers.
 - [redis-rs](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
 - [sqlx](https://github.com/launchbadge/sqlx) - The Rust SQL Toolkit
-
-## Roadmap
-
-v 0.5
-
-- [x] Refactor the crates structure
-- [x] Mocking utilities
-- [ ] Support for SurrealDB and Mongo
-- [ ] Lock free for Postgres
-- [x] Add more utility layers
-- [x] Use extractors in job fn structure
-- [x] Polish up documentation
-- [ ] Improve and standardize apalis Board
-- [ ] Benchmarks
-
-v 0.4
-
-- [x] Move from actor based to layer based processing
-- [x] Graceful Shutdown
-- [x] Allow other types of executors apart from Tokio
-- [x] Mock/Test Worker
-- [x] Improve monitoring
-- [x] Add job progress via layer
-- [x] Add more sources
-
-v 0.3
-
-- [x] Standardize API (Storage, Worker, Data, Middleware, Context )
-- [x] Introduce SQL
-- [x] Implement layers for Sentry and Tracing.
-- [x] Improve documentation
-- [x] Organized modules and features.
-- [x] Basic Web API Interface
-- [x] Sql Examples
-- [x] Sqlx migrations
-
-v 0.2
-
-- [x] Redis Example
-- [x] Actix Web Example
 
 ## Contributing
 
