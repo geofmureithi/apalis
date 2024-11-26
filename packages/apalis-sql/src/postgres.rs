@@ -39,7 +39,8 @@
 //!  }
 //! ```
 use crate::context::SqlContext;
-use crate::{calculate_status, Config};
+use crate::{calculate_status, Config, SqlError};
+use apalis_core::backend::{BackendExpose, Stat, WorkerState};
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::{BoxDynError, Error};
 use apalis_core::layers::{Ack, AckLayer};
@@ -47,13 +48,13 @@ use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
-use apalis_core::request::{Parts, Request, RequestStream};
+use apalis_core::request::{Parts, Request, RequestStream, State};
 use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::{Context, Event, Worker, WorkerId};
-use apalis_core::{Backend, Codec};
+use apalis_core::{backend::Backend, codec::Codec};
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
 use futures::StreamExt;
@@ -690,9 +691,77 @@ impl<T, C: Codec> PostgresStorage<T, C> {
         Ok(())
     }
 }
+
+impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExpose<J>
+    for PostgresStorage<J>
+{
+    type Request = Request<J, Parts<SqlContext>>;
+    type Error = SqlError;
+    async fn stats(&self) -> Result<Stat, Self::Error> {
+        let fetch_query = "SELECT
+                            COUNT(1) FILTER (WHERE status = 'Pending') AS pending,
+                            COUNT(1) FILTER (WHERE status = 'Running') AS running,
+                            COUNT(1) FILTER (WHERE status = 'Done') AS done,
+                            COUNT(1) FILTER (WHERE status = 'Retry') AS retry,
+                            COUNT(1) FILTER (WHERE status = 'Failed') AS failed,
+                            COUNT(1) FILTER (WHERE status = 'Killed') AS killed
+                        FROM apalis.jobs WHERE job_type = $1";
+
+        let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
+            .bind(self.config().namespace())
+            .fetch_one(self.pool())
+            .await?;
+
+        Ok(Stat {
+            pending: res.0.try_into()?,
+            running: res.1.try_into()?,
+            dead: res.4.try_into()?,
+            failed: res.3.try_into()?,
+            success: res.2.try_into()?,
+        })
+    }
+
+    async fn list_jobs(
+        &self,
+        status: &State,
+        page: i32,
+    ) -> Result<Vec<Self::Request>, Self::Error> {
+        let status = status.to_string();
+        let fetch_query = "SELECT * FROM apalis.jobs WHERE status = $1 AND job_type = $2 ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET $3";
+        let res: Vec<SqlRequest<serde_json::Value>> = sqlx::query_as(fetch_query)
+            .bind(status)
+            .bind(self.config().namespace())
+            .bind(((page - 1) * 10).to_string())
+            .fetch_all(self.pool())
+            .await?;
+        Ok(res
+            .into_iter()
+            .map(|j| {
+                let (req, ctx) = j.req.take_parts();
+                let req = JsonCodec::<Value>::decode(req).unwrap();
+                Request::new_with_ctx(req, ctx)
+            })
+            .collect())
+    }
+
+    async fn list_workers(&self) -> Result<Vec<Worker<WorkerState>>, Self::Error> {
+        let fetch_query =
+            "SELECT id, layers, last_seen FROM apalis.workers WHERE worker_type = $1 ORDER BY last_seen DESC LIMIT 20 OFFSET $2";
+        let res: Vec<(String, String, i64)> = sqlx::query_as(fetch_query)
+            .bind(self.config().namespace())
+            .bind(0)
+            .fetch_all(self.pool())
+            .await?;
+        Ok(res
+            .into_iter()
+            .map(|w| Worker::new(WorkerId::new(w.0), WorkerState::new::<Self>(w.1)))
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::context::State;
+
     use crate::sql_storage_tests;
 
     use super::*;

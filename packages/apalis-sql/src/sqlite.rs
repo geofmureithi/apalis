@@ -1,18 +1,19 @@
 use crate::context::SqlContext;
-use crate::{calculate_status, Config};
+use crate::{calculate_status, Config, SqlError};
+use apalis_core::backend::{BackendExpose, Stat, WorkerState};
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
 use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
-use apalis_core::request::{Parts, Request, RequestStream};
+use apalis_core::request::{Parts, Request, RequestStream, State};
 use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::{Context, Event, Worker, WorkerId};
-use apalis_core::{Backend, Codec};
+use apalis_core::{backend::Backend, codec::Codec};
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
@@ -543,13 +544,79 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
     }
 }
 
+impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExpose<J>
+    for SqliteStorage<J, JsonCodec<String>>
+{
+    type Request = Request<J, Parts<SqlContext>>;
+    type Error = SqlError;
+    async fn stats(&self) -> Result<Stat, Self::Error> {
+        let fetch_query = "SELECT
+                            COUNT(1) FILTER (WHERE status = 'Pending') AS pending,
+                            COUNT(1) FILTER (WHERE status = 'Running') AS running,
+                            COUNT(1) FILTER (WHERE status = 'Done') AS done,
+                            COUNT(1) FILTER (WHERE status = 'Failed') AS failed,
+                            COUNT(1) FILTER (WHERE status = 'Killed') AS killed
+                        FROM Jobs WHERE job_type = ?";
+
+        let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
+            .bind(self.get_config().namespace())
+            .fetch_one(self.pool())
+            .await?;
+
+        Ok(Stat {
+            pending: res.0.try_into()?,
+            running: res.1.try_into()?,
+            dead: res.4.try_into()?,
+            failed: res.3.try_into()?,
+            success: res.2.try_into()?,
+        })
+    }
+
+    async fn list_jobs(
+        &self,
+        status: &State,
+        page: i32,
+    ) -> Result<Vec<Self::Request>, Self::Error> {
+        let status = status.to_string();
+        let fetch_query = "SELECT * FROM Jobs WHERE status = ? AND job_type = ? ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET ?";
+        let res: Vec<SqlRequest<String>> = sqlx::query_as(fetch_query)
+            .bind(status)
+            .bind(self.get_config().namespace())
+            .bind(((page - 1) * 10).to_string())
+            .fetch_all(self.pool())
+            .await?;
+        Ok(res
+            .into_iter()
+            .map(|j| {
+                let (req, ctx) = j.req.take_parts();
+                let req = JsonCodec::<String>::decode(req).unwrap();
+                Request::new_with_ctx(req, ctx)
+            })
+            .collect())
+    }
+
+    async fn list_workers(&self) -> Result<Vec<Worker<WorkerState>>, Self::Error> {
+        let fetch_query =
+            "SELECT id, layers, last_seen FROM Workers WHERE worker_type = ? ORDER BY last_seen DESC LIMIT 20 OFFSET ?";
+        let res: Vec<(String, String, i64)> = sqlx::query_as(fetch_query)
+            .bind(self.get_config().namespace())
+            .bind(0)
+            .fetch_all(self.pool())
+            .await?;
+        Ok(res
+            .into_iter()
+            .map(|w| Worker::new(WorkerId::new(w.0), WorkerState::new::<Self>(w.1)))
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
-    use crate::context::State;
     use crate::sql_storage_tests;
 
     use super::*;
+    use apalis_core::request::State;
     use apalis_core::test_utils::DummyService;
     use chrono::Utc;
     use email_service::example_good_email;

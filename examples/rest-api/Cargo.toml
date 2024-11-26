@@ -1,0 +1,15 @@
+[package]
+name = "rest-api"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1"
+apalis = { path = "../../" }
+apalis-redis = { path = "../../packages/apalis-redis" }
+serde = "1"
+env_logger = "0.10"
+actix-web = "4"
+futures = "0.3"
+email-service = { path = "../email-service" }
