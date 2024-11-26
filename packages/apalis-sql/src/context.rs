@@ -1,10 +1,9 @@
-use apalis_core::error::Error;
 use apalis_core::request::Request;
 use apalis_core::service_fn::FromRequest;
 use apalis_core::worker::WorkerId;
+use apalis_core::{error::Error, request::State};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::{fmt, str::FromStr};
 
 /// The context for a job is represented here
 /// Used to provide a context for a job with an sql backend
@@ -113,54 +112,5 @@ impl SqlContext {
 impl<Req> FromRequest<Request<Req, SqlContext>> for SqlContext {
     fn from_request(req: &Request<Req, SqlContext>) -> Result<Self, Error> {
         Ok(req.parts.context.clone())
-    }
-}
-
-/// Represents the state of a job
-#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
-pub enum State {
-    /// Job is pending
-    #[serde(alias = "Latest")]
-    Pending,
-    /// Job is running
-    Running,
-    /// Job was done successfully
-    Done,
-    /// Job has failed. Check `last_error`
-    Failed,
-    /// Job has been killed
-    Killed,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        State::Pending
-    }
-}
-
-impl FromStr for State {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "Pending" | "Latest" => Ok(State::Pending),
-            "Running" => Ok(State::Running),
-            "Done" => Ok(State::Done),
-            "Failed" => Ok(State::Failed),
-            "Killed" => Ok(State::Killed),
-            _ => Err(Error::MissingData("Invalid Job state".to_string())),
-        }
-    }
-}
-
-impl fmt::Display for State {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self {
-            State::Pending => write!(f, "Pending"),
-            State::Running => write!(f, "Running"),
-            State::Done => write!(f, "Done"),
-            State::Failed => write!(f, "Failed"),
-            State::Killed => write!(f, "Killed"),
-        }
     }
 }

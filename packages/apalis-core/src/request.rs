@@ -2,15 +2,15 @@ use futures::{future::BoxFuture, Stream};
 use serde::{Deserialize, Serialize};
 use tower::layer::util::Identity;
 
-use std::{fmt::Debug, pin::Pin};
+use std::{fmt, fmt::Debug, pin::Pin, str::FromStr};
 
 use crate::{
+    backend::Backend,
     data::Extensions,
     error::Error,
     poller::Poller,
     task::{attempt::Attempt, namespace::Namespace, task_id::TaskId},
     worker::{Context, Worker},
-    Backend,
 };
 
 /// Represents a job which can be serialized and executed
@@ -43,6 +43,7 @@ pub struct Parts<Ctx> {
     /// Represents the namespace
     #[serde(skip)]
     pub namespace: Option<Namespace>,
+    //TODO: add State
 }
 
 impl<T, Ctx: Default> Request<T, Ctx> {
@@ -95,6 +96,59 @@ impl<T, Ctx> std::ops::Deref for Request<T, Ctx> {
 impl<T, Ctx> std::ops::DerefMut for Request<T, Ctx> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.parts.data
+    }
+}
+
+/// Represents the state of a job/task
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
+pub enum State {
+    /// Job is pending
+    #[serde(alias = "Latest")]
+    Pending,
+    /// Job is in the queue but not ready for execution
+    Scheduled,
+    /// Job is running
+    Running,
+    /// Job was done successfully
+    Done,
+    /// Job has failed. Check `last_error`
+    Failed,
+    /// Job has been killed
+    Killed,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State::Pending
+    }
+}
+
+impl FromStr for State {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Pending" | "Latest" => Ok(State::Pending),
+            "Running" => Ok(State::Running),
+            "Done" => Ok(State::Done),
+            "Failed" => Ok(State::Failed),
+            "Killed" => Ok(State::Killed),
+            "Scheduled" => Ok(State::Scheduled),
+            _ => Err(Error::MissingData("Invalid Job state".to_string())),
+        }
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            State::Pending => write!(f, "Pending"),
+            State::Running => write!(f, "Running"),
+            State::Done => write!(f, "Done"),
+            State::Failed => write!(f, "Failed"),
+            State::Killed => write!(f, "Killed"),
+            State::Scheduled => write!(f, "Scheduled"),
+        }
     }
 }
 

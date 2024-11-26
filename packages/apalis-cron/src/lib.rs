@@ -57,6 +57,7 @@
 //! }
 //! ```
 
+use apalis_core::backend::Backend;
 use apalis_core::error::BoxDynError;
 use apalis_core::layers::Identity;
 use apalis_core::mq::MessageQueue;
@@ -65,7 +66,6 @@ use apalis_core::request::RequestStream;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::worker::{Context, Worker};
-use apalis_core::Backend;
 use apalis_core::{error::Error, request::Request};
 use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;

@@ -11,7 +11,7 @@ use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::{Event, Worker, WorkerId};
-use apalis_core::{Backend, Codec};
+use apalis_core::{backend::Backend, codec::Codec};
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc::{self, SendError, Sender};
 use futures::{select, FutureExt, SinkExt, StreamExt, TryFutureExt};

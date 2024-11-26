@@ -7,13 +7,13 @@ use tower::{
 };
 
 use crate::{
+    backend::Backend,
     error::Error,
     layers::extensions::Data,
     request::Request,
     service_fn::service_fn,
     service_fn::ServiceFn,
     worker::{Ready, Worker, WorkerId},
-    Backend,
 };
 
 /// Allows building a [`Worker`].

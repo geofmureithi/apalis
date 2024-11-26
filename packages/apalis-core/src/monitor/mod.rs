@@ -11,10 +11,10 @@ use tower::{Layer, Service};
 pub mod shutdown;
 
 use crate::{
+    backend::Backend,
     error::BoxDynError,
     request::Request,
     worker::{Context, Event, EventHandler, Ready, Worker, WorkerId},
-    Backend,
 };
 
 use self::shutdown::Shutdown;
