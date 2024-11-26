@@ -34,7 +34,7 @@
 
 - Simple and predictable job handling model.
 - Jobs handlers with a macro free API.
-- Take full advantage of the [tower] ecosystem of
+- Take full advantage of the [`tower`] ecosystem of
   middleware, services, and utilities.
 - Runtime agnostic - Use tokio, smol etc.
 - Optional Web interface to help you manage your jobs.
@@ -246,5 +246,5 @@ See also the list of [contributors](https://github.com/geofmureithi/apalis/contr
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
 
 [`tower::Service`]: https://docs.rs/tower/latest/tower/trait.Service.html
-[tower]: https://crates.io/crates/tower
+[`tower`]: https://crates.io/crates/tower
 [`actix`]: https://crates.io/crates/actix
