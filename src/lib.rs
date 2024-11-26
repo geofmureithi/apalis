@@ -70,7 +70,12 @@ pub mod layers;
 pub mod prelude {
     pub use crate::layers::WorkerBuilderExt;
     pub use apalis_core::{
+        backend::Backend,
+        backend::BackendExpose,
+        backend::Stat,
+        backend::WorkerState,
         builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
+        codec::Codec,
         data::Extensions,
         error::{BoxDynError, Error},
         layers::extensions::{AddExtension, Data},
@@ -80,6 +85,7 @@ pub mod prelude {
         notify::Notify,
         poller::stream::BackendStream,
         poller::{controller::Controller, Poller},
+        request::State,
         request::{Request, RequestStream},
         response::IntoResponse,
         service_fn::{service_fn, FromRequest, ServiceFn},
@@ -87,6 +93,5 @@ pub mod prelude {
         task::attempt::Attempt,
         task::task_id::TaskId,
         worker::{Context, Event, Ready, Worker, WorkerError, WorkerId},
-        Backend, Codec,
     };
 }

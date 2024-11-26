@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::Codec;
+use crate::codec::Codec;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

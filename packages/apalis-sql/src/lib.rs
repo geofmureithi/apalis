@@ -10,10 +10,9 @@
 //! apalis offers Sqlite, Mysql and Postgres storages for its workers.
 //! See relevant modules for examples
 
-use std::time::Duration;
+use std::{num::TryFromIntError, time::Duration};
 
-use apalis_core::error::Error;
-use context::State;
+use apalis_core::{error::Error, request::State};
 
 /// The context of the sql job
 pub mod context;
@@ -47,6 +46,17 @@ pub struct Config {
     poll_interval: Duration,
     reenqueue_orphaned_after: Duration,
     namespace: String,
+}
+
+/// A general sql error
+#[derive(Debug, thiserror::Error)]
+pub enum SqlError {
+    /// Handles sqlx errors
+    #[error("sqlx::Error: {0}")]
+    Sqlx(#[from] sqlx::Error),
+    /// Handles int conversion errors
+    #[error("TryFromIntError: {0}")]
+    TryFromInt(#[from] TryFromIntError),
 }
 
 impl Default for Config {

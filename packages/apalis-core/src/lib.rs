@@ -22,15 +22,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //! # apalis-core
 //! Utilities for building job and message processing tools.
-use error::BoxDynError;
-use futures::Stream;
-use poller::Poller;
-use serde::{Deserialize, Serialize};
-use tower::Service;
-use worker::{Context, Worker};
-
 /// Represent utilities for creating worker instances.
 pub mod builder;
+
+/// Represents a task source eg Postgres or Redis
+pub mod backend;
 /// Includes all possible error types.
 pub mod error;
 /// Represents middleware offered through [`tower`]
@@ -65,40 +61,6 @@ pub mod task;
 
 /// Codec for handling data
 pub mod codec;
-
-/// A backend represents a task source
-/// Both [`Storage`] and [`MessageQueue`] need to implement it for workers to be able to consume tasks
-///
-/// [`Storage`]: crate::storage::Storage
-/// [`MessageQueue`]: crate::mq::MessageQueue
-pub trait Backend<Req, Res> {
-    /// The stream to be produced by the backend
-    type Stream: Stream<Item = Result<Option<Req>, crate::error::Error>>;
-
-    /// Returns the final decoration of layers
-    type Layer;
-
-    /// Returns a poller that is ready for streaming
-    fn poll<Svc: Service<Req, Response = Res>>(
-        self,
-        worker: &Worker<Context>,
-    ) -> Poller<Self::Stream, Self::Layer>;
-}
-/// A codec allows backends to encode and decode data
-pub trait Codec {
-    /// The mode of storage by the codec
-    type Compact;
-    /// Error encountered by the codec
-    type Error: Into<BoxDynError>;
-    /// The encoding method
-    fn encode<I>(input: I) -> Result<Self::Compact, Self::Error>
-    where
-        I: Serialize;
-    /// The decoding method
-    fn decode<O>(input: Self::Compact) -> Result<O, Self::Error>
-    where
-        O: for<'de> Deserialize<'de>;
-}
 
 /// Sleep utilities
 #[cfg(feature = "sleep")]
@@ -162,11 +124,11 @@ pub mod interval {
 #[cfg(feature = "test-utils")]
 /// Test utilities that allows you to test backends
 pub mod test_utils {
+    use crate::backend::Backend;
     use crate::error::BoxDynError;
     use crate::request::Request;
     use crate::task::task_id::TaskId;
     use crate::worker::{Worker, WorkerId};
-    use crate::Backend;
     use futures::channel::mpsc::{channel, Receiver, Sender};
     use futures::future::BoxFuture;
     use futures::stream::{Stream, StreamExt};

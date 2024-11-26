@@ -27,6 +27,7 @@
 //! }
 //! ```
 
+mod expose;
 mod storage;
 pub use storage::connect;
 pub use storage::Config;

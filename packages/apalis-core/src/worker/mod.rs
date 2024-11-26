@@ -1,10 +1,10 @@
+use crate::backend::Backend;
 use crate::error::{BoxDynError, Error};
 use crate::layers::extensions::Data;
 use crate::monitor::shutdown::Shutdown;
 use crate::request::Request;
 use crate::service_fn::FromRequest;
 use crate::task::task_id::TaskId;
-use crate::Backend;
 use futures::future::{join, select, BoxFuture};
 use futures::stream::BoxStream;
 use futures::{Future, FutureExt, Stream, StreamExt};
@@ -160,7 +160,7 @@ impl<S, P> Ready<S, P> {
 }
 
 /// Represents a generic [Worker] that can be in many different states
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Worker<T> {
     pub(crate) id: WorkerId,
     pub(crate) state: T,

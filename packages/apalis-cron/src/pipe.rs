@@ -1,6 +1,6 @@
+use apalis_core::backend::Backend;
 use apalis_core::error::BoxDynError;
 use apalis_core::request::BoxStream;
-use apalis_core::Backend;
 use apalis_core::{poller::Poller, request::Request, worker::Context, worker::Worker};
 use futures::StreamExt;
 use std::{error, fmt};
