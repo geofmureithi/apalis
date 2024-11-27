@@ -205,13 +205,14 @@ where
         let worker_type = self.config.namespace.clone();
         let storage_name = std::any::type_name::<Self>();
         let query =
-            "REPLACE INTO workers (id, worker_type, storage_name, layers, last_seen) VALUES (?, ?, ?, ?, ?);";
+            "INSERT INTO workers (id, worker_type, storage_name, layers, last_seen) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = ?;";
         sqlx::query(query)
             .bind(worker_id.to_string())
             .bind(worker_type)
             .bind(storage_name)
             .bind(std::any::type_name::<Service>())
             .bind(last_seen)
+            .bind(worker_id.to_string())
             .execute(&mut *tx)
             .await?;
         Ok(())

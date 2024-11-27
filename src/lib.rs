@@ -51,7 +51,7 @@
 //!
 //! ## Web UI Available
 //! ![UI](https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png)
-//! See [this example](https://github.com/geofmureithi/apalis/tree/master/examples/rest-api)
+//! See [this example](https://github.com/geofmureithi/apalis/tree/main/examples/rest-api)
 //! ## Feature flags
 #![cfg_attr(
     feature = "docsrs",

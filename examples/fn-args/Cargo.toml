@@ -6,7 +6,7 @@ repository.workspace = true
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-apalis = { path = "../../", features = ["limit", "tokio-comp", "catch-panic"] }
+apalis = { path = "../../", features = ["limit", "catch-panic"] }
 apalis-sql = { path = "../../packages/apalis-sql", features = [
     "sqlite",
     "tokio-comp",

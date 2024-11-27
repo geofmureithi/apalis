@@ -6,10 +6,9 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 apalis = { path = "../../", default-features = false, features = [
-    "tokio-comp",
     "tracing",
     "limit",
-    "catch-panic"
+    "catch-panic",
 ] }
 apalis-cron = { path = "../../packages/apalis-cron" }
 tokio = { version = "1", features = ["full"] }

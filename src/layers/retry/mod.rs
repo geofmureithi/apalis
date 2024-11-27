@@ -34,9 +34,13 @@ where
     T: Clone,
     Ctx: Clone,
 {
-    type Future = future::Ready<Self>;
+    type Future = future::Ready<()>;
 
-    fn retry(&self, req: &Req<T, Ctx>, result: Result<&Res, &Err>) -> Option<Self::Future> {
+    fn retry(
+        &mut self,
+        req: &mut Req<T, Ctx>,
+        result: &mut Result<Res, Err>,
+    ) -> Option<Self::Future> {
         let attempt = &req.parts.attempt;
         match result {
             Ok(_) => {
@@ -45,12 +49,12 @@ where
                 None
             }
             Err(_) if self.retries == 0 => None,
-            Err(_) if (self.retries - attempt.current() > 0) => Some(future::ready(self.clone())),
+            Err(_) if (self.retries - attempt.current() > 0) => Some(future::ready(())),
             Err(_) => None,
         }
     }
 
-    fn clone_request(&self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
+    fn clone_request(&mut self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
         let req = req.clone();
         req.parts.attempt.increment();
         Some(req)

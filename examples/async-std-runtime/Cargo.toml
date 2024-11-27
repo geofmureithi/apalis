@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 apalis = { path = "../../", default-features = false, features = [
-    "async-std-comp",
     "tracing",
     "retry",
 ] }

@@ -1,6 +1,6 @@
 [package]
 name = "apalis-core"
-version = "0.6.0-rc.8"
+version = "0.6.0"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition.workspace = true
 repository.workspace = true
@@ -15,9 +15,9 @@ readme = "../../README.md"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["async-await"] }
-tower = { version = "0.4", features = ["util"], default-features = false }
+tower = { version = "0.5", features = ["util"], default-features = false }
 pin-project-lite = "0.2.14"
-thiserror = "1.0.59"
+thiserror = "2.0.0"
 ulid = { version = "1.1.2", default-features = false, features = ["std"] }
 futures-timer = { version = "3.0.3", optional = true }
 # Needed for the codec

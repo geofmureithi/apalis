@@ -263,6 +263,7 @@ impl<S, P> Worker<Ready<S, P>> {
         });
         let stream = CallAllUnordered::new(service, stream).map(move |res| {
             if let Err(error) = res {
+                let error = error.into();
                 if let Some(Error::MissingData(_)) = error.downcast_ref::<Error>() {
                     w.stop();
                 }

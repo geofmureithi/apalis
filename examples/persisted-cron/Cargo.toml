@@ -7,13 +7,15 @@ repository.workspace = true
 [dependencies]
 anyhow = "1"
 apalis = { path = "../../", default-features = false, features = [
-    "tokio-comp",
     "tracing",
     "limit",
-    "catch-panic"
+    "catch-panic",
 ] }
 apalis-cron = { path = "../../packages/apalis-cron" }
-apalis-sql = { path = "../../packages/apalis-sql", features = ["sqlite", "tokio-comp"] }
+apalis-sql = { path = "../../packages/apalis-sql", features = [
+    "sqlite",
+    "tokio-comp",
+] }
 tokio = { version = "1", features = ["full"] }
 serde = "1"
 tracing-subscriber = "0.3.11"
