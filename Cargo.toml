@@ -125,7 +125,9 @@ members = [
   "examples/catch-panic",
   "examples/graceful-shutdown",
   "examples/unmonitored-worker",
-  "examples/fn-args", "examples/persisted-cron", "examples/rest-api",
+  "examples/fn-args",
+  "examples/persisted-cron",
+  "examples/rest-api",
 ]
 
 
