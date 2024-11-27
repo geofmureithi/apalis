@@ -20,7 +20,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --features tokio-comp
+          args: --all
       - uses: actions-rs/cargo@v1
         with:
           command: check
@@ -39,7 +39,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --features tokio-comp
+          args: --all
 
 
   fmt:
