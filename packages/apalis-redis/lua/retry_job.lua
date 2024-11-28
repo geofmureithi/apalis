@@ -22,7 +22,7 @@ if removed == 1 then
 
   -- Save the result of the job
   local ns = "::result"
-  redis.call("hmset", KEYS[3].. ns, ARGV[1], ARGV[4] )
+  redis.call("hmset", KEYS[3] .. ns, ARGV[1], ARGV[3] )
 
 end
 

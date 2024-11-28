@@ -566,6 +566,7 @@ where
                         .await
                 }
                 _ => {
+                    // TODO: Increase the attempts
                     let retry_job = self.scripts.retry_job.clone();
                     let retry_jobs_set = &self.config.scheduled_jobs_set();
                     retry_job
