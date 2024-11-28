@@ -29,6 +29,7 @@
 
 mod expose;
 mod storage;
+pub use redis::{aio::ConnectionManager, RedisError};
 pub use storage::connect;
 pub use storage::Config;
 pub use storage::RedisContext;
