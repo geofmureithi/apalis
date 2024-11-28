@@ -1,16 +1,13 @@
+use sentry_core::protocol;
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-
-use sentry_core::protocol;
 use tower::Layer;
 use tower::Service;
 
 use apalis_core::error::Error;
 use apalis_core::request::Request;
-use apalis_core::storage::Job;
-use apalis_core::task::attempt::Attempt;
 use apalis_core::task::task_id::TaskId;
 
 /// Tower Layer that logs Job Details.
@@ -126,34 +123,39 @@ where
     }
 }
 
-impl<S, J, F, Res> Service<Request<J>> for SentryJobService<S>
+impl<Svc, Req, Ctx, Fut, Res> Service<Request<Req, Ctx>> for SentryJobService<Svc>
 where
-    S: Service<Request<J>, Response = Res, Error = Error, Future = F>,
-    F: Future<Output = Result<Res, Error>> + 'static,
-    J: Job,
+    Svc: Service<Request<Req, Ctx>, Response = Res, Error = Error, Future = Fut>,
+    Fut: Future<Output = Result<Res, Error>> + 'static,
 {
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = SentryHttpFuture<S::Future>;
+    type Response = Svc::Response;
+    type Error = Svc::Error;
+    type Future = SentryHttpFuture<Svc::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<J>) -> Self::Future {
-        let op = J::NAME;
-        let trx_ctx = sentry_core::TransactionContext::new(op, "apalis.job");
-        let job_type = std::any::type_name::<J>().to_string();
-        let ctx = request.get::<Attempt>().cloned().unwrap_or_default();
-        let task_id = request.get::<TaskId>().unwrap();
-        let job_details = Task {
+    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
+        let task_type = std::any::type_name::<Req>().to_string();
+        let attempt = &request.parts.attempt;
+        let task_id = &request.parts.task_id;
+        let namespace = request
+            .parts
+            .namespace
+            .as_ref()
+            .map(|s| s.0.as_str())
+            .unwrap_or(std::any::type_name::<Req>());
+        let trx_ctx = sentry_core::TransactionContext::new(namespace, "apalis.task");
+
+        let task_details = Task {
             id: task_id.clone(),
-            current_attempt: ctx.current().try_into().unwrap(),
-            namespace: job_type,
+            current_attempt: attempt.current().try_into().unwrap(),
+            namespace: task_type,
         };
 
         SentryHttpFuture {
-            on_first_poll: Some((job_details, trx_ctx)),
+            on_first_poll: Some((task_details, trx_ctx)),
             transaction: None,
             future: self.service.call(request),
         }

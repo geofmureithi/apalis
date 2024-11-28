@@ -4,14 +4,15 @@ use std::{
     time::Instant,
 };
 
-use apalis_core::{error::Error, request::Request, storage::Job};
+use apalis_core::{error::Error, request::Request};
 use futures::Future;
 use pin_project_lite::pin_project;
 use tower::{Layer, Service};
 
 /// A layer to support prometheus metrics
 #[derive(Debug, Default)]
-pub struct PrometheusLayer;
+#[non_exhaustive]
+pub struct PrometheusLayer {}
 
 impl<S> Layer<S> for PrometheusLayer {
     type Service = PrometheusService<S>;
@@ -27,30 +28,36 @@ pub struct PrometheusService<S> {
     service: S,
 }
 
-impl<S, J, F, Res> Service<Request<J>> for PrometheusService<S>
+impl<Svc, Fut, Req, Ctx, Res> Service<Request<Req, Ctx>> for PrometheusService<Svc>
 where
-    S: Service<Request<J>, Response = Res, Error = Error, Future = F>,
-    F: Future<Output = Result<Res, Error>> + 'static,
-    J: Job,
+    Svc: Service<Request<Req, Ctx>, Response = Res, Error = Error, Future = Fut>,
+    Fut: Future<Output = Result<Res, Error>> + 'static,
 {
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = ResponseFuture<F>;
+    type Response = Svc::Response;
+    type Error = Svc::Error;
+    type Future = ResponseFuture<Fut>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<J>) -> Self::Future {
+    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
         let start = Instant::now();
+        let namespace = request
+            .parts
+            .namespace
+            .as_ref()
+            .map(|ns| ns.0.to_string())
+            .unwrap_or(std::any::type_name::<Svc>().to_string());
+
         let req = self.service.call(request);
-        let job_type = std::any::type_name::<J>().to_string();
-        let op = J::NAME;
+        let job_type = std::any::type_name::<Req>().to_string();
+
         ResponseFuture {
             inner: req,
             start,
             job_type,
-            operation: op.to_string(),
+            operation: namespace,
         }
     }
 }
@@ -89,8 +96,10 @@ where
             ("namespace", this.job_type.to_string()),
             ("status", status),
         ];
-        metrics::counter!("requests_total", &labels).increment(1);
-        metrics::histogram!("request_duration_seconds", &labels).record(latency);
+        let counter = metrics::counter!("requests_total", &labels);
+        counter.increment(1);
+        let hist = metrics::histogram!("request_duration_seconds", &labels);
+        hist.record(latency);
         Poll::Ready(response)
     }
 }

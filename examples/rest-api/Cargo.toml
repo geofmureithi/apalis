@@ -1,19 +1,15 @@
 [package]
-name = "rest-api-example"
+name = "rest-api"
 version = "0.1.0"
-authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
-edition = "2018"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow = "1"
-apalis = { path = "../../", features = ["redis", "sqlite", "sentry", "postgres", "mysql", "expose"] }
+apalis = { path = "../../" }
+apalis-redis = { path = "../../packages/apalis-redis" }
 serde = "1"
-tokio = { version = "1", features =["macros", "rt-multi-thread"] }
 env_logger = "0.10"
 actix-web = "4"
 futures = "0.3"
-actix-cors = "0.6.1"
-serde_json = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
 email-service = { path = "../email-service" }

@@ -1,6 +1,6 @@
 [package]
 name = "apalis-core"
-version = "0.5.5"
+version = "0.6.0"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition.workspace = true
 repository.workspace = true
@@ -17,7 +17,6 @@ serde = { version = "1.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["async-await"] }
 tower = { version = "0.5", features = ["util"], default-features = false }
 pin-project-lite = "0.2.14"
-async-oneshot = "0.5.9"
 thiserror = "2.0.0"
 ulid = { version = "1.1.2", default-features = false, features = ["std"] }
 futures-timer = { version = "3.0.3", optional = true }
@@ -30,10 +29,11 @@ optional = true
 
 
 [features]
-default = []
+default = ["test-utils"]
 docsrs = ["document-features"]
 sleep = ["futures-timer"]
 json = ["serde_json"]
+test-utils = []
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

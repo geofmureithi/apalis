@@ -19,15 +19,11 @@
 //! ```rust, no_run
 //! use apalis::prelude::*;
 //! use serde::{Deserialize, Serialize};
-//! use apalis::redis::RedisStorage;
+//! use apalis_redis::{RedisStorage, Config};
 //!
 //! #[derive(Debug, Deserialize, Serialize)]
 //! struct Email {
 //!     to: String,
-//! }
-//!
-//! impl Job for Email {
-//!     const NAME: &'static str = "apalis::Email";
 //! }
 //!
 //! async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
@@ -37,13 +33,14 @@
 //! #[tokio::main]
 //! async fn main() {
 //!     let redis = std::env::var("REDIS_URL").expect("Missing REDIS_URL env variable");
-//!     let conn = apalis::redis::connect(redis).await.unwrap();
+//!     let conn = apalis_redis::connect(redis).await.unwrap();
 //!     let storage = RedisStorage::new(conn);
-//!     Monitor::<TokioExecutor>::new()
-//!         .register_with_count(2, {
+//!     Monitor::new()
+//!         .register({
 //!             WorkerBuilder::new(&format!("quick-sand"))
+//!                 .concurrency(2)
 //!                 .data(0usize)
-//!                 .source(storage.clone())
+//!                 .backend(storage.clone())
 //!                 .build_fn(send_email)
 //!         })
 //!         .run()
@@ -66,95 +63,35 @@
 //! [`tower-http`]: https://crates.io/crates/tower-http
 //! [`Layer`]: https://docs.rs/tower/latest/tower/trait.Layer.html
 //! [`Stream`]: https://docs.rs/futures/latest/futures/stream/trait.Stream.html
-
-/// Include the default Redis storage
-#[cfg(feature = "redis")]
-#[cfg_attr(docsrs, doc(cfg(feature = "redis")))]
-pub mod redis {
-    pub use apalis_redis::*;
-}
-
-/// Include the default Sqlite storage
-#[cfg(feature = "sqlite")]
-#[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
-pub mod sqlite {
-    pub use apalis_sql::sqlite::*;
-}
-
-/// Include the default Postgres storage
-#[cfg(feature = "postgres")]
-#[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
-pub mod postgres {
-    pub use apalis_sql::postgres::*;
-}
-
-/// Include the default MySQL storage
-#[cfg(feature = "mysql")]
-#[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
-pub mod mysql {
-    pub use apalis_sql::mysql::*;
-}
-
-/// Include Cron utilities
-#[cfg(feature = "cron")]
-#[cfg_attr(docsrs, doc(cfg(feature = "cron")))]
-pub mod cron {
-    pub use apalis_cron::*;
-}
-
 /// apalis fully supports middleware via [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html)
 pub mod layers;
 
-/// Utilities for working with apalis
-pub mod utils {
-    /// Executor for [`tokio`]
-    #[cfg(feature = "tokio-comp")]
-    #[derive(Clone, Debug, Default)]
-    pub struct TokioExecutor;
-
-    #[cfg(feature = "tokio-comp")]
-    impl apalis_core::executor::Executor for TokioExecutor {
-        fn spawn(&self, future: impl std::future::Future<Output = ()> + Send + 'static) {
-            tokio::spawn(future);
-        }
-    }
-
-    /// Executor for [`async_std`]
-    #[cfg(feature = "async-std-comp")]
-    #[derive(Clone, Debug, Default)]
-    pub struct AsyncStdExecutor;
-
-    #[cfg(feature = "async-std-comp")]
-    impl apalis_core::executor::Executor for AsyncStdExecutor {
-        fn spawn(&self, future: impl std::future::Future<Output = ()> + Send + 'static) {
-            async_std::task::spawn(future);
-        }
-    }
-}
-
 /// Common imports
 pub mod prelude {
-    #[cfg(feature = "tokio-comp")]
-    pub use crate::utils::TokioExecutor;
+    pub use crate::layers::WorkerBuilderExt;
     pub use apalis_core::{
+        backend::Backend,
+        backend::BackendExpose,
+        backend::Stat,
+        backend::WorkerState,
         builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
+        codec::Codec,
         data::Extensions,
         error::{BoxDynError, Error},
-        executor::Executor,
         layers::extensions::{AddExtension, Data},
         memory::{MemoryStorage, MemoryWrapper},
-        monitor::{Monitor, MonitorContext},
-        mq::{Message, MessageQueue},
+        monitor::Monitor,
+        mq::MessageQueue,
         notify::Notify,
         poller::stream::BackendStream,
-        poller::{controller::Controller, FetchNext, Poller},
+        poller::{controller::Controller, Poller},
+        request::State,
         request::{Request, RequestStream},
         response::IntoResponse,
-        service_fn::{service_fn, FromData, ServiceFn},
-        storage::{Job, Storage, StorageStream},
+        service_fn::{service_fn, FromRequest, ServiceFn},
+        storage::Storage,
         task::attempt::Attempt,
         task::task_id::TaskId,
         worker::{Context, Event, Ready, Worker, WorkerError, WorkerId},
-        Backend, Codec,
     };
 }

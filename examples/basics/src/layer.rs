@@ -1,10 +1,14 @@
-use std::task::{Context, Poll};
+use std::{
+    fmt::Debug,
+    task::{Context, Poll},
+};
 
 use apalis::prelude::Request;
 use tower::{Layer, Service};
 use tracing::info;
 
 /// A layer that logs a job info before it starts
+#[derive(Debug, Clone)]
 pub struct LogLayer {
     target: &'static str,
 }
@@ -34,10 +38,11 @@ pub struct LogService<S> {
     service: S,
 }
 
-impl<S, Req> Service<Request<Req>> for LogService<S>
+impl<S, Req, Ctx> Service<Request<Req, Ctx>> for LogService<S>
 where
-    S: Service<Request<Req>> + Clone,
-    Req: std::fmt::Debug,
+    S: Service<Request<Req, Ctx>> + Clone,
+    Req: Debug,
+    Ctx: Debug,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -47,7 +52,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<Req>) -> Self::Future {
+    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
         // Use service to apply middleware before or(and) after a request
         info!("request = {:?}, target = {:?}", request, self.target);
         self.service.call(request)

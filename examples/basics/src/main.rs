@@ -2,20 +2,17 @@ mod cache;
 mod layer;
 mod service;
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use apalis::{
-    layers::tracing::TraceLayer,
-    prelude::*,
-    sqlite::{SqlitePool, SqliteStorage},
-};
+use apalis::{layers::catch_panic::CatchPanicLayer, prelude::*};
+use apalis_sql::sqlite::{SqlitePool, SqliteStorage};
 
 use email_service::Email;
 use layer::LogLayer;
 
 use tracing::{log::info, Instrument, Span};
 
-type WorkerCtx = Context<TokioExecutor>;
+type WorkerCtx = Context;
 
 use crate::{cache::ValidEmailCache, service::EmailService};
 
@@ -35,7 +32,7 @@ async fn produce_jobs(storage: &SqliteStorage<Email>) {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum ServiceError {
     #[error("data store disconnected")]
     Disconnect(#[from] std::io::Error),
     #[error("the data for key `{0}` is not available")]
@@ -46,15 +43,21 @@ pub enum Error {
     Unknown,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum PanicError {
+    #[error("{0}")]
+    Panic(String),
+}
+
 /// Quick solution to prevent spam.
 /// If email in cache, then send email else complete the job but let a validation process run in the background,
 async fn send_email(
     email: Email,
     svc: Data<EmailService>,
     worker_ctx: Data<WorkerCtx>,
-    worker_id: WorkerId,
+    worker_id: Data<WorkerId>,
     cache: Data<ValidEmailCache>,
-) -> Result<(), Error> {
+) -> Result<(), ServiceError> {
     info!("Job started in worker {:?}", worker_id);
     let cache_clone = cache.clone();
     let email_to = email.to.clone();
@@ -66,14 +69,16 @@ async fn send_email(
             // This can be important for starting long running jobs that don't block the queue
             // Its also possible to acquire context types and clone them into the futures context.
             // They will also be gracefully shutdown if [`Monitor`] has a shutdown signal
-            worker_ctx.spawn(
-                async move {
-                    if cache::fetch_validity(email_to, &cache_clone).await {
-                        svc.send(email).await;
-                        info!("Email added to cache")
+            tokio::spawn(
+                worker_ctx.track(
+                    async move {
+                        if cache::fetch_validity(email_to, &cache_clone).await {
+                            svc.send(email).await;
+                            info!("Email added to cache")
+                        }
                     }
-                }
-                .instrument(Span::current()), // Its still gonna use the jobs current tracing span. Important eg using sentry.
+                    .instrument(Span::current()),
+                ), // Its still gonna use the jobs current tracing span. Important eg using sentry.
             );
         }
 
@@ -96,15 +101,29 @@ async fn main() -> Result<(), std::io::Error> {
     let sqlite: SqliteStorage<Email> = SqliteStorage::new(pool);
     produce_jobs(&sqlite).await;
 
-    Monitor::<TokioExecutor>::new()
-        .register_with_count(2, {
+    Monitor::new()
+        .register({
             WorkerBuilder::new("tasty-banana")
-                .layer(TraceLayer::new())
+                // This handles any panics that may occur in any of the layers below
+                // .catch_panic()
+                // Or just to customize
+                .layer(CatchPanicLayer::with_panic_handler(|e| {
+                    let panic_info = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown panic".to_string()
+                    };
+                    // Abort tells the backend to kill job
+                    Error::Abort(Arc::new(Box::new(PanicError::Panic(panic_info))))
+                }))
+                .enable_tracing()
                 .layer(LogLayer::new("some-log-example"))
                 // Add shared context to all jobs executed by this worker
                 .data(EmailService::new())
                 .data(ValidEmailCache::new())
-                .with_storage(sqlite)
+                .backend(sqlite)
                 .build_fn(send_email)
         })
         .shutdown_timeout(Duration::from_secs(5))

@@ -1,0 +1,23 @@
+[package]
+name = "cron-example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+apalis = { path = "../../", default-features = false, features = [
+    "tracing",
+    "limit",
+    "catch-panic",
+] }
+apalis-cron = { path = "../../packages/apalis-cron" }
+tokio = { version = "1", features = ["full"] }
+serde = "1"
+tracing-subscriber = "0.3.11"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+pin-project-lite = "0.2.9"
+tower = { version = "0.4", features = ["load-shed"] }
+
+[dependencies.tracing]
+default-features = false
+version = "0.1"

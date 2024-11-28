@@ -1,0 +1,22 @@
+[package]
+name = "unmonitored-worker"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+apalis = { path = "../../", features = ["limit", "catch-panic"] }
+apalis-sql = { path = "../../packages/apalis-sql", features = [
+    "sqlite",
+    "tokio-comp",
+] }
+serde = "1"
+tracing-subscriber = "0.3.11"
+futures = "0.3"
+tower = "0.4"
+
+
+[dependencies.tracing]
+default-features = false
+version = "0.1"

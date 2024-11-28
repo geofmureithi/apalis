@@ -34,7 +34,7 @@
 
 - Simple and predictable job handling model.
 - Jobs handlers with a macro free API.
-- Take full advantage of the [tower] ecosystem of
+- Take full advantage of the [`tower`] ecosystem of
   middleware, services, and utilities.
 - Runtime agnostic - Use tokio, smol etc.
 - Optional Web interface to help you manage your jobs.
@@ -59,24 +59,21 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.5", features = ["redis"] } # Backends available: postgres, sqlite, mysql, amqp
+apalis = { version = "0.6" }
+apalis-redis = { version = "0.6" }
+# apalis-sql = { version = "0.6", features = ["postgres"] } # or mysql, sqlite
 ```
 
 ## Usage
 
 ```rust
 use apalis::prelude::*;
-use apalis::redis::RedisStorage;
+use apalis_redis::{RedisStorage, Config};
 use serde::{Deserialize, Serialize};
-use anyhow::Result;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Email {
     to: String,
-}
-
-impl Job for Email {
-    const NAME: &'static str = "apalis::Email";
 }
 
 /// A function that will be converted into a service.
@@ -86,16 +83,18 @@ async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
     let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
-    let storage = RedisStorage::new(redis).await?;
+    let conn = apalis_redis::connect(redis_url).await.expect("Could not connect");
+    let storage = RedisStorage::new(conn);
     Monitor::new()
-        .register_with_count(2, {
+        .register({
             WorkerBuilder::new(format!("email-worker"))
+                .concurrency(2)
                 .data(0usize)
-                .with_storage(storage)
+                .backend(storage)
                 .build_fn(send_email)
         })
         .run()
@@ -122,17 +121,13 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
 ## Feature flags
 
 - _tracing_ (enabled by default) — Support Tracing 👀
-- _redis_ — Include redis storage
-- _postgres_ — Include Postgres storage
-- _sqlite_ — Include SQlite storage
-- _mysql_ — Include MySql storage
-- _cron_ — Include cron job processing
 - _sentry_ — Support for Sentry exception and performance monitoring
 - _prometheus_ — Support Prometheus metrics
 - _retry_ — Support direct retrying jobs
 - _timeout_ — Support timeouts on jobs
 - _limit_ — 💪 Limit the amount of jobs
 - _filter_ — Support filtering jobs based on a predicate
+- _catch-panic_ - Catch panics that occur during execution
 
 ## Storage Comparison
 
@@ -214,5 +209,5 @@ See also the list of [contributors](https://github.com/geofmureithi/apalis/contr
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
 
 [`tower::Service`]: https://docs.rs/tower/latest/tower/trait.Service.html
-[tower]: https://crates.io/crates/tower
+[`tower`]: https://crates.io/crates/tower
 [`actix`]: https://crates.io/crates/actix

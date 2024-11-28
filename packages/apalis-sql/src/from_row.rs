@@ -1,23 +1,24 @@
+use apalis_core::request::Parts;
+use apalis_core::task::attempt::Attempt;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::{data::Extensions, request::Request, worker::WorkerId};
+use apalis_core::{request::Request, worker::WorkerId};
+
+use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Type};
 
 use crate::context::SqlContext;
 /// Wrapper for [Request]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlRequest<T> {
-    pub(crate) req: T,
-    pub(crate) context: SqlContext,
+    /// The inner request
+    pub req: Request<T, SqlContext>,
+    pub(crate) _priv: (),
 }
 
-impl<T> From<SqlRequest<T>> for Request<T> {
-    fn from(val: SqlRequest<T>) -> Self {
-        let mut data = Extensions::new();
-        data.insert(val.context.id().clone());
-        data.insert(val.context.attempts().clone());
-        data.insert(val.context);
-
-        Request::new_with_data(val.req, data)
+impl<T> SqlRequest<T> {
+    /// Creates a new SqlRequest.
+    pub fn new(req: Request<T, SqlContext>) -> Self {
+        SqlRequest { req, _priv: () }
     }
 }
 
@@ -27,26 +28,30 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
     sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
-        use sqlx::types::chrono::DateTime;
+        use chrono::DateTime;
         use sqlx::Row;
         use std::str::FromStr;
 
         let job: T = row.try_get("job")?;
-        let id: TaskId =
+        let task_id: TaskId =
             TaskId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut context = crate::context::SqlContext::new(id);
+        let mut parts = Parts::<SqlContext>::default();
+        parts.task_id = task_id;
+
+        let attempt: i32 = row.try_get("attempts").unwrap_or(0);
+        parts.attempt = Attempt::new_with_value(attempt as usize);
+
+        let mut context = crate::context::SqlContext::new();
 
         let run_at: i64 = row.try_get("run_at")?;
         context.set_run_at(DateTime::from_timestamp(run_at, 0).unwrap_or_default());
 
-        let attempts = row.try_get("attempts").unwrap_or(0);
-        context.set_attempts(attempts);
-
-        let max_attempts = row.try_get("max_attempts").unwrap_or(25);
-        context.set_max_attempts(max_attempts);
+        if let Ok(max_attempts) = row.try_get("max_attempts") {
+            context.set_max_attempts(max_attempts)
+        }
 
         let done_at: Option<i64> = row.try_get("done_at").unwrap_or_default();
         context.set_done_at(done_at);
@@ -74,8 +79,11 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
                     source: "Could not parse lock_by as a WorkerId".into(),
                 })?,
         );
-
-        Ok(SqlRequest { context, req: job })
+        parts.context = context;
+        Ok(SqlRequest {
+            req: Request::new_with_parts(job, parts),
+            _priv: (),
+        })
     }
 }
 
@@ -85,32 +93,35 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
     sqlx::FromRow<'r, sqlx::postgres::PgRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        use chrono::Utc;
         use sqlx::Row;
         use std::str::FromStr;
-        type Timestamp = i64;
 
         let job: T = row.try_get("job")?;
-        let id: TaskId =
+        let task_id: TaskId =
             TaskId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut context = SqlContext::new(id);
+        let mut parts = Parts::<SqlContext>::default();
+        parts.task_id = task_id;
+
+        let attempt: i32 = row.try_get("attempts").unwrap_or(0);
+        parts.attempt = Attempt::new_with_value(attempt as usize);
+        let mut context = SqlContext::new();
 
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
 
-        let attempts = row.try_get("attempts").unwrap_or(0);
-        context.set_attempts(attempts);
+        if let Ok(max_attempts) = row.try_get("max_attempts") {
+            context.set_max_attempts(max_attempts)
+        }
 
-        let max_attempts = row.try_get("max_attempts").unwrap_or(25);
-        context.set_max_attempts(max_attempts);
+        let done_at: Option<chrono::DateTime<Utc>> = row.try_get("done_at").unwrap_or_default();
+        context.set_done_at(done_at.map(|d| d.timestamp()));
 
-        let done_at: Option<Timestamp> = row.try_get("done_at").unwrap_or_default();
-        context.set_done_at(done_at);
-
-        let lock_at: Option<Timestamp> = row.try_get("lock_at").unwrap_or_default();
-        context.set_lock_at(lock_at);
+        let lock_at: Option<chrono::DateTime<Utc>> = row.try_get("lock_at").unwrap_or_default();
+        context.set_lock_at(lock_at.map(|d| d.timestamp()));
 
         let last_error = row.try_get("last_error").unwrap_or_default();
         context.set_last_error(last_error);
@@ -132,7 +143,11 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
                     source: "Could not parse lock_by as a WorkerId".into(),
                 })?,
         );
-        Ok(SqlRequest { context, req: job })
+        parts.context = context;
+        Ok(SqlRequest {
+            req: Request::new_with_parts(job, parts),
+            _priv: (),
+        })
     }
 }
 
@@ -144,31 +159,32 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
     fn from_row(row: &'r sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
         use std::str::FromStr;
-
-        type Timestamp = i64;
-
         let job: T = row.try_get("job")?;
-        let id: TaskId =
+        let task_id: TaskId =
             TaskId::from_str(row.try_get("id")?).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut context = SqlContext::new(id);
+        let mut parts = Parts::<SqlContext>::default();
+        parts.task_id = task_id;
+
+        let attempt: i32 = row.try_get("attempts").unwrap_or(0);
+        parts.attempt = Attempt::new_with_value(attempt as usize);
+
+        let mut context = SqlContext::new();
 
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
 
-        let attempts = row.try_get("attempts").unwrap_or(0);
-        context.set_attempts(attempts);
+        if let Ok(max_attempts) = row.try_get("max_attempts") {
+            context.set_max_attempts(max_attempts)
+        }
 
-        let max_attempts = row.try_get("max_attempts").unwrap_or(25);
-        context.set_max_attempts(max_attempts);
+        let done_at: Option<chrono::NaiveDateTime> = row.try_get("done_at").unwrap_or_default();
+        context.set_done_at(done_at.map(|d| d.and_utc().timestamp()));
 
-        let done_at: Option<Timestamp> = row.try_get("done_at").unwrap_or_default();
-        context.set_done_at(done_at);
-
-        let lock_at: Option<Timestamp> = row.try_get("lock_at").unwrap_or_default();
-        context.set_lock_at(lock_at);
+        let lock_at: Option<chrono::NaiveDateTime> = row.try_get("lock_at").unwrap_or_default();
+        context.set_lock_at(lock_at.map(|d| d.and_utc().timestamp()));
 
         let last_error = row.try_get("last_error").unwrap_or_default();
         context.set_last_error(last_error);
@@ -190,7 +206,10 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
                     source: "Could not parse lock_by as a WorkerId".into(),
                 })?,
         );
-
-        Ok(SqlRequest { context, req: job })
+        parts.context = context;
+        Ok(SqlRequest {
+            req: Request::new_with_parts(job, parts),
+            _priv: (),
+        })
     }
 }

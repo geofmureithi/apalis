@@ -8,22 +8,22 @@ use super::DEFAULT_MESSAGE_LEVEL;
 ///
 /// [`Span`]: tracing::Span
 /// [`Trace`]: super::Trace
-pub trait MakeSpan<B> {
+pub trait MakeSpan<B, Ctx> {
     /// Make a span from a request.
-    fn make_span(&mut self, request: &Request<B>) -> Span;
+    fn make_span(&mut self, request: &Request<B, Ctx>) -> Span;
 }
 
-impl<B> MakeSpan<B> for Span {
-    fn make_span(&mut self, _request: &Request<B>) -> Span {
+impl<B, Ctx> MakeSpan<B, Ctx> for Span {
+    fn make_span(&mut self, _request: &Request<B, Ctx>) -> Span {
         self.clone()
     }
 }
 
-impl<F, B> MakeSpan<B> for F
+impl<F, B, Ctx> MakeSpan<B, Ctx> for F
 where
-    F: FnMut(&Request<B>) -> Span,
+    F: FnMut(&Request<B, Ctx>) -> Span,
 {
-    fn make_span(&mut self, request: &Request<B>) -> Span {
+    fn make_span(&mut self, request: &Request<B, Ctx>) -> Span {
         self(request)
     }
 }
@@ -62,18 +62,22 @@ impl Default for DefaultMakeSpan {
     }
 }
 
-impl<B> MakeSpan<B> for DefaultMakeSpan {
-    fn make_span(&mut self, _req: &Request<B>) -> Span {
+impl<B, Ctx> MakeSpan<B, Ctx> for DefaultMakeSpan {
+    fn make_span(&mut self, req: &Request<B, Ctx>) -> Span {
         // This ugly macro is needed, unfortunately, because `tracing::span!`
         // required the level argument to be static. Meaning we can't just pass
         // `self.level`.
+        let task_id = req.parts.task_id.to_string();
+        let attempt = req.parts.attempt.current();
         let span = Span::current();
         macro_rules! make_span {
             ($level:expr) => {
                 tracing::span!(
                     parent: span,
                     $level,
-                    "job",
+                    "task",
+                    task_id = task_id,
+                    attempt = attempt
                 )
             };
         }

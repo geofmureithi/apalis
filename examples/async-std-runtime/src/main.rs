@@ -1,16 +1,15 @@
-use std::{future::Future, str::FromStr, time::Duration};
+use std::{str::FromStr, time::Duration};
 
 use anyhow::Result;
 use apalis::{
-    cron::{CronStream, Schedule},
-    layers::{retry::RetryLayer, retry::RetryPolicy, tracing::MakeSpan, tracing::TraceLayer},
+    layers::{retry::RetryPolicy, tracing::MakeSpan, tracing::TraceLayer},
     prelude::*,
 };
-
+use apalis_cron::{CronStream, Schedule};
 use chrono::{DateTime, Utc};
 use tracing::{debug, info, Instrument, Level, Span};
 
-type WorkerCtx = Context<AsyncStdExecutor>;
+type WorkerCtx = Worker<Context>;
 
 #[derive(Default, Debug, Clone)]
 struct Reminder(DateTime<Utc>);
@@ -27,7 +26,7 @@ async fn send_in_background(reminder: Reminder) {
 }
 async fn send_reminder(reminder: Reminder, worker: WorkerCtx) -> bool {
     // this will happen in the workers background and wont block the next tasks
-    worker.spawn(send_in_background(reminder).in_current_span());
+    async_std::task::spawn(worker.track(send_in_background(reminder).in_current_span()));
     false
 }
 
@@ -43,13 +42,13 @@ async fn main() -> Result<()> {
 
     let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
     let worker = WorkerBuilder::new("daily-cron-worker")
-        .layer(RetryLayer::new(RetryPolicy::retries(5)))
+        .retry(RetryPolicy::retries(5))
         .layer(TraceLayer::new().make_span_with(ReminderSpan::new()))
-        .stream(CronStream::new(schedule).into_stream())
+        .backend(CronStream::new(schedule))
         .build_fn(send_reminder);
 
-    Monitor::<AsyncStdExecutor>::new()
-        .register_with_count(2, worker)
+    Monitor::new()
+        .register(worker)
         .on_event(|e| debug!("Worker event: {e:?}"))
         .run_with_signal(async {
             ctrl_c.recv().await.ok();
@@ -58,22 +57,6 @@ async fn main() -> Result<()> {
         })
         .await?;
     Ok(())
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct AsyncStdExecutor;
-
-impl AsyncStdExecutor {
-    /// A new async-std executor
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Executor for AsyncStdExecutor {
-    fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) {
-        async_std::task::spawn(fut);
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -96,10 +79,10 @@ impl ReminderSpan {
     }
 }
 
-impl<B> MakeSpan<B> for ReminderSpan {
-    fn make_span(&mut self, req: &Request<B>) -> Span {
-        let task_id: &TaskId = req.get().unwrap();
-        let attempts: Attempt = req.get().cloned().unwrap_or_default();
+impl<B, Ctx> MakeSpan<B, Ctx> for ReminderSpan {
+    fn make_span(&mut self, req: &Request<B, Ctx>) -> Span {
+        let task_id: &TaskId = &req.parts.task_id;
+        let attempts: &Attempt = &req.parts.attempt;
         let span = Span::current();
         macro_rules! make_span {
             ($level:expr) => {

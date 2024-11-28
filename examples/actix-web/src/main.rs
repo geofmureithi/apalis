@@ -2,8 +2,8 @@ use actix_web::rt::signal;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use anyhow::Result;
 use apalis::prelude::*;
-use apalis::utils::TokioExecutor;
-use apalis::{layers::tracing::TraceLayer, redis::RedisStorage};
+
+use apalis_redis::RedisStorage;
 use futures::future;
 
 use email_service::{send_email, Email};
@@ -16,7 +16,7 @@ async fn push_email(
     let mut storage = storage.clone();
     let res = storage.push(email.into_inner()).await;
     match res {
-        Ok(jid) => HttpResponse::Ok().body(format!("Email with job_id [{jid}] added to queue")),
+        Ok(ctx) => HttpResponse::Ok().json(ctx),
         Err(e) => HttpResponse::InternalServerError().body(format!("{e}")),
     }
 }
@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     env_logger::init();
 
-    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
+    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
     let storage = RedisStorage::new(conn);
     let data = web::Data::new(storage.clone());
     let http = async {
@@ -40,11 +40,12 @@ async fn main() -> Result<()> {
         .await?;
         Ok(())
     };
-    let worker = Monitor::<TokioExecutor>::new()
-        .register_with_count(2, {
+    let worker = Monitor::new()
+        .register({
             WorkerBuilder::new("tasty-avocado")
-                .layer(TraceLayer::new())
-                .with_storage(storage)
+                .enable_tracing()
+                // .concurrency(2)
+                .backend(storage)
                 .build_fn(send_email)
         })
         .run_with_signal(signal::ctrl_c());

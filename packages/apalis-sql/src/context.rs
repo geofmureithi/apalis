@@ -1,18 +1,16 @@
-use apalis_core::error::Error;
-use apalis_core::task::{attempt::Attempt, task_id::TaskId};
+use apalis_core::request::Request;
+use apalis_core::service_fn::FromRequest;
 use apalis_core::worker::WorkerId;
+use apalis_core::{error::Error, request::State};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::types::chrono::{DateTime, Utc};
-use std::{fmt, str::FromStr};
 
 /// The context for a job is represented here
-/// Used to provide a context when a job is defined through the [Job] trait
-#[derive(Debug, Clone)]
+/// Used to provide a context for a job with an sql backend
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlContext {
-    id: TaskId,
     status: State,
     run_at: DateTime<Utc>,
-    attempts: Attempt,
     max_attempts: i32,
     last_error: Option<String>,
     lock_at: Option<i64>,
@@ -20,16 +18,20 @@ pub struct SqlContext {
     done_at: Option<i64>,
 }
 
+impl Default for SqlContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SqlContext {
-    /// Build a new context with defaults given an ID.
-    pub fn new(id: TaskId) -> Self {
+    /// Build a new context with defaults
+    pub fn new() -> Self {
         SqlContext {
-            id,
             status: State::Pending,
             run_at: Utc::now(),
             lock_at: None,
             done_at: None,
-            attempts: Default::default(),
             max_attempts: 25,
             last_error: None,
             lock_by: None,
@@ -44,21 +46,6 @@ impl SqlContext {
     /// Gets the maximum attempts for a job. Default 25
     pub fn max_attempts(&self) -> i32 {
         self.max_attempts
-    }
-
-    /// Get the id for a job
-    pub fn id(&self) -> &TaskId {
-        &self.id
-    }
-
-    /// Gets the current attempts for a job. Default 0
-    pub fn attempts(&self) -> &Attempt {
-        &self.attempts
-    }
-
-    /// Set the number of attempts
-    pub fn set_attempts(&mut self, attempts: i32) {
-        self.attempts = Attempt::new_with_value(attempts.try_into().unwrap());
     }
 
     /// Get the time a job was done
@@ -117,65 +104,13 @@ impl SqlContext {
     }
 
     /// Set the last error
-    pub fn set_last_error(&mut self, error: String) {
-        self.last_error = Some(error);
-    }
-
-    /// Record an attempt to execute the request
-    pub fn record_attempt(&mut self) {
-        self.attempts.increment();
+    pub fn set_last_error(&mut self, error: Option<String>) {
+        self.last_error = error;
     }
 }
 
-/// Represents the state of a [Request]
-#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
-pub enum State {
-    /// Job is pending
-    #[serde(alias = "Latest")]
-    Pending,
-    /// Job is running
-    Running,
-    /// Job was done successfully
-    Done,
-    /// Retry Job
-    Retry,
-    /// Job has failed. Check `last_error`
-    Failed,
-    /// Job has been killed
-    Killed,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        State::Pending
-    }
-}
-
-impl FromStr for State {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "Pending" | "Latest" => Ok(State::Pending),
-            "Running" => Ok(State::Running),
-            "Done" => Ok(State::Done),
-            "Retry" => Ok(State::Retry),
-            "Failed" => Ok(State::Failed),
-            "Killed" => Ok(State::Killed),
-            _ => Err(Error::InvalidContext("Invalid Job state".to_string())),
-        }
-    }
-}
-
-impl fmt::Display for State {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self {
-            State::Pending => write!(f, "Pending"),
-            State::Running => write!(f, "Running"),
-            State::Done => write!(f, "Done"),
-            State::Retry => write!(f, "Retry"),
-            State::Failed => write!(f, "Failed"),
-            State::Killed => write!(f, "Killed"),
-        }
+impl<Req> FromRequest<Request<Req, SqlContext>> for SqlContext {
+    fn from_request(req: &Request<Req, SqlContext>) -> Result<Self, Error> {
+        Ok(req.parts.context.clone())
     }
 }

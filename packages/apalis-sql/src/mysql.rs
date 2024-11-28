@@ -1,62 +1,76 @@
+use apalis_core::backend::{BackendExpose, Stat, WorkerState};
 use apalis_core::codec::json::JsonCodec;
-use apalis_core::error::Error;
+use apalis_core::error::{BoxDynError, Error};
 use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
-use apalis_core::request::{Request, RequestStream};
-use apalis_core::storage::{Job, Storage};
+use apalis_core::request::{Parts, Request, RequestStream, State};
+use apalis_core::response::Response;
+use apalis_core::storage::Storage;
+use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::worker::WorkerId;
-use apalis_core::{Backend, Codec};
+use apalis_core::worker::{Context, Event, Worker, WorkerId};
+use apalis_core::{backend::Backend, codec::Codec};
 use async_stream::try_stream;
+use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt, TryStreamExt};
 use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use sqlx::mysql::MySqlRow;
-use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::{MySql, Pool, Row};
+use std::any::type_name;
 use std::convert::TryInto;
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::{fmt, io};
 use std::{marker::PhantomData, ops::Add, time::Duration};
 
 use crate::context::SqlContext;
 use crate::from_row::SqlRequest;
-use crate::Config;
+use crate::{calculate_status, Config, SqlError};
 
 pub use sqlx::mysql::MySqlPool;
 
+type MysqlCodec = JsonCodec<Value>;
+
 /// Represents a [Storage] that persists to MySQL
 
-pub struct MysqlStorage<T> {
+pub struct MysqlStorage<T, C = JsonCodec<Value>>
+where
+    C: Codec,
+{
     pool: Pool<MySql>,
     job_type: PhantomData<T>,
     controller: Controller,
     config: Config,
-    codec: Arc<Box<dyn Codec<T, serde_json::Value, Error = Error> + Sync + Send + 'static>>,
-    ack_notify: Notify<(WorkerId, TaskId)>,
+    codec: PhantomData<C>,
+    ack_notify: Notify<(SqlContext, Response<C::Compact>)>,
 }
 
-impl<T> fmt::Debug for MysqlStorage<T> {
+impl<T, C> fmt::Debug for MysqlStorage<T, C>
+where
+    C: Debug + Codec,
+    C::Compact: Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MysqlStorage")
             .field("pool", &self.pool)
             .field("job_type", &"PhantomData<T>")
             .field("controller", &self.controller)
             .field("config", &self.config)
-            .field(
-                "codec",
-                &"Arc<Box<dyn Codec<T, String, Error = Error> + Sync + Send + 'static>>",
-            )
+            .field("codec", &self.codec)
             .field("ack_notify", &self.ack_notify)
             .finish()
     }
 }
 
-impl<T> Clone for MysqlStorage<T> {
+impl<T, C> Clone for MysqlStorage<T, C>
+where
+    C: Debug + Codec,
+{
     fn clone(&self) -> Self {
         let pool = self.pool.clone();
         MysqlStorage {
@@ -64,13 +78,13 @@ impl<T> Clone for MysqlStorage<T> {
             job_type: PhantomData,
             controller: self.controller.clone(),
             config: self.config.clone(),
-            codec: self.codec.clone(),
+            codec: self.codec,
             ack_notify: self.ack_notify.clone(),
         }
     }
 }
 
-impl MysqlStorage<()> {
+impl MysqlStorage<(), JsonCodec<Value>> {
     /// Get mysql migrations without running them
     #[cfg(feature = "migrate")]
     pub fn migrations() -> sqlx::migrate::Migrator {
@@ -85,10 +99,13 @@ impl MysqlStorage<()> {
     }
 }
 
-impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
+impl<T> MysqlStorage<T>
+where
+    T: Serialize + DeserializeOwned,
+{
     /// Create a new instance from a pool
     pub fn new(pool: MySqlPool) -> Self {
-        Self::new_with_config(pool, Config::default())
+        Self::new_with_config(pool, Config::new(type_name::<T>()))
     }
 
     /// Create a new instance from a pool and custom config
@@ -98,8 +115,8 @@ impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
             job_type: PhantomData,
             controller: Controller::new(),
             config,
-            codec: Arc::new(Box::new(JsonCodec)),
             ack_notify: Notify::new(),
+            codec: PhantomData,
         }
     }
 
@@ -107,26 +124,33 @@ impl<T: Serialize + DeserializeOwned> MysqlStorage<T> {
     pub fn pool(&self) -> &Pool<MySql> {
         &self.pool
     }
+
+    /// Get the config used by the storage
+    pub fn get_config(&self) -> &Config {
+        &self.config
+    }
 }
 
-impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> {
+impl<T, C> MysqlStorage<T, C>
+where
+    T: DeserializeOwned + Send + Unpin + Sync + 'static,
+    C: Codec<Compact = Value> + Send + 'static,
+{
     fn stream_jobs(
         self,
         worker_id: &WorkerId,
         interval: Duration,
         buffer_size: usize,
-    ) -> impl Stream<Item = Result<Option<Request<T>>, sqlx::Error>> {
+    ) -> impl Stream<Item = Result<Option<Request<T, SqlContext>>, sqlx::Error>> {
         let pool = self.pool.clone();
         let worker_id = worker_id.to_string();
-
         try_stream! {
-            let pool = pool.clone();
             let buffer_size = u32::try_from(buffer_size)
                     .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
             loop {
                 apalis_core::sleep(interval).await;
                 let pool = pool.clone();
-                let job_type = T::NAME;
+                let job_type = self.config.namespace.clone();
                 let mut tx = pool.begin().await?;
                 let fetch_query = "SELECT id FROM jobs
                 WHERE status = 'Pending' AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE SKIP LOCKED";
@@ -156,10 +180,14 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
                     let jobs: Vec<SqlRequest<Value>> = query.fetch_all(&pool).await?;
 
                     for job in jobs {
-                        yield Some(Into::into(SqlRequest {
-                            context: job.context,
-                            req: self.codec.decode(&job.req).map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?
-                        }))
+                        yield {
+                            let (req, ctx) = job.req.take_parts();
+                            let req = C::decode(req)
+                                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+                            let mut req: Request<T, SqlContext> = Request::new_with_parts(req, ctx);
+                            req.parts.namespace = Some(Namespace(self.config.namespace.clone()));
+                            Some(req)
+                        }
                     }
                 }
             }
@@ -174,7 +202,7 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
         let pool = self.pool.clone();
 
         let mut tx = pool.acquire().await?;
-        let worker_type = T::NAME;
+        let worker_type = self.config.namespace.clone();
         let storage_name = std::any::type_name::<Self>();
         let query =
             "INSERT INTO workers (id, worker_type, storage_name, layers, last_seen) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = ?;";
@@ -191,62 +219,66 @@ impl<T: DeserializeOwned + Send + Unpin + Job + Sync + 'static> MysqlStorage<T> 
     }
 }
 
-impl<T> Storage for MysqlStorage<T>
+impl<T, C> Storage for MysqlStorage<T, C>
 where
-    T: Job + Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
+    T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
+    C: Codec<Compact = Value> + Send,
 {
     type Job = T;
 
     type Error = sqlx::Error;
 
-    type Identifier = TaskId;
+    type Context = SqlContext;
 
-    async fn push(&mut self, job: Self::Job) -> Result<TaskId, sqlx::Error> {
-        let id = TaskId::new();
+    async fn push_request(
+        &mut self,
+        job: Request<Self::Job, SqlContext>,
+    ) -> Result<Parts<SqlContext>, sqlx::Error> {
+        let (args, parts) = job.take_parts();
         let query =
-            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, now(), NULL, NULL, NULL, NULL)";
+            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
 
-        let job = self
-            .codec
-            .encode(&job)
+        let job = C::encode(args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-        let job_type = T::NAME;
+        let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(job)
-            .bind(id.to_string())
+            .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
+            .bind(parts.context.max_attempts())
             .execute(&pool)
             .await?;
-        Ok(id)
+        Ok(parts)
     }
 
-    async fn schedule(&mut self, job: Self::Job, on: i64) -> Result<TaskId, sqlx::Error> {
-        let query =
-            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, 25, ?, NULL, NULL, NULL, NULL)";
+    async fn schedule_request(
+        &mut self,
+        req: Request<Self::Job, SqlContext>,
+        on: i64,
+    ) -> Result<Parts<Self::Context>, sqlx::Error> {
+        let query = "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, ?, NULL, NULL, NULL, NULL)";
         let pool = self.pool.clone();
-        let id = TaskId::new();
 
-        let job = self
-            .codec
-            .encode(&job)
+        let args = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
-        let job_type = T::NAME;
+        let job_type = self.config.namespace.clone();
         sqlx::query(query)
-            .bind(job)
-            .bind(id.to_string())
+            .bind(args)
+            .bind(req.parts.task_id.to_string())
             .bind(job_type)
+            .bind(req.parts.context.max_attempts())
             .bind(on)
             .execute(&pool)
             .await?;
-        Ok(id)
+        Ok(req.parts)
     }
 
     async fn fetch_by_id(
-        &self,
+        &mut self,
         job_id: &TaskId,
-    ) -> Result<Option<Request<Self::Job>>, sqlx::Error> {
+    ) -> Result<Option<Request<Self::Job, SqlContext>>, sqlx::Error> {
         let pool = self.pool.clone();
 
         let fetch_query = "SELECT * FROM jobs WHERE id = ?";
@@ -256,19 +288,18 @@ where
             .await?;
         match res {
             None => Ok(None),
-            Some(c) => Ok(Some(
-                SqlRequest {
-                    context: c.context,
-                    req: self.codec.decode(&c.req).map_err(|e| {
-                        sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e))
-                    })?,
-                }
-                .into(),
-            )),
+            Some(job) => Ok(Some({
+                let (req, parts) = job.req.take_parts();
+                let req = C::decode(req)
+                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+                let mut req = Request::new_with_parts(req, parts);
+                req.parts.namespace = Some(Namespace(self.config.namespace.clone()));
+                req
+            })),
         }
     }
 
-    async fn len(&self) -> Result<i64, sqlx::Error> {
+    async fn len(&mut self) -> Result<i64, sqlx::Error> {
         let pool = self.pool.clone();
 
         let query = "Select Count(*) as count from jobs where status='Pending'";
@@ -276,12 +307,13 @@ where
         record.try_get("count")
     }
 
-    async fn reschedule(&mut self, job: Request<T>, wait: Duration) -> Result<(), sqlx::Error> {
+    async fn reschedule(
+        &mut self,
+        job: Request<T, SqlContext>,
+        wait: Duration,
+    ) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let job_id = job.get::<TaskId>().ok_or(sqlx::Error::Io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Missing TaskId",
-        )))?;
+        let job_id = job.parts.task_id.clone();
 
         let wait: i64 = wait
             .as_secs()
@@ -299,21 +331,16 @@ where
         Ok(())
     }
 
-    async fn update(&self, job: Request<Self::Job>) -> Result<(), sqlx::Error> {
+    async fn update(&mut self, job: Request<Self::Job, SqlContext>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let ctx = job
-            .get::<SqlContext>()
-            .ok_or(sqlx::Error::Io(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Missing TaskId",
-            )))?;
+        let ctx = job.parts.context;
         let status = ctx.status().to_string();
-        let attempts = ctx.attempts();
+        let attempts = job.parts.attempt;
         let done_at = *ctx.done_at();
         let lock_by = ctx.lock_by().clone();
         let lock_at = *ctx.lock_at();
         let last_error = ctx.last_error().clone();
-        let job_id = ctx.id();
+        let job_id = job.parts.task_id;
         let mut tx = pool.acquire().await?;
         let query =
                 "UPDATE jobs SET status = ?, attempts = ?, done_at = ?, lock_by = ?, lock_at = ?, last_error = ? WHERE id = ?";
@@ -335,11 +362,11 @@ where
         Ok(())
     }
 
-    async fn is_empty(&self) -> Result<bool, Self::Error> {
+    async fn is_empty(&mut self) -> Result<bool, Self::Error> {
         Ok(self.len().await? == 0)
     }
 
-    async fn vacuum(&self) -> Result<usize, sqlx::Error> {
+    async fn vacuum(&mut self) -> Result<usize, sqlx::Error> {
         let pool = self.pool.clone();
         let query = "Delete from jobs where status='Done'";
         let record = sqlx::query(query).execute(&pool).await?;
@@ -347,27 +374,49 @@ where
     }
 }
 
-impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Backend<Request<T>>
-    for MysqlStorage<T>
+/// Errors that can occur while polling a MySQL database.
+#[derive(thiserror::Error, Debug)]
+pub enum MysqlPollError {
+    /// Error during task acknowledgment.
+    #[error("Encountered an error during ACK: `{0}`")]
+    AckError(sqlx::Error),
+
+    /// Error during result encoding.
+    #[error("Encountered an error during encoding the result: {0}")]
+    CodecError(BoxDynError),
+
+    /// Error during a keep-alive heartbeat.
+    #[error("Encountered an error during KeepAlive heartbeat: `{0}`")]
+    KeepAliveError(sqlx::Error),
+
+    /// Error during re-enqueuing orphaned tasks.
+    #[error("Encountered an error during ReenqueueOrphaned heartbeat: `{0}`")]
+    ReenqueueOrphanedError(sqlx::Error),
+}
+
+impl<Req, Res, C> Backend<Request<Req, SqlContext>, Res> for MysqlStorage<Req, C>
+where
+    Req: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
+    C: Debug + Codec<Compact = Value> + Clone + Send + 'static + Sync,
+    C::Error: std::error::Error + 'static + Send + Sync,
 {
-    type Stream = BackendStream<RequestStream<Request<T>>>;
+    type Stream = BackendStream<RequestStream<Request<Req, SqlContext>>>;
 
-    type Layer = AckLayer<MysqlStorage<T>, T>;
+    type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, Res>;
 
-    fn common_layer(&self, worker_id: WorkerId) -> Self::Layer {
-        AckLayer::new(self.clone(), worker_id)
-    }
-
-    fn poll(self, worker: WorkerId) -> Poller<Self::Stream> {
+    fn poll<Svc>(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+        let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
         let pool = self.pool.clone();
         let ack_notify = self.ack_notify.clone();
         let mut hb_storage = self.clone();
+        let requeue_storage = self.clone();
         let stream = self
-            .stream_jobs(&worker, config.poll_interval, config.buffer_size)
-            .map_err(|e| Error::SourceError(Box::new(e)));
+            .stream_jobs(worker.id(), config.poll_interval, config.buffer_size)
+            .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
+        let w = worker.clone();
 
         let ack_heartbeat = async move {
             while let Some(ids) = ack_notify
@@ -376,58 +425,101 @@ impl<T: Job + Serialize + DeserializeOwned + Sync + Send + Unpin + 'static> Back
                 .next()
                 .await
             {
-                let worker_ids: Vec<String> = ids.iter().map(|c| c.0.to_string()).collect();
-                let task_ids: Vec<String> = ids.iter().map(|c| c.1.to_string()).collect();
-                let id_params = format!("?{}", ", ?".repeat(task_ids.len() - 1));
-                let worker_params = format!("?{}", ", ?".repeat(worker_ids.len() - 1));
-                let query =
-                format!("UPDATE jobs SET status = 'Done', done_at = now() WHERE id IN ( { } ) AND lock_by IN ( { } )", id_params, worker_params);
-                let mut query = sqlx::query(&query);
-                for i in task_ids {
-                    query = query.bind(i);
+                for (ctx, res) in ids {
+                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ? WHERE id = ? AND lock_by = ?";
+                    let query = sqlx::query(query);
+                    let last_result =
+                        C::encode(res.inner.as_ref().map_err(|e| e.to_string())).map_err(Box::new);
+                    match (last_result, ctx.lock_by()) {
+                        (Ok(val), Some(worker_id)) => {
+                            let query = query
+                                .bind(calculate_status(&res.inner).to_string())
+                                .bind(val)
+                                .bind(res.task_id.to_string())
+                                .bind(worker_id.to_string());
+                            if let Err(e) = query.execute(&pool).await {
+                                w.emit(Event::Error(Box::new(MysqlPollError::AckError(e))));
+                            }
+                        }
+                        (Err(error), Some(_)) => {
+                            w.emit(Event::Error(Box::new(MysqlPollError::CodecError(error))));
+                        }
+                        _ => {
+                            unreachable!(
+                                "Attempted to ACK without a worker attached. This is a bug, File it on the repo"
+                            );
+                        }
+                    }
                 }
-                for i in worker_ids {
-                    query = query.bind(i);
-                }
-                if let Err(e) = query.execute(&pool).await {
-                    error!("Ack failed: {e}");
-                }
+
                 apalis_core::sleep(config.poll_interval).await;
             }
         };
-
+        let w = worker.clone();
         let heartbeat = async move {
             loop {
                 let now = Utc::now();
-                if let Err(e) = hb_storage.keep_alive_at::<Self::Layer>(&worker, now).await {
-                    error!("Heartbeat failed: {e}");
+                if let Err(e) = hb_storage.keep_alive_at::<Self::Layer>(w.id(), now).await {
+                    w.emit(Event::Error(Box::new(MysqlPollError::KeepAliveError(e))));
                 }
                 apalis_core::sleep(config.keep_alive).await;
             }
         };
-        Poller::new(stream, async {
-            futures::join!(heartbeat, ack_heartbeat);
-        })
+        let w = worker.clone();
+        let reenqueue_beat = async move {
+            loop {
+                let dead_since = Utc::now()
+                    - chrono::Duration::from_std(config.reenqueue_orphaned_after)
+                        .expect("Could not calculate dead since");
+                if let Err(e) = requeue_storage
+                    .reenqueue_orphaned(
+                        config
+                            .buffer_size
+                            .try_into()
+                            .expect("Could not convert usize to i32"),
+                        dead_since,
+                    )
+                    .await
+                {
+                    w.emit(Event::Error(Box::new(
+                        MysqlPollError::ReenqueueOrphanedError(e),
+                    )));
+                }
+                apalis_core::sleep(config.poll_interval).await;
+            }
+        };
+        Poller::new_with_layer(
+            stream,
+            async {
+                futures::join!(heartbeat, ack_heartbeat, reenqueue_beat);
+            },
+            layer,
+        )
     }
 }
 
-impl<T: Sync> Ack<T> for MysqlStorage<T> {
-    type Acknowledger = TaskId;
-    type Error = sqlx::Error;
-    async fn ack(
-        &self,
-        worker_id: &WorkerId,
-        task_id: &Self::Acknowledger,
-    ) -> Result<(), sqlx::Error> {
+impl<T, Res, C> Ack<T, Res> for MysqlStorage<T, C>
+where
+    T: Sync + Send,
+    Res: Serialize + Send + 'static + Sync,
+    C: Codec<Compact = Value> + Send,
+    C::Error: Debug,
+{
+    type Context = SqlContext;
+    type AckError = sqlx::Error;
+    async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {
         self.ack_notify
-            .notify((worker_id.clone(), task_id.clone()))
+            .notify((
+                ctx.clone(),
+                res.map(|res| C::encode(res).expect("Could not encode result")),
+            ))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::BrokenPipe, e)))?;
 
         Ok(())
     }
 }
 
-impl<T: Job> MysqlStorage<T> {
+impl<T, C: Codec> MysqlStorage<T, C> {
     /// Kill a job
     pub async fn kill(&mut self, worker_id: &WorkerId, job_id: &TaskId) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
@@ -463,44 +555,116 @@ impl<T: Job> MysqlStorage<T> {
     }
 
     /// Readd jobs that are abandoned to the queue
-    pub async fn reenqueue_orphaned(&self, timeout: i64) -> Result<bool, sqlx::Error> {
-        let job_type = T::NAME;
+    pub async fn reenqueue_orphaned(
+        &self,
+        count: i32,
+        dead_since: DateTime<Utc>,
+    ) -> Result<bool, sqlx::Error> {
+        let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update jobs
                         INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
                         SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
-        let now = Utc::now().timestamp();
-        let seconds_ago = DateTime::from_timestamp(now - timeout, 0).ok_or(sqlx::Error::Io(
-            io::Error::new(io::ErrorKind::InvalidData, "Invalid timeout"),
-        ))?;
 
         sqlx::query(query)
-            .bind(seconds_ago)
+            .bind(dead_since)
             .bind(job_type)
-            .bind::<i64>(
-                self.config
-                    .buffer_size
-                    .try_into()
-                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?,
-            )
+            .bind(count)
             .execute(&mut *tx)
             .await?;
         Ok(true)
     }
 }
 
+impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExpose<J>
+    for MysqlStorage<J>
+{
+    type Request = Request<J, Parts<SqlContext>>;
+    type Error = SqlError;
+    async fn stats(&self) -> Result<Stat, Self::Error> {
+        let fetch_query = "SELECT
+            COUNT(CASE WHEN status = 'Pending' THEN 1 END) AS pending,
+            COUNT(CASE WHEN status = 'Running' THEN 1 END) AS running,
+            COUNT(CASE WHEN status = 'Done' THEN 1 END) AS done,
+            COUNT(CASE WHEN status = 'Retry' THEN 1 END) AS retry,
+            COUNT(CASE WHEN status = 'Failed' THEN 1 END) AS failed,
+            COUNT(CASE WHEN status = 'Killed' THEN 1 END) AS killed
+        FROM jobs WHERE job_type = ?";
+
+        let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
+            .bind(self.get_config().namespace())
+            .fetch_one(self.pool())
+            .await?;
+
+        Ok(Stat {
+            pending: res.0.try_into()?,
+            running: res.1.try_into()?,
+            dead: res.4.try_into()?,
+            failed: res.3.try_into()?,
+            success: res.2.try_into()?,
+        })
+    }
+
+    async fn list_jobs(
+        &self,
+        status: &State,
+        page: i32,
+    ) -> Result<Vec<Self::Request>, Self::Error> {
+        let status = status.to_string();
+        let fetch_query = "SELECT * FROM jobs WHERE status = ? AND job_type = ? ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET ?";
+        let res: Vec<SqlRequest<serde_json::Value>> = sqlx::query_as(fetch_query)
+            .bind(status)
+            .bind(self.get_config().namespace())
+            .bind(((page - 1) * 10).to_string())
+            .fetch_all(self.pool())
+            .await?;
+        Ok(res
+            .into_iter()
+            .map(|j| {
+                let (req, ctx) = j.req.take_parts();
+                let req: J = MysqlCodec::decode(req).unwrap();
+                Request::new_with_ctx(req, ctx)
+            })
+            .collect())
+    }
+
+    async fn list_workers(&self) -> Result<Vec<Worker<WorkerState>>, Self::Error> {
+        let fetch_query =
+            "SELECT id, layers, last_seen FROM workers WHERE worker_type = ? ORDER BY last_seen DESC LIMIT 20 OFFSET ?";
+        let res: Vec<(String, String, i64)> = sqlx::query_as(fetch_query)
+            .bind(self.get_config().namespace())
+            .bind(0)
+            .fetch_all(self.pool())
+            .await?;
+        Ok(res
+            .into_iter()
+            .map(|w| Worker::new(WorkerId::new(w.0), WorkerState::new::<Self>(w.1)))
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
-    use crate::context::State;
+    use crate::sql_storage_tests;
 
     use super::*;
+
+    use apalis_core::test_utils::DummyService;
     use email_service::Email;
     use futures::StreamExt;
 
+    use apalis_core::generic_storage_test;
+    use apalis_core::test_utils::apalis_test_service_fn;
+    use apalis_core::test_utils::TestWrapper;
+
+    generic_storage_test!(setup);
+
+    sql_storage_tests!(setup::<Email>, MysqlStorage<Email>, Email);
+
     /// migrate DB and return a storage instance.
-    async fn setup() -> MysqlStorage<Email> {
+    async fn setup<T: Serialize + DeserializeOwned>() -> MysqlStorage<T> {
         let db_url = &std::env::var("DATABASE_URL").expect("No DATABASE_URL is specified");
         // Because connections cannot be shared across async runtime
         // (different runtimes are created for each test),
@@ -509,8 +673,8 @@ mod tests {
         MysqlStorage::setup(&pool)
             .await
             .expect("failed to migrate DB");
-        let storage = MysqlStorage::new(pool);
-
+        let mut storage = MysqlStorage::new(pool);
+        cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage
     }
 
@@ -520,9 +684,9 @@ mod tests {
     ///  - worker identified by `worker_id`
     ///
     /// You should execute this function in the end of a test
-    async fn cleanup(storage: MysqlStorage<Email>, worker_id: &WorkerId) {
-        sqlx::query("DELETE FROM jobs WHERE lock_by = ? OR status = 'Pending'")
-            .bind(worker_id.to_string())
+    async fn cleanup<T>(storage: &mut MysqlStorage<T>, worker_id: &WorkerId) {
+        sqlx::query("DELETE FROM jobs WHERE job_type = ?")
+            .bind(storage.config.namespace())
             .execute(&storage.pool)
             .await
             .expect("failed to delete jobs");
@@ -533,9 +697,14 @@ mod tests {
             .expect("failed to delete worker");
     }
 
-    async fn consume_one(storage: &MysqlStorage<Email>, worker_id: &WorkerId) -> Request<Email> {
-        let storage = storage.clone();
-        let mut stream = storage.stream_jobs(worker_id, std::time::Duration::from_secs(10), 1);
+    async fn consume_one(
+        storage: &mut MysqlStorage<Email>,
+        worker_id: &WorkerId,
+    ) -> Request<Email, SqlContext> {
+        let mut stream =
+            storage
+                .clone()
+                .stream_jobs(worker_id, std::time::Duration::from_secs(10), 1);
         stream
             .next()
             .await
@@ -551,8 +720,6 @@ mod tests {
             text: "Some Text".to_string(),
         }
     }
-
-    struct DummyService {}
 
     async fn register_worker_at(
         storage: &mut MysqlStorage<Email>,
@@ -573,17 +740,16 @@ mod tests {
         register_worker_at(storage, now).await
     }
 
-    async fn push_email<S>(storage: &mut S, email: Email)
-    where
-        S: Storage<Job = Email, Error = sqlx::Error>,
-    {
+    async fn push_email(storage: &mut MysqlStorage<Email>, email: Email) {
         storage.push(email).await.expect("failed to push a job");
     }
 
-    async fn get_job<S>(storage: &mut S, job_id: &TaskId) -> Request<Email>
-    where
-        S: Storage<Job = Email, Identifier = TaskId, Error = sqlx::Error>,
-    {
+    async fn get_job(
+        storage: &mut MysqlStorage<Email>,
+        job_id: &TaskId,
+    ) -> Request<Email, SqlContext> {
+        // add a slight delay to allow background actions like ack to complete
+        apalis_core::sleep(Duration::from_secs(1)).await;
         storage
             .fetch_by_id(job_id)
             .await
@@ -599,39 +765,11 @@ mod tests {
         let worker_id = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
+        let ctx = job.parts.context;
         // TODO: Fix assertions
-        // assert_eq!(*ctx.status(), State::Running);
-        // assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
-        // assert!(ctx.lock_at().is_some());
-
-        cleanup(storage, &worker_id).await;
-    }
-
-    #[tokio::test]
-    async fn test_acknowledge_job() {
-        let mut storage = setup().await;
-        push_email(&mut storage, example_email()).await;
-
-        let worker_id = register_worker(&mut storage).await;
-
-        let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
-        let job_id = ctx.id();
-
-        storage
-            .ack(&worker_id, job_id)
-            .await
-            .expect("failed to acknowledge the job");
-
-        let job = get_job(&mut storage, job_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
-
-        // TODO: Fix assertions
-        // assert_eq!(*ctx.status(), State::Done);
-        // assert!(ctx.done_at().is_some());
-
-        cleanup(storage, &worker_id).await;
+        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
+        assert!(ctx.lock_at().is_some());
     }
 
     #[tokio::test]
@@ -644,8 +782,7 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker_id).await;
 
-        let ctx = job.get::<SqlContext>().unwrap();
-        let job_id = ctx.id();
+        let job_id = &job.parts.task_id;
 
         storage
             .kill(&worker_id, job_id)
@@ -653,12 +790,10 @@ mod tests {
             .expect("failed to kill job");
 
         let job = get_job(&mut storage, job_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
+        let ctx = job.parts.context;
         // TODO: Fix assertions
-        // assert_eq!(*ctx.status(), State::Killed);
-        // assert!(ctx.done_at().is_some());
-
-        cleanup(storage, &worker_id).await;
+        assert_eq!(*ctx.status(), State::Killed);
+        assert!(ctx.done_at().is_some());
     }
 
     #[tokio::test]
@@ -674,6 +809,8 @@ mod tests {
         // register a worker not responding since 6 minutes ago
         let worker_id = WorkerId::new("test-worker");
 
+        let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
+
         let six_minutes_ago = Utc::now() - Duration::from_secs(60 * 6);
 
         storage
@@ -683,23 +820,28 @@ mod tests {
 
         // fetch job
         let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
+        let ctx = job.parts.context;
 
         assert_eq!(*ctx.status(), State::Running);
 
-        storage.reenqueue_orphaned(300).await.unwrap();
+        storage
+            .reenqueue_orphaned(1, five_minutes_ago)
+            .await
+            .unwrap();
 
         // then, the job status has changed to Pending
-        let job = storage.fetch_by_id(ctx.id()).await.unwrap().unwrap();
-        let context = job.get::<SqlContext>().unwrap();
-        // TODO: Fix assertions
-        // assert_eq!(*context.status(), State::Pending);
-        // assert!(context.lock_by().is_none());
-        // assert!(context.lock_at().is_none());
-        // assert!(context.done_at().is_none());
-        // assert_eq!(*context.last_error(), Some("Job was abandoned".to_string()));
-
-        cleanup(storage, &worker_id).await;
+        let job = storage
+            .fetch_by_id(&job.parts.task_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let ctx = job.parts.context;
+        assert_eq!(*ctx.status(), State::Pending);
+        assert!(ctx.done_at().is_none());
+        assert!(ctx.lock_by().is_none());
+        assert!(ctx.lock_at().is_none());
+        assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_owned()));
+        assert_eq!(job.parts.attempt.current(), 1);
     }
 
     #[tokio::test]
@@ -714,6 +856,7 @@ mod tests {
 
         // register a worker responding at 4 minutes ago
         let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
+        let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
 
         let worker_id = WorkerId::new("test-worker");
         storage
@@ -723,20 +866,27 @@ mod tests {
 
         // fetch job
         let job = consume_one(&mut storage, &worker_id).await;
-        let ctx = job.get::<SqlContext>().unwrap();
+        let ctx = &job.parts.context;
 
         assert_eq!(*ctx.status(), State::Running);
 
         // heartbeat with ReenqueueOrpharned pulse
-        storage.reenqueue_orphaned(300).await.unwrap();
+        storage
+            .reenqueue_orphaned(1, six_minutes_ago)
+            .await
+            .unwrap();
 
         // then, the job status is not changed
-        let job = storage.fetch_by_id(ctx.id()).await.unwrap().unwrap();
-        let context = job.get::<SqlContext>().unwrap();
-        // TODO: Fix assertions
-        // assert_eq!(*context.status(), State::Running);
-        // assert_eq!(*context.lock_by(), Some(worker_id.clone()));
-
-        cleanup(storage, &worker_id).await;
+        let job = storage
+            .fetch_by_id(&job.parts.task_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let ctx = job.parts.context;
+        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.lock_by(), Some(worker_id));
+        assert!(ctx.lock_at().is_some());
+        assert_eq!(*ctx.last_error(), None);
+        assert_eq!(job.parts.attempt.current(), 1);
     }
 }

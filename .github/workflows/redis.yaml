@@ -1,8 +1,4 @@
 on:
-  push:
-    paths:
-      - "packages/apalis-redis/**"
-      - ".github/workflows/redis.yaml"
   pull_request:
     paths:
       - "packages/apalis-redis/**"
@@ -26,11 +22,11 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: cargo test --features tokio-comp -- --test-threads=1
+      - run: cargo test -- --test-threads=1
         working-directory: packages/apalis-redis
         env:
           REDIS_URL: redis://127.0.0.1/
-      - run: cargo test --features async-std-comp -- --test-threads=1
+      - run: cargo test -- --test-threads=1
         working-directory: packages/apalis-redis
         env:
           REDIS_URL: redis://127.0.0.1/

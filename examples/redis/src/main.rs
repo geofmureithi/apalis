@@ -1,18 +1,15 @@
-use std::{
-    ops::Deref,
-    sync::{atomic::AtomicUsize, Arc},
-    time::Duration,
-};
+use std::time::Duration;
 
 use anyhow::Result;
+use apalis::layers::ErrorHandlingLayer;
 use apalis::prelude::*;
-use apalis::redis::RedisStorage;
+use apalis_redis::RedisStorage;
 
 use email_service::{send_email, Email};
 use tracing::{error, info};
 
 async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
-    for index in 0..1 {
+    for index in 0..10 {
         storage
             .push(Email {
                 to: index.to_string(),
@@ -24,36 +21,28 @@ async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
     Ok(())
 }
 
-#[derive(Clone, Debug, Default)]
-struct Count(Arc<AtomicUsize>);
-
-impl Deref for Count {
-    type Target = Arc<AtomicUsize>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
 
     tracing_subscriber::fmt::init();
 
-    let conn = apalis::redis::connect("redis://127.0.0.1/").await?;
-    let config = apalis::redis::Config::default();
-    let storage = RedisStorage::new_with_config(conn, config);
+    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
+    let storage = RedisStorage::new(conn);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
-        .chain(|svc| svc.timeout(Duration::from_millis(500)))
-        .data(Count::default())
-        .with_storage(storage)
+        .layer(ErrorHandlingLayer::new())
+        .enable_tracing()
+        .rate_limit(5, Duration::from_secs(1))
+        .timeout(Duration::from_millis(500))
+        .concurrency(2)
+        .backend(storage)
         .build_fn(send_email);
 
-    Monitor::<TokioExecutor>::new()
-        .register_with_count(2, worker)
+    Monitor::new()
+        .register(worker)
         .on_event(|e| {
             let worker_id = e.id();
             match e.inner() {
@@ -72,6 +61,7 @@ async fn main() -> Result<()> {
         })
         .shutdown_timeout(Duration::from_millis(5000))
         .run_with_signal(async {
+            info!("Monitor started");
             tokio::signal::ctrl_c().await?;
             info!("Monitor starting shutdown");
             Ok(())

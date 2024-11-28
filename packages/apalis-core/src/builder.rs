@@ -7,29 +7,27 @@ use tower::{
 };
 
 use crate::{
+    backend::Backend,
     error::Error,
     layers::extensions::Data,
-    mq::MessageQueue,
     request::Request,
     service_fn::service_fn,
     service_fn::ServiceFn,
-    storage::Storage,
     worker::{Ready, Worker, WorkerId},
-    Backend,
 };
 
 /// Allows building a [`Worker`].
 /// Usually the output is [`Worker<Ready>`]
-pub struct WorkerBuilder<Req, Source, Middleware, Serv> {
+pub struct WorkerBuilder<Req, Ctx, Source, Middleware, Serv> {
     id: WorkerId,
-    request: PhantomData<Req>,
+    request: PhantomData<Request<Req, Ctx>>,
     layer: ServiceBuilder<Middleware>,
     source: Source,
     service: PhantomData<Serv>,
 }
 
-impl<Req, Source, Middleware, Serv> std::fmt::Debug
-    for WorkerBuilder<Req, Source, Middleware, Serv>
+impl<Req, Ctx, Source, Middleware, Serv> std::fmt::Debug
+    for WorkerBuilder<Req, Ctx, Source, Middleware, Serv>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WorkerBuilder")
@@ -41,10 +39,10 @@ impl<Req, Source, Middleware, Serv> std::fmt::Debug
     }
 }
 
-impl<Serv> WorkerBuilder<(), (), Identity, Serv> {
+impl<Serv> WorkerBuilder<(), (), (), Identity, Serv> {
     /// Build a new [`WorkerBuilder`] instance with a name for the worker to build
-    pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), Identity, Serv> {
-        let job: PhantomData<()> = PhantomData;
+    pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), (), Identity, Serv> {
+        let job: PhantomData<Request<(), ()>> = PhantomData;
         WorkerBuilder {
             request: job,
             layer: ServiceBuilder::new(),
@@ -55,12 +53,17 @@ impl<Serv> WorkerBuilder<(), (), Identity, Serv> {
     }
 }
 
-impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
+impl<M, Serv> WorkerBuilder<(), (), (), M, Serv> {
     /// Consume a stream directly
-    pub fn stream<NS: Stream<Item = Result<Option<Request<NJ>>, Error>> + Send + 'static, NJ>(
+    #[deprecated(since = "0.6.0", note = "Consider using the `.backend`")]
+    pub fn stream<
+        NS: Stream<Item = Result<Option<Request<NJ, Ctx>>, Error>> + Send + 'static,
+        NJ,
+        Ctx,
+    >(
         self,
         stream: NS,
-    ) -> WorkerBuilder<NJ, NS, M, Serv> {
+    ) -> WorkerBuilder<NJ, Ctx, NS, M, Serv> {
         WorkerBuilder {
             request: PhantomData,
             layer: self.layer,
@@ -70,39 +73,14 @@ impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
         }
     }
 
-    /// Set the source to a [Storage]
-    pub fn with_storage<NS: Storage<Job = NJ>, NJ>(
+    /// Set the source to a backend that implements [Backend]
+    pub fn backend<NB: Backend<Request<NJ, Ctx>, Res>, NJ, Res: Send, Ctx>(
         self,
-        storage: NS,
-    ) -> WorkerBuilder<NJ, NS, M, Serv> {
-        WorkerBuilder {
-            request: PhantomData,
-            layer: self.layer,
-            source: storage,
-            id: self.id,
-            service: self.service,
-        }
-    }
-
-    /// Set the source to a [MessageQueue]
-    pub fn with_mq<NS: MessageQueue<NJ>, NJ>(
-        self,
-        message_queue: NS,
-    ) -> WorkerBuilder<NJ, NS, M, Serv> {
-        WorkerBuilder {
-            request: PhantomData,
-            layer: self.layer,
-            source: message_queue,
-            id: self.id,
-            service: self.service,
-        }
-    }
-
-    /// Set the source to a generic backend that implements only [Backend]
-    pub fn source<NS: Backend<Request<NJ>>, NJ>(
-        self,
-        backend: NS,
-    ) -> WorkerBuilder<NJ, NS, M, Serv> {
+        backend: NB,
+    ) -> WorkerBuilder<NJ, Ctx, NB, M, Serv>
+    where
+        Serv: Service<Request<NJ, Ctx>, Response = Res>,
+    {
         WorkerBuilder {
             request: PhantomData,
             layer: self.layer,
@@ -113,13 +91,13 @@ impl<J, S, M, Serv> WorkerBuilder<J, S, M, Serv> {
     }
 }
 
-impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
+impl<Req, M, Serv, Ctx> WorkerBuilder<Req, Ctx, (), M, Serv> {
     /// Allows of decorating the service that consumes jobs.
     /// Allows adding multiple [`tower`] middleware
     pub fn chain<NewLayer>(
         self,
-        f: impl Fn(ServiceBuilder<M>) -> ServiceBuilder<NewLayer>,
-    ) -> WorkerBuilder<Request, Stream, NewLayer, Serv> {
+        f: impl FnOnce(ServiceBuilder<M>) -> ServiceBuilder<NewLayer>,
+    ) -> WorkerBuilder<Req, Ctx, (), NewLayer, Serv> {
         let middleware = f(self.layer);
 
         WorkerBuilder {
@@ -131,7 +109,7 @@ impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
         }
     }
     /// Allows adding a single layer [tower] middleware
-    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Request, Stream, Stack<U, M>, Serv>
+    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Req, Ctx, (), Stack<U, M>, Serv>
     where
         M: Layer<U>,
     {
@@ -146,7 +124,7 @@ impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
 
     /// Adds data to the context
     /// This will be shared by all requests
-    pub fn data<D>(self, data: D) -> WorkerBuilder<Request, Stream, Stack<Data<D>, M>, Serv>
+    pub fn data<D>(self, data: D) -> WorkerBuilder<Req, Ctx, (), Stack<Data<D>, M>, Serv>
     where
         M: Layer<Data<D>>,
     {
@@ -160,33 +138,32 @@ impl<Request, Stream, M, Serv> WorkerBuilder<Request, Stream, M, Serv> {
     }
 }
 
-impl<Req: Send + 'static + Sync, P: Backend<Request<Req>> + 'static, M: 'static, S>
-    WorkerFactory<Req, S> for WorkerBuilder<Req, P, M, S>
+impl<Req, P, M, S, Ctx> WorkerFactory<Req, Ctx, S> for WorkerBuilder<Req, Ctx, P, M, S>
 where
-    S: Service<Request<Req>> + Send + 'static + Clone + Sync,
+    S: Service<Request<Req, Ctx>> + Send + 'static + Sync,
     S::Future: Send,
 
     S::Response: 'static,
-    P::Layer: Layer<S>,
-    M: Layer<<P::Layer as Layer<S>>::Service>,
+    M: Layer<S>,
+    Req: Send + 'static + Sync,
+    P: Backend<Request<Req, Ctx>, S::Response> + 'static,
+    M: 'static,
 {
     type Source = P;
 
     type Service = M::Service;
-    /// Build a worker, given a tower service
-    fn build(self, service: S) -> Worker<Ready<Self::Service, P>> {
+
+    fn build(self, service: S) -> Worker<Ready<M::Service, P>> {
         let worker_id = self.id;
-        let common_layer = self.source.common_layer(worker_id.clone());
         let poller = self.source;
-        let middleware = self.layer.layer(common_layer);
+        let middleware = self.layer;
         let service = middleware.service(service);
 
         Worker::new(worker_id, Ready::new(service, poller))
     }
 }
-
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait WorkerFactory<J, S> {
+pub trait WorkerFactory<Req, Ctx, S> {
     /// The request source for the worker
     type Source;
 
@@ -205,7 +182,7 @@ pub trait WorkerFactory<J, S> {
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
 
-pub trait WorkerFactoryFn<J, F, K> {
+pub trait WorkerFactoryFn<Req, Ctx, F, FnArgs> {
     /// The request source for the [`Worker`]
     type Source;
 
@@ -224,36 +201,29 @@ pub trait WorkerFactoryFn<J, F, K> {
     /// - An async function with an argument of the item being processed plus up-to 16 arguments that are extracted from the request [`Data`]
     ///
     /// A function can return:
-    /// - Unit
+    /// - ()
     /// - primitive
     /// - Result<T, E: Error>
     /// - impl IntoResponse
     ///
     /// ```rust
+    /// # use apalis_core::layers::extensions::Data;
     /// #[derive(Debug)]
     /// struct Email;
     /// #[derive(Debug)]
     /// struct PgPool;
-    /// # struct PgError;
     ///
-    /// async fn send_email(email: Email) {
-    ///     // Implementation of the job function
-    ///     // ...
-    /// }
-    ///
-    /// async fn send_email(email: Email, data: Data<PgPool>) -> Result<(), PgError> {
-    ///     // Implementation of the job function?
-    ///     // ...
-    ///     Ok(())
+    /// async fn send_email(email: Email, data: Data<PgPool>) {
+    ///     // Implementation of the task function?
     /// }
     /// ```
     ///
     fn build_fn(self, f: F) -> Worker<Ready<Self::Service, Self::Source>>;
 }
 
-impl<J, W, F, K> WorkerFactoryFn<J, F, K> for W
+impl<Req, W, F, Ctx, FnArgs> WorkerFactoryFn<Req, Ctx, F, FnArgs> for W
 where
-    W: WorkerFactory<J, ServiceFn<F, K>>,
+    W: WorkerFactory<Req, Ctx, ServiceFn<F, Req, Ctx, FnArgs>>,
 {
     type Source = W::Source;
 

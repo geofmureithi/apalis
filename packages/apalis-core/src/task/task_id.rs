@@ -6,8 +6,10 @@ use std::{
 use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use ulid::Ulid;
 
+use crate::{error::Error, request::Request, service_fn::FromRequest};
+
 /// A wrapper type that defines a task id.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct TaskId(Ulid);
 
 impl TaskId {
@@ -55,6 +57,12 @@ impl<'de> Deserialize<'de> for TaskId {
         D: Deserializer<'de>,
     {
         deserializer.deserialize_str(TaskIdVisitor)
+    }
+}
+
+impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for TaskId {
+    fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
+        Ok(req.parts.task_id.clone())
     }
 }
 

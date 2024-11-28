@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::{BuildHasherDefault, Hasher};
 
+use crate::error::Error;
+
 type AnyMap = HashMap<TypeId, Box<dyn AnyClone + Send + Sync>, BuildHasherDefault<IdHasher>>;
 
 // With TypeIds as keys, there's no need to hash them. They are already hashes
@@ -85,6 +87,27 @@ impl Extensions {
             .as_ref()
             .and_then(|map| map.get(&TypeId::of::<T>()))
             .and_then(|boxed| (**boxed).as_any().downcast_ref())
+    }
+
+    /// Get a checked reference to a type previously inserted on this `Extensions`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use apalis_core::data::Extensions;
+    /// let mut ext = Extensions::new();
+    /// assert!(ext.get_checked::<i32>().is_err());
+    /// ext.insert(5i32);
+    ///
+    /// assert_eq!(ext.get_checked::<i32>(), Ok(&5i32));
+    /// ```
+    pub fn get_checked<T: Send + Sync + 'static>(&self) -> Result<&T, Error> {
+        self.get()
+            .ok_or({
+                let type_name = std::any::type_name::<T>();
+                Error::MissingData(
+                format!("Missing the an entry for `{type_name}`. Did you forget to add `.data(<{type_name}>)", ))
+            })
     }
 
     /// Get a mutable reference to a type previously inserted on this `Extensions`.

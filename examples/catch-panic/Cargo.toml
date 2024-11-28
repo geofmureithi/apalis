@@ -1,0 +1,24 @@
+[package]
+name = "catch-panic"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+apalis = { path = "../../", features = ["limit", "tracing", "catch-panic"] }
+apalis-sql = { path = "../../packages/apalis-sql", features = ["sqlite"] }
+serde = { version = "1", features = ["derive"] }
+tracing-subscriber = "0.3.11"
+email-service = { path = "../email-service" }
+
+
+[dependencies.tracing]
+default-features = false
+version = "0.1"
+
+[dependencies.sqlx]
+version = "0.8"
+default-features = false
+features = ["sqlite", "runtime-tokio"]

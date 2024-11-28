@@ -1,6 +1,6 @@
 [package]
 name = "apalis-cron"
-version = "0.5.5"
+version = "0.6.0"
 edition.workspace = true
 repository.workspace = true
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
@@ -10,9 +10,8 @@ description = "A simple yet extensible library for cron-like job scheduling for 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.5.5", default-features = false, features = [
+apalis-core = { path = "../../packages/apalis-core", version = "0.6.0", default-features = false, features = [
     "sleep",
-    "json",
 ] }
 cron = "0.13.0"
 futures = "0.3.30"
@@ -22,7 +21,7 @@ chrono = { version = "0.4.38", default-features = false, features = [
     "serde",
 ] }
 async-stream = "0.3.5"
-async-std = { version = "1.12.0", optional = true }
+async-std = { version = "1.13.0", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
@@ -30,10 +29,6 @@ apalis-core = { path = "../../packages/apalis-core" }
 apalis = { path = "../../", default-features = false, features = ["retry"] }
 serde = { version = "1.0", features = ["derive"] }
 
-[features]
-default = ["tokio-comp"]
-async-std-comp = ["async-std"]
-tokio-comp = ["tokio/net"]
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
