@@ -44,7 +44,7 @@
 - Persisted cron jobs. Pipe your cronjobs to other backends and distribute them.
 - Optional Web interface to help you manage your jobs.
 
-apalis job processing is powered by [`tower::Service`] which means you have access to the [tower] middleware.
+apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] middleware.
 
 apalis has support for:
 
@@ -194,6 +194,7 @@ If you are running [apalis Board](https://github.com/geofmureithi/apalis-board),
 - [`tower`] - Tower is a library of modular and reusable components for building robust networking clients and servers.
 - [redis-rs](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
 - [sqlx](https://github.com/launchbadge/sqlx) - The Rust SQL Toolkit
+- [cron](https://docs.rs/cron/latest/cron/) - A cron expression parser and schedule explorer
 
 ## Contributing
 
