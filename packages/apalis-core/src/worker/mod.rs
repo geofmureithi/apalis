@@ -290,13 +290,14 @@ impl<S, P> Worker<Ready<S, P>> {
         Ctx: Send + 'static + Sync,
         Res: 'static,
     {
-        let worker_id = self.id().clone();
+        let worker_id = self.id;
         let ctx = Context {
             running: Arc::default(),
             task_count: Arc::default(),
             wakers: Arc::default(),
             shutdown: self.state.shutdown,
             event_handler: self.state.event_handler.clone(),
+            is_ready: Arc::default(),
         };
         let worker = Worker {
             id: worker_id.clone(),
@@ -310,6 +311,7 @@ impl<S, P> Worker<Ready<S, P>> {
         let layer = poller.layer;
         let service = ServiceBuilder::new()
             .layer(TrackerLayer::new(worker.state.clone()))
+            .layer(ReadinessLayer::new(worker.state.is_ready.clone()))
             .layer(Data::new(worker.clone()))
             .layer(layer)
             .service(service);
@@ -395,6 +397,7 @@ pub struct Context {
     running: Arc<AtomicBool>,
     shutdown: Option<Shutdown>,
     event_handler: EventHandler,
+    is_ready: Arc<AtomicBool>,
 }
 
 impl fmt::Debug for Context {
@@ -497,6 +500,11 @@ impl Context {
             }
         }
     }
+
+    /// Returns if the worker is ready to consume new tasks
+    pub fn is_ready(&self) -> bool {
+        self.is_ready.load(Ordering::Relaxed)
+    }
 }
 
 impl Future for Context {
@@ -554,6 +562,58 @@ where
 
     fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
         self.ctx.track(self.service.call(request))
+    }
+}
+
+#[derive(Clone)]
+struct ReadinessLayer {
+    is_ready: Arc<AtomicBool>,
+}
+
+impl ReadinessLayer {
+    fn new(is_ready: Arc<AtomicBool>) -> Self {
+        Self { is_ready }
+    }
+}
+
+impl<S> Layer<S> for ReadinessLayer {
+    type Service = ReadinessService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ReadinessService {
+            inner,
+            is_ready: self.is_ready.clone(),
+        }
+    }
+}
+
+struct ReadinessService<S> {
+    inner: S,
+    is_ready: Arc<AtomicBool>,
+}
+
+impl<S, Request> Service<Request> for ReadinessService<S>
+where
+    S: Service<Request>,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Delegate poll_ready to the inner service
+        let result = self.inner.poll_ready(cx);
+        // Update the readiness state based on the result
+        match &result {
+            Poll::Ready(Ok(_)) => self.is_ready.store(true, Ordering::Release),
+            Poll::Pending | Poll::Ready(Err(_)) => self.is_ready.store(false, Ordering::Release),
+        }
+
+        result
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        self.inner.call(req)
     }
 }
 
