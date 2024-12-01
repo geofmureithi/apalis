@@ -735,7 +735,9 @@ mod tests {
             .keep_alive_at::<DummyService>(&worker_id, last_seen)
             .await
             .expect("failed to register worker");
-        Worker::new(worker_id, Context::default())
+        let wrk = Worker::new(worker_id, Context::default());
+        wrk.start();
+        wrk
     }
 
     async fn register_worker(storage: &mut MysqlStorage<Email>) -> Worker<Context> {
@@ -813,7 +815,7 @@ mod tests {
         // register a worker not responding since 6 minutes ago
         let worker_id = WorkerId::new("test-worker");
         let worker = Worker::new(worker_id, Context::default());
-
+        worker.start();
         let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
 
         let six_minutes_ago = Utc::now() - Duration::from_secs(60 * 6);
@@ -865,8 +867,9 @@ mod tests {
 
         let worker_id = WorkerId::new("test-worker");
         let worker = Worker::new(worker_id, Context::default());
+        worker.start();
         storage
-            .keep_alive_at::<Email>(&worker_id, four_minutes_ago)
+            .keep_alive_at::<Email>(&worker.id(), four_minutes_ago)
             .await
             .unwrap();
 
@@ -890,7 +893,7 @@ mod tests {
             .unwrap();
         let ctx = job.parts.context;
         assert_eq!(*ctx.status(), State::Running);
-        assert_eq!(*ctx.lock_by(), Some(worker.id()));
+        assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
         assert_eq!(*ctx.last_error(), None);
         assert_eq!(job.parts.attempt.current(), 1);

@@ -968,6 +968,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use apalis_core::worker::Context;
     use apalis_core::{generic_storage_test, sleep};
     use email_service::Email;
 
@@ -1021,17 +1022,17 @@ mod tests {
             .clone()
     }
 
-    async fn register_worker_at(storage: &mut RedisStorage<Email>) -> WorkerId {
-        let worker = WorkerId::new("test-worker");
-
+    async fn register_worker_at(storage: &mut RedisStorage<Email>) -> Worker<Context> {
+        let worker = Worker::new(WorkerId::new("test-worker"), Context::default());
+        worker.start();
         storage
-            .keep_alive(&worker)
+            .keep_alive(&worker.id())
             .await
             .expect("failed to register worker");
         worker
     }
 
-    async fn register_worker(storage: &mut RedisStorage<Email>) -> WorkerId {
+    async fn register_worker(storage: &mut RedisStorage<Email>) -> Worker<Context> {
         register_worker_at(storage).await
     }
 
@@ -1055,9 +1056,9 @@ mod tests {
         let mut storage = setup().await;
         push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker(&mut storage).await;
+        let worker = register_worker(&mut storage).await;
 
-        let _job = consume_one(&mut storage, &worker_id).await;
+        let _job = consume_one(&mut storage, &worker.id()).await;
     }
 
     #[tokio::test]
@@ -1065,9 +1066,9 @@ mod tests {
         let mut storage = setup().await;
         push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker(&mut storage).await;
+        let worker = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker.id()).await;
         let ctx = &job.parts.context;
         let res = 42usize;
         storage
@@ -1087,13 +1088,13 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker(&mut storage).await;
+        let worker = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker.id()).await;
         let job_id = &job.parts.task_id;
 
         storage
-            .kill(&worker_id, &job_id)
+            .kill(&worker.id(), &job_id)
             .await
             .expect("failed to kill job");
 
@@ -1106,9 +1107,9 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker_at(&mut storage).await;
+        let worker = register_worker_at(&mut storage).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker.id()).await;
         sleep(Duration::from_millis(1000)).await;
         let dead_since = Utc::now() - chrono::Duration::from_std(Duration::from_secs(1)).unwrap();
         let res = storage
@@ -1134,9 +1135,9 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker_at(&mut storage).await;
+        let worker = register_worker_at(&mut storage).await;
         sleep(Duration::from_millis(1100)).await;
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker.id()).await;
         let dead_since = Utc::now() - chrono::Duration::from_std(Duration::from_secs(5)).unwrap();
         let res = storage
             .reenqueue_orphaned(1, dead_since)

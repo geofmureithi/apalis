@@ -665,10 +665,10 @@ mod tests {
 
     async fn consume_one(
         storage: &mut SqliteStorage<Email>,
-        worker_id: &WorkerId,
+        worker: &Worker<Context>,
     ) -> Request<Email, SqlContext> {
         let mut stream = storage
-            .stream_jobs(worker_id, std::time::Duration::from_secs(10), 1)
+            .stream_jobs(worker, std::time::Duration::from_secs(10), 1)
             .boxed();
         stream
             .next()
@@ -678,17 +678,22 @@ mod tests {
             .expect("no job is pending")
     }
 
-    async fn register_worker_at(storage: &mut SqliteStorage<Email>, last_seen: i64) -> WorkerId {
+    async fn register_worker_at(
+        storage: &mut SqliteStorage<Email>,
+        last_seen: i64,
+    ) -> Worker<Context> {
         let worker_id = WorkerId::new("test-worker");
 
         storage
             .keep_alive_at::<DummyService>(&worker_id, last_seen)
             .await
             .expect("failed to register worker");
-        worker_id
+        let wrk = Worker::new(worker_id, Context::default());
+        wrk.start();
+        wrk
     }
 
-    async fn register_worker(storage: &mut SqliteStorage<Email>) -> WorkerId {
+    async fn register_worker(storage: &mut SqliteStorage<Email>) -> Worker<Context> {
         register_worker_at(storage, Utc::now().timestamp()).await
     }
 
@@ -710,26 +715,26 @@ mod tests {
     #[tokio::test]
     async fn test_consume_last_pushed_job() {
         let mut storage = setup().await;
-        let worker_id = register_worker(&mut storage).await;
+        let worker = register_worker(&mut storage).await;
 
         push_email(&mut storage, example_good_email()).await;
         let len = storage.len().await.expect("Could not fetch the jobs count");
         assert_eq!(len, 1);
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker).await;
         let ctx = job.parts.context;
         assert_eq!(*ctx.status(), State::Running);
-        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
+        assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
     }
 
     #[tokio::test]
     async fn test_acknowledge_job() {
         let mut storage = setup().await;
-        let worker_id = register_worker(&mut storage).await;
+        let worker = register_worker(&mut storage).await;
 
         push_email(&mut storage, example_good_email()).await;
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker).await;
         let job_id = &job.parts.task_id;
         let ctx = &job.parts.context;
         let res = 1usize;
@@ -753,13 +758,13 @@ mod tests {
 
         push_email(&mut storage, example_good_email()).await;
 
-        let worker_id = register_worker(&mut storage).await;
+        let worker = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker).await;
         let job_id = &job.parts.task_id;
 
         storage
-            .kill(&worker_id, job_id)
+            .kill(&worker.id(), job_id)
             .await
             .expect("failed to kill job");
 
@@ -778,9 +783,9 @@ mod tests {
         let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
 
         let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
-        let worker_id = register_worker_at(&mut storage, six_minutes_ago.timestamp()).await;
+        let worker = register_worker_at(&mut storage, six_minutes_ago.timestamp()).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker).await;
         let job_id = &job.parts.task_id;
         storage
             .reenqueue_orphaned(1, five_minutes_ago)
@@ -804,9 +809,9 @@ mod tests {
 
         let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
         let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
-        let worker_id = register_worker_at(&mut storage, four_minutes_ago.timestamp()).await;
+        let worker = register_worker_at(&mut storage, four_minutes_ago.timestamp()).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker).await;
         let job_id = &job.parts.task_id;
         storage
             .reenqueue_orphaned(1, six_minutes_ago)
@@ -816,7 +821,7 @@ mod tests {
         let job = get_job(&mut storage, job_id).await;
         let ctx = &job.parts.context;
         assert_eq!(*ctx.status(), State::Running);
-        assert_eq!(*ctx.lock_by(), Some(worker_id));
+        assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
         assert_eq!(*ctx.last_error(), None);
         assert_eq!(job.parts.attempt.current(), 1);

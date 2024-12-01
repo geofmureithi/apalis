@@ -210,6 +210,12 @@ impl Worker<Context> {
         }
         false
     }
+    /// Start running the worker
+    pub fn start(&self) {
+        self.state.running.store(false, Ordering::Relaxed);
+        self.state.is_ready.store(false, Ordering::Relaxed);
+        self.emit(Event::Start);
+    }
 }
 
 impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for Worker<Context> {
@@ -370,10 +376,8 @@ impl Future for Runnable {
         let poller_future = async { while (poller.next().await).is_some() {} };
 
         if !this.running {
-            worker.running.store(true, Ordering::Relaxed);
-            worker.is_ready.store(true, Ordering::Release);
+            worker.start();
             this.running = true;
-            worker.emit(Event::Start);
         }
         let combined = Box::pin(join(poller_future, heartbeat.as_mut()));
 
