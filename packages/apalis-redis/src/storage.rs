@@ -479,15 +479,17 @@ where
                         }
                     }
                     _ = poll_next_stm.next() => {
-                        let res = self.fetch_next(worker.id()).await;
-                        match res {
-                            Err(e) => {
-                                worker.emit(Event::Error(Box::new(RedisPollError::PollNextError(e))));
-                            }
-                            Ok(res) => {
-                                for job in res {
-                                    if let Err(e) = tx.send(Ok(Some(job))).await {
-                                        worker.emit(Event::Error(Box::new(RedisPollError::EnqueueError(e))));
+                        if worker.is_ready() {
+                            let res = self.fetch_next(worker.id()).await;
+                            match res {
+                                Err(e) => {
+                                    worker.emit(Event::Error(Box::new(RedisPollError::PollNextError(e))));
+                                }
+                                Ok(res) => {
+                                    for job in res {
+                                        if let Err(e) = tx.send(Ok(Some(job))).await {
+                                            worker.emit(Event::Error(Box::new(RedisPollError::EnqueueError(e))));
+                                        }
                                     }
                                 }
                             }

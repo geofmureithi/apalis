@@ -5,6 +5,7 @@ use crate::monitor::shutdown::Shutdown;
 use crate::request::Request;
 use crate::service_fn::FromRequest;
 use crate::task::task_id::TaskId;
+use call_all::CallAllUnordered;
 use futures::future::{join, select, BoxFuture};
 use futures::stream::BoxStream;
 use futures::{Future, FutureExt, Stream, StreamExt};
@@ -19,8 +20,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::task::{Context as TaskCtx, Poll, Waker};
 use thiserror::Error;
-use tower::util::CallAllUnordered;
 use tower::{Layer, Service, ServiceBuilder};
+
+mod call_all;
 
 /// A worker name wrapper usually used by Worker builder
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -369,6 +371,7 @@ impl Future for Runnable {
 
         if !this.running {
             worker.running.store(true, Ordering::Relaxed);
+            worker.is_ready.store(true, Ordering::Release);
             this.running = true;
             worker.emit(Event::Start);
         }
@@ -503,7 +506,7 @@ impl Context {
 
     /// Returns if the worker is ready to consume new tasks
     pub fn is_ready(&self) -> bool {
-        self.is_ready.load(Ordering::Relaxed)
+        self.is_ready.load(Ordering::Acquire) && !self.is_shutting_down()
     }
 }
 

@@ -178,16 +178,21 @@ where
 {
     fn stream_jobs(
         &self,
-        worker_id: &WorkerId,
+        worker: &Worker<Context>,
         interval: Duration,
         buffer_size: usize,
     ) -> impl Stream<Item = Result<Option<Request<T, SqlContext>>, sqlx::Error>> {
         let pool = self.pool.clone();
-        let worker_id = worker_id.clone();
+        let worker = worker.clone();
         let config = self.config.clone();
         let namespace = Namespace(self.config.namespace.clone());
         try_stream! {
             loop {
+                apalis_core::sleep(interval).await;
+                if worker.is_ready() {
+                    continue;
+                }
+                let worker_id = worker.id();
                 let tx = pool.clone();
                 let mut tx = tx.acquire().await?;
                 let job_type = &config.namespace;
@@ -214,7 +219,6 @@ where
                         }
                     }
                 };
-                apalis_core::sleep(interval).await;
             }
         }
     }
@@ -472,7 +476,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
         let config = self.config.clone();
         let controller = self.controller.clone();
         let stream = self
-            .stream_jobs(worker.id(), config.poll_interval, config.buffer_size)
+            .stream_jobs(&worker, config.poll_interval, config.buffer_size)
             .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
         let requeue_storage = self.clone();

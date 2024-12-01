@@ -253,9 +253,10 @@ where
                         }
                     }
                     _ = poll_next_stm.next() => {
-                        if let Err(e) = fetch_next_batch(&mut self, worker.id(), &mut tx).await {
-                            worker.emit(Event::Error(Box::new(PgPollError::FetchNextError(e))));
-
+                        if worker.is_ready() {
+                            if let Err(e) = fetch_next_batch(&mut self, worker.id(), &mut tx).await {
+                                worker.emit(Event::Error(Box::new(PgPollError::FetchNextError(e))));
+                            }
                         }
                     }
                     _ = pg_notification.next() => {
