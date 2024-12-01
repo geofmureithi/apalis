@@ -418,7 +418,7 @@ where
         let mut hb_storage = self.clone();
         let requeue_storage = self.clone();
         let stream = self
-            .stream_jobs(&worker, config.poll_interval, config.buffer_size)
+            .stream_jobs(worker, config.poll_interval, config.buffer_size)
             .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
         let w = worker.clone();

@@ -485,7 +485,7 @@ where
             .bind(args)
             .bind(req.parts.task_id.to_string())
             .bind(&job_type)
-            .bind(&req.parts.context.max_attempts())
+            .bind(req.parts.context.max_attempts())
             .execute(&self.pool)
             .await?;
         Ok(req.parts)
@@ -508,7 +508,7 @@ where
             .bind(job)
             .bind(task_id)
             .bind(job_type)
-            .bind(&parts.context.max_attempts())
+            .bind(parts.context.max_attempts())
             .bind(on)
             .execute(&self.pool)
             .await?;

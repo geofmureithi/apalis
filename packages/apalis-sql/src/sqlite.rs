@@ -206,7 +206,7 @@ where
                     .fetch_all(&mut *tx)
                     .await?;
                 for id in ids {
-                    let res = fetch_next(&pool, &worker_id, id.0, &config).await?;
+                    let res = fetch_next(&pool, worker_id, id.0, &config).await?;
                     yield match res {
                         None => None::<Request<T, SqlContext>>,
                         Some(job) => {
@@ -248,7 +248,7 @@ where
             .bind(raw)
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
-            .bind(&parts.context.max_attempts())
+            .bind(parts.context.max_attempts())
             .execute(&self.pool)
             .await?;
         Ok(parts)
@@ -269,7 +269,7 @@ where
             .bind(job)
             .bind(id.to_string())
             .bind(job_type)
-            .bind(&req.parts.context.max_attempts())
+            .bind(req.parts.context.max_attempts())
             .bind(on)
             .execute(&self.pool)
             .await?;
@@ -476,7 +476,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
         let config = self.config.clone();
         let controller = self.controller.clone();
         let stream = self
-            .stream_jobs(&worker, config.poll_interval, config.buffer_size)
+            .stream_jobs(worker, config.poll_interval, config.buffer_size)
             .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
         let requeue_storage = self.clone();
