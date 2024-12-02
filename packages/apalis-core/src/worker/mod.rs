@@ -212,8 +212,8 @@ impl Worker<Context> {
     }
     /// Start running the worker
     pub fn start(&self) {
-        self.state.running.store(false, Ordering::Relaxed);
-        self.state.is_ready.store(false, Ordering::Relaxed);
+        self.state.running.store(true, Ordering::Relaxed);
+        self.state.is_ready.store(true, Ordering::Release);
         self.emit(Event::Start);
     }
 }
