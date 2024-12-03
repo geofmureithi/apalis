@@ -138,17 +138,22 @@ where
 {
     fn stream_jobs(
         self,
-        worker_id: &WorkerId,
+        worker: &Worker<Context>,
         interval: Duration,
         buffer_size: usize,
     ) -> impl Stream<Item = Result<Option<Request<T, SqlContext>>, sqlx::Error>> {
         let pool = self.pool.clone();
-        let worker_id = worker_id.to_string();
+        let worker = worker.clone();
+        let worker_id = worker.id().to_string();
+
         try_stream! {
             let buffer_size = u32::try_from(buffer_size)
                     .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
             loop {
                 apalis_core::sleep(interval).await;
+                if !worker.is_ready() {
+                    continue;
+                }
                 let pool = pool.clone();
                 let job_type = self.config.namespace.clone();
                 let mut tx = pool.begin().await?;
@@ -413,7 +418,7 @@ where
         let mut hb_storage = self.clone();
         let requeue_storage = self.clone();
         let stream = self
-            .stream_jobs(worker.id(), config.poll_interval, config.buffer_size)
+            .stream_jobs(worker, config.poll_interval, config.buffer_size)
             .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
         let w = worker.clone();
@@ -699,12 +704,11 @@ mod tests {
 
     async fn consume_one(
         storage: &mut MysqlStorage<Email>,
-        worker_id: &WorkerId,
+        worker: &Worker<Context>,
     ) -> Request<Email, SqlContext> {
-        let mut stream =
-            storage
-                .clone()
-                .stream_jobs(worker_id, std::time::Duration::from_secs(10), 1);
+        let mut stream = storage
+            .clone()
+            .stream_jobs(worker, std::time::Duration::from_secs(10), 1);
         stream
             .next()
             .await
@@ -724,17 +728,18 @@ mod tests {
     async fn register_worker_at(
         storage: &mut MysqlStorage<Email>,
         last_seen: DateTime<Utc>,
-    ) -> WorkerId {
+    ) -> Worker<Context> {
         let worker_id = WorkerId::new("test-worker");
-
+        let wrk = Worker::new(worker_id, Context::default());
+        wrk.start();
         storage
-            .keep_alive_at::<DummyService>(&worker_id, last_seen)
+            .keep_alive_at::<DummyService>(&wrk.id(), last_seen)
             .await
             .expect("failed to register worker");
-        worker_id
+        wrk
     }
 
-    async fn register_worker(storage: &mut MysqlStorage<Email>) -> WorkerId {
+    async fn register_worker(storage: &mut MysqlStorage<Email>) -> Worker<Context> {
         let now = Utc::now();
 
         register_worker_at(storage, now).await
@@ -762,13 +767,13 @@ mod tests {
         let mut storage = setup().await;
         push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker(&mut storage).await;
+        let worker = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker).await;
         let ctx = job.parts.context;
         // TODO: Fix assertions
         assert_eq!(*ctx.status(), State::Running);
-        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
+        assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
     }
 
@@ -778,14 +783,14 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker(&mut storage).await;
+        let worker = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker).await;
 
         let job_id = &job.parts.task_id;
 
         storage
-            .kill(&worker_id, job_id)
+            .kill(worker.id(), job_id)
             .await
             .expect("failed to kill job");
 
@@ -808,18 +813,19 @@ mod tests {
 
         // register a worker not responding since 6 minutes ago
         let worker_id = WorkerId::new("test-worker");
-
+        let worker = Worker::new(worker_id, Context::default());
+        worker.start();
         let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
 
         let six_minutes_ago = Utc::now() - Duration::from_secs(60 * 6);
 
         storage
-            .keep_alive_at::<Email>(&worker_id, six_minutes_ago)
+            .keep_alive_at::<Email>(worker.id(), six_minutes_ago)
             .await
             .unwrap();
 
         // fetch job
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker).await;
         let ctx = job.parts.context;
 
         assert_eq!(*ctx.status(), State::Running);
@@ -859,13 +865,15 @@ mod tests {
         let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
 
         let worker_id = WorkerId::new("test-worker");
+        let worker = Worker::new(worker_id, Context::default());
+        worker.start();
         storage
-            .keep_alive_at::<Email>(&worker_id, four_minutes_ago)
+            .keep_alive_at::<Email>(&worker.id(), four_minutes_ago)
             .await
             .unwrap();
 
         // fetch job
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker).await;
         let ctx = &job.parts.context;
 
         assert_eq!(*ctx.status(), State::Running);
@@ -884,7 +892,7 @@ mod tests {
             .unwrap();
         let ctx = job.parts.context;
         assert_eq!(*ctx.status(), State::Running);
-        assert_eq!(*ctx.lock_by(), Some(worker_id));
+        assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
         assert_eq!(*ctx.last_error(), None);
         assert_eq!(job.parts.attempt.current(), 1);

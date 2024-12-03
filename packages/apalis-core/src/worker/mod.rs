@@ -5,6 +5,7 @@ use crate::monitor::shutdown::Shutdown;
 use crate::request::Request;
 use crate::service_fn::FromRequest;
 use crate::task::task_id::TaskId;
+use call_all::CallAllUnordered;
 use futures::future::{join, select, BoxFuture};
 use futures::stream::BoxStream;
 use futures::{Future, FutureExt, Stream, StreamExt};
@@ -19,8 +20,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::task::{Context as TaskCtx, Poll, Waker};
 use thiserror::Error;
-use tower::util::CallAllUnordered;
 use tower::{Layer, Service, ServiceBuilder};
+
+mod call_all;
 
 /// A worker name wrapper usually used by Worker builder
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -208,6 +210,12 @@ impl Worker<Context> {
         }
         false
     }
+    /// Start running the worker
+    pub fn start(&self) {
+        self.state.running.store(true, Ordering::Relaxed);
+        self.state.is_ready.store(true, Ordering::Release);
+        self.emit(Event::Start);
+    }
 }
 
 impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for Worker<Context> {
@@ -290,13 +298,14 @@ impl<S, P> Worker<Ready<S, P>> {
         Ctx: Send + 'static + Sync,
         Res: 'static,
     {
-        let worker_id = self.id().clone();
+        let worker_id = self.id;
         let ctx = Context {
             running: Arc::default(),
             task_count: Arc::default(),
             wakers: Arc::default(),
             shutdown: self.state.shutdown,
             event_handler: self.state.event_handler.clone(),
+            is_ready: Arc::default(),
         };
         let worker = Worker {
             id: worker_id.clone(),
@@ -310,6 +319,7 @@ impl<S, P> Worker<Ready<S, P>> {
         let layer = poller.layer;
         let service = ServiceBuilder::new()
             .layer(TrackerLayer::new(worker.state.clone()))
+            .layer(ReadinessLayer::new(worker.state.is_ready.clone()))
             .layer(Data::new(worker.clone()))
             .layer(layer)
             .service(service);
@@ -366,9 +376,8 @@ impl Future for Runnable {
         let poller_future = async { while (poller.next().await).is_some() {} };
 
         if !this.running {
-            worker.running.store(true, Ordering::Relaxed);
+            worker.start();
             this.running = true;
-            worker.emit(Event::Start);
         }
         let combined = Box::pin(join(poller_future, heartbeat.as_mut()));
 
@@ -395,6 +404,7 @@ pub struct Context {
     running: Arc<AtomicBool>,
     shutdown: Option<Shutdown>,
     event_handler: EventHandler,
+    is_ready: Arc<AtomicBool>,
 }
 
 impl fmt::Debug for Context {
@@ -497,6 +507,11 @@ impl Context {
             }
         }
     }
+
+    /// Returns if the worker is ready to consume new tasks
+    pub fn is_ready(&self) -> bool {
+        self.is_ready.load(Ordering::Acquire) && !self.is_shutting_down()
+    }
 }
 
 impl Future for Context {
@@ -554,6 +569,58 @@ where
 
     fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
         self.ctx.track(self.service.call(request))
+    }
+}
+
+#[derive(Clone)]
+struct ReadinessLayer {
+    is_ready: Arc<AtomicBool>,
+}
+
+impl ReadinessLayer {
+    fn new(is_ready: Arc<AtomicBool>) -> Self {
+        Self { is_ready }
+    }
+}
+
+impl<S> Layer<S> for ReadinessLayer {
+    type Service = ReadinessService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ReadinessService {
+            inner,
+            is_ready: self.is_ready.clone(),
+        }
+    }
+}
+
+struct ReadinessService<S> {
+    inner: S,
+    is_ready: Arc<AtomicBool>,
+}
+
+impl<S, Request> Service<Request> for ReadinessService<S>
+where
+    S: Service<Request>,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Delegate poll_ready to the inner service
+        let result = self.inner.poll_ready(cx);
+        // Update the readiness state based on the result
+        match &result {
+            Poll::Ready(Ok(_)) => self.is_ready.store(true, Ordering::Release),
+            Poll::Pending | Poll::Ready(Err(_)) => self.is_ready.store(false, Ordering::Release),
+        }
+
+        result
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        self.inner.call(req)
     }
 }
 

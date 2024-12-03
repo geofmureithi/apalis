@@ -253,9 +253,10 @@ where
                         }
                     }
                     _ = poll_next_stm.next() => {
-                        if let Err(e) = fetch_next_batch(&mut self, worker.id(), &mut tx).await {
-                            worker.emit(Event::Error(Box::new(PgPollError::FetchNextError(e))));
-
+                        if worker.is_ready() {
+                            if let Err(e) = fetch_next_batch(&mut self, worker.id(), &mut tx).await {
+                                worker.emit(Event::Error(Box::new(PgPollError::FetchNextError(e))));
+                            }
                         }
                     }
                     _ = pg_notification.next() => {
@@ -484,7 +485,7 @@ where
             .bind(args)
             .bind(req.parts.task_id.to_string())
             .bind(&job_type)
-            .bind(&req.parts.context.max_attempts())
+            .bind(req.parts.context.max_attempts())
             .execute(&self.pool)
             .await?;
         Ok(req.parts)
@@ -507,7 +508,7 @@ where
             .bind(job)
             .bind(task_id)
             .bind(job_type)
-            .bind(&parts.context.max_attempts())
+            .bind(parts.context.max_attempts())
             .bind(on)
             .execute(&self.pool)
             .await?;
@@ -835,17 +836,19 @@ mod tests {
     async fn register_worker_at(
         storage: &mut PostgresStorage<Email>,
         last_seen: Timestamp,
-    ) -> WorkerId {
+    ) -> Worker<Context> {
         let worker_id = WorkerId::new("test-worker");
 
         storage
             .keep_alive_at::<DummyService>(&worker_id, last_seen)
             .await
             .expect("failed to register worker");
-        worker_id
+        let wrk = Worker::new(worker_id, Context::default());
+        wrk.start();
+        wrk
     }
 
-    async fn register_worker(storage: &mut PostgresStorage<Email>) -> WorkerId {
+    async fn register_worker(storage: &mut PostgresStorage<Email>) -> Worker<Context> {
         register_worker_at(storage, Utc::now().timestamp()).await
     }
 
@@ -871,16 +874,16 @@ mod tests {
         let mut storage = setup().await;
         push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker(&mut storage).await;
+        let worker = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker.id()).await;
         let job_id = &job.parts.task_id;
 
         // Refresh our job
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.parts.context;
         assert_eq!(*ctx.status(), State::Running);
-        assert_eq!(*ctx.lock_by(), Some(worker_id.clone()));
+        assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
     }
 
@@ -890,13 +893,13 @@ mod tests {
 
         push_email(&mut storage, example_email()).await;
 
-        let worker_id = register_worker(&mut storage).await;
+        let worker = register_worker(&mut storage).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker.id()).await;
         let job_id = &job.parts.task_id;
 
         storage
-            .kill(&worker_id, job_id)
+            .kill(&worker.id(), job_id)
             .await
             .expect("failed to kill job");
 
@@ -914,9 +917,9 @@ mod tests {
         let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
         let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
 
-        let worker_id = register_worker_at(&mut storage, six_minutes_ago.timestamp()).await;
+        let worker = register_worker_at(&mut storage, six_minutes_ago.timestamp()).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker.id()).await;
         storage
             .reenqueue_orphaned(1, five_minutes_ago)
             .await
@@ -942,9 +945,9 @@ mod tests {
         let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
         let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
 
-        let worker_id = register_worker_at(&mut storage, four_minutes_ago.timestamp()).await;
+        let worker = register_worker_at(&mut storage, four_minutes_ago.timestamp()).await;
 
-        let job = consume_one(&mut storage, &worker_id).await;
+        let job = consume_one(&mut storage, &worker.id()).await;
         let ctx = &job.parts.context;
 
         assert_eq!(*ctx.status(), State::Running);
@@ -957,7 +960,7 @@ mod tests {
         let job = get_job(&mut storage, job_id).await;
         let ctx = job.parts.context;
         assert_eq!(*ctx.status(), State::Running);
-        assert_eq!(*ctx.lock_by(), Some(worker_id));
+        assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
         assert_eq!(*ctx.last_error(), None);
         assert_eq!(job.parts.attempt.current(), 0);
