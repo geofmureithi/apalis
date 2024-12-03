@@ -227,6 +227,7 @@ pub mod test_utils {
         {
             let worker_id = WorkerId::new("test-worker");
             let worker = Worker::new(worker_id, crate::worker::Context::default());
+            worker.start();
             let b = backend.clone();
             let mut poller = b.poll::<S>(&worker);
             let (stop_tx, mut stop_rx) = channel::<()>(1);

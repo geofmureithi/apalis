@@ -493,6 +493,8 @@ where
                                     }
                                 }
                             }
+                        } else {
+                            continue;
                         }
 
                     }

@@ -189,7 +189,7 @@ where
         try_stream! {
             loop {
                 apalis_core::sleep(interval).await;
-                if worker.is_ready() {
+                if !worker.is_ready() {
                     continue;
                 }
                 let worker_id = worker.id();

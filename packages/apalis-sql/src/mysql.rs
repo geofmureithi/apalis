@@ -730,13 +730,12 @@ mod tests {
         last_seen: DateTime<Utc>,
     ) -> Worker<Context> {
         let worker_id = WorkerId::new("test-worker");
-
-        storage
-            .keep_alive_at::<DummyService>(&worker_id, last_seen)
-            .await
-            .expect("failed to register worker");
         let wrk = Worker::new(worker_id, Context::default());
         wrk.start();
+        storage
+            .keep_alive_at::<DummyService>(&wrk.id(), last_seen)
+            .await
+            .expect("failed to register worker");
         wrk
     }
 
