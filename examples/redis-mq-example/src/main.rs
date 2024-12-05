@@ -23,6 +23,8 @@ struct RedisMq<T, C = JsonCodec<Vec<u8>>> {
     codec: PhantomData<C>,
 }
 
+type RedisMqMessage<Req> = (Req, RedisMqContext);
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct RedisMqContext {
     max_attempts: usize,
@@ -71,7 +73,7 @@ where
                     .map(|r| {
                         let mut req: Request<Req, RedisMqContext> =
                             C::decode(r.message).map_err(Into::into).unwrap();
-                        req.insert(r.id);
+                        req.parts.context.message_id = r.id;
                         req
                     });
                 tx.send(Ok(msg)).await.unwrap();
