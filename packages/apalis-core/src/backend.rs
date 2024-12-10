@@ -22,6 +22,9 @@ pub trait Backend<Req, Res> {
     /// Returns the final decoration of layers
     type Layer;
 
+    /// Specifies the codec type used by the backend
+    type Codec;
+
     /// Returns a poller that is ready for streaming
     fn poll<Svc: Service<Req, Response = Res>>(
         self,

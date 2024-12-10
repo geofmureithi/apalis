@@ -409,6 +409,8 @@ where
 
     type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, Res>;
 
+    type Codec = C;
+
     fn poll<Svc>(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();

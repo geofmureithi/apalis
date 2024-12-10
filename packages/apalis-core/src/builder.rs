@@ -19,10 +19,10 @@ use crate::{
 /// Allows building a [`Worker`].
 /// Usually the output is [`Worker<Ready>`]
 pub struct WorkerBuilder<Req, Ctx, Source, Middleware, Serv> {
-    id: WorkerId,
-    request: PhantomData<Request<Req, Ctx>>,
-    layer: ServiceBuilder<Middleware>,
-    source: Source,
+    pub id: WorkerId,
+    pub request: PhantomData<Request<Req, Ctx>>,
+    pub layer: ServiceBuilder<Middleware>,
+    pub source: Source,
     service: PhantomData<Serv>,
 }
 

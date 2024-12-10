@@ -102,6 +102,8 @@ impl<T: Send + 'static + Sync, Res> Backend<Request<T, ()>, Res> for MemoryStora
 
     type Layer = Identity;
 
+    type Codec = ();
+
     fn poll<Svc>(self, _worker: &Worker<worker::Context>) -> Poller<Self::Stream> {
         let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         Poller {

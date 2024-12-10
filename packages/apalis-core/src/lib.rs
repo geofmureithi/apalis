@@ -62,6 +62,8 @@ pub mod task;
 /// Codec for handling data
 pub mod codec;
 
+pub mod step;
+
 /// Sleep utilities
 #[cfg(feature = "sleep")]
 pub async fn sleep(duration: std::time::Duration) {

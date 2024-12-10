@@ -438,6 +438,8 @@ where
 
     type Layer = AckLayer<Sender<(RedisContext, Response<Res>)>, T, RedisContext, Res>;
 
+    type Codec = C;
+
     fn poll<Svc: Service<Request<T, RedisContext>>>(
         mut self,
         worker: &Worker<apalis_core::worker::Context>,
