@@ -8,7 +8,10 @@ repository.workspace = true
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 apalis = { path = "../../", features = ["limit", "tracing", "catch-panic"] }
-apalis-sql = { path = "../../packages/apalis-sql", features = ["sqlite"] }
+apalis-sql = { path = "../../packages/apalis-sql", features = [
+    "sqlite",
+    "tokio-comp",
+] }
 serde = { version = "1", features = ["derive"] }
 tracing-subscriber = "0.3.11"
 email-service = { path = "../email-service" }
@@ -17,8 +20,3 @@ email-service = { path = "../email-service" }
 [dependencies.tracing]
 default-features = false
 version = "0.1"
-
-[dependencies.sqlx]
-version = "0.8"
-default-features = false
-features = ["sqlite", "runtime-tokio"]

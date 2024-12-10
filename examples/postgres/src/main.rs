@@ -2,7 +2,10 @@ use anyhow::Result;
 use apalis::layers::retry::RetryPolicy;
 
 use apalis::prelude::*;
-use apalis_sql::postgres::{PgListen, PgPool, PostgresStorage};
+use apalis_sql::{
+    postgres::{PgListen, PgPool, PostgresStorage},
+    Config,
+};
 use email_service::{send_email, Email};
 use tracing::{debug, info};
 
@@ -32,7 +35,7 @@ async fn main() -> Result<()> {
         .await
         .expect("unable to run migrations for postgres");
 
-    let mut pg = PostgresStorage::new(pool.clone());
+    let mut pg = PostgresStorage::new_with_config(pool.clone(), Config::new("apalis::Email"));
     produce_jobs(&mut pg).await?;
 
     let mut listener = PgListen::new(pool).await?;
