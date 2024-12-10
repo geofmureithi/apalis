@@ -213,6 +213,8 @@ where
 
     type Layer = Identity;
 
+    type Codec = ();
+
     fn poll<Svc>(self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let stream = self.into_stream();
         Poller::new(stream, futures::future::pending())
