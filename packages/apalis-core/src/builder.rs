@@ -74,7 +74,7 @@ impl<M, Serv> WorkerBuilder<(), (), (), M, Serv> {
     }
 
     /// Set the source to a backend that implements [Backend]
-    pub fn backend<NB: Backend<Request<NJ, Ctx>, Res>, NJ, Res: Send, Ctx>(
+    pub fn backend<NB: Backend<Request<NJ, Ctx>>, NJ, Res: Send, Ctx>(
         self,
         backend: NB,
     ) -> WorkerBuilder<NJ, Ctx, NB, M, Serv>
@@ -146,7 +146,7 @@ where
     S::Response: 'static,
     M: Layer<S>,
     Req: Send + 'static + Sync,
-    P: Backend<Request<Req, Ctx>, S::Response> + 'static,
+    P: Backend<Request<Req, Ctx>> + 'static,
     M: 'static,
 {
     type Source = P;

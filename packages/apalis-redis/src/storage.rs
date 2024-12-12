@@ -427,18 +427,19 @@ impl<T, Conn, C> RedisStorage<T, Conn, C> {
     }
 }
 
-impl<T, Conn, C, Res> Backend<Request<T, RedisContext>, Res> for RedisStorage<T, Conn, C>
+impl<T, Conn, C> Backend<Request<T, RedisContext>> for RedisStorage<T, Conn, C>
 where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
-    Res: Send + Serialize + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
 {
     type Stream = BackendStream<RequestStream<Request<T, RedisContext>>>;
 
-    type Layer = AckLayer<Sender<(RedisContext, Response<Res>)>, T, RedisContext, Res>;
+    type Layer = AckLayer<Sender<(RedisContext, Response<Vec<u8>>)>, T, RedisContext, Vec<u8>>;
 
-    fn poll<Svc: Service<Request<T, RedisContext>>>(
+    type Compact = Vec<u8>;
+
+    fn poll(
         mut self,
         worker: &Worker<apalis_core::worker::Context>,
     ) -> Poller<Self::Stream, Self::Layer> {
@@ -523,16 +524,19 @@ where
     }
 }
 
-impl<T, Conn, Res, C> Ack<T, Res> for RedisStorage<T, Conn, C>
+impl<T, Conn, C> Ack<T, Vec<u8>> for RedisStorage<T, Conn, C>
 where
-    Res: Serialize + Sync + Send + 'static,
     T: Sync + Send,
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send,
 {
     type Context = RedisContext;
     type AckError = RedisError;
-    async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), RedisError> {
+    async fn ack(
+        &mut self,
+        ctx: &Self::Context,
+        res: &Response<Vec<u8>>,
+    ) -> Result<(), RedisError> {
         let inflight_set = format!(
             "{}:{}",
             self.config.inflight_jobs_set(),
@@ -588,11 +592,12 @@ where
     }
 }
 
-impl<T, Conn, C> RedisStorage<T, Conn, C>
+impl<T, Conn, C, Res> RedisStorage<T, Conn, C>
 where
     T: DeserializeOwned + Send + Unpin + Send + Sync + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
-    C: Codec<Compact = Vec<u8>>,
+    C: Codec<Compact = Res>,
+    Res: From<Vec<u8>>,
 {
     async fn fetch_next(
         &mut self,
@@ -622,7 +627,7 @@ where
                 let mut processed = vec![];
                 for job in jobs {
                     let bytes = deserialize_job(&job)?;
-                    let mut request: Request<T, RedisContext> = C::decode(bytes.to_vec())
+                    let mut request: Request<T, RedisContext> = C::decode(bytes.clone().into())
                         .map_err(|e| build_error(&e.into().to_string()))?;
                     request.parts.context.lock_by = Some(worker_id.clone());
                     request.parts.namespace = Some(Namespace(namespace.clone()));
@@ -686,10 +691,21 @@ where
     type Error = RedisError;
     type Context = RedisContext;
 
+    type Codec = C;
+
     async fn push_request(
         &mut self,
         req: Request<T, RedisContext>,
     ) -> Result<Parts<Self::Context>, RedisError> {
+        let args = C::encode(&req.args)
+            .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
+        self.push_raw_request(Request::new_with_parts(args, req.parts)).await
+    }
+
+    async fn push_raw_request(
+        &mut self,
+        req: Request<Self::Compact, Self::Context>,
+    ) -> Result<Parts<Self::Context>, Self::Error> {
         let conn = &mut self.conn;
         let push_job = self.scripts.push_job.clone();
         let job_data_hash = self.config.job_data_hash();
@@ -708,6 +724,7 @@ where
             .await?;
         Ok(req.parts)
     }
+
 
     async fn schedule_request(
         &mut self,

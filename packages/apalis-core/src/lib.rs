@@ -202,7 +202,7 @@ pub mod test_utils {
     /// ````
     impl<B, Req, Res, Ctx> TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req, Ctx>, Res> + Send + Sync + 'static + Clone,
+        B: Backend<Request<Req, Ctx>> + Send + Sync + 'static + Clone,
         Req: Send + 'static,
         Ctx: Send,
         B::Stream: Send + 'static,
@@ -213,15 +213,15 @@ pub mod test_utils {
         where
             S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
             B::Layer: Layer<S>,
-            <<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service:
+            <<B as Backend<Request<Req, Ctx>>>::Layer as Layer<S>>::Service:
                 Service<Request<Req, Ctx>> + Send + 'static,
-            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
+            <<<B as Backend<Request<Req, Ctx>>>::Layer as Layer<S>>::Service as Service<
                 Request<Req, Ctx>,
             >>::Response: Send + Debug,
-            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
+            <<<B as Backend<Request<Req, Ctx>>>::Layer as Layer<S>>::Service as Service<
                 Request<Req, Ctx>,
             >>::Error: Send + Into<BoxDynError> + Sync,
-            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
+            <<<B as Backend<Request<Req, Ctx>>>::Layer as Layer<S>>::Service as Service<
                 Request<Req, Ctx>,
             >>::Future: Send + 'static,
         {
@@ -229,7 +229,7 @@ pub mod test_utils {
             let worker = Worker::new(worker_id, crate::worker::Context::default());
             worker.start();
             let b = backend.clone();
-            let mut poller = b.poll::<S>(&worker);
+            let mut poller = b.poll(&worker);
             let (stop_tx, mut stop_rx) = channel::<()>(1);
 
             let (mut res_tx, res_rx) = channel(10);
@@ -291,7 +291,7 @@ pub mod test_utils {
 
     impl<B, Req, Res, Ctx> Deref for TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req, Ctx>, Res>,
+        B: Backend<Request<Req, Ctx>>,
     {
         type Target = B;
 
@@ -302,7 +302,7 @@ pub mod test_utils {
 
     impl<B, Req, Ctx, Res> DerefMut for TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req, Ctx>, Res>,
+        B: Backend<Request<Req, Ctx>>,
     {
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.backend

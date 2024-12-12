@@ -235,9 +235,9 @@ where
 
     type Context = SqlContext;
 
-    async fn push_request(
+    async fn push_raw_request<T>(
         &mut self,
-        job: Request<Self::Job, SqlContext>,
+        job: Request<T, SqlContext>,
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
         let (args, parts) = job.take_parts();
         let query =

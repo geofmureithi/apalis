@@ -284,7 +284,7 @@ impl<S, P> Worker<Ready<S, P>> {
     pub fn run<Req, Res, Ctx>(self) -> Runnable
     where
         S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
-        P: Backend<Request<Req, Ctx>, Res> + 'static,
+        P: Backend<Request<Req, Ctx>> + 'static,
         Req: Send + 'static + Sync,
         S::Future: Send,
         S::Response: 'static + Send + Sync + Serialize,
@@ -298,6 +298,7 @@ impl<S, P> Worker<Ready<S, P>> {
         Ctx: Send + 'static + Sync,
         Res: 'static,
     {
+        let service = self.state.service;
         let worker_id = self.id;
         let ctx = Context {
             running: Arc::default(),
@@ -306,14 +307,15 @@ impl<S, P> Worker<Ready<S, P>> {
             shutdown: self.state.shutdown,
             event_handler: self.state.event_handler.clone(),
             is_ready: Arc::default(),
+            service: std::any::type_name_of_val(&service).to_owned(),
         };
         let worker = Worker {
             id: worker_id.clone(),
             state: ctx.clone(),
         };
         let backend = self.state.backend;
-        let service = self.state.service;
-        let poller = backend.poll::<S>(&worker);
+
+        let poller = backend.poll(&worker);
         let stream = poller.stream;
         let heartbeat = poller.heartbeat.boxed();
         let layer = poller.layer;
@@ -405,6 +407,7 @@ pub struct Context {
     shutdown: Option<Shutdown>,
     event_handler: EventHandler,
     is_ready: Arc<AtomicBool>,
+    service: String,
 }
 
 impl fmt::Debug for Context {
@@ -413,6 +416,7 @@ impl fmt::Debug for Context {
             .field("shutdown", &["Shutdown handle"])
             .field("task_count", &self.task_count)
             .field("running", &self.running)
+            .field("service", &self.service)
             .finish()
     }
 }
@@ -511,6 +515,11 @@ impl Context {
     /// Returns if the worker is ready to consume new tasks
     pub fn is_ready(&self) -> bool {
         self.is_ready.load(Ordering::Acquire) && !self.is_shutting_down()
+    }
+
+    /// Get the type of service
+    pub fn get_service(&self) -> &String {
+        &self.service
     }
 }
 
