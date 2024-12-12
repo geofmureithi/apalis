@@ -471,7 +471,7 @@ impl Context {
     pub(crate) fn wake(&self) {
         if let Ok(waker) = self.waker.lock() {
             if let Some(waker) = &*waker {
-                waker.clone().wake();
+                waker.wake_by_ref();
             }
         }
     }
