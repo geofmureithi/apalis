@@ -302,7 +302,7 @@ impl<S, P> Worker<Ready<S, P>> {
         let ctx = Context {
             running: Arc::default(),
             task_count: Arc::default(),
-            wakers: Arc::default(),
+            waker: Arc::default(),
             shutdown: self.state.shutdown,
             event_handler: self.state.event_handler.clone(),
             is_ready: Arc::default(),
@@ -400,7 +400,7 @@ impl Future for Runnable {
 #[derive(Clone, Default)]
 pub struct Context {
     task_count: Arc<AtomicUsize>,
-    wakers: Arc<Mutex<Vec<Waker>>>,
+    waker: Arc<Mutex<Option<Waker>>>,
     running: Arc<AtomicBool>,
     shutdown: Option<Shutdown>,
     event_handler: EventHandler,
@@ -469,9 +469,9 @@ impl Context {
     }
 
     pub(crate) fn wake(&self) {
-        if let Ok(mut wakers) = self.wakers.lock() {
-            for waker in wakers.drain(..) {
-                waker.wake();
+        if let Ok(waker) = self.waker.lock() {
+            if let Some(waker) = &*waker {
+                waker.clone().wake();
             }
         }
     }
@@ -501,11 +501,24 @@ impl Context {
     }
 
     fn add_waker(&self, cx: &mut TaskCtx<'_>) {
-        if let Ok(mut wakers) = self.wakers.lock() {
-            if !wakers.iter().any(|w| w.will_wake(cx.waker())) {
-                wakers.push(cx.waker().clone());
+        if let Ok(mut waker_guard) = self.waker.lock() {
+            if waker_guard
+                .as_ref()
+                .map_or(true, |stored_waker| !stored_waker.will_wake(cx.waker()))
+            {
+                *waker_guard = Some(cx.waker().clone());
             }
         }
+    }
+
+    /// Checks if the stored waker matches the current one.
+    fn has_recent_waker(&self, cx: &TaskCtx<'_>) -> bool {
+        if let Ok(waker_guard) = self.waker.lock() {
+            if let Some(stored_waker) = &*waker_guard {
+                return stored_waker.will_wake(cx.waker());
+            }
+        }
+        false
     }
 
     /// Returns if the worker is ready to consume new tasks
@@ -522,7 +535,9 @@ impl Future for Context {
         if self.is_shutting_down() && task_count == 0 {
             Poll::Ready(())
         } else {
-            self.add_waker(cx);
+            if !self.has_recent_waker(cx) {
+                self.add_waker(cx);
+            }
             Poll::Pending
         }
     }
