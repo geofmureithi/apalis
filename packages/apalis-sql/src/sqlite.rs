@@ -398,7 +398,7 @@ where
     }
 }
 
-impl<T> SqliteStorage<T> {
+impl<T, C> SqliteStorage<T, C> {
     /// Puts the job instantly back into the queue
     /// Another Worker may consume
     pub async fn retry(

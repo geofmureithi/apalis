@@ -114,6 +114,8 @@ where
 {
     type Error = RsmqError;
 
+    type Codec = C;
+
     async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
         let bytes = C::encode(Request::<Message, RedisMqContext>::new(message))
             .map_err(Into::into)

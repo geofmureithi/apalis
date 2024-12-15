@@ -283,7 +283,7 @@ impl<S, P> Worker<Ready<S, P>> {
     /// Start a worker
     pub fn run<Req, Res, Ctx>(self) -> Runnable
     where
-        S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
+        S: Service<Request<Req, Ctx>> + Send + 'static,
         P: Backend<Request<Req, Ctx>> + 'static,
         Req: Send + 'static + Sync,
         S::Future: Send,
@@ -291,7 +291,7 @@ impl<S, P> Worker<Ready<S, P>> {
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S>,
-        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>, Response = Res> + Send,
+        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>> + Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
             Send + Into<BoxDynError> + Sync,

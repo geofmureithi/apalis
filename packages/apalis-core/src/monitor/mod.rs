@@ -41,14 +41,14 @@ impl Monitor {
     /// Registers a single instance of a [Worker]
     pub fn register<Req, S, P, Res, Ctx>(mut self, mut worker: Worker<Ready<S, P>>) -> Self
     where
-        S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
+        S: Service<Request<Req, Ctx>> + Send + 'static,
         S::Future: Send,
         S::Response: Send + Sync + Serialize + 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Request<Req, Ctx>> + Send + 'static,
         P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S> + Send,
-        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>, Response = Res> + Send,
+        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>> + Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
             Send + Sync + Into<BoxDynError>,
@@ -104,7 +104,7 @@ impl Monitor {
             let mut worker = worker.clone();
             let name = format!("{}-{index}", worker.id());
             worker.id = WorkerId::new(name);
-            self = self.register(worker);
+            self = self.register::<Req, S, P, Res, Ctx>(worker);
         }
         self
     }
