@@ -233,20 +233,19 @@ impl<S, P> Worker<Ready<S, P>> {
         self
     }
 
-    fn poll_jobs<Svc, Stm, Req, Res, Ctx>(
+    fn poll_jobs<Svc, Stm, Req, Ctx>(
         worker: Worker<Context>,
         service: Svc,
         stream: Stm,
     ) -> BoxStream<'static, ()>
     where
-        Svc: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
+        Svc: Service<Request<Req, Ctx>> + Send + 'static,
         Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, Error>> + Send + Unpin + 'static,
         Req: Send + 'static + Sync,
         Svc::Future: Send,
-        Svc::Response: 'static + Send + Sync + Serialize,
+        // Svc::Response: 'static + Send + Sync + Serialize,
         Svc::Error: Send + Sync + 'static + Into<BoxDynError>,
         Ctx: Send + 'static + Sync,
-        Res: 'static,
     {
         let w = worker.clone();
         let stream = stream.filter_map(move |result| {
@@ -281,7 +280,7 @@ impl<S, P> Worker<Ready<S, P>> {
         stream.boxed()
     }
     /// Start a worker
-    pub fn run<Req, Res, Ctx>(self) -> Runnable
+    pub fn run<Req, Ctx>(self) -> Runnable
     where
         S: Service<Request<Req, Ctx>> + Send + 'static,
         P: Backend<Request<Req, Ctx>> + 'static,
@@ -296,7 +295,6 @@ impl<S, P> Worker<Ready<S, P>> {
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
             Send + Into<BoxDynError> + Sync,
         Ctx: Send + 'static + Sync,
-        Res: 'static,
     {
         let service = self.state.service;
         let worker_id = self.id;

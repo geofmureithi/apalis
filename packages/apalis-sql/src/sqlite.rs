@@ -89,11 +89,7 @@ impl SqliteStorage<()> {
     }
 }
 
-impl<T, C> SqliteStorage<T, C>
-where
-    T: Serialize + DeserializeOwned,
-    C: Codec<Compact = String>
-{
+impl<T> SqliteStorage<T> {
     /// Create a new instance
     pub fn new(pool: SqlitePool) -> Self {
         Self {
@@ -115,6 +111,8 @@ where
             codec: PhantomData,
         }
     }
+}
+impl<T, C> SqliteStorage<T, C> {
     /// Keeps a storage notified that the worker is still alive manually
     pub async fn keep_alive_at(
         &mut self,
@@ -231,8 +229,8 @@ where
 impl<T, C> Storage for SqliteStorage<T, C>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
-    C: Codec<Compact = String> + Send + 'static,
-    C::Error: std::error::Error + Send + Sync + 'static
+    C: Codec<Compact = String> + Send + 'static + Sync,
+    C::Error: std::error::Error + Send + Sync + 'static,
 {
     type Job = T;
 
@@ -493,12 +491,12 @@ pub enum SqlitePollError {
 
 impl<T, C> Backend<Request<T, SqlContext>> for SqliteStorage<T, C>
 where
-    C: Codec<Compact = String> + Send + 'static,
+    C: Codec<Compact = String> + Send + 'static + Sync,
     C::Error: std::error::Error + 'static + Send + Sync,
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
-    type Layer = AckLayer<SqliteStorage<T>, T, SqlContext, String>;
+    type Layer = AckLayer<SqliteStorage<T, C>, T, SqlContext>;
 
     type Compact = String;
 
@@ -554,14 +552,10 @@ where
     }
 }
 
-impl<T: Sync + Send> Ack<T, String> for SqliteStorage<T> {
+impl<T: Sync + Send, C: Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T, C> {
     type Context = SqlContext;
     type AckError = sqlx::Error;
-    async fn ack(
-        &mut self,
-        ctx: &Self::Context,
-        res: &Response<String>,
-    ) -> Result<(), sqlx::Error> {
+    async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let query =
                 "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";

@@ -5,6 +5,7 @@ use futures::channel::mpsc::{SendError, Sender};
 use futures::SinkExt;
 use futures::{future::BoxFuture, Future, FutureExt};
 use serde::Serialize;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::{fmt, sync::Arc};
 pub use tower::{
@@ -190,24 +191,23 @@ impl<T, Res: Clone + Send + Sync, Ctx: Clone + Send + Sync> Ack<T, Res>
 
 /// A layer that acknowledges a job completed successfully
 #[derive(Debug)]
-pub struct AckLayer<A, Req, Ctx, Res> {
+pub struct AckLayer<A, Req, Ctx> {
     ack: A,
     job_type: PhantomData<Request<Req, Ctx>>,
-    res: PhantomData<Res>,
 }
 
-impl<A, Req, Ctx, Res> AckLayer<A, Req, Ctx, Res> {
+impl<A, Req, Ctx> AckLayer<A, Req, Ctx> {
     /// Build a new [AckLayer] for a job
     pub fn new(ack: A) -> Self {
         Self {
             ack,
             job_type: PhantomData,
-            res: PhantomData,
+            // res: PhantomData,
         }
     }
 }
 
-impl<A, Req, Ctx, S, Res> Layer<S> for AckLayer<A, Req, Ctx, Res>
+impl<A, Req, Ctx, S> Layer<S> for AckLayer<A, Req, Ctx>
 where
     S: Service<Request<Req, Ctx>> + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,

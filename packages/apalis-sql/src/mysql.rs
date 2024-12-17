@@ -432,7 +432,7 @@ where
 {
     type Stream = BackendStream<RequestStream<Request<Req, SqlContext>>>;
 
-    type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, Value>;
+    type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext>;
 
     type Compact = Value;
 

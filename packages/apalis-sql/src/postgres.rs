@@ -155,7 +155,7 @@ where
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
 
-    type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, Value>;
+    type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext>;
 
     type Compact = Value;
 

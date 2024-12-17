@@ -29,8 +29,6 @@ where
 
     type Layer = Inner::Layer;
 
-    type Codec = ();
-
     type Compact = ();
 
     fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {

@@ -213,8 +213,6 @@ where
 
     type Layer = Identity;
 
-    type Codec = ();
-
     type Compact = ();
 
     fn poll(self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {

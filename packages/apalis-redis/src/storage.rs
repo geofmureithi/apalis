@@ -329,16 +329,17 @@ impl Config {
 }
 
 /// Represents a [Storage] that uses Redis for storage.
-pub struct RedisStorage<T, Conn = ConnectionManager, C = JsonCodec<Vec<u8>>> {
+pub struct RedisStorage<T, Conn = ConnectionManager, C = JsonCodec<Vec<u8>>, Res = ()> {
     conn: Conn,
     job_type: PhantomData<T>,
     scripts: RedisScript,
     controller: Controller,
     config: Config,
     codec: PhantomData<C>,
+    res: PhantomData<Res>,
 }
 
-impl<T, Conn, C> fmt::Debug for RedisStorage<T, Conn, C> {
+impl<T, Conn, C, Res> fmt::Debug for RedisStorage<T, Conn, C, Res> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RedisStorage")
             .field("conn", &"ConnectionManager")
@@ -349,7 +350,7 @@ impl<T, Conn, C> fmt::Debug for RedisStorage<T, Conn, C> {
     }
 }
 
-impl<T, Conn: Clone, C> Clone for RedisStorage<T, Conn, C> {
+impl<T, Conn: Clone, C, Res> Clone for RedisStorage<T, Conn, C, Res> {
     fn clone(&self) -> Self {
         Self {
             conn: self.conn.clone(),
@@ -358,13 +359,14 @@ impl<T, Conn: Clone, C> Clone for RedisStorage<T, Conn, C> {
             controller: self.controller.clone(),
             config: self.config.clone(),
             codec: self.codec,
+            res: self.res,
         }
     }
 }
 
-impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn> {
+impl<T: Serialize + DeserializeOwned, Conn, Res> RedisStorage<T, Conn, JsonCodec<Vec<u8>>, Res> {
     /// Start a new connection
-    pub fn new(conn: Conn) -> Self {
+    pub fn new(conn: Conn) -> RedisStorage<T, Conn, JsonCodec<Vec<u8>>, Res> {
         Self::new_with_codec::<JsonCodec<Vec<u8>>>(
             conn,
             Config::default().set_namespace(type_name::<T>()),
@@ -372,21 +374,25 @@ impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn> {
     }
 
     /// Start a connection with a custom config
-    pub fn new_with_config(conn: Conn, config: Config) -> Self {
+    pub fn new_with_config(
+        conn: Conn,
+        config: Config,
+    ) -> RedisStorage<T, Conn, JsonCodec<Vec<u8>>, Res> {
         Self::new_with_codec::<JsonCodec<Vec<u8>>>(conn, config)
     }
 
     /// Start a new connection providing custom config and a codec
-    pub fn new_with_codec<C>(conn: Conn, config: Config) -> RedisStorage<T, Conn, C>
+    pub fn new_with_codec<K>(conn: Conn, config: Config) -> RedisStorage<T, Conn, K, Res>
     where
-        C: Codec + Sync + Send + 'static,
+        K: Codec + Sync + Send + 'static,
     {
         RedisStorage {
             conn,
             job_type: PhantomData,
             controller: Controller::new(),
             config,
-            codec: PhantomData::<C>,
+            codec: PhantomData::<K>,
+            res: PhantomData::<Res>,
             scripts: RedisScript {
                 done_job: redis::Script::new(include_str!("../lua/done_job.lua")),
                 push_job: redis::Script::new(include_str!("../lua/push_job.lua")),
@@ -427,15 +433,16 @@ impl<T, Conn, C> RedisStorage<T, Conn, C> {
     }
 }
 
-impl<T, Conn, C> Backend<Request<T, RedisContext>> for RedisStorage<T, Conn, C>
+impl<T, Conn, C, Res> Backend<Request<T, RedisContext>> for RedisStorage<T, Conn, C, Res>
 where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
+    Res: Serialize + Send + Sync + 'static
 {
     type Stream = BackendStream<RequestStream<Request<T, RedisContext>>>;
 
-    type Layer = AckLayer<Sender<(RedisContext, Response<Vec<u8>>)>, T, RedisContext, Vec<u8>>;
+    type Layer = AckLayer<Sender<(RedisContext, Response<Res>)>, T, RedisContext>;
 
     type Compact = Vec<u8>;
 
@@ -444,7 +451,7 @@ where
         worker: &Worker<apalis_core::worker::Context>,
     ) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
-        let (ack, ack_rx) = mpsc::channel(self.config.buffer_size);
+        let (ack, ack_rx) = mpsc::channel::<(RedisContext, Response<Res>)>(self.config.buffer_size);
         let layer = AckLayer::new(ack);
         let controller = self.controller.clone();
         let config = self.config.clone();
@@ -524,19 +531,16 @@ where
     }
 }
 
-impl<T, Conn, C> Ack<T, Vec<u8>> for RedisStorage<T, Conn, C>
+impl<T, Conn, C, Res> Ack<T, Res> for RedisStorage<T, Conn, C, Res>
 where
     T: Sync + Send,
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send,
+    Res: Serialize + Sync + Send,
 {
     type Context = RedisContext;
     type AckError = RedisError;
-    async fn ack(
-        &mut self,
-        ctx: &Self::Context,
-        res: &Response<Vec<u8>>,
-    ) -> Result<(), RedisError> {
+    async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), RedisError> {
         let inflight_set = format!(
             "{}:{}",
             self.config.inflight_jobs_set(),
@@ -592,12 +596,11 @@ where
     }
 }
 
-impl<T, Conn, C, Res> RedisStorage<T, Conn, C>
+impl<T, Conn, C, Res> RedisStorage<T, Conn, C, Res>
 where
     T: DeserializeOwned + Send + Unpin + Send + Sync + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
-    C: Codec<Compact = Res>,
-    Res: From<Vec<u8>>,
+    C: Codec<Compact = Vec<u8>>,
 {
     async fn fetch_next(
         &mut self,
@@ -627,7 +630,7 @@ where
                 let mut processed = vec![];
                 for job in jobs {
                     let bytes = deserialize_job(&job)?;
-                    let mut request: Request<T, RedisContext> = C::decode(bytes.clone().into())
+                    let mut request: Request<T, RedisContext> = C::decode(bytes.clone())
                         .map_err(|e| build_error(&e.into().to_string()))?;
                     request.parts.context.lock_by = Some(worker_id.clone());
                     request.parts.namespace = Some(Namespace(namespace.clone()));
@@ -664,7 +667,7 @@ fn deserialize_job(job: &Value) -> Result<&Vec<u8>, RedisError> {
     }
 }
 
-impl<T, Conn: ConnectionLike, C> RedisStorage<T, Conn, C> {
+impl<T, Conn: ConnectionLike, C, Res> RedisStorage<T, Conn, C, Res> {
     async fn keep_alive(&mut self, worker_id: &WorkerId) -> Result<(), RedisError> {
         let register_consumer = self.scripts.register_consumer.clone();
         let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
@@ -681,11 +684,12 @@ impl<T, Conn: ConnectionLike, C> RedisStorage<T, Conn, C> {
     }
 }
 
-impl<T, Conn, C> Storage for RedisStorage<T, Conn, C>
+impl<T, Conn, C, Res> Storage for RedisStorage<T, Conn, C, Res>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
+    Res: Serialize + Send + Sync + 'static
 {
     type Job = T;
     type Error = RedisError;
@@ -697,9 +701,23 @@ where
         &mut self,
         req: Request<T, RedisContext>,
     ) -> Result<Parts<Self::Context>, RedisError> {
-        let args = C::encode(&req.args)
+        let conn = &mut self.conn;
+        let push_job = self.scripts.push_job.clone();
+        let job_data_hash = self.config.job_data_hash();
+        let active_jobs_list = self.config.active_jobs_list();
+        let signal_list = self.config.signal_list();
+
+        let job = C::encode(&req)
             .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
-        self.push_raw_request(Request::new_with_parts(args, req.parts)).await
+        push_job
+            .key(job_data_hash)
+            .key(active_jobs_list)
+            .key(signal_list)
+            .arg(req.parts.task_id.to_string())
+            .arg(job)
+            .invoke_async(conn)
+            .await?;
+        Ok(req.parts)
     }
 
     async fn push_raw_request(
@@ -724,7 +742,6 @@ where
             .await?;
         Ok(req.parts)
     }
-
 
     async fn schedule_request(
         &mut self,
@@ -842,10 +859,12 @@ where
     }
 }
 
-impl<T, Conn, C> RedisStorage<T, Conn, C>
+impl<T, Conn, C, Res> RedisStorage<T, Conn, C, Res>
 where
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
+    Res: Serialize + Send + Sync + 'static
+
 {
     /// Attempt to retry a job
     pub async fn retry(&mut self, worker_id: &WorkerId, task_id: &TaskId) -> Result<i32, RedisError>

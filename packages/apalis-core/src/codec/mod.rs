@@ -1,8 +1,6 @@
-use std::convert::Infallible;
-
 use serde::{Deserialize, Serialize};
 
-use crate::{error::BoxDynError, response::Response};
+use crate::error::BoxDynError;
 
 /// A codec allows backends to encode and decode data
 pub trait Codec {
