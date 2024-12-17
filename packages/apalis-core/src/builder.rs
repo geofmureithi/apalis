@@ -140,14 +140,9 @@ impl<Req, M, Serv, Ctx> WorkerBuilder<Req, Ctx, (), M, Serv> {
 
 impl<Req, P, M, S, Ctx> WorkerFactory<Req, Ctx, S> for WorkerBuilder<Req, Ctx, P, M, S>
 where
-    S: Service<Request<Req, Ctx>> + Send + 'static + Sync,
-    S::Future: Send,
-
-    S::Response: 'static,
+    S: Service<Request<Req, Ctx>>,
     M: Layer<S>,
-    Req: Send + 'static + Sync,
-    P: Backend<Request<Req, Ctx>> + 'static,
-    M: 'static,
+    P: Backend<Request<Req, Ctx>>,
 {
     type Source = P;
 
