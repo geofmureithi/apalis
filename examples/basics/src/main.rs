@@ -12,8 +12,6 @@ use layer::LogLayer;
 
 use tracing::{log::info, Instrument, Span};
 
-type WorkerCtx = Context;
-
 use crate::{cache::ValidEmailCache, service::EmailService};
 
 async fn produce_jobs(storage: &SqliteStorage<Email>) {
@@ -54,11 +52,10 @@ pub enum PanicError {
 async fn send_email(
     email: Email,
     svc: Data<EmailService>,
-    worker_ctx: Data<WorkerCtx>,
-    worker_id: Data<WorkerId>,
+    worker: Worker<Context>,
     cache: Data<ValidEmailCache>,
 ) -> Result<(), ServiceError> {
-    info!("Job started in worker {:?}", worker_id);
+    info!("Job started in worker {:?}", worker.id());
     let cache_clone = cache.clone();
     let email_to = email.to.clone();
     let res = cache.get(&email_to);
@@ -70,7 +67,7 @@ async fn send_email(
             // Its also possible to acquire context types and clone them into the futures context.
             // They will also be gracefully shutdown if [`Monitor`] has a shutdown signal
             tokio::spawn(
-                worker_ctx.track(
+                worker.track(
                     async move {
                         if cache::fetch_validity(email_to, &cache_clone).await {
                             svc.send(email).await;
@@ -94,7 +91,7 @@ async fn send_email(
 async fn main() -> Result<(), std::io::Error> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
-    let pool = SqlitePool::connect("sqlite::memory").await.unwrap();
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
     SqliteStorage::setup(&pool)
         .await
         .expect("unable to run migrations for sqlite");
