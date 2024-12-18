@@ -241,11 +241,10 @@ impl<S, P> Worker<Ready<S, P>> {
     where
         Svc: Service<Request<Req, Ctx>> + Send + 'static,
         Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, Error>> + Send + Unpin + 'static,
-        Req: Send + 'static + Sync,
+        Req: Send + 'static,
         Svc::Future: Send,
-        // Svc::Response: 'static + Send + Sync + Serialize,
-        Svc::Error: Send + Sync + 'static + Into<BoxDynError>,
-        Ctx: Send + 'static + Sync,
+        Svc::Error: Send + 'static + Into<BoxDynError>,
+        Ctx: Send + 'static,
     {
         let w = worker.clone();
         let stream = stream.filter_map(move |result| {
@@ -282,19 +281,17 @@ impl<S, P> Worker<Ready<S, P>> {
     /// Start a worker
     pub fn run<Req, Ctx>(self) -> Runnable
     where
-        S: Service<Request<Req, Ctx>> + Send + 'static,
+        S: Service<Request<Req, Ctx>> + 'static,
         P: Backend<Request<Req, Ctx>> + 'static,
-        Req: Send + 'static + Sync,
-        S::Future: Send,
-        S::Response: 'static + Send + Sync + Serialize,
-        S::Error: Send + Sync + 'static + Into<BoxDynError>,
+        Req: Send + 'static,
+        S::Error: Send + 'static + Into<BoxDynError>,
         P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S>,
         <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>> + Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
-            Send + Into<BoxDynError> + Sync,
-        Ctx: Send + 'static + Sync,
+            Send + Into<BoxDynError>,
+        Ctx: Send + 'static,
     {
         let service = self.state.service;
         let worker_id = self.id;
