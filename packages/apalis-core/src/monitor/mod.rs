@@ -43,7 +43,6 @@ impl Monitor {
     where
         S: Service<Request<Req, Ctx>> + Send + 'static,
         S::Future: Send,
-        S::Response: Send + Sync + Serialize + 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Request<Req, Ctx>> + Send + 'static,
         P::Stream: Unpin + Send + 'static,
@@ -52,8 +51,8 @@ impl Monitor {
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
             Send + Sync + Into<BoxDynError>,
-        Req: Send + Sync + 'static,
-        Ctx: Send + Sync + 'static,
+        Req: Send + 'static,
+        Ctx: Send + 'static,
     {
         worker.state.shutdown = Some(self.shutdown.clone());
         worker.state.event_handler = self.event_handler.clone();
@@ -86,7 +85,6 @@ impl Monitor {
     where
         S: Service<Request<Req, Ctx>> + Send + 'static + Clone,
         S::Future: Send,
-        S::Response: Send + Sync + Serialize + 'static,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Request<Req, Ctx>> + Send + 'static + Clone,
         P::Stream: Unpin + Send + 'static,
@@ -95,8 +93,8 @@ impl Monitor {
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
             Send + Sync + Into<BoxDynError>,
-        Req: Send + Sync + 'static,
-        Ctx: Send + Sync + 'static,
+        Req: Send + 'static,
+        Ctx: Send + 'static,
     {
         for index in 0..count {
             let mut worker = worker.clone();

@@ -248,18 +248,16 @@ impl<Sv: Clone, A: Clone, Req, Ctx, Res> Clone for AckService<Sv, A, Req, Ctx, R
 
 impl<SV, A, Req, Res, Ctx> Service<Request<Req, Ctx>> for AckService<SV, A, Req, Ctx, Res>
 where
-    SV: Service<Request<Req, Ctx>> + Send + Sync + 'static,
-    <SV as Service<Request<Req, Ctx>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
-    <SV as Service<Request<Req, Ctx>>>::Future: std::marker::Send + 'static,
+    SV: Service<Request<Req, Ctx>> + Send + 'static,
+    <SV as Service<Request<Req, Ctx>>>::Error: Into<BoxDynError> + Send + 'static,
+    <SV as Service<Request<Req, Ctx>>>::Future: Send + 'static,
     A: Ack<Req, <SV as Service<Request<Req, Ctx>>>::Response, Context = Ctx>
         + Send
         + 'static
-        + Clone
-        + Send
-        + Sync,
+        + Clone,
     Req: 'static + Send,
-    <SV as Service<Request<Req, Ctx>>>::Response: std::marker::Send + fmt::Debug + Sync + Serialize,
-    <A as Ack<Req, SV::Response>>::Context: Sync + Send + Clone,
+    <SV as Service<Request<Req, Ctx>>>::Response: std::marker::Send + Serialize,
+    <A as Ack<Req, SV::Response>>::Context: Send + Clone,
     <A as Ack<Req, <SV as Service<Request<Req, Ctx>>>::Response>>::Context: 'static,
     Ctx: Clone,
 {
