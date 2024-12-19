@@ -27,7 +27,8 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
+    let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
+    let conn = apalis_redis::connect(redis_url).await.expect("Could not connect");
     let storage = RedisStorage::new(conn);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;
