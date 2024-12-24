@@ -66,7 +66,7 @@ use apalis_core::request::RequestStream;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::worker::{Context, Worker};
-use apalis_core::{error::Error, request::Request};
+use apalis_core::{error::Error, request::Request, service_fn::FromRequest};
 use chrono::{DateTime, TimeZone, Utc};
 pub use cron::Schedule;
 use futures::StreamExt;
@@ -111,12 +111,12 @@ where
 }
 impl<Req, Tz> CronStream<Req, Tz>
 where
-    Req: From<DateTime<Tz>> + Send + Sync + 'static,
+    Req: Default + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync,
 {
     /// Convert to consumable
-    fn into_stream(self) -> RequestStream<Request<Req, ()>> {
+    fn into_stream(self) -> RequestStream<Request<Req, CronContext<Tz>>> {
         let timezone = self.timezone.clone();
         let stream = async_stream::stream! {
             let mut schedule = self.schedule.upcoming_owned(timezone.clone());
@@ -129,7 +129,7 @@ where
                         apalis_core::sleep(to_sleep).await;
                         let timestamp = timezone.from_utc_datetime(&Utc::now().naive_utc());
                         let namespace = Namespace(format!("{}:{timestamp:?}", self.schedule));
-                        let mut req = Request::new(Req::from(timestamp));
+                        let mut req = Request::new_with_ctx(Req::default(), CronContext::new(timestamp));
                         req.parts.namespace = Some(namespace);
                         yield Ok(Some(req));
                     },
@@ -203,13 +203,48 @@ where
     }
 }
 
-impl<Req, Tz, Res> Backend<Request<Req, ()>, Res> for CronStream<Req, Tz>
+/// Context for all cron jobs
+#[derive(Debug, Clone)]
+pub struct CronContext<Tz: TimeZone> {
+    timestamp: DateTime<Tz>,
+}
+
+impl<Tz: TimeZone> Default for CronContext<Tz>
 where
-    Req: From<DateTime<Tz>> + Send + Sync + 'static,
+    DateTime<Tz>: Default,
+{
+    fn default() -> Self {
+        Self {
+            timestamp: Default::default(),
+        }
+    }
+}
+
+impl<Tz: TimeZone> CronContext<Tz> {
+    /// Create a new context provided a timestamp
+    pub fn new(timestamp: DateTime<Tz>) -> Self {
+        Self { timestamp }
+    }
+
+    /// Get the inner timestamp
+    pub fn get_timestamp(&self) -> &DateTime<Tz> {
+        &self.timestamp
+    }
+}
+
+impl<Req, Tz: TimeZone> FromRequest<Request<Req, CronContext<Tz>>> for CronContext<Tz> {
+    fn from_request(req: &Request<Req, CronContext<Tz>>) -> Result<Self, Error> {
+        Ok(req.parts.context.clone())
+    }
+}
+
+impl<Req, Tz, Res> Backend<Request<Req, CronContext<Tz>>, Res> for CronStream<Req, Tz>
+where
+    Req: Default + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync,
 {
-    type Stream = RequestStream<Request<Req, ()>>;
+    type Stream = RequestStream<Request<Req, CronContext<Tz>>>;
 
     type Layer = Identity;
 
