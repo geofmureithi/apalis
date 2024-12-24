@@ -10,12 +10,12 @@
 //! use apalis::prelude::*;
 //! use apalis_redis::{RedisStorage, Config};
 //! use serde::{Deserialize, Serialize};
-//! 
+//!
 //! #[derive(Debug, Deserialize, Serialize)]
 //! struct Email {
 //!     to: String,
 //! }
-//! 
+//!
 //! async fn send_email(job: Email) -> Result<(), Error> {
 //!     Ok(())
 //! }
@@ -28,7 +28,7 @@
 //!     let worker = WorkerBuilder::new("tasty-pear")
 //!         .backend(storage.clone())
 //!         .build_fn(send_email);
-//! 
+//!
 //!     worker.run().await;
 //! }
 //! ```

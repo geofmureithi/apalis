@@ -19,30 +19,30 @@
 //! use std::str::FromStr;
 //! use apalis_cron::{CronStream, Schedule};
 //! use chrono::{DateTime, Utc};
-//! 
+//!
 //! #[derive(Default, Debug, Clone)]
 //! struct Reminder(DateTime<Utc>);
-//! 
+//!
 //! # impl From<DateTime<Utc>> for Reminder {
 //! #    fn from(t: DateTime<Utc>) -> Self {
 //! #        Reminder(t)
 //! #    }
 //! # }
-//! 
+//!
 //! async fn handle_tick(job: Reminder, data: Data<usize>) {
 //!     // Do something with the current tick
 //! }
-//! 
+//!
 //! #[tokio::main]
 //! async fn main() {
 //!     let schedule = Schedule::from_str("@daily").unwrap();
-//! 
+//!
 //!     let worker = WorkerBuilder::new("morning-cereal")
 //!         .retry(RetryPolicy::retries(5))
 //!         .data(42usize)
 //!         .backend(CronStream::new(schedule))
 //!         .build_fn(handle_tick);
-//! 
+//!
 //!     worker.run().await;
 //! }
 //! ```

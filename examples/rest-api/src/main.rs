@@ -78,7 +78,9 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
-    let conn = apalis_redis::connect(redis_url).await.expect("Could not connect");
+    let conn = apalis_redis::connect(redis_url)
+        .await
+        .expect("Could not connect");
     let storage = RedisStorage::new(conn);
     let data = web::Data::new(storage.clone());
     let http = async {

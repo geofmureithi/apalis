@@ -33,7 +33,9 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
-    let conn = apalis_redis::connect(redis_url).await.expect("Could not connect");
+    let conn = apalis_redis::connect(redis_url)
+        .await
+        .expect("Could not connect");
     let config = apalis_redis::Config::default()
         .set_namespace("apalis_redis-with-msg-pack")
         .set_max_retries(5);
