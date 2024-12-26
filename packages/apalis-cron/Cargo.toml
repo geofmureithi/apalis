@@ -13,7 +13,7 @@ description = "A simple yet extensible library for cron-like job scheduling for 
 apalis-core = { path = "../../packages/apalis-core", version = "0.6.2", default-features = false, features = [
     "sleep",
 ] }
-cron = "0.13.0"
+cron = "0.14.0"
 futures = "0.3.30"
 tower = { version = "0.5" }
 chrono = { version = "0.4.38", default-features = false, features = [
