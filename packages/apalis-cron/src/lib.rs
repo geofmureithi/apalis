@@ -15,46 +15,37 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! # use apalis::layers::retry::RetryLayer;
-//! # use apalis::layers::retry::RetryPolicy;
-//! use tower::ServiceBuilder;
-//! use apalis_cron::Schedule;
+//! use apalis::{prelude::*, layers::retry::RetryPolicy};
 //! use std::str::FromStr;
-//! # use apalis::prelude::*;
-//! use apalis_cron::CronStream;
+//! use apalis_cron::{CronStream, Schedule};
 //! use chrono::{DateTime, Utc};
-//!
-//! #[derive(Clone)]
-//! struct FakeService;
-//! impl FakeService {
-//!     fn execute(&self, item: Reminder){}
-//! }
 //!
 //! #[derive(Default, Debug, Clone)]
 //! struct Reminder(DateTime<Utc>);
-//! impl From<DateTime<Utc>> for Reminder {
-//!    fn from(t: DateTime<Utc>) -> Self {
-//!        Reminder(t)
-//!    }
-//! }
-//! async fn send_reminder(job: Reminder, svc: Data<FakeService>) {
-//!     svc.execute(job);
+//!
+//! # impl From<DateTime<Utc>> for Reminder {
+//! #    fn from(t: DateTime<Utc>) -> Self {
+//! #        Reminder(t)
+//! #    }
+//! # }
+//!
+//! async fn handle_tick(job: Reminder, data: Data<usize>) {
+//!     // Do something with the current tick
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     let schedule = Schedule::from_str("@daily").unwrap();
+//!
 //!     let worker = WorkerBuilder::new("morning-cereal")
 //!         .retry(RetryPolicy::retries(5))
-//!         .data(FakeService)
+//!         .data(42usize)
 //!         .backend(CronStream::new(schedule))
-//!         .build_fn(send_reminder);
-//!     Monitor::new()
-//!         .register(worker)
-//!         .run()
-//!         .await
-//!         .unwrap();
+//!         .build_fn(handle_tick);
+//!
+//!     worker.run().await;
 //! }
+//! ```
 //! ```
 
 use apalis_core::backend::Backend;
