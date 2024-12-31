@@ -471,6 +471,8 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
     type Layer = AckLayer<SqliteStorage<T>, T, SqlContext, Res>;
 
+    type Codec = JsonCodec<String>;
+
     fn poll<Svc>(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
