@@ -64,9 +64,8 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.6" }
-apalis-redis = { version = "0.6" }
-# apalis-sql = { version = "0.6", features = ["postgres"] } # or mysql, sqlite
+apalis = { version = "0.6", features = "limit" } # Limit for concurrency
+apalis-redis = { version = "0.6" } # Use redis for persistence
 ```
 
 ## Usage
@@ -122,7 +121,7 @@ async fn produce_route_jobs(storage: &mut RedisStorage<Email>) -> Result<()> {
 - _prometheus_ — Support Prometheus metrics
 - _retry_ — Support direct retrying jobs
 - _timeout_ — Support timeouts on jobs
-- _limit_ — 💪 Limit the amount of jobs
+- _limit_ — 💪 Support for concurrency and rate-limiting
 - _filter_ — Support filtering jobs based on a predicate
 - _catch-panic_ - Catch panics that occur during execution
 
