@@ -632,6 +632,7 @@ where
             }
             Err(e) => {
                 warn!("An error occurred during streaming jobs: {e}");
+                self.keep_alive(worker_id).await?;
                 Err(e)
             }
         }
