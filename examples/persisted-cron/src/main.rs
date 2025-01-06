@@ -4,29 +4,24 @@ use apalis_cron::CronStream;
 use apalis_cron::Schedule;
 use apalis_sql::sqlite::SqliteStorage;
 use apalis_sql::sqlx::SqlitePool;
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono::Local;
 use serde::Deserialize;
 use serde::Serialize;
 use std::str::FromStr;
 use std::time::Duration;
 
-#[derive(Clone)]
-struct FakeService;
-impl FakeService {
-    fn execute(&self, item: Reminder) {
-        dbg!(&item.0);
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Reminder(DateTime<Local>);
+
+impl Default for Reminder {
+    fn default() -> Self {
+        Self(Local::now())
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-struct Reminder(DateTime<Utc>);
-impl From<DateTime<Utc>> for Reminder {
-    fn from(t: DateTime<Utc>) -> Self {
-        Reminder(t)
-    }
-}
-async fn send_reminder(job: Reminder, svc: Data<FakeService>) {
-    svc.execute(job);
+async fn send_reminder(job: Reminder) {
+    println!("Reminder {:?}", job);
 }
 
 #[tokio::main]
@@ -50,7 +45,6 @@ async fn main() {
     let worker = WorkerBuilder::new("morning-cereal")
         .enable_tracing()
         .rate_limit(1, Duration::from_secs(2))
-        .data(FakeService)
         .backend(backend)
         .build_fn(send_reminder);
     Monitor::new().register(worker).run().await.unwrap();

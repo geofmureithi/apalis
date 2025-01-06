@@ -1,30 +1,19 @@
 use apalis::prelude::*;
 
+use apalis_cron::CronContext;
 use apalis_cron::CronStream;
 use apalis_cron::Schedule;
-use chrono::{DateTime, Utc};
+use chrono::Local;
 use std::str::FromStr;
 use std::time::Duration;
-// use std::time::Duration;
 use tower::load_shed::LoadShedLayer;
 
-#[derive(Clone)]
-struct FakeService;
-impl FakeService {
-    fn execute(&self, item: Reminder) {
-        dbg!(&item.0);
-    }
-}
+#[derive(Debug, Default)]
+struct Reminder;
 
-#[derive(Default, Debug, Clone)]
-struct Reminder(DateTime<Utc>);
-impl From<DateTime<Utc>> for Reminder {
-    fn from(t: DateTime<Utc>) -> Self {
-        Reminder(t)
-    }
-}
-async fn send_reminder(job: Reminder, svc: Data<FakeService>) {
-    svc.execute(job);
+async fn send_reminder(_job: Reminder, ctx: CronContext<Local>) {
+    println!("Running cronjob for timestamp: {}", ctx.get_timestamp())
+    // Do something
 }
 
 #[tokio::main]
@@ -34,8 +23,7 @@ async fn main() {
         .enable_tracing()
         .layer(LoadShedLayer::new()) // Important when you have layers that block the service
         .rate_limit(1, Duration::from_secs(2))
-        .data(FakeService)
-        .backend(CronStream::new(schedule))
+        .backend(CronStream::new_with_timezone(schedule, Local))
         .build_fn(send_reminder);
-    Monitor::new().register(worker).run().await.unwrap();
+    worker.run().await;
 }
