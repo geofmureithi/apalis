@@ -159,7 +159,7 @@ async fn fetch_next(
     config: &Config,
 ) -> Result<Option<SqlRequest<String>>, sqlx::Error> {
     let now: i64 = Utc::now().timestamp();
-    let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3, attempts = attempts + 1 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
+    let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
     let job: Option<SqlRequest<String>> = sqlx::query_as(update_query)
         .bind(id.to_string())
         .bind(worker_id.to_string())
@@ -300,7 +300,7 @@ where
     }
 
     async fn len(&mut self) -> Result<i64, Self::Error> {
-        let query = "Select Count(*) as count from Jobs where status='Pending'";
+        let query = "Select Count(*) as count from Jobs WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts))";
         let record = sqlx::query(query).fetch_one(&self.pool).await?;
         record.try_get("count")
     }
@@ -405,29 +405,6 @@ impl<T> SqliteStorage<T> {
         Ok(())
     }
 
-    /// Add jobs that failed back to the queue if there are still remaining attemps
-    pub async fn reenqueue_failed(&mut self) -> Result<(), sqlx::Error> {
-        let job_type = self.config.namespace.clone();
-        let mut tx = self.pool.acquire().await?;
-        let query = r#"Update Jobs
-                            SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL
-                            WHERE id in
-                                (SELECT Jobs.id from Jobs
-                                    WHERE status= "Failed" AND Jobs.attempts < Jobs.max_attempts
-                                     ORDER BY lock_at ASC LIMIT ?2);"#;
-        sqlx::query(query)
-            .bind(job_type)
-            .bind::<u32>(
-                self.config
-                    .buffer_size
-                    .try_into()
-                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?,
-            )
-            .execute(&mut *tx)
-            .await?;
-        Ok(())
-    }
-
     /// Add jobs that workers have disappeared to the queue
     pub async fn reenqueue_orphaned(
         &self,
@@ -529,7 +506,7 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let query =
-                "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
+                "UPDATE Jobs SET status = ?4, attempts = attempts + 1, done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
         let result = serde_json::to_string(&res.inner.as_ref().map_err(|r| r.to_string()))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         sqlx::query(query)

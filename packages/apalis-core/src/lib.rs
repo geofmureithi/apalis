@@ -373,6 +373,48 @@ pub mod test_utils {
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 0); // After vacuuming, there should be nothing
             }
+
+            #[tokio::test]
+            async fn integration_test_storage_retry_persists() {
+                use std::io::{Error, ErrorKind};
+                let mut backend = $setup().await;
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Err::<String, io::Error>(Error::new(ErrorKind::Other, "oh no!"))
+                });
+                let (mut t, poller) = TestWrapper::new_with_service(backend.clone(), service);
+                tokio::spawn(poller);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // No jobs
+                let parts = t.push(1).await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1); // A job exists
+                let res = t.execute_next().await;
+                assert_eq!(res.1, Err("FailedError: oh no!".to_owned()));
+
+                let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
+                assert_eq!(task.parts.attempt.current(), 1);
+
+                let res = t.execute_next().await;
+                assert_eq!(res.1, Err("FailedError: oh no!".to_owned()));
+
+                let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
+                assert_eq!(task.parts.attempt.current(), 2);
+
+                let res = t.execute_next().await;
+                assert_eq!(res.1, Err("FailedError: oh no!".to_owned()));
+
+                let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
+                assert_eq!(task.parts.attempt.current(), 3);
+
+                let res = t.execute_next().await;
+                assert_eq!(res.1, Err("FailedError: oh no!".to_owned()));
+
+                let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
+                assert_eq!(task.parts.attempt.current(), 4);
+
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1); // The job still exists and there is no duplicates
+            }
         };
     }
 }
