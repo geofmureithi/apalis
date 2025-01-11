@@ -368,7 +368,7 @@ pub mod test_utils {
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 1); // A job exists
                 let res = t.execute_next().await;
-                assert_eq!(res.1, Ok("1".to_owned()));                
+                assert_eq!(res.1, Ok("1".to_owned()));
                 t.vacuum().await.unwrap();
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 0); // After vacuuming, there should be nothing
