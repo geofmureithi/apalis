@@ -6,6 +6,7 @@ on:
       - "packages/apalis-sql/src/migrations/postgres/**"
       - "packages/apalis-sql/src/Cargo.toml"
       - ".github/workflows/postgres.yaml"
+      - "packages/apalis-core/**"
 
 name: Postgres CI
 

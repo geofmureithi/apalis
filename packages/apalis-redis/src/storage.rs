@@ -818,7 +818,7 @@ where
     async fn vacuum(&mut self) -> Result<usize, RedisError> {
         let vacuum_script = self.scripts.vacuum.clone();
         vacuum_script
-            .key(self.config.dead_jobs_set())
+            .key(self.config.done_jobs_set())
             .key(self.config.job_data_hash())
             .invoke_async(&mut self.conn)
             .await
