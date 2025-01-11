@@ -354,6 +354,25 @@ pub mod test_utils {
                 // assert_eq!(res, 0);
                 t.vacuum().await.unwrap();
             }
+            #[tokio::test]
+            async fn integration_test_storage_vacuum() {
+                let backend = $setup().await;
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Ok::<_, io::Error>(request.args)
+                });
+                let (mut t, poller) = TestWrapper::new_with_service(backend, service);
+                tokio::spawn(poller);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // No jobs
+                t.push(1).await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1); // A job exists
+                let res = t.execute_next().await;
+                assert_eq!(res.1, Ok("1".to_owned()));                
+                t.vacuum().await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // After vacuuming, there should be nothing
+            }
         };
     }
 }
