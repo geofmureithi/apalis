@@ -583,6 +583,8 @@ where
     }
 
     fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
+        dbg!(&request.parts.attempt);
+        request.parts.attempt.increment();
         self.ctx.track(self.service.call(request))
     }
 }

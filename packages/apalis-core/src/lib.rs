@@ -125,6 +125,7 @@ pub mod interval {
 /// Test utilities that allows you to test backends
 pub mod test_utils {
     use crate::backend::Backend;
+    use crate::builder::WorkerBuilder;
     use crate::error::BoxDynError;
     use crate::request::Request;
     use crate::task::task_id::TaskId;
@@ -132,13 +133,15 @@ pub mod test_utils {
     use futures::channel::mpsc::{channel, Receiver, Sender};
     use futures::future::BoxFuture;
     use futures::stream::{Stream, StreamExt};
-    use futures::{Future, FutureExt, SinkExt};
+    use futures::{Future, FutureExt, SinkExt, TryFutureExt};
+    use std::error::Error;
     use std::fmt::Debug;
     use std::marker::PhantomData;
     use std::ops::{Deref, DerefMut};
     use std::pin::Pin;
     use std::task::{Context, Poll};
-    use tower::{Layer, Service};
+    use tower::layer::layer_fn;
+    use tower::{Layer, Service, ServiceExt};
 
     /// Define a dummy service
     #[derive(Debug, Clone)]
@@ -200,21 +203,22 @@ pub mod test_utils {
     ///    }
     ///}
     /// ````
-    impl<B, Req, Res, Ctx> TestWrapper<B, Request<Req, Ctx>, Res>
+    impl<B, Req: Sync, Res: Send + Debug + Sync + serde::Serialize + 'static, Ctx>
+        TestWrapper<B, Request<Req, Ctx>, Res>
     where
         B: Backend<Request<Req, Ctx>, Res> + Send + Sync + 'static + Clone,
         Req: Send + 'static,
-        Ctx: Send,
+        Ctx: Send + Sync + 'static,
         B::Stream: Send + 'static,
         B::Stream: Stream<Item = Result<Option<Request<Req, Ctx>>, crate::error::Error>> + Unpin,
     {
         /// Build a new instance provided a custom service
         pub fn new_with_service<S>(backend: B, service: S) -> (Self, BoxFuture<'static, ()>)
         where
-            S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
+            S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static + Sync,
             B::Layer: Layer<S>,
             <<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service:
-                Service<Request<Req, Ctx>> + Send + 'static,
+                Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
             <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
                 Request<Req, Ctx>,
             >>::Response: Send + Debug,
@@ -224,47 +228,28 @@ pub mod test_utils {
             <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
                 Request<Req, Ctx>,
             >>::Future: Send + 'static,
+            <S as Service<Request<Req, Ctx>>>::Future: Send,
+            <S as Service<Request<Req, Ctx>>>::Error: Send,
+            <S as Service<Request<Req, Ctx>>>::Error: Sync,
+            <S as Service<Request<Req, Ctx>>>::Error: std::error::Error,
+            <B as Backend<Request<Req, Ctx>, Res>>::Layer: Layer<TestEmitService<S>>,
+            <<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<TestEmitService<S>>>::Service:
+                Service<Request<Req, Ctx>>,
         {
-            let worker_id = WorkerId::new("test-worker");
-            let worker = Worker::new(worker_id, crate::worker::Context::default());
-            worker.start();
-            let b = backend.clone();
-            let mut poller = b.poll::<S>(&worker);
+            use crate::builder::WorkerFactory;
+            let (mut res_tx, res_rx) = channel(10);
+            let worker = WorkerBuilder::new("test-worker")
+                .layer(TestEmitLayer {
+                    tx: res_tx,
+                    service,
+                })
+                .backend(backend)
+                .build(service);
+
             let (stop_tx, mut stop_rx) = channel::<()>(1);
 
-            let (mut res_tx, res_rx) = channel(10);
-
-            let mut service = poller.layer.layer(service);
-
             let poller = async move {
-                let heartbeat = poller.heartbeat.shared();
-                loop {
-                    futures::select! {
-
-                        item = poller.stream.next().fuse() => match item {
-                            Some(Ok(Some(req))) => {
-                                let task_id = req.parts.task_id.clone();
-                                match service.call(req).await {
-                                    Ok(res) => {
-                                        res_tx.send((task_id, Ok(format!("{res:?}")))).await.unwrap();
-                                    },
-                                    Err(err) => {
-                                        res_tx.send((task_id, Err(err.into().to_string()))).await.unwrap();
-                                    }
-                                }
-                            }
-                            Some(Ok(None)) | None => break,
-                            Some(Err(_e)) => {
-                                // handle error
-                                break;
-                            }
-                        },
-                        _ = stop_rx.next().fuse() => break,
-                        _ = heartbeat.clone().fuse() => {
-
-                        },
-                    }
-                }
+                worker.run().await;
             };
             (
                 TestWrapper {
@@ -286,6 +271,63 @@ pub mod test_utils {
         /// Gets the current state of results
         pub async fn execute_next(&mut self) -> (TaskId, Result<String, String>) {
             self.res_rx.next().await.unwrap()
+        }
+    }
+
+    pub struct TestEmitService<S> {
+        tx: Sender<(TaskId, Result<String, String>)>,
+        service: S,
+    }
+
+    pub struct TestEmitLayer<S> {
+        tx: Sender<(TaskId, Result<String, String>)>,
+        service: S,
+    }
+
+    impl<S> Layer<S> for TestEmitLayer<S> {
+        type Service = TestEmitService<S>;
+
+        fn layer(&self, service: S) -> Self::Service {
+            TestEmitService {
+                tx: self.tx.clone(),
+                service,
+            }
+        }
+    }
+
+    impl<S, Req, Ctx, Res: Debug + Send + Sync, Err: std::error::Error + Send>
+        Service<Request<Req, Ctx>> for TestEmitService<S>
+    where
+        S: Service<Request<Req, Ctx>, Response = Res, Error = Err>,
+        S::Future: Send + 'static,
+    {
+        type Response = S::Response;
+        type Error = S::Error;
+        type Future = Pin<Box<dyn Future<Output = Result<Res, Err>> + Send>>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.service.poll_ready(cx)
+        }
+
+        fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
+            let task_id = request.parts.task_id.clone();
+            let mut res_tx = self.tx.clone();
+            let fut = self.service.call(request);
+            Box::pin(async move {
+                let res = fut.await;
+                match &res {
+                    Ok(res) => {
+                        res_tx
+                            .send((task_id, Ok(format!("{res:?}"))))
+                            .await
+                            .unwrap();
+                    }
+                    Err(err) => {
+                        res_tx.send((task_id, Err(err.to_string()))).await.unwrap();
+                    }
+                }
+                res
+            })
         }
     }
 
@@ -384,15 +426,16 @@ pub mod test_utils {
                 let (mut t, poller) = TestWrapper::new_with_service(backend.clone(), service);
                 tokio::spawn(poller);
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 0); // No jobs
+                assert_eq!(res, 0, "should have no jobs"); // No jobs
                 let parts = t.push(1).await.unwrap();
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 1); // A job exists
+                assert_eq!(res, 1, "should have 1 job"); // A job exists
                 let res = t.execute_next().await;
                 assert_eq!(res.1, Err("FailedError: oh no!".to_owned()));
 
+                tokio::time::sleep(Duration::from_secs(1)).await;
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
-                assert_eq!(task.parts.attempt.current(), 1);
+                assert_eq!(task.parts.attempt.current(), 1, "should have 1 attempt");
 
                 let res = t.execute_next().await;
                 assert_eq!(res.1, Err("FailedError: oh no!".to_owned()));
