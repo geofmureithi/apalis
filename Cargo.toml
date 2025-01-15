@@ -4,7 +4,7 @@ repository = "https://github.com/geofmureithi/apalis"
 
 [package]
 name = "apalis"
-version = "0.6.3"
+version = "0.6.4"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 edition.workspace = true
@@ -54,7 +54,7 @@ layers = [
 docsrs = ["document-features"]
 
 [dependencies.apalis-core]
-version = "0.6.3"
+version = "0.6.4"
 default-features = false
 path = "./packages/apalis-core"
 
