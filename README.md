@@ -64,16 +64,15 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.6" }
-apalis-redis = { version = "0.6" }
-# apalis-sql = { version = "0.6", features = ["postgres"] } # or mysql, sqlite
+apalis = { version = "0.6", features = "limit" } # Limit for concurrency
+apalis-redis = { version = "0.6" } # Use redis for persistence
 ```
 
 ## Usage
 
 ```rust
 use apalis::prelude::*;
-use apalis_redis::{RedisStorage, Config};
+use apalis_redis::RedisStorage;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -81,7 +80,7 @@ struct Email {
     to: String,
 }
 
-/// A function that will be converted into a service.
+/// A function called for every job
 async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
   /// execute job
   Ok(())
@@ -94,33 +93,25 @@ async fn main() -> {
     let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
     let conn = apalis_redis::connect(redis_url).await.expect("Could not connect");
     let storage = RedisStorage::new(conn);
-    Monitor::new()
-        .register({
-            WorkerBuilder::new(format!("email-worker"))
-                .concurrency(2)
-                .data(0usize)
-                .backend(storage)
-                .build_fn(send_email)
-        })
-        .run()
-        .await
+    WorkerBuilder::new("email-worker")
+      .concurrency(2)
+      .data(0usize)
+      .backend(storage)
+      .build_fn(send_email)
+      .run()
+      .await;
 }
-
 ```
-
 Then
-
 ```rust
 //This can be in another part of the program or another application eg a http server
-async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
-    let mut storage = storage.clone();
+async fn produce_route_jobs(storage: &mut RedisStorage<Email>) -> Result<()> {
     storage
         .push(Email {
             to: "test@example.com".to_string(),
         })
         .await?;
 }
-
 ```
 
 ## Feature flags
@@ -130,7 +121,7 @@ async fn produce_route_jobs(storage: &RedisStorage<Email>) -> Result<()> {
 - _prometheus_ — Support Prometheus metrics
 - _retry_ — Support direct retrying jobs
 - _timeout_ — Support timeouts on jobs
-- _limit_ — 💪 Limit the amount of jobs
+- _limit_ — 💪 Support for concurrency and rate-limiting
 - _filter_ — Support filtering jobs based on a predicate
 - _catch-panic_ - Catch panics that occur during execution
 
@@ -169,6 +160,7 @@ sequenceDiagram
 
 - [Shuttle](https://github.com/shuttle-hq/shuttle-examples/tree/main/shuttle-cron): Using apalis-cron with [shuttle.rs](https://shuttle.rs)
 - [Actix-Web](https://github.com/actix/examples/tree/master/background-jobs): Using apalis-redis with actix-web
+- [Zino-Example](https://github.com/apalis-dev/zino-example): Using [zino](https://crates.io/crates/zino)
 
 ## Projects using apalis
 
