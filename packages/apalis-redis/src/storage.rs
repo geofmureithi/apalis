@@ -78,7 +78,7 @@ pub struct RedisQueueInfo {
 }
 
 #[derive(Clone, Debug)]
-pub (crate) struct RedisScript {
+pub(crate) struct RedisScript {
     done_job: Script,
     enqueue_scheduled: Script,
     get_jobs: Script,
@@ -90,7 +90,7 @@ pub (crate) struct RedisScript {
     retry_job: Script,
     schedule_job: Script,
     vacuum: Script,
-    pub (crate) stats: Script,
+    pub(crate) stats: Script,
 }
 
 /// The context for a redis storage job
@@ -928,9 +928,13 @@ where
     }
 
     /// Re-enqueue some jobs that might be abandoned.
-    pub async fn reenqueue_active(&mut self, job_ids: Vec<&TaskId>) -> Result<(), RedisError> {
+    pub async fn reenqueue_active(
+        &mut self,
+        worker_id: &WorkerId,
+        job_ids: Vec<&TaskId>,
+    ) -> Result<(), RedisError> {
         let reenqueue_active = self.scripts.reenqueue_active.clone();
-        let inflight_set: String =  todo!("get inflight set");//self.config.inflight_jobs_set().to_string();
+        let inflight_set: String = self.config.inflight_jobs_set(worker_id);
         let active_jobs_list = self.config.active_jobs_list();
         let signal_list = self.config.signal_list();
 
