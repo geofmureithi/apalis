@@ -23,35 +23,16 @@ where
     async fn stats(&self) -> Result<Stat, redis::RedisError> {
         let mut conn = self.get_connection().clone();
         let queue = self.get_config();
-        let script = r#"
-            local pending_jobs_set = KEYS[1]
-            local running_jobs_set = KEYS[2]
-            local dead_jobs_set = KEYS[3]
-            local failed_jobs_set = KEYS[4]
-            local success_jobs_set = KEYS[5]
 
-            local pending_count = redis.call('ZCARD', pending_jobs_set)
-            local running_count = redis.call('ZCARD', running_jobs_set)
-            local dead_count = redis.call('ZCARD', dead_jobs_set)
-            local failed_count = redis.call('ZCARD', failed_jobs_set)
-            local success_count = redis.call('ZCARD', success_jobs_set)
+        let stats_script = self.scripts().stats.clone();
 
-            return {pending_count, running_count, dead_count, failed_count, success_count}
-    "#;
-
-        let keys = vec![
-            queue.inflight_jobs_set().to_string(),
-            queue.active_jobs_list().to_string(),
-            queue.dead_jobs_set().to_string(),
-            queue.failed_jobs_set().to_string(),
-            queue.done_jobs_set().to_string(),
-        ];
-
-        let results: Vec<usize> = redis::cmd("EVAL")
-            .arg(script)
-            .arg(keys.len().to_string())
-            .arg(keys)
-            .query_async(&mut conn)
+        let results: Vec<usize> = stats_script
+            .key(queue.active_jobs_list())
+            .key(queue.consumers_set())
+            .key(queue.dead_jobs_set())
+            .key(queue.failed_jobs_set())
+            .key(queue.done_jobs_set())
+            .invoke_async(&mut conn)
             .await?;
 
         Ok(Stat {
@@ -215,7 +196,7 @@ where
             .into_iter()
             .map(|w| {
                 Worker::new(
-                    WorkerId::new(w.replace(&format!("{}:", &queue.inflight_jobs_set()), "")),
+                    WorkerId::new(w.split(':').last().unwrap_or("").to_string()),
                     WorkerState::new::<Self>(queue.get_namespace().to_owned()),
                 )
             })

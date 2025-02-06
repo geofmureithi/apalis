@@ -78,7 +78,7 @@ pub struct RedisQueueInfo {
 }
 
 #[derive(Clone, Debug)]
-struct RedisScript {
+pub (crate) struct RedisScript {
     done_job: Script,
     enqueue_scheduled: Script,
     get_jobs: Script,
@@ -90,6 +90,7 @@ struct RedisScript {
     retry_job: Script,
     schedule_job: Script,
     vacuum: Script,
+    pub (crate) stats: Script,
 }
 
 /// The context for a redis storage job
@@ -227,11 +228,11 @@ impl Config {
         self
     }
 
-    /// Returns the Redis key for the list of active jobs associated with the queue.
+    /// Returns the Redis key for the list of pending jobs associated with the queue.
     /// The key is dynamically generated using the namespace of the queue.
     ///
     /// # Returns
-    /// A `String` representing the Redis key for the active jobs list.
+    /// A `String` representing the Redis key for the pending jobs list.
     pub fn active_jobs_list(&self) -> String {
         ACTIVE_JOBS_LIST.replace("{queue}", &self.namespace)
     }
@@ -277,8 +278,8 @@ impl Config {
     ///
     /// # Returns
     /// A `String` representing the Redis key for the inflight jobs set.
-    pub fn inflight_jobs_set(&self) -> String {
-        INFLIGHT_JOB_SET.replace("{queue}", &self.namespace)
+    pub fn inflight_jobs_set(&self, worker_id: &WorkerId) -> String {
+        INFLIGHT_JOB_SET.replace("{queue}", &format!("{}:{worker_id}", &self.namespace))
     }
 
     /// Returns the Redis key for the hash storing job data associated with the queue.
@@ -405,6 +406,7 @@ impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn> {
                 )),
                 schedule_job: redis::Script::new(include_str!("../lua/schedule_job.lua")),
                 vacuum: redis::Script::new(include_str!("../lua/vacuum.lua")),
+                stats: redis::Script::new(include_str!("../lua/stats.lua")),
             },
         }
     }
@@ -417,6 +419,10 @@ impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn> {
     /// Get the config used by the storage
     pub fn get_config(&self) -> &Config {
         &self.config
+    }
+
+    pub(crate) fn scripts(&self) -> &RedisScript {
+        &self.scripts
     }
 }
 
@@ -533,11 +539,7 @@ where
     type Context = RedisContext;
     type AckError = RedisError;
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), RedisError> {
-        let inflight_set = format!(
-            "{}:{}",
-            self.config.inflight_jobs_set(),
-            ctx.lock_by.clone().unwrap()
-        );
+        let inflight_set = self.config.inflight_jobs_set(&ctx.lock_by.clone().unwrap());
 
         let now: i64 = Utc::now().timestamp();
         let task_id = res.task_id.to_string();
@@ -602,7 +604,7 @@ where
         let consumers_set = self.config.consumers_set();
         let active_jobs_list = self.config.active_jobs_list();
         let job_data_hash = self.config.job_data_hash();
-        let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
+        let inflight_set = self.config.inflight_jobs_set(worker_id);
         let signal_list = self.config.signal_list();
         let namespace = &self.config.namespace;
 
@@ -667,7 +669,7 @@ fn deserialize_job(job: &Value) -> Result<&Vec<u8>, RedisError> {
 impl<T, Conn: ConnectionLike, C> RedisStorage<T, Conn, C> {
     async fn keep_alive(&mut self, worker_id: &WorkerId) -> Result<(), RedisError> {
         let register_consumer = self.scripts.register_consumer.clone();
-        let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
+        let inflight_set = self.config.inflight_jobs_set(&worker_id);
         let consumers_set = self.config.consumers_set();
 
         let now: i64 = Utc::now().timestamp();
@@ -794,7 +796,7 @@ where
             .as_secs()
             .try_into()
             .map_err(|e: TryFromIntError| (ErrorKind::IoError, "Duration error", e.to_string()))?;
-        let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
+        let inflight_set = self.config.inflight_jobs_set(worker_id);
         let failed_jobs_set = self.config.failed_jobs_set();
         redis::cmd("SREM")
             .arg(inflight_set)
@@ -841,7 +843,7 @@ where
         T: Send + DeserializeOwned + Serialize + Unpin + Sync + 'static,
     {
         let retry_job = self.scripts.retry_job.clone();
-        let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
+        let inflight_set = self.config.inflight_jobs_set(worker_id);
         let scheduled_jobs_set = self.config.scheduled_jobs_set();
         let job_data_hash = self.config.job_data_hash();
         let failed_jobs_set = self.config.failed_jobs_set();
@@ -889,7 +891,7 @@ where
         T: Send + DeserializeOwned + Serialize + Unpin + Sync + 'static,
     {
         let kill_job = self.scripts.kill_job.clone();
-        let current_worker_id = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
+        let current_worker_id = self.config.inflight_jobs_set(worker_id);
         let job_data_hash = self.config.job_data_hash();
         let dead_jobs_set = self.config.dead_jobs_set();
         let now: i64 = Utc::now().timestamp();
@@ -928,7 +930,7 @@ where
     /// Re-enqueue some jobs that might be abandoned.
     pub async fn reenqueue_active(&mut self, job_ids: Vec<&TaskId>) -> Result<(), RedisError> {
         let reenqueue_active = self.scripts.reenqueue_active.clone();
-        let inflight_set = self.config.inflight_jobs_set().to_string();
+        let inflight_set: String =  todo!("get inflight set");//self.config.inflight_jobs_set().to_string();
         let active_jobs_list = self.config.active_jobs_list();
         let signal_list = self.config.signal_list();
 
