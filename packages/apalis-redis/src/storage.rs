@@ -1029,9 +1029,9 @@ mod tests {
         let stream = storage.fetch_next(worker_id);
         stream
             .await
-            .expect("stream is empty")
-            .first()
             .expect("failed to poll job")
+            .first()
+            .expect("stream is empty")
             .clone()
     }
 
@@ -1167,4 +1167,26 @@ mod tests {
         // assert_eq!(*ctx.last_error(), None);
         assert_eq!(job.parts.attempt.current(), 0);
     }
+
+    #[tokio::test]
+    async fn test_stats() {
+        use apalis_core::backend::BackendExpose;
+
+        let mut storage = setup().await;
+        let stats = storage.stats().await.expect("failed to get stats");
+        assert_eq!(stats.pending, 0);
+        assert_eq!(stats.running, 0);
+        push_email(&mut storage, example_email()).await;
+        let stats = storage.stats().await.expect("failed to get stats");
+        assert_eq!(stats.pending, 1);
+
+        let worker = register_worker(&mut storage).await;
+
+        let _job = consume_one(&mut storage, &worker.id()).await;
+
+        let stats = storage.stats().await.expect("failed to get stats");
+        assert_eq!(stats.pending, 0);
+        assert_eq!(stats.running, 1);
+    }
+
 }
