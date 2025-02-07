@@ -40,7 +40,7 @@
 //! ```
 use crate::context::SqlContext;
 use crate::{calculate_status, Config, SqlError};
-use apalis_core::backend::{BackendExpose, Stat, WorkerState};
+use apalis_core::backend::{BackendExpose, MakeShared, Stat, WorkerState};
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::{BoxDynError, Error};
 use apalis_core::layers::{Ack, AckLayer};
@@ -56,7 +56,8 @@ use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::{Context, Event, Worker, WorkerId};
 use apalis_core::{backend::Backend, codec::Codec};
 use chrono::{DateTime, Utc};
-use futures::channel::mpsc;
+use futures::channel::mpsc::{self, Receiver};
+use futures::future::BoxFuture;
 use futures::StreamExt;
 use futures::{select, stream, SinkExt};
 use log::error;
@@ -65,6 +66,7 @@ use serde_json::Value;
 use sqlx::postgres::PgListener;
 use sqlx::{Pool, Postgres, Row};
 use std::any::type_name;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -90,6 +92,7 @@ where
     controller: Controller,
     ack_notify: Notify<(SqlContext, Response<C::Compact>)>,
     subscription: Option<PgSubscription>,
+    receiver: Option<Notify<Vec<Request<T, SqlContext>>>>,
 }
 
 impl<T, C: Codec> Clone for PostgresStorage<T, C> {
@@ -102,6 +105,7 @@ impl<T, C: Codec> Clone for PostgresStorage<T, C> {
             controller: self.controller.clone(),
             ack_notify: self.ack_notify.clone(),
             subscription: self.subscription.clone(),
+            receiver: self.receiver.clone(),
         }
     }
 }
@@ -174,9 +178,9 @@ where
                 apalis_core::interval::interval(config.poll_interval).fuse();
             let mut ack_stream = ack_notify.clone().ready_chunks(config.buffer_size).fuse();
 
-            let mut poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
+            let poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
 
-            let mut pg_notification = subscription
+            let pg_notification = subscription
                 .map(|stm| stm.notify.boxed().fuse())
                 .unwrap_or(stream::iter(vec![]).boxed().fuse());
 
@@ -206,6 +210,10 @@ where
             {
                 worker.emit(Event::Error(Box::new(PgPollError::KeepAliveError(e))));
             }
+
+            let mut combined = poll_next_stm
+                .ready_chunks(self.config.buffer_size)
+                .chain(pg_notification.ready_chunks(self.config.buffer_size));
 
             loop {
                 select! {
@@ -254,16 +262,26 @@ where
 
                         }
                     }
-                    _ = poll_next_stm.next() => {
+                    _ = combined.next() => {
                         if worker.is_ready() {
-                            if let Err(e) = fetch_next_batch(&mut self, worker.id(), &mut tx).await {
-                                worker.emit(Event::Error(Box::new(PgPollError::FetchNextError(e))));
-                            }
-                        }
-                    }
-                    _ = pg_notification.next() => {
-                        if let Err(e) = fetch_next_batch(&mut self, worker.id(), &mut tx).await {
-                            worker.emit(Event::Error(Box::new(PgPollError::PgNotificationError(e))));
+                            match &mut self.receiver {
+                                Some(receiver) => {
+                                    if let Some(res) = receiver.next().await {
+                                        for job in res {
+                                            if let Err(e) = tx.send(Ok(Some(job)))
+                                                .await
+                                                .map_err(|e| Error::SourceError(Arc::new(Box::new(e)))) {
+                                                    worker.emit(Event::Error(Box::new(PgPollError::FetchNextError(e))));
+                                                }
+                                        }
+                                    }
+                                },
+                                None => {
+                                    if let Err(e) = fetch_next_batch(&mut self, worker.id(), &mut tx).await {
+                                        worker.emit(Event::Error(Box::new(PgPollError::FetchNextError(e))));
+                                    }
+                                },
+                            };
 
                         }
                     }
@@ -313,6 +331,7 @@ impl<T> PostgresStorage<T> {
             controller: Controller::new(),
             ack_notify: Notify::new(),
             subscription: None,
+            receiver: None
         }
     }
 
@@ -324,6 +343,36 @@ impl<T> PostgresStorage<T> {
     /// Expose the config
     pub fn config(&self) -> &Config {
         &self.config
+    }
+}
+
+#[derive(Debug)]
+pub struct SharedPostgresStorage {
+    listener: PgListen,
+    instances: HashMap<String, Receiver<Value>>,
+    pool: PgPool,
+    config: Config,
+}
+
+// impl PostgresStorage<Shared> {
+//     /// New Sharable
+//     pub fn new_shared(pool: PgPool) -> Self {
+//         Self::new_with_config(pool, Config::new(type_name::<Shared>()))
+//     }
+// }
+
+impl<Req: Send + 'static> MakeShared<Req> for SharedPostgresStorage {
+    type MakeError = ();
+    type Backend = PostgresStorage<Req>;
+    type Future = BoxFuture<'static, Result<Self::Backend, Self::MakeError>>;
+
+    fn make_shared(&mut self) -> Self::Future {
+        let pool = self.pool.clone();
+        let mut config = self.config.clone();
+        config.namespace = std::any::type_name::<Req>().into();
+        let mut pg = PostgresStorage::new_with_config(pool, config);
+        self.listener.subscribe_with(&mut pg);
+        Box::pin(async { Ok(pg) })
     }
 }
 
@@ -514,8 +563,6 @@ where
             .await?;
         Ok(req.parts)
     }
-
-    
 
     async fn schedule_request(
         &mut self,

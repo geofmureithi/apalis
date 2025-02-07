@@ -28,6 +28,20 @@ pub trait Backend<Req> {
     fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer>;
 }
 
+/// Trait to make multiple backends using a shared connection
+/// This can improve performance for example sql engines since it leads to only one query for multiple job types
+pub trait MakeShared<Request> {
+    /// The backend to be shared
+    type Backend;
+    /// The error returned if the backend cant be shared
+    type MakeError;
+    /// The future to allow sharing
+    type Future: Future<Output = Result<Self::Backend, Self::MakeError>>;
+
+    /// Returns the future for sharing
+    fn make_shared(&mut self) -> Self::Future;
+}
+
 /// Represents functionality that allows reading of jobs and stats from a backend
 /// Some backends esp MessageQueues may not currently implement this
 pub trait BackendExpose<T>
