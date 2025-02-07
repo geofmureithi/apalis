@@ -4,8 +4,8 @@ use anyhow::Result;
 use apalis::prelude::*;
 use apalis_redis::RedisStorage;
 
-use email_service::{send_email, Email};
 use apalis_redis::ConnectionManager;
+use email_service::{send_email, Email};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
