@@ -24,7 +24,7 @@ where
         let mut conn = self.get_connection().clone();
         let queue = self.get_config();
 
-        let stats_script = self.scripts().stats.clone();
+        let stats_script = self.scripts.stats.clone();
 
         let results: Vec<usize> = stats_script
             .key(queue.active_jobs_list())

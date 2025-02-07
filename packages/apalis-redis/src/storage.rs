@@ -333,7 +333,7 @@ impl Config {
 pub struct RedisStorage<T, Conn = ConnectionManager, C = JsonCodec<Vec<u8>>> {
     conn: Conn,
     job_type: PhantomData<T>,
-    scripts: RedisScript,
+    pub(super) scripts: RedisScript,
     controller: Controller,
     config: Config,
     codec: PhantomData<C>,
@@ -419,10 +419,6 @@ impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn> {
     /// Get the config used by the storage
     pub fn get_config(&self) -> &Config {
         &self.config
-    }
-
-    pub(crate) fn scripts(&self) -> &RedisScript {
-        &self.scripts
     }
 }
 
@@ -1188,5 +1184,4 @@ mod tests {
         assert_eq!(stats.pending, 0);
         assert_eq!(stats.running, 1);
     }
-
 }
