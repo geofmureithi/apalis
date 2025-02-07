@@ -167,6 +167,16 @@ where
         let pool = self.pool.clone();
         let worker = worker.clone();
         let heartbeat = async move {
+            // Lets reenqueue any jobs that belonged to this worker in case of a death
+            if let Err(e) = self
+                .reenqueue_orphaned((config.buffer_size * 10) as i32, Utc::now())
+                .await
+            {
+                worker.emit(Event::Error(Box::new(PgPollError::ReenqueueOrphanedError(
+                    e,
+                ))));
+            }
+
             let mut keep_alive_stm = apalis_core::interval::interval(config.keep_alive).fuse();
             let mut reenqueue_orphaned_stm =
                 apalis_core::interval::interval(config.poll_interval).fuse();
