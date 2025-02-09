@@ -137,6 +137,8 @@ pub mod test_utils {
     use std::marker::PhantomData;
     use std::ops::{Deref, DerefMut};
     use std::pin::Pin;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use std::task::{Context, Poll};
     use tower::{Layer, Service, ServiceBuilder};
 
@@ -166,6 +168,7 @@ pub mod test_utils {
         res_rx: Receiver<(TaskId, Result<String, String>)>,
         _p: PhantomData<Req>,
         _r: PhantomData<Res>,
+        should_next: Arc<AtomicBool>,
         /// The inner backend
         pub backend: B,
     }
@@ -237,10 +240,12 @@ pub mod test_utils {
             Send + Sync + Sync + std::error::Error,
     {
             let (mut res_tx, res_rx) = channel(10);
+            let should_next = Arc::new(AtomicBool::new(false));
             let service = ServiceBuilder::new()
                 .layer_fn(|service| TestEmitService {
                     service,
                     tx: res_tx.clone(),
+                    should_next: should_next.clone(),
                 })
                 .service(service);
             let worker = WorkerBuilder::new("test-worker")
@@ -268,6 +273,7 @@ pub mod test_utils {
                     _p: PhantomData,
                     backend,
                     _r: PhantomData,
+                    should_next,
                 },
                 poller.boxed(),
             )
@@ -280,6 +286,7 @@ pub mod test_utils {
 
         /// Gets the current state of results
         pub async fn execute_next(&mut self) -> (TaskId, Result<String, String>) {
+            self.should_next.store(true, Ordering::Release);
             self.res_rx.next().await.unwrap()
         }
 
@@ -316,6 +323,7 @@ pub mod test_utils {
     pub struct TestEmitService<S> {
         tx: mpsc::Sender<(TaskId, Result<String, String>)>,
         service: S,
+        should_next: Arc<AtomicBool>,
     }
 
     impl<S, Req, Ctx> Service<Request<Req, Ctx>> for TestEmitService<S>
@@ -332,10 +340,15 @@ pub mod test_utils {
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
         fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            self.service.poll_ready(cx)
+            if self.should_next.load(Ordering::Relaxed) {
+                self.service.poll_ready(cx)
+            } else {
+                Poll::Pending
+            }
         }
 
         fn call(&mut self, req: Request<Req, Ctx>) -> Self::Future {
+            self.should_next.store(false, Ordering::Relaxed);
             let task_id = req.parts.task_id.clone();
             let mut tx = Clone::clone(&self.tx);
             let fut = self.service.call(req);
@@ -436,7 +449,6 @@ pub mod test_utils {
                 let res = t.execute_next().await;
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
-                tokio::time::sleep(Duration::from_secs(1)).await;
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 1, "should have 1 attempt");
 
@@ -444,22 +456,22 @@ pub mod test_utils {
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
-                assert_eq!(task.parts.attempt.current(), 2);
+                assert_eq!(task.parts.attempt.current(), 2, "should have 2 attempts");
 
                 let res = t.execute_next().await;
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
-                assert_eq!(task.parts.attempt.current(), 3);
+                assert_eq!(task.parts.attempt.current(), 3, "should have 3 attempts");
 
                 let res = t.execute_next().await;
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
-                assert_eq!(task.parts.attempt.current(), 4);
+                assert_eq!(task.parts.attempt.current(), 4, "should have 4 attempts");
 
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 1); // The job still exists and there is no duplicates
+                assert_eq!(res, 1, "should still have 1 job");
             }
         };
     }
