@@ -462,6 +462,16 @@ where
         };
         let w = worker.clone();
         let heartbeat = async move {
+            // Lets reenqueue any jobs that belonged to this worker in case of a death
+            if let Err(e) = hb_storage
+                .reenqueue_orphaned((config.buffer_size * 10) as i32, Utc::now())
+                .await
+            {
+                w.emit(Event::Error(Box::new(
+                    MysqlPollError::ReenqueueOrphanedError(e),
+                )));
+            }
+
             loop {
                 let now = Utc::now();
                 if let Err(e) = hb_storage.keep_alive_at::<Self::Layer>(w.id(), now).await {

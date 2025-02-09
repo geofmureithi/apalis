@@ -125,23 +125,20 @@ pub mod interval {
 /// Test utilities that allows you to test backends
 pub mod test_utils {
     use crate::backend::Backend;
-    use crate::builder::WorkerBuilder;
-    use crate::error::BoxDynError;
+    use crate::builder::{WorkerBuilder, WorkerFactory};
     use crate::request::Request;
     use crate::task::task_id::TaskId;
-    use crate::worker::{Worker, WorkerId};
-    use futures::channel::mpsc::{channel, Receiver, Sender};
+    use futures::channel::mpsc::{self, channel, Receiver, Sender, TryRecvError};
     use futures::future::BoxFuture;
     use futures::stream::{Stream, StreamExt};
-    use futures::{Future, FutureExt, SinkExt, TryFutureExt};
-    use std::error::Error;
+    use futures::{FutureExt, SinkExt};
     use std::fmt::Debug;
+    use std::future::Future;
     use std::marker::PhantomData;
     use std::ops::{Deref, DerefMut};
     use std::pin::Pin;
     use std::task::{Context, Poll};
-    use tower::layer::layer_fn;
-    use tower::{Layer, Service, ServiceExt};
+    use tower::{Layer, Service, ServiceBuilder};
 
     /// Define a dummy service
     #[derive(Debug, Clone)]
@@ -169,7 +166,8 @@ pub mod test_utils {
         res_rx: Receiver<(TaskId, Result<String, String>)>,
         _p: PhantomData<Req>,
         _r: PhantomData<Res>,
-        backend: B,
+        /// The inner backend
+        pub backend: B,
     }
     /// A test wrapper to allow you to test without requiring a worker.
     /// Important for testing backends and jobs
@@ -203,53 +201,65 @@ pub mod test_utils {
     ///    }
     ///}
     /// ````
-    impl<B, Req: Sync, Res: Send + Debug + Sync + serde::Serialize + 'static, Ctx>
-        TestWrapper<B, Request<Req, Ctx>, Res>
+
+    impl<B, Req, Res, Ctx> TestWrapper<B, Request<Req, Ctx>, Res>
     where
         B: Backend<Request<Req, Ctx>, Res> + Send + Sync + 'static + Clone,
-        Req: Send + 'static,
-        Ctx: Send + Sync + 'static,
+        Req: Send + 'static + Sync,
+        Ctx: Send + Sync,
         B::Stream: Send + 'static,
         B::Stream: Stream<Item = Result<Option<Request<Req, Ctx>>, crate::error::Error>> + Unpin,
+        Res: Debug,
     {
         /// Build a new instance provided a custom service
-        pub fn new_with_service<S>(backend: B, service: S) -> (Self, BoxFuture<'static, ()>)
-        where
-            S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static + Sync,
-            B::Layer: Layer<S>,
-            <<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service:
-                Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
-            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
-                Request<Req, Ctx>,
-            >>::Response: Send + Debug,
-            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
-                Request<Req, Ctx>,
-            >>::Error: Send + Into<BoxDynError> + Sync,
-            <<<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<S>>::Service as Service<
-                Request<Req, Ctx>,
-            >>::Future: Send + 'static,
-            <S as Service<Request<Req, Ctx>>>::Future: Send,
-            <S as Service<Request<Req, Ctx>>>::Error: Send,
-            <S as Service<Request<Req, Ctx>>>::Error: Sync,
-            <S as Service<Request<Req, Ctx>>>::Error: std::error::Error,
-            <B as Backend<Request<Req, Ctx>, Res>>::Layer: Layer<TestEmitService<S>>,
-            <<B as Backend<Request<Req, Ctx>, Res>>::Layer as Layer<TestEmitService<S>>>::Service:
-                Service<Request<Req, Ctx>>,
-        {
-            use crate::builder::WorkerFactory;
+    pub fn new_with_service<Svc>(backend: B, service: Svc) -> (Self, BoxFuture<'static, ()>)
+    where
+        Svc::Future: Send,
+        Svc: Send + Sync + Service<Request<Req, Ctx>, Response = Res> + 'static,
+        Req: Send + Sync + 'static,
+        Svc::Response: Send + Sync + 'static,
+        Svc::Error: Send + Sync + std::error::Error,
+        Ctx: Send + Sync + 'static,
+        B: Backend<Request<Req, Ctx>, Res> + 'static,
+        B::Layer: Layer<Svc>,
+        <B::Layer as Layer<Svc>>::Service: Service<Request<Req, Ctx>, Response = Res> + Send + Sync,
+        B::Stream: Unpin + Send,
+        Res: Send,
+        <<B::Layer as Layer<Svc>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
+        <<B::Layer as Layer<Svc>>::Service as Service<Request<Req, Ctx>>>::Error:
+            Send + Sync + std::error::Error,
+        B::Layer: Layer<TestEmitService<Svc>>,
+        <B::Layer as Layer<TestEmitService<Svc>>>::Service:
+            Service<Request<Req, Ctx>, Response = Res> + Send + Sync,
+        <<B::Layer as Layer<TestEmitService<Svc>>>::Service as Service<Request<Req, Ctx>>>::Future:
+            Send,
+        <<B::Layer as Layer<TestEmitService<Svc>>>::Service as Service<Request<Req, Ctx>>>::Error:
+            Send + Sync + Sync + std::error::Error,
+    {
             let (mut res_tx, res_rx) = channel(10);
-            let worker = WorkerBuilder::new("test-worker")
-                .layer(TestEmitLayer {
-                    tx: res_tx,
+            let service = ServiceBuilder::new()
+                .layer_fn(|service| TestEmitService {
                     service,
+                    tx: res_tx.clone(),
                 })
-                .backend(backend)
-                .build(service);
-
+                .service(service);
+            let worker = WorkerBuilder::new("test-worker")
+                .backend(backend.clone())
+                .build(service)
+                .run();
             let (stop_tx, mut stop_rx) = channel::<()>(1);
 
             let poller = async move {
-                worker.run().await;
+                let worker = worker.shared();
+                loop {
+                    futures::select! {
+                        _ = stop_rx.next().fuse() => break,
+                        _ = worker.clone().fuse() => {
+
+                        },
+                    }
+                }
+                res_tx.close_channel();
             };
             (
                 TestWrapper {
@@ -272,62 +282,12 @@ pub mod test_utils {
         pub async fn execute_next(&mut self) -> (TaskId, Result<String, String>) {
             self.res_rx.next().await.unwrap()
         }
-    }
 
-    pub struct TestEmitService<S> {
-        tx: Sender<(TaskId, Result<String, String>)>,
-        service: S,
-    }
-
-    pub struct TestEmitLayer<S> {
-        tx: Sender<(TaskId, Result<String, String>)>,
-        service: S,
-    }
-
-    impl<S> Layer<S> for TestEmitLayer<S> {
-        type Service = TestEmitService<S>;
-
-        fn layer(&self, service: S) -> Self::Service {
-            TestEmitService {
-                tx: self.tx.clone(),
-                service,
-            }
-        }
-    }
-
-    impl<S, Req, Ctx, Res: Debug + Send + Sync, Err: std::error::Error + Send>
-        Service<Request<Req, Ctx>> for TestEmitService<S>
-    where
-        S: Service<Request<Req, Ctx>, Response = Res, Error = Err>,
-        S::Future: Send + 'static,
-    {
-        type Response = S::Response;
-        type Error = S::Error;
-        type Future = Pin<Box<dyn Future<Output = Result<Res, Err>> + Send>>;
-
-        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            self.service.poll_ready(cx)
-        }
-
-        fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
-            let task_id = request.parts.task_id.clone();
-            let mut res_tx = self.tx.clone();
-            let fut = self.service.call(request);
-            Box::pin(async move {
-                let res = fut.await;
-                match &res {
-                    Ok(res) => {
-                        res_tx
-                            .send((task_id, Ok(format!("{res:?}"))))
-                            .await
-                            .unwrap();
-                    }
-                    Err(err) => {
-                        res_tx.send((task_id, Err(err.to_string()))).await.unwrap();
-                    }
-                }
-                res
-            })
+        /// Gets the current state of results
+        pub fn try_execute_next(
+            &mut self,
+        ) -> Result<Option<(TaskId, Result<String, String>)>, TryRecvError> {
+            self.res_rx.try_next()
         }
     }
 
@@ -348,6 +308,49 @@ pub mod test_utils {
     {
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.backend
+        }
+    }
+
+    /// A generic service that emits the result of a test
+    #[derive(Debug, Clone)]
+    pub struct TestEmitService<S> {
+        tx: mpsc::Sender<(TaskId, Result<String, String>)>,
+        service: S,
+    }
+
+    impl<S, Req, Ctx> Service<Request<Req, Ctx>> for TestEmitService<S>
+    where
+        S: Service<Request<Req, Ctx>> + Send + 'static,
+        S::Future: Send + 'static,
+        Req: Send + 'static,
+        S::Response: Debug + Send + Sync,
+        S::Error: std::error::Error + Send,
+        Ctx: Send + 'static,
+    {
+        type Response = S::Response;
+        type Error = S::Error;
+        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.service.poll_ready(cx)
+        }
+
+        fn call(&mut self, req: Request<Req, Ctx>) -> Self::Future {
+            let task_id = req.parts.task_id.clone();
+            let mut tx = Clone::clone(&self.tx);
+            let fut = self.service.call(req);
+            Box::pin(async move {
+                let res = fut.await;
+                match &res {
+                    Ok(res) => {
+                        tx.send((task_id, Ok(format!("{res:?}")))).await.unwrap();
+                    }
+                    Err(err) => {
+                        tx.send((task_id, Err(err.to_string()))).await.unwrap();
+                    }
+                }
+                res
+            })
         }
     }
 

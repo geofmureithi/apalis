@@ -450,6 +450,16 @@ where
         let stream: RequestStream<Request<T, RedisContext>> = Box::pin(rx);
         let worker = worker.clone();
         let heartbeat = async move {
+            // Lets reenqueue any jobs that belonged to this worker in case of a death
+            if let Err(e) = self
+                .reenqueue_orphaned((config.buffer_size * 10) as i32, Utc::now())
+                .await
+            {
+                worker.emit(Event::Error(Box::new(
+                    RedisPollError::ReenqueueOrphanedError(e),
+                )));
+            }
+
             let mut reenqueue_orphaned_stm =
                 apalis_core::interval::interval(config.poll_interval).fuse();
 
@@ -632,6 +642,11 @@ where
             }
             Err(e) => {
                 warn!("An error occurred during streaming jobs: {e}");
+                if matches!(e.kind(), ErrorKind::ResponseError)
+                    && e.to_string().contains("consumer not registered script")
+                {
+                    self.keep_alive(worker_id).await?;
+                }
                 Err(e)
             }
         }
