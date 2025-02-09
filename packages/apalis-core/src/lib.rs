@@ -449,6 +449,8 @@ pub mod test_utils {
                 let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
+                apalis_core::sleep(Duration::from_secs(1)).await;
+                
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 1, "should have 1 attempt");
 
