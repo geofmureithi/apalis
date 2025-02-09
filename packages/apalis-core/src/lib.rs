@@ -476,12 +476,16 @@ pub mod test_utils {
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 5, "should have 5 attempts");
 
+
+                apalis_core::sleep(Duration::from_secs(1)).await;
+
                 let res = t.len().await.unwrap();
                 // Integration tests should include a max of 5 retries after that job should be aborted
                 assert_eq!(res, 0, "should have no job"); 
 
-                let res = t.execute_next().await;
-                assert_eq!(res, None);
+
+                let res = t.try_execute_next();
+                assert!(res.is_err());
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 5, "should still have 5 attempts");
