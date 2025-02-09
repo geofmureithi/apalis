@@ -199,7 +199,7 @@ macro_rules! sql_storage_tests {
                 .await
                 .unwrap();
 
-            let (job_id, res) = storage.execute_next().await;
+            let (job_id, res) = storage.execute_next().await.unwrap();
             assert_eq!(res, Err("AbortError: Invalid character.".to_owned()));
             apalis_core::sleep(Duration::from_secs(1)).await;
             let job = storage
@@ -224,7 +224,7 @@ macro_rules! sql_storage_tests {
                 .await
                 .unwrap();
 
-            let (job_id, res) = storage.execute_next().await;
+            let (job_id, res) = storage.execute_next().await.unwrap();
             assert_eq!(res, Ok("()".to_owned()));
             apalis_core::sleep(Duration::from_secs(1)).await;
             let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
@@ -242,7 +242,7 @@ macro_rules! sql_storage_tests {
                 .await
                 .unwrap();
 
-            let (job_id, res) = storage.execute_next().await;
+            let (job_id, res) = storage.execute_next().await.unwrap();
             assert_eq!(
                 res,
                 Err("FailedError: Missing separator character '@'.".to_owned())

@@ -422,7 +422,7 @@ pub mod test_utils {
                 let (mut t, poller) = TestWrapper::new_with_service(t.backend, service);
                 tokio::spawn(poller);
                 // This is testing resuming the same worker
-                // This ensures that the worker resumed any jobs lost during an interuption
+                // This ensures that the worker resumed any jobs lost during an interruption
                 let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Ok("1".to_owned()));
 
