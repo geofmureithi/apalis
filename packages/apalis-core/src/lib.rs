@@ -133,10 +133,31 @@ pub mod test_utils {
     use futures::stream::{Stream, StreamExt};
     use futures::{FutureExt, SinkExt};
     use std::fmt::Debug;
+    use std::future::Future;
     use std::marker::PhantomData;
     use std::ops::{Deref, DerefMut};
+    use std::pin::Pin;
     use std::task::{Context, Poll};
     use tower::{Layer, Service, ServiceBuilder};
+
+    /// Define a dummy service
+    #[derive(Debug, Clone)]
+    pub struct DummyService;
+
+    impl<Request: Send + 'static> Service<Request> for DummyService {
+        type Response = Request;
+        type Error = std::convert::Infallible;
+        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: Request) -> Self::Future {
+            let fut = async move { Ok(req) };
+            Box::pin(fut)
+        }
+    }
 
     /// A generic backend wrapper that polls and executes jobs
     #[derive(Debug)]
@@ -233,7 +254,9 @@ pub mod test_utils {
                 loop {
                     futures::select! {
                         _ = stop_rx.next().fuse() => break,
-                        _ = worker.clone().fuse() => break,
+                        _ = worker.clone().fuse() => {
+
+                        },
                     }
                 }
                 res_tx.close_channel();
