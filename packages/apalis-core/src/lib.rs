@@ -393,9 +393,18 @@ pub mod test_utils {
                 assert_eq!(res, 1); // A job exists
                 let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Err("AbortError: request was invalid".to_owned()));
+                // Allow lazy storages to sync
+                apalis_core::sleep(Duration::from_secs(1)).await;
+                // Rechecking the queue len should return 0
+                let res = t.len().await.unwrap();
+                assert_eq!(
+                    res, 0,
+                    "The queue should be empty as the previous task was aborted"
+                );
+
                 t.vacuum().await.unwrap();
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 0); // After vacuuming, there should be nothing
+                assert_eq!(res, 0, "After vacuuming, there should be nothing");
             }
 
             #[tokio::test]
@@ -421,14 +430,24 @@ pub mod test_utils {
                 });
                 let (mut t, poller) = TestWrapper::new_with_service(t.backend, service);
                 tokio::spawn(poller);
+
+                // Allow lazy storages to sync
+                apalis_core::sleep(Duration::from_secs(1)).await;
+
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1, "Abandoned job must be back to the queue");
+
                 // This is testing resuming the same worker
                 // This ensures that the worker resumed any jobs lost during an interruption
-                let res = t.execute_next().await.unwrap();
+                let res = t
+                    .execute_next()
+                    .await
+                    .expect("Task must have been recovered and added to the queue");
                 assert_eq!(res.1, Ok("1".to_owned()));
 
                 t.vacuum().await.unwrap();
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 0); // After vacuuming, there should be nothing
+                assert_eq!(res, 0, "After vacuuming, there should be nothing");
             }
         };
     }
