@@ -225,7 +225,7 @@ where
                     ids = ack_stream.next() => {
                         if let Some(ids) = ids {
                             let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(_ctx, res)| {
-                                (res.task_id.to_string(), worker.id().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(&res.inner).to_string(), (res.attempt.current() + 1) as u64 )
+                                (res.task_id.to_string(), worker.id().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(&res.inner).to_string(), res.attempt.current() as u64)
                             }).collect();
                             let query =
                                 "UPDATE apalis.jobs
@@ -550,7 +550,7 @@ where
     }
 
     async fn len(&mut self) -> Result<i64, sqlx::Error> {
-        let query = "Select Count(*) as count from apalis.jobs where status='Pending'";
+        let query = "Select Count(*) as count from apalis.jobs where status='Pending' OR (status = 'Failed' AND attempts < max_attempts)";
         let record = sqlx::query(query).fetch_one(&self.pool).await?;
         record.try_get("count")
     }
