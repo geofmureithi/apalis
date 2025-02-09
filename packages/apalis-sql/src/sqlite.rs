@@ -482,6 +482,15 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
         let requeue_storage = self.clone();
         let w = worker.clone();
         let heartbeat = async move {
+            // Lets reenqueue any jobs that belonged to this worker in case of a death
+            if let Err(e) = self
+                .reenqueue_orphaned((config.buffer_size * 10) as i32, Utc::now())
+                .await
+            {
+                w.emit(Event::Error(Box::new(
+                    SqlitePollError::ReenqueueOrphanedError(e),
+                )));
+            }
             loop {
                 let now: i64 = Utc::now().timestamp();
                 if let Err(e) = self.keep_alive_at::<Self::Layer>(w.id(), now).await {
