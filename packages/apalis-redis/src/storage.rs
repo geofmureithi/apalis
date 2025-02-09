@@ -580,18 +580,31 @@ where
                         .await
                 }
                 _ => {
-                    // TODO: Increase the attempts
-                    let retry_job = self.scripts.retry_job.clone();
-                    let retry_jobs_set = &self.config.scheduled_jobs_set();
-                    retry_job
-                        .key(inflight_set)
-                        .key(retry_jobs_set)
-                        .key(self.config.job_data_hash())
-                        .arg(task_id)
-                        .arg(now)
-                        .arg(e.to_string())
-                        .invoke_async(&mut self.conn)
-                        .await
+                    if ctx.max_attempts > res.attempt.current() {
+                        let retry_job = self.scripts.retry_job.clone();
+                        let retry_jobs_set = &self.config.scheduled_jobs_set();
+                        retry_job
+                            .key(inflight_set)
+                            .key(retry_jobs_set)
+                            .key(self.config.job_data_hash())
+                            .arg(task_id)
+                            .arg(now)
+                            .arg(e.to_string())
+                            .invoke_async(&mut self.conn)
+                            .await
+                    } else {
+                        let kill_job = self.scripts.kill_job.clone();
+                        let kill_jobs_set = &self.config.dead_jobs_set();
+                        kill_job
+                            .key(inflight_set)
+                            .key(kill_jobs_set)
+                            .key(self.config.job_data_hash())
+                            .arg(task_id)
+                            .arg(now)
+                            .arg(e.to_string())
+                            .invoke_async(&mut self.conn)
+                            .await
+                    }
                 }
             },
         }
