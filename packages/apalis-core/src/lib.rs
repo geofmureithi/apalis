@@ -434,26 +434,26 @@ pub mod test_utils {
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 1, "should have 1 job"); // A job exists
                 let res = t.execute_next().await;
-                assert_eq!(res.1, Err("FailedError: oh no!".to_owned()));
+                assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 1, "should have 1 attempt");
 
                 let res = t.execute_next().await;
-                assert_eq!(res.1, Err("FailedError: oh no!".to_owned()));
+                assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 2);
 
                 let res = t.execute_next().await;
-                assert_eq!(res.1, Err("FailedError: oh no!".to_owned()));
+                assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 3);
 
                 let res = t.execute_next().await;
-                assert_eq!(res.1, Err("FailedError: oh no!".to_owned()));
+                assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 4);
