@@ -166,7 +166,8 @@ pub mod test_utils {
         res_rx: Receiver<(TaskId, Result<String, String>)>,
         _p: PhantomData<Req>,
         _r: PhantomData<Res>,
-        backend: B,
+        /// The inner backend
+        pub backend: B,
     }
     /// A test wrapper to allow you to test without requiring a worker.
     /// Important for testing backends and jobs
@@ -284,8 +285,8 @@ pub mod test_utils {
         }
 
         /// Gets the current state of results
-        pub async fn execute_next(&mut self) -> (TaskId, Result<String, String>) {
-            self.res_rx.next().await.unwrap()
+        pub async fn execute_next(&mut self) -> Option<(TaskId, Result<String, String>)> {
+            self.res_rx.next().await
         }
     }
 
@@ -347,7 +348,7 @@ pub mod test_utils {
                 t.push(1).await.unwrap();
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 1); // A job exists
-                let res = t.execute_next().await;
+                let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Ok("1".to_owned()));
                 // TODO: all storages need to satisfy this rule, redis does not
                 // let res = t.len().await.unwrap();
@@ -367,8 +368,64 @@ pub mod test_utils {
                 t.push(1).await.unwrap();
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 1); // A job exists
-                let res = t.execute_next().await;
+                let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Ok("1".to_owned()));
+                t.vacuum().await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // After vacuuming, there should be nothing
+            }
+
+            #[tokio::test]
+            async fn integration_test_storage_abort() {
+                let backend = $setup().await;
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Err::<(), _>(Error::Abort(std::sync::Arc::new(Box::new(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "request was invalid",
+                    )))))
+                });
+                let (mut t, poller) = TestWrapper::new_with_service(backend, service);
+                tokio::spawn(poller);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // No jobs
+                t.push(1).await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1); // A job exists
+                let res = t.execute_next().await.unwrap();
+                assert_eq!(res.1, Err("AbortError: request was invalid".to_owned()));
+                t.vacuum().await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // After vacuuming, there should be nothing
+            }
+
+            #[tokio::test]
+            async fn integration_test_storage_unexpected_abort() {
+                let backend = $setup().await;
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    None::<()>.unwrap(); // unexpected abort
+                    Ok::<_, io::Error>(request.args)
+                });
+                let (mut t, poller) = TestWrapper::new_with_service(backend, service);
+                tokio::spawn(poller);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // No jobs
+                t.push(1).await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1); // A job exists
+                let res = t.execute_next().await;
+                assert_eq!(res, None); // Our worker is dead.
+
+                // We start a healthy worker
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Ok::<_, io::Error>(request.args)
+                });
+                let (mut t, poller) = TestWrapper::new_with_service(t.backend, service);
+                tokio::spawn(poller);
+                // This is testing resuming the same worker
+                // This ensures that the worker resumed any jobs lost during an interuption
+                let res = t.execute_next().await.unwrap();
+                assert_eq!(res.1, Ok("1".to_owned()));
+
                 t.vacuum().await.unwrap();
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 0); // After vacuuming, there should be nothing
