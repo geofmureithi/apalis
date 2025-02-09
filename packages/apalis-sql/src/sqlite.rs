@@ -632,7 +632,8 @@ mod tests {
         SqliteStorage::setup(&pool)
             .await
             .expect("failed to migrate DB");
-        let storage = SqliteStorage::<T>::new(pool);
+        let config = Config::new("apalis::test");
+        let storage = SqliteStorage::<T>::new_with_config(pool, config);
 
         storage
     }

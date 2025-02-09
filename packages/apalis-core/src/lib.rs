@@ -199,7 +199,7 @@ pub mod test_utils {
     ///        tokio::spawn(poller);
     ///        tester.enqueue(42usize).await.unwrap();
     ///        assert_eq!(tester.size().await.unwrap(), 1);
-    ///        let (_, resp) = tester.execute_next().await;
+    ///        let (_, resp) = tester.execute_next().await.unwrap();
     ///        assert_eq!(resp, Ok("()".to_string()));
     ///    }
     ///}
@@ -285,9 +285,9 @@ pub mod test_utils {
         }
 
         /// Gets the current state of results
-        pub async fn execute_next(&mut self) -> (TaskId, Result<String, String>) {
+        pub async fn execute_next(&mut self) -> Option<(TaskId, Result<String, String>)> {
             self.should_next.store(true, Ordering::Release);
-            self.res_rx.next().await.unwrap()
+            self.res_rx.next().await
         }
 
         /// Gets the current state of results
@@ -383,7 +383,7 @@ pub mod test_utils {
                 tokio::spawn(poller);
                 t.enqueue(1).await.unwrap();
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                let _res = t.execute_next().await;
+                let _res = t.execute_next().await.unwrap();
                 // assert_eq!(res.len(), 1); // One job is done
             }
         };
@@ -405,7 +405,7 @@ pub mod test_utils {
                 t.push(1).await.unwrap();
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 1); // A job exists
-                let res = t.execute_next().await;
+                let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Ok("1".to_owned()));
                 // TODO: all storages need to satisfy this rule, redis does not
                 // let res = t.len().await.unwrap();
@@ -425,7 +425,7 @@ pub mod test_utils {
                 t.push(1).await.unwrap();
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 1); // A job exists
-                let res = t.execute_next().await;
+                let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Ok("1".to_owned()));
                 t.vacuum().await.unwrap();
                 let res = t.len().await.unwrap();
@@ -446,32 +446,45 @@ pub mod test_utils {
                 let parts = t.push(1).await.unwrap();
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 1, "should have 1 job"); // A job exists
-                let res = t.execute_next().await;
+                let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 1, "should have 1 attempt");
 
-                let res = t.execute_next().await;
+                let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 2, "should have 2 attempts");
 
-                let res = t.execute_next().await;
+                let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 3, "should have 3 attempts");
 
-                let res = t.execute_next().await;
+                let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 4, "should have 4 attempts");
 
+                let res = t.execute_next().await.unwrap();
+                assert_eq!(res.1, Err("oh no!".to_owned()));
+
+                let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
+                assert_eq!(task.parts.attempt.current(), 5, "should have 5 attempts");
+
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 1, "should still have 1 job");
+                // Integration tests should include a max of 5 retries after that job should be aborted
+                assert_eq!(res, 0, "should have no job"); 
+
+                let res = t.execute_next().await;
+                assert_eq!(res, None);
+
+                let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
+                assert_eq!(task.parts.attempt.current(), 5, "should still have 5 attempts");
             }
         };
     }
