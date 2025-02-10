@@ -294,7 +294,11 @@ pub mod test_utils {
         pub fn try_execute_next(
             &mut self,
         ) -> Result<Option<(TaskId, Result<String, String>)>, TryRecvError> {
-            self.res_rx.try_next()
+            self.should_next.store(true, Ordering::Release);
+            self.res_rx.try_next().map(|res| {
+                self.should_next.store(false, Ordering::Release);
+                res
+            })
         }
     }
 
@@ -450,47 +454,53 @@ pub mod test_utils {
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 apalis_core::sleep(Duration::from_secs(1)).await;
-                
+
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 1, "should have 1 attempt");
 
                 let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
+                apalis_core::sleep(Duration::from_secs(1)).await;
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 2, "should have 2 attempts");
 
                 let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
+                apalis_core::sleep(Duration::from_secs(1)).await;
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 3, "should have 3 attempts");
 
                 let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Err("oh no!".to_owned()));
+                apalis_core::sleep(Duration::from_secs(1)).await;
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 4, "should have 4 attempts");
 
                 let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Err("oh no!".to_owned()));
+                apalis_core::sleep(Duration::from_secs(1)).await;
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 5, "should have 5 attempts");
-
 
                 apalis_core::sleep(Duration::from_secs(1)).await;
 
                 let res = t.len().await.unwrap();
                 // Integration tests should include a max of 5 retries after that job should be aborted
-                assert_eq!(res, 0, "should have no job"); 
-
+                assert_eq!(res, 0, "should have no job");
 
                 let res = t.try_execute_next();
                 assert!(res.is_err());
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
-                assert_eq!(task.parts.attempt.current(), 5, "should still have 5 attempts");
+                assert_eq!(
+                    task.parts.attempt.current(),
+                    5,
+                    "should still have 5 attempts"
+                );
             }
         };
     }
