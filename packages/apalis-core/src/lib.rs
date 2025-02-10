@@ -295,7 +295,7 @@ pub mod test_utils {
             self.should_next.store(true, Ordering::Release);
             let res = futures::future::select(
                 self.res_rx.next(),
-                crate::sleep(Duration::from_secs(1)).boxed(),
+                crate::sleep(Duration::from_secs(2)).boxed(),
             )
             .await;
             match res {
