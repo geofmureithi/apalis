@@ -749,29 +749,12 @@ where
     }
 
     async fn len(&mut self) -> Result<i64, RedisError> {
-        let all_jobs: i64 = redis::cmd("HLEN")
-            .arg(self.config.job_data_hash())
+        let pending_jobs: i64 = redis::cmd("LLEN")
+            .arg(self.config.active_jobs_list())
             .query_async(&mut self.conn)
             .await?;
-        let done_jobs: i64 = redis::cmd("ZCOUNT")
-            .arg(self.config.done_jobs_set())
-            .arg("-inf")
-            .arg("+inf")
-            .query_async(&mut self.conn)
-            .await?;
-        let dead_jobs: i64 = redis::cmd("ZCOUNT")
-            .arg(self.config.dead_jobs_set())
-            .arg("-inf")
-            .arg("+inf")
-            .query_async(&mut self.conn)
-            .await?;
-        let failed_jobs: i64 = redis::cmd("ZCOUNT")
-            .arg(self.config.failed_jobs_set())
-            .arg("-inf")
-            .arg("+inf")
-            .query_async(&mut self.conn)
-            .await?;
-        Ok(all_jobs - (done_jobs + dead_jobs + failed_jobs))
+
+        Ok(pending_jobs)
     }
 
     async fn fetch_by_id(
