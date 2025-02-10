@@ -1,5 +1,5 @@
 use apalis_core::codec::json::JsonCodec;
-use apalis_core::error::Error;
+use apalis_core::error::{BoxDynError, Error};
 use apalis_core::layers::{Ack, AckLayer, Service};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
@@ -24,6 +24,7 @@ use std::any::type_name;
 use std::fmt::{self, Debug};
 use std::io;
 use std::num::TryFromIntError;
+use std::sync::Arc;
 use std::time::SystemTime;
 use std::{marker::PhantomData, time::Duration};
 
@@ -93,11 +94,21 @@ struct RedisScript {
 }
 
 /// The context for a redis storage job
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RedisContext {
     max_attempts: usize,
     lock_by: Option<WorkerId>,
     run_at: Option<SystemTime>,
+}
+
+impl Default for RedisContext {
+    fn default() -> Self {
+        Self {
+            max_attempts: 5,
+            lock_by: None,
+            run_at: None,
+        }
+    }
 }
 
 impl<Req> FromRequest<Request<Req, RedisContext>> for RedisContext {
@@ -139,7 +150,6 @@ pub enum RedisPollError {
 pub struct Config {
     poll_interval: Duration,
     buffer_size: usize,
-    max_retries: usize,
     keep_alive: Duration,
     enqueue_scheduled: Duration,
     reenqueue_orphaned_after: Duration,
@@ -151,7 +161,6 @@ impl Default for Config {
         Self {
             poll_interval: Duration::from_millis(100),
             buffer_size: 10,
-            max_retries: 5,
             keep_alive: Duration::from_secs(30),
             enqueue_scheduled: Duration::from_secs(30),
             reenqueue_orphaned_after: Duration::from_secs(300),
@@ -169,11 +178,6 @@ impl Config {
     /// Get the number of jobs to fetch
     pub fn get_buffer_size(&self) -> usize {
         self.buffer_size
-    }
-
-    /// Get the max retries
-    pub fn get_max_retries(&self) -> usize {
-        self.max_retries
     }
 
     /// get the keep live rate
@@ -200,12 +204,6 @@ impl Config {
     /// set the buffer setting
     pub fn set_buffer_size(mut self, buffer_size: usize) -> Self {
         self.buffer_size = buffer_size;
-        self
-    }
-
-    /// set the max-retries setting
-    pub fn set_max_retries(mut self, max_retries: usize) -> Self {
-        self.max_retries = max_retries;
         self
     }
 
@@ -536,13 +534,23 @@ where
 impl<T, Conn, Res, C> Ack<T, Res> for RedisStorage<T, Conn, C>
 where
     Res: Serialize + Sync + Send + 'static,
-    T: Sync + Send,
+    T: Sync + Send + DeserializeOwned + Serialize + Unpin + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
-    C: Codec<Compact = Vec<u8>> + Send,
+    C: Codec<Compact = Vec<u8>> + Send + 'static,
 {
     type Context = RedisContext;
     type AckError = RedisError;
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), RedisError> {
+        // Lets update the number of attempts
+        // TODO: move attempts to its own key
+        let mut task = self
+            .fetch_by_id(&res.task_id)
+            .await?
+            .expect("must be a valid task");
+        task.parts.attempt = res.attempt.clone();
+        self.update(task).await?;
+        // End of expensive update
+
         let inflight_set = format!(
             "{}:{}",
             self.config.inflight_jobs_set(),
@@ -567,31 +575,26 @@ where
             }
             Err(e) => match e {
                 Error::Abort(e) => {
-                    let kill_job = self.scripts.kill_job.clone();
-                    let kill_jobs_set = &self.config.dead_jobs_set();
-                    kill_job
-                        .key(inflight_set)
-                        .key(kill_jobs_set)
-                        .key(self.config.job_data_hash())
-                        .arg(task_id)
-                        .arg(now)
-                        .arg(e.to_string())
-                        .invoke_async(&mut self.conn)
-                        .await
+                    let worker_id = ctx.lock_by.as_ref().unwrap();
+                    self.kill(worker_id, &res.task_id, &e).await
                 }
                 _ => {
-                    // TODO: Increase the attempts
-                    let retry_job = self.scripts.retry_job.clone();
-                    let retry_jobs_set = &self.config.scheduled_jobs_set();
-                    retry_job
-                        .key(inflight_set)
-                        .key(retry_jobs_set)
-                        .key(self.config.job_data_hash())
-                        .arg(task_id)
-                        .arg(now)
-                        .arg(e.to_string())
-                        .invoke_async(&mut self.conn)
+                    if ctx.max_attempts > res.attempt.current() {
+                        let worker_id = ctx.lock_by.as_ref().unwrap();
+                        self.retry(worker_id, &res.task_id).await.map(|_| ())
+                    } else {
+                        let worker_id = ctx.lock_by.as_ref().unwrap();
+
+                        self.kill(
+                            worker_id,
+                            &res.task_id,
+                            &(Box::new(io::Error::new(
+                                io::ErrorKind::Interrupted,
+                                format!("Max retries of {} exceeded", ctx.max_attempts),
+                            )) as BoxDynError),
+                        )
                         .await
+                    }
                 }
             },
         }
@@ -756,7 +759,19 @@ where
             .arg("+inf")
             .query_async(&mut self.conn)
             .await?;
-        Ok(all_jobs - done_jobs)
+        let dead_jobs: i64 = redis::cmd("ZCOUNT")
+            .arg(self.config.dead_jobs_set())
+            .arg("-inf")
+            .arg("+inf")
+            .query_async(&mut self.conn)
+            .await?;
+        let failed_jobs: i64 = redis::cmd("ZCOUNT")
+            .arg(self.config.failed_jobs_set())
+            .arg("-inf")
+            .arg("+inf")
+            .query_async(&mut self.conn)
+            .await?;
+        Ok(all_jobs - (done_jobs + dead_jobs + failed_jobs))
     }
 
     async fn fetch_by_id(
@@ -854,7 +869,6 @@ where
         let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
         let scheduled_jobs_set = self.config.scheduled_jobs_set();
         let job_data_hash = self.config.job_data_hash();
-        let failed_jobs_set = self.config.failed_jobs_set();
         let job_fut = self.fetch_by_id(task_id);
         let now: i64 = Utc::now().timestamp();
         let res = job_fut.await?;
@@ -862,14 +876,17 @@ where
         match res {
             Some(job) => {
                 let attempt = &job.parts.attempt;
-                if attempt.current() >= self.config.max_retries {
-                    redis::cmd("ZADD")
-                        .arg(failed_jobs_set)
-                        .arg(now)
-                        .arg(task_id.to_string())
-                        .query_async(conn)
-                        .await?;
-                    self.kill(worker_id, task_id).await?;
+                let max_attempts = &job.parts.context.max_attempts;
+                if &attempt.current() >= &max_attempts {
+                    self.kill(
+                        worker_id,
+                        task_id,
+                        &(Box::new(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            format!("Max retries of {} exceeded", max_attempts),
+                        )) as BoxDynError),
+                    )
+                    .await?;
                     return Ok(1);
                 }
                 let job = C::encode(job)
@@ -894,10 +911,12 @@ where
     }
 
     /// Attempt to kill a job
-    pub async fn kill(&mut self, worker_id: &WorkerId, task_id: &TaskId) -> Result<(), RedisError>
-    where
-        T: Send + DeserializeOwned + Serialize + Unpin + Sync + 'static,
-    {
+    pub async fn kill(
+        &mut self,
+        worker_id: &WorkerId,
+        task_id: &TaskId,
+        error: &BoxDynError,
+    ) -> Result<(), RedisError> {
         let kill_job = self.scripts.kill_job.clone();
         let current_worker_id = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
         let job_data_hash = self.config.job_data_hash();
@@ -909,7 +928,7 @@ where
             .key(job_data_hash)
             .arg(task_id.to_string())
             .arg(now)
-            .arg("AbortError")
+            .arg(error.to_string())
             .invoke_async(&mut self.conn)
             .await
     }
@@ -1003,7 +1022,10 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         let conn = connect(redis_url).await.unwrap();
-        let mut storage = RedisStorage::new(conn);
+        let config = Config::default()
+            .set_namespace("apalis::test")
+            .set_enqueue_scheduled(Duration::from_millis(500)); // Instantly return jobs to the queue
+        let mut storage = RedisStorage::new_with_config(conn, config);
         cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage
     }
@@ -1111,7 +1133,14 @@ mod tests {
         let job_id = &job.parts.task_id;
 
         storage
-            .kill(&worker.id(), &job_id)
+            .kill(
+                &worker.id(),
+                &job_id,
+                &(Box::new(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "Some unforeseen error occurred",
+                )) as BoxDynError),
+            )
             .await
             .expect("failed to kill job");
 

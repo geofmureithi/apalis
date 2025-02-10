@@ -583,6 +583,7 @@ where
     }
 
     fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
+        request.parts.attempt.increment();
         self.ctx.track(self.service.call(request))
     }
 }
