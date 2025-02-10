@@ -128,6 +128,7 @@ pub mod test_utils {
     use crate::builder::{WorkerBuilder, WorkerFactory};
     use crate::request::Request;
     use crate::task::task_id::TaskId;
+    use crate::worker::Worker;
     use futures::channel::mpsc::{self, channel, Receiver, Sender, TryRecvError};
     use futures::future::{BoxFuture, Either};
     use futures::stream::{Stream, StreamExt};
@@ -172,6 +173,8 @@ pub mod test_utils {
         should_next: Arc<AtomicBool>,
         /// The inner backend
         pub backend: B,
+        /// The inner worker
+        pub worker: Worker<crate::worker::Context>,
     }
     /// A test wrapper to allow you to test without requiring a worker.
     /// Important for testing backends and jobs
@@ -253,6 +256,7 @@ pub mod test_utils {
                 .backend(backend.clone())
                 .build(service)
                 .run();
+            let handle = worker.get_handle();
             let (stop_tx, mut stop_rx) = channel::<()>(1);
 
             let poller = async move {
@@ -275,6 +279,7 @@ pub mod test_utils {
                     backend,
                     _r: PhantomData,
                     should_next,
+                    worker: handle,
                 },
                 poller.boxed(),
             )
@@ -414,15 +419,17 @@ pub mod test_utils {
                 let (mut t, poller) = TestWrapper::new_with_service(backend, service);
                 tokio::spawn(poller);
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 0); // No jobs
+                assert_eq!(res, 0, "There should be no jobs");
                 t.push(1).await.unwrap();
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 1); // A job exists
+                assert_eq!(res, 1, "There should be 1 job");
                 let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Ok("1".to_owned()));
-                // TODO: all storages need to satisfy this rule, redis does not
-                // let res = t.len().await.unwrap();
-                // assert_eq!(res, 0);
+
+                apalis_core::sleep(Duration::from_secs(1)).await;
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0);
+
                 t.vacuum().await.unwrap();
             }
             #[tokio::test]
@@ -467,28 +474,40 @@ pub mod test_utils {
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 1, "should have 1 attempt");
 
-                let res = t.execute_next().await.expect("Job must be added back to the queue after attempt 1");
+                let res = t
+                    .execute_next()
+                    .await
+                    .expect("Job must be added back to the queue after attempt 1");
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 apalis_core::sleep(Duration::from_secs(1)).await;
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 2, "should have 2 attempts");
 
-                let res = t.execute_next().await.expect("Job must be added back to the queue after attempt 2");
+                let res = t
+                    .execute_next()
+                    .await
+                    .expect("Job must be added back to the queue after attempt 2");
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 apalis_core::sleep(Duration::from_secs(1)).await;
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 3, "should have 3 attempts");
 
-                let res = t.execute_next().await.expect("Job must be added back to the queue after attempt 3");
+                let res = t
+                    .execute_next()
+                    .await
+                    .expect("Job must be added back to the queue after attempt 3");
                 assert_eq!(res.1, Err("oh no!".to_owned()));
                 apalis_core::sleep(Duration::from_secs(1)).await;
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 4, "should have 4 attempts");
 
-                let res = t.execute_next().await.expect("Job must be added back to the queue after attempt 5");
+                let res = t
+                    .execute_next()
+                    .await
+                    .expect("Job must be added back to the queue after attempt 5");
                 assert_eq!(res.1, Err("oh no!".to_owned()));
                 apalis_core::sleep(Duration::from_secs(1)).await;
 
@@ -510,6 +529,10 @@ pub mod test_utils {
                     5,
                     "should still have 5 attempts"
                 );
+
+                t.vacuum().await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // After vacuuming, there should be nothing
             }
         };
     }

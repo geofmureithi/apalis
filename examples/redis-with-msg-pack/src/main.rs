@@ -37,8 +37,7 @@ async fn main() -> Result<()> {
         .await
         .expect("Could not connect");
     let config = apalis_redis::Config::default()
-        .set_namespace("apalis_redis-with-msg-pack")
-        .set_max_retries(5);
+        .set_namespace("apalis_redis-with-msg-pack");
     let storage = RedisStorage::new_with_codec::<MessagePack>(conn, config);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;

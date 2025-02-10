@@ -226,8 +226,8 @@ where
                     ids = ack_stream.next() => {
 
                         if let Some(ids) = ids {
-                            let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(_ctx, res)| {
-                                (res.task_id.to_string(), worker.id().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(&res.inner).to_string(), res.attempt.current() as u64)
+                            let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(ctx, res)| {
+                                (res.task_id.to_string(), worker.id().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(ctx,res).to_string(), res.attempt.current() as u64)
                             }).collect();
                             let query =
                                 "UPDATE apalis.jobs
@@ -254,7 +254,6 @@ where
                                         .execute(&pool)
                                         .await
                                     {
-                                        dbg!(&e);
                                         worker.emit(Event::Error(Box::new(PgPollError::AckError(e))));
                                     }
                                 }
@@ -799,7 +798,7 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         PostgresStorage::setup(&pool).await.unwrap();
-        let config = Config::new("apalis-ci-tests").set_buffer_size(1);
+        let config = Config::new("apalis-tests").set_buffer_size(1);
         let mut storage = PostgresStorage::new_with_config(pool, config);
         cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage

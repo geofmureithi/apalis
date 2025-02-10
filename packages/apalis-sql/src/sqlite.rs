@@ -514,7 +514,6 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
     type Context = SqlContext;
     type AckError = sqlx::Error;
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {
-        dbg!(&res.attempt);
         let pool = self.pool.clone();
         let query =
                 "UPDATE Jobs SET status = ?4, attempts = ?5, done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
@@ -529,7 +528,7 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
                     .to_string(),
             )
             .bind(result)
-            .bind(calculate_status(&res.inner).to_string())
+            .bind(calculate_status(ctx, res).to_string())
             .bind(res.attempt.current() as u32)
             .execute(&pool)
             .await?;

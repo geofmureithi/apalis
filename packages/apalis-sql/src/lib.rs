@@ -12,7 +12,7 @@
 
 use std::{num::TryFromIntError, time::Duration};
 
-use apalis_core::{error::Error, request::State};
+use apalis_core::{error::Error, request::State, response::Response};
 
 /// The context of the sql job
 pub mod context;
@@ -35,6 +35,7 @@ pub mod sqlite;
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;
 
+use context::SqlContext;
 // Re-exports
 pub use sqlx;
 
@@ -165,11 +166,14 @@ impl Config {
 }
 
 /// Calculates the status from a result
-pub fn calculate_status<Res>(res: &Result<Res, Error>) -> State {
-    match res {
+pub fn calculate_status<Res>(ctx: &SqlContext, res: &Response<Res>) -> State {
+    match &res.inner {
         Ok(_) => State::Done,
         Err(e) => match &e {
             Error::Abort(_) => State::Killed,
+            Error::Failed(_) if ctx.max_attempts() as usize <= res.attempt.current() => {
+                State::Killed
+            }
             _ => State::Failed,
         },
     }

@@ -580,17 +580,8 @@ where
                 }
                 _ => {
                     if ctx.max_attempts > res.attempt.current() {
-                        let retry_job = self.scripts.retry_job.clone();
-                        let retry_jobs_set = &self.config.scheduled_jobs_set();
-                        retry_job
-                            .key(inflight_set)
-                            .key(retry_jobs_set)
-                            .key(self.config.job_data_hash())
-                            .arg(task_id)
-                            .arg(now)
-                            .arg(e.to_string())
-                            .invoke_async(&mut self.conn)
-                            .await
+                        let worker_id = ctx.lock_by.as_ref().unwrap();
+                        self.retry(worker_id, &res.task_id).await.map(|_| ())
                     } else {
                         let worker_id = ctx.lock_by.as_ref().unwrap();
 
@@ -1031,7 +1022,10 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         let conn = connect(redis_url).await.unwrap();
-        let mut storage = RedisStorage::new(conn);
+        let config = Config::default()
+            .set_namespace("apalis::test")
+            .set_enqueue_scheduled(Duration::from_millis(500)); // Instantly return jobs to the queue
+        let mut storage = RedisStorage::new_with_config(conn, config);
         cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage
     }
