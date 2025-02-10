@@ -180,6 +180,7 @@ where
             let mut keep_alive_stm = apalis_core::interval::interval(config.keep_alive).fuse();
             let mut reenqueue_orphaned_stm =
                 apalis_core::interval::interval(config.poll_interval).fuse();
+
             let mut ack_stream = ack_notify.clone().ready_chunks(config.buffer_size).fuse();
 
             let mut poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
@@ -223,6 +224,7 @@ where
                         }
                     }
                     ids = ack_stream.next() => {
+
                         if let Some(ids) = ids {
                             let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(_ctx, res)| {
                                 (res.task_id.to_string(), worker.id().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(&res.inner).to_string(), res.attempt.current() as u64)
@@ -252,6 +254,7 @@ where
                                         .execute(&pool)
                                         .await
                                     {
+                                        dbg!(&e);
                                         worker.emit(Event::Error(Box::new(PgPollError::AckError(e))));
                                     }
                                 }

@@ -129,7 +129,7 @@ pub mod test_utils {
     use crate::request::Request;
     use crate::task::task_id::TaskId;
     use futures::channel::mpsc::{self, channel, Receiver, Sender, TryRecvError};
-    use futures::future::BoxFuture;
+    use futures::future::{BoxFuture, Either};
     use futures::stream::{Stream, StreamExt};
     use futures::{FutureExt, SinkExt};
     use std::fmt::Debug;
@@ -140,6 +140,7 @@ pub mod test_utils {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::task::{Context, Poll};
+    use std::time::Duration;
     use tower::{Layer, Service, ServiceBuilder};
 
     /// Define a dummy service
@@ -287,7 +288,15 @@ pub mod test_utils {
         /// Gets the current state of results
         pub async fn execute_next(&mut self) -> Option<(TaskId, Result<String, String>)> {
             self.should_next.store(true, Ordering::Release);
-            self.res_rx.next().await
+            let res = futures::future::select(
+                self.res_rx.next(),
+                crate::sleep(Duration::from_secs(1)).boxed(),
+            )
+            .await;
+            match res {
+                Either::Left(next) => next.0,
+                Either::Right(_) => None,
+            }
         }
 
         /// Gets the current state of results
@@ -458,28 +467,28 @@ pub mod test_utils {
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 1, "should have 1 attempt");
 
-                let res = t.execute_next().await.unwrap();
+                let res = t.execute_next().await.expect("Job must be added back to the queue after attempt 1");
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 apalis_core::sleep(Duration::from_secs(1)).await;
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 2, "should have 2 attempts");
 
-                let res = t.execute_next().await.unwrap();
+                let res = t.execute_next().await.expect("Job must be added back to the queue after attempt 2");
                 assert_eq!(res.1, Err("oh no!".to_owned()));
 
                 apalis_core::sleep(Duration::from_secs(1)).await;
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 3, "should have 3 attempts");
 
-                let res = t.execute_next().await.unwrap();
+                let res = t.execute_next().await.expect("Job must be added back to the queue after attempt 3");
                 assert_eq!(res.1, Err("oh no!".to_owned()));
                 apalis_core::sleep(Duration::from_secs(1)).await;
 
                 let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
                 assert_eq!(task.parts.attempt.current(), 4, "should have 4 attempts");
 
-                let res = t.execute_next().await.unwrap();
+                let res = t.execute_next().await.expect("Job must be added back to the queue after attempt 5");
                 assert_eq!(res.1, Err("oh no!".to_owned()));
                 apalis_core::sleep(Duration::from_secs(1)).await;
 
