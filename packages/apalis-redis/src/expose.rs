@@ -196,7 +196,7 @@ where
             .into_iter()
             .map(|w| {
                 Worker::new(
-                    WorkerId::new(w.split(':').last().unwrap_or("").to_string()),
+                    WorkerId::new(w.replace(&format!("{}:", &queue.inflight_jobs_set()), "")),
                     WorkerState::new::<Self>(queue.get_namespace().to_owned()),
                 )
             })
