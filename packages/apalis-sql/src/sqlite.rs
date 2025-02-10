@@ -22,6 +22,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{Pool, Row, Sqlite};
 use std::any::type_name;
 use std::convert::TryInto;
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::{fmt, io};
 use std::{marker::PhantomData, time::Duration};
@@ -159,7 +160,7 @@ async fn fetch_next(
     config: &Config,
 ) -> Result<Option<SqlRequest<String>>, sqlx::Error> {
     let now: i64 = Utc::now().timestamp();
-    let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3, attempts = attempts + 1 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
+    let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
     let job: Option<SqlRequest<String>> = sqlx::query_as(update_query)
         .bind(id.to_string())
         .bind(worker_id.to_string())
@@ -226,7 +227,7 @@ where
 
 impl<T, C> Storage for SqliteStorage<T, C>
 where
-    T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
+    T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync + Debug,
     C: Codec<Compact = String> + Send,
 {
     type Job = T;
@@ -300,7 +301,7 @@ where
     }
 
     async fn len(&mut self) -> Result<i64, Self::Error> {
-        let query = "Select Count(*) as count from Jobs where status='Pending'";
+        let query = "Select Count(*) as count from Jobs WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts))";
         let record = sqlx::query(query).fetch_one(&self.pool).await?;
         record.try_get("count")
     }
@@ -405,29 +406,6 @@ impl<T> SqliteStorage<T> {
         Ok(())
     }
 
-    /// Add jobs that failed back to the queue if there are still remaining attemps
-    pub async fn reenqueue_failed(&mut self) -> Result<(), sqlx::Error> {
-        let job_type = self.config.namespace.clone();
-        let mut tx = self.pool.acquire().await?;
-        let query = r#"Update Jobs
-                            SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL
-                            WHERE id in
-                                (SELECT Jobs.id from Jobs
-                                    WHERE status= "Failed" AND Jobs.attempts < Jobs.max_attempts
-                                     ORDER BY lock_at ASC LIMIT ?2);"#;
-        sqlx::query(query)
-            .bind(job_type)
-            .bind::<u32>(
-                self.config
-                    .buffer_size
-                    .try_into()
-                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?,
-            )
-            .execute(&mut *tx)
-            .await?;
-        Ok(())
-    }
-
     /// Add jobs that workers have disappeared to the queue
     pub async fn reenqueue_orphaned(
         &self,
@@ -437,7 +415,7 @@ impl<T> SqliteStorage<T> {
         let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update Jobs
-                            SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned"
+                            SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, attempts = attempts + 1, last_error ="Job was abandoned"
                             WHERE id in
                                 (SELECT Jobs.id from Jobs INNER join Workers ON lock_by = Workers.id
                                     WHERE status= "Running" AND workers.last_seen < ?1
@@ -482,6 +460,15 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
         let requeue_storage = self.clone();
         let w = worker.clone();
         let heartbeat = async move {
+            // Lets reenqueue any jobs that belonged to this worker in case of a death
+            if let Err(e) = self
+                .reenqueue_orphaned((config.buffer_size * 10) as i32, Utc::now())
+                .await
+            {
+                w.emit(Event::Error(Box::new(
+                    SqlitePollError::ReenqueueOrphanedError(e),
+                )));
+            }
             loop {
                 let now: i64 = Utc::now().timestamp();
                 if let Err(e) = self.keep_alive_at::<Self::Layer>(w.id(), now).await {
@@ -529,7 +516,7 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
         let query =
-                "UPDATE Jobs SET status = ?4, done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
+                "UPDATE Jobs SET status = ?4, attempts = ?5, done_at = strftime('%s','now'), last_error = ?3 WHERE id = ?1 AND lock_by = ?2";
         let result = serde_json::to_string(&res.inner.as_ref().map_err(|r| r.to_string()))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         sqlx::query(query)
@@ -541,7 +528,8 @@ impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
                     .to_string(),
             )
             .bind(result)
-            .bind(calculate_status(&res.inner).to_string())
+            .bind(calculate_status(ctx, res).to_string())
+            .bind(res.attempt.current() as u32)
             .execute(&pool)
             .await?;
         Ok(())
@@ -643,7 +631,8 @@ mod tests {
         SqliteStorage::setup(&pool)
             .await
             .expect("failed to migrate DB");
-        let storage = SqliteStorage::<T>::new(pool);
+        let config = Config::new("apalis::test");
+        let storage = SqliteStorage::<T>::new_with_config(pool, config);
 
         storage
     }
@@ -799,6 +788,27 @@ mod tests {
         assert!(ctx.lock_at().is_none());
         assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_owned()));
         assert_eq!(job.parts.attempt.current(), 1);
+
+        let job = consume_one(&mut storage, &worker).await;
+        let ctx = &job.parts.context;
+        // Simulate worker
+        job.parts.attempt.increment();
+        storage
+            .ack(
+                ctx,
+                &Response::new(Ok("success".to_owned()), job_id.clone(), job.parts.attempt),
+            )
+            .await
+            .unwrap();
+        //end simulate worker
+
+        let job = get_job(&mut storage, &job_id).await;
+        let ctx = &job.parts.context;
+        assert_eq!(*ctx.status(), State::Done);
+        assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
+        assert!(ctx.lock_at().is_some());
+        assert_eq!(*ctx.last_error(), Some("{\"Ok\":\"success\"}".to_owned()));
+        assert_eq!(job.parts.attempt.current(), 2);
     }
 
     #[tokio::test]
@@ -812,18 +822,32 @@ mod tests {
         let worker = register_worker_at(&mut storage, four_minutes_ago.timestamp()).await;
 
         let job = consume_one(&mut storage, &worker).await;
-        let job_id = &job.parts.task_id;
+        let job_id = job.parts.task_id;
         storage
             .reenqueue_orphaned(1, six_minutes_ago)
             .await
             .expect("failed to heartbeat");
 
-        let job = get_job(&mut storage, job_id).await;
+        let job = get_job(&mut storage, &job_id).await;
         let ctx = &job.parts.context;
-        assert_eq!(*ctx.status(), State::Running);
+
+        // Simulate worker
+        job.parts.attempt.increment();
+        storage
+            .ack(
+                ctx,
+                &Response::new(Ok("success".to_owned()), job_id.clone(), job.parts.attempt),
+            )
+            .await
+            .unwrap();
+        //end simulate worker
+
+        let job = get_job(&mut storage, &job_id).await;
+        let ctx = &job.parts.context;
+        assert_eq!(*ctx.status(), State::Done);
         assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
-        assert_eq!(*ctx.last_error(), None);
+        assert_eq!(*ctx.last_error(), Some("{\"Ok\":\"success\"}".to_owned()));
         assert_eq!(job.parts.attempt.current(), 1);
     }
 }

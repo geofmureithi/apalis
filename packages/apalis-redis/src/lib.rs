@@ -9,21 +9,27 @@
 //! ```rust,no_run
 //! use apalis::prelude::*;
 //! use apalis_redis::{RedisStorage, Config};
-//! use email_service::send_email;
+//! use serde::{Deserialize, Serialize};
+//!
+//! #[derive(Debug, Deserialize, Serialize)]
+//! struct Email {
+//!     to: String,
+//! }
+//!
+//! async fn send_email(job: Email) -> Result<(), Error> {
+//!     Ok(())
+//! }
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let conn = apalis_redis::connect("redis://127.0.0.1/").await.unwrap();
+//!     let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
+//!     let conn = apalis_redis::connect(redis_url).await.expect("Could not connect");
 //!     let storage = RedisStorage::new(conn);
-//!     Monitor::new()
-//!        .register(
-//!            WorkerBuilder::new("tasty-pear")
-//!                .backend(storage.clone())
-//!                .build_fn(send_email),
-//!        )
-//!        .run()
-//!        .await
-//!        .unwrap();
+//!     let worker = WorkerBuilder::new("tasty-pear")
+//!         .backend(storage.clone())
+//!         .build_fn(send_email);
+//!
+//!     worker.run().await;
 //! }
 //! ```
 
