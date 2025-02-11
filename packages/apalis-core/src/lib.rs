@@ -428,7 +428,7 @@ pub mod test_utils {
 
                 apalis_core::sleep(Duration::from_secs(1)).await;
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 0);
+                assert_eq!(res, 0, "There should be no jobs");
 
                 t.vacuum().await.unwrap();
             }
@@ -441,15 +441,19 @@ pub mod test_utils {
                 let (mut t, poller) = TestWrapper::new_with_service(backend, service);
                 tokio::spawn(poller);
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 0); // No jobs
+                assert_eq!(res, 0, "There should be no jobs");
                 t.push(1).await.unwrap();
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 1); // A job exists
+                assert_eq!(res, 1, "A job exists");
                 let res = t.execute_next().await.unwrap();
                 assert_eq!(res.1, Ok("1".to_owned()));
+                apalis_core::sleep(Duration::from_secs(1)).await;
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "There should be no job");
+
                 t.vacuum().await.unwrap();
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 0); // After vacuuming, there should be nothing
+                assert_eq!(res, 0, "After vacuuming, there should be nothing");
             }
 
             #[tokio::test]
@@ -532,7 +536,82 @@ pub mod test_utils {
 
                 t.vacuum().await.unwrap();
                 let res = t.len().await.unwrap();
-                assert_eq!(res, 0); // After vacuuming, there should be nothing
+                assert_eq!(res, 0, "After vacuuming, there should be nothing");
+            }
+
+            #[tokio::test]
+            async fn integration_test_storage_abort() {
+                let backend = $setup().await;
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Err::<(), _>(Error::Abort(std::sync::Arc::new(Box::new(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "request was invalid",
+                    )))))
+                });
+                let (mut t, poller) = TestWrapper::new_with_service(backend, service);
+                tokio::spawn(poller);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0); // No jobs
+                t.push(1).await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1); // A job exists
+                let res = t.execute_next().await.unwrap();
+                assert_eq!(res.1, Err("AbortError: request was invalid".to_owned()));
+                // Allow lazy storages to sync
+                apalis_core::sleep(Duration::from_secs(1)).await;
+                // Rechecking the queue len should return 0
+                let res = t.len().await.unwrap();
+                assert_eq!(
+                    res, 0,
+                    "The queue should be empty as the previous task was aborted"
+                );
+
+                t.vacuum().await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "After vacuuming, there should be nothing");
+            }
+
+            #[tokio::test]
+            async fn integration_test_storage_unexpected_abort() {
+                let backend = $setup().await;
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    None::<()>.unwrap(); // unexpected abort
+                    Ok::<_, io::Error>(request.args)
+                });
+                let (mut t, poller) = TestWrapper::new_with_service(backend, service);
+                tokio::spawn(poller);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "There should be no jobs");
+                let parts = t.push(1).await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1, "A job exists");
+                let res = t.execute_next().await;
+                assert_eq!(res, None, "Our worker is dead");
+
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "Job should not have been re-added to the queue");
+
+                // We start a healthy worker
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Ok::<_, io::Error>(request.args)
+                });
+                let (mut t, poller) = TestWrapper::new_with_service(t.backend, service);
+                tokio::spawn(poller);
+
+                // This is testing resuming the same worker
+                // This ensures that the worker resumed any jobs lost during an interruption
+                let res = t
+                    .execute_next()
+                    .await
+                    .expect("Task must have been recovered and added to the queue");
+                assert_eq!(res.1, Ok("1".to_owned()));
+
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "Task should have been consumed");
+
+                t.vacuum().await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "After vacuuming, there should be nothing");
             }
         };
     }
