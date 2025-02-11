@@ -93,6 +93,7 @@ use futures::StreamExt;
 use pipe::CronPipe;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Allows piping of cronjobs to a Storage or MessageQueue
 pub mod pipe;
@@ -233,8 +234,16 @@ where
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let stream = self.into_stream();
-        Poller::new(stream, futures::future::pending())
+        let worker = worker.clone();
+        Poller::new(stream, async move {
+            loop {
+                if worker.is_shutting_down() {
+                    break;
+                }
+                apalis_core::sleep(Duration::from_millis(500)).await;
+            }
+        })
     }
 }
