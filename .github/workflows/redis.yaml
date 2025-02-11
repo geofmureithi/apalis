@@ -3,6 +3,8 @@ on:
     paths:
       - "packages/apalis-redis/**"
       - ".github/workflows/redis.yaml"
+      - "packages/apalis-core/**"
+
 
 name: Redis CI
 

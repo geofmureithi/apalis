@@ -6,20 +6,10 @@ Since apalis-cron is build on top of apalis which supports tower middleware, you
 ## Example
 
 ```rust
-use apalis::layers::retry::RetryLayer;
-use apalis::layers::retry::RetryPolicy;
-use tower::ServiceBuilder;
-use apalis_cron::Schedule;
+use apalis::{prelude::*, layers::retry::RetryPolicy};
 use std::str::FromStr;
-use apalis::prelude::*;
-use apalis_cron::CronStream;
+use apalis_cron::{CronStream, Schedule};
 use chrono::{DateTime, Utc};
-
-#[derive(Clone)]
-struct FakeService;
-impl FakeService {
-    fn execute(&self, item: Reminder){}
-}
 
 #[derive(Default, Debug, Clone)]
 struct Reminder(DateTime<Utc>);
@@ -28,22 +18,51 @@ impl From<DateTime<Utc>> for Reminder {
        Reminder(t)
    }
 }
-async fn send_reminder(job: Reminder, svc: Data<FakeService>) {
-    svc.execute(job);
+async fn handle_tick(job: Reminder, data: Data<usize>) {
+    // Do something with the current tick
 }
 
 #[tokio::main]
 async fn main() {
     let schedule = Schedule::from_str("@daily").unwrap();
+
     let worker = WorkerBuilder::new("morning-cereal")
         .retry(RetryPolicy::retries(5))
-        .data(FakeService)
-        .stream(CronStream::new(schedule).into_stream())
-        .build_fn(send_reminder);
-    Monitor::new()
-        .register(worker)
-        .run()
+        .data(42usize)
+        .backend(CronStream::new(schedule))
+        .build_fn(handle_tick);
+
+    worker.run().await;
+}
+```
+
+## Persisting cron jobs
+
+Sometimes we may want to persist cron jobs for several reasons:
+
+- Distribute cronjobs between multiple servers
+- Store the results of the cronjob
+- Prevent task skipping in the case of a restart
+
+```rs
+#[tokio::main]
+async fn main() {
+    let schedule = Schedule::from_str("@daily").unwrap();
+    let cron_stream = CronStream::new(schedule);
+
+    // Lets create a storage for our cron jobs
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    SqliteStorage::setup(&pool)
         .await
-        .unwrap();
+        .expect("unable to run migrations for sqlite");
+    let sqlite = SqliteStorage::new(pool);
+
+    let backend = cron_stream.pipe_to_storage(sqlite);
+
+    let worker = WorkerBuilder::new("morning-cereal")
+        .backend(backend)
+        .build_fn(handle_tick);
+
+    worker.run().await;
 }
 ```

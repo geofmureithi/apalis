@@ -30,7 +30,10 @@ async fn main() -> Result<()> {
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
+    let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
+    let conn = apalis_redis::connect(redis_url)
+        .await
+        .expect("Could not connect");
     let storage = RedisStorage::new(conn);
     // build our application with some routes
     let recorder_handle = setup_metrics_recorder();

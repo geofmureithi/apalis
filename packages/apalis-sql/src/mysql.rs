@@ -158,7 +158,7 @@ where
                 let job_type = self.config.namespace.clone();
                 let mut tx = pool.begin().await?;
                 let fetch_query = "SELECT id FROM jobs
-                WHERE status = 'Pending' AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE SKIP LOCKED";
+                WHERE (status='Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE SKIP LOCKED";
                 let task_ids: Vec<MySqlRow> = sqlx::query(fetch_query)
                     .bind(job_type)
                     .bind(buffer_size)
@@ -169,7 +169,7 @@ where
                 } else {
                     let task_ids: Vec<String> = task_ids.iter().map(|r| r.get_unchecked("id")).collect();
                     let id_params = format!("?{}", ", ?".repeat(task_ids.len() - 1));
-                    let query = format!("UPDATE jobs SET status = 'Running', lock_by = ?, lock_at = NOW(), attempts = attempts + 1 WHERE id IN({}) AND status = 'Pending' AND lock_by IS NULL;", id_params);
+                    let query = format!("UPDATE jobs SET status = 'Running', lock_by = ?, lock_at = NOW() WHERE id IN({}) AND status = 'Pending' AND lock_by IS NULL;", id_params);
                     let mut query = sqlx::query(&query).bind(worker_id.clone());
                     for i in &task_ids {
                         query = query.bind(i);
@@ -433,15 +433,16 @@ where
                 .await
             {
                 for (ctx, res) in ids {
-                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ? WHERE id = ? AND lock_by = ?";
+                    let query = "UPDATE jobs SET status = ?, done_at = now(), last_error = ?, attempts = ? WHERE id = ? AND lock_by = ?";
                     let query = sqlx::query(query);
                     let last_result =
                         C::encode(res.inner.as_ref().map_err(|e| e.to_string())).map_err(Box::new);
                     match (last_result, ctx.lock_by()) {
                         (Ok(val), Some(worker_id)) => {
                             let query = query
-                                .bind(calculate_status(&res.inner).to_string())
+                                .bind(calculate_status(&ctx, &res).to_string())
                                 .bind(val)
+                                .bind(res.attempt.current() as i32)
                                 .bind(res.task_id.to_string())
                                 .bind(worker_id.to_string());
                             if let Err(e) = query.execute(&pool).await {
@@ -464,6 +465,16 @@ where
         };
         let w = worker.clone();
         let heartbeat = async move {
+            // Lets reenqueue any jobs that belonged to this worker in case of a death
+            if let Err(e) = hb_storage
+                .reenqueue_orphaned((config.buffer_size * 10) as i32, Utc::now())
+                .await
+            {
+                w.emit(Event::Error(Box::new(
+                    MysqlPollError::ReenqueueOrphanedError(e),
+                )));
+            }
+
             loop {
                 let now = Utc::now();
                 if let Err(e) = hb_storage.keep_alive_at::<Self::Layer>(w.id(), now).await {
@@ -570,9 +581,9 @@ impl<T, C: Codec> MysqlStorage<T, C> {
         let job_type = self.config.namespace.clone();
         let mut tx = self.pool.acquire().await?;
         let query = r#"Update jobs
-                        INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
+                        INNER JOIN ( SELECT workers.id as worker_id, jobs.id as job_id from workers INNER JOIN jobs ON jobs.lock_by = workers.id WHERE jobs.attempts < jobs.max_attempts AND jobs.status = "Running" AND workers.last_seen < ? AND workers.worker_type = ?
                             ORDER BY lock_at ASC LIMIT ?) as workers ON jobs.lock_by = workers.worker_id AND jobs.id = workers.job_id
-                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned";"#;
+                        SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, last_error ="Job was abandoned", attempts = attempts + 1;"#;
 
         sqlx::query(query)
             .bind(dead_since)
@@ -856,30 +867,27 @@ mod tests {
     async fn test_storage_heartbeat_reenqueuorphaned_pulse_last_seen_4min() {
         let mut storage = setup().await;
 
-        // push an Email job
+        let service = apalis_test_service_fn(|_: Request<Email, _>| async move {
+            apalis_core::sleep(Duration::from_millis(500)).await;
+            Ok::<_, io::Error>("success")
+        });
+        let (mut t, poller) = TestWrapper::new_with_service(storage.clone(), service);
+        let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
         storage
+            .keep_alive_at::<Email>(&t.worker.id(), four_minutes_ago)
+            .await
+            .unwrap();
+
+        tokio::spawn(poller);
+
+        // push an Email job
+        let parts = storage
             .push(example_email())
             .await
             .expect("failed to push job");
 
         // register a worker responding at 4 minutes ago
-        let four_minutes_ago = Utc::now() - Duration::from_secs(4 * 60);
         let six_minutes_ago = Utc::now() - Duration::from_secs(6 * 60);
-
-        let worker_id = WorkerId::new("test-worker");
-        let worker = Worker::new(worker_id, Context::default());
-        worker.start();
-        storage
-            .keep_alive_at::<Email>(&worker.id(), four_minutes_ago)
-            .await
-            .unwrap();
-
-        // fetch job
-        let job = consume_one(&mut storage, &worker).await;
-        let ctx = &job.parts.context;
-
-        assert_eq!(*ctx.status(), State::Running);
-
         // heartbeat with ReenqueueOrpharned pulse
         storage
             .reenqueue_orphaned(1, six_minutes_ago)
@@ -887,16 +895,24 @@ mod tests {
             .unwrap();
 
         // then, the job status is not changed
-        let job = storage
-            .fetch_by_id(&job.parts.task_id)
-            .await
-            .unwrap()
-            .unwrap();
+        let job = storage.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
         let ctx = job.parts.context;
-        assert_eq!(*ctx.status(), State::Running);
-        assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
-        assert!(ctx.lock_at().is_some());
+        assert_eq!(*ctx.status(), State::Pending);
+        assert_eq!(*ctx.lock_by(), None);
+        assert!(ctx.lock_at().is_none());
         assert_eq!(*ctx.last_error(), None);
+        assert_eq!(job.parts.attempt.current(), 0);
+
+        let res = t.execute_next().await.unwrap();
+
+        apalis_core::sleep(Duration::from_millis(1000)).await;
+
+        let job = storage.fetch_by_id(&res.0).await.unwrap().unwrap();
+        let ctx = job.parts.context;
+        assert_eq!(*ctx.status(), State::Done);
+        assert_eq!(*ctx.lock_by(), Some(t.worker.id().clone()));
+        assert!(ctx.lock_at().is_some());
+        assert_eq!(*ctx.last_error(), Some("{\"Ok\":\"success\"}".to_owned()));
         assert_eq!(job.parts.attempt.current(), 1);
     }
 }

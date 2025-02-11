@@ -1,10 +1,9 @@
 use anyhow::Result;
 use apalis::prelude::*;
 
-use apalis_sql::sqlite::SqliteStorage;
+use apalis_sql::{sqlite::SqliteStorage, sqlx::SqlitePool};
 
 use email_service::Email;
-use sqlx::SqlitePool;
 
 async fn produce_emails(storage: &mut SqliteStorage<Email>) -> Result<()> {
     for i in 0..2 {
