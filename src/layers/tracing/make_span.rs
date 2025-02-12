@@ -68,7 +68,7 @@ impl<B, Ctx> MakeSpan<B, Ctx> for DefaultMakeSpan {
         // required the level argument to be static. Meaning we can't just pass
         // `self.level`.
         let task_id = req.parts.task_id.to_string();
-        let attempt = req.parts.attempt.current();
+        let attempt = &req.parts.attempt;
         let span = Span::current();
         macro_rules! make_span {
             ($level:expr) => {
@@ -77,7 +77,7 @@ impl<B, Ctx> MakeSpan<B, Ctx> for DefaultMakeSpan {
                     $level,
                     "task",
                     task_id = task_id,
-                    attempt = attempt
+                    attempt = attempt.current()
                 )
             };
         }
