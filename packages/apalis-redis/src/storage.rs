@@ -79,7 +79,7 @@ pub struct RedisQueueInfo {
 }
 
 #[derive(Clone, Debug)]
-struct RedisScript {
+pub(crate) struct RedisScript {
     done_job: Script,
     enqueue_scheduled: Script,
     get_jobs: Script,
@@ -91,6 +91,7 @@ struct RedisScript {
     retry_job: Script,
     schedule_job: Script,
     vacuum: Script,
+    pub(crate) stats: Script,
 }
 
 /// The context for a redis storage job
@@ -225,11 +226,11 @@ impl Config {
         self
     }
 
-    /// Returns the Redis key for the list of active jobs associated with the queue.
+    /// Returns the Redis key for the list of pending jobs associated with the queue.
     /// The key is dynamically generated using the namespace of the queue.
     ///
     /// # Returns
-    /// A `String` representing the Redis key for the active jobs list.
+    /// A `String` representing the Redis key for the pending jobs list.
     pub fn active_jobs_list(&self) -> String {
         ACTIVE_JOBS_LIST.replace("{queue}", &self.namespace)
     }
@@ -330,7 +331,7 @@ impl Config {
 pub struct RedisStorage<T, Conn = ConnectionManager, C = JsonCodec<Vec<u8>>> {
     conn: Conn,
     job_type: PhantomData<T>,
-    scripts: RedisScript,
+    pub(super) scripts: RedisScript,
     controller: Controller,
     config: Config,
     codec: PhantomData<C>,
@@ -403,6 +404,7 @@ impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn> {
                 )),
                 schedule_job: redis::Script::new(include_str!("../lua/schedule_job.lua")),
                 vacuum: redis::Script::new(include_str!("../lua/vacuum.lua")),
+                stats: redis::Script::new(include_str!("../lua/stats.lua")),
             },
         }
     }
@@ -940,7 +942,7 @@ where
     /// Re-enqueue some jobs that might be abandoned.
     pub async fn reenqueue_active(&mut self, job_ids: Vec<&TaskId>) -> Result<(), RedisError> {
         let reenqueue_active = self.scripts.reenqueue_active.clone();
-        let inflight_set = self.config.inflight_jobs_set().to_string();
+        let inflight_set: String = self.config.inflight_jobs_set().to_string();
         let active_jobs_list = self.config.active_jobs_list();
         let signal_list = self.config.signal_list();
 
@@ -1038,9 +1040,9 @@ mod tests {
         let stream = storage.fetch_next(worker_id);
         stream
             .await
-            .expect("stream is empty")
-            .first()
             .expect("failed to poll job")
+            .first()
+            .expect("stream is empty")
             .clone()
     }
 
@@ -1182,5 +1184,26 @@ mod tests {
         // assert!(ctx.lock_at().is_some());
         // assert_eq!(*ctx.last_error(), None);
         assert_eq!(job.parts.attempt.current(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_stats() {
+        use apalis_core::backend::BackendExpose;
+
+        let mut storage = setup().await;
+        let stats = storage.stats().await.expect("failed to get stats");
+        assert_eq!(stats.pending, 0);
+        assert_eq!(stats.running, 0);
+        push_email(&mut storage, example_email()).await;
+        let stats = storage.stats().await.expect("failed to get stats");
+        assert_eq!(stats.pending, 1);
+
+        let worker = register_worker(&mut storage).await;
+
+        let _job = consume_one(&mut storage, &worker.id()).await;
+
+        let stats = storage.stats().await.expect("failed to get stats");
+        assert_eq!(stats.pending, 0);
+        assert_eq!(stats.running, 1);
     }
 }
