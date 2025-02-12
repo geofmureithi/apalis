@@ -46,9 +46,12 @@ pub struct Parts<Ctx> {
     //TODO: add State
 }
 
-impl<T, Ctx: Default> Request<T, Ctx> {
+impl<T, Ctx> Request<T, Ctx> {
     /// Creates a new [Request]
-    pub fn new(args: T) -> Self {
+    pub fn new(args: T) -> Self
+    where
+        Ctx: Default,
+    {
         Self::new_with_data(args, Extensions::default(), Ctx::default())
     }
 
@@ -63,7 +66,10 @@ impl<T, Ctx: Default> Request<T, Ctx> {
             args: req,
             parts: Parts {
                 context: ctx,
-                ..Default::default()
+                task_id: Default::default(),
+                attempt: Default::default(),
+                data: Default::default(),
+                namespace: Default::default(),
             },
         }
     }
@@ -74,8 +80,10 @@ impl<T, Ctx: Default> Request<T, Ctx> {
             args: req,
             parts: Parts {
                 context: ctx,
+                task_id: Default::default(),
+                attempt: Default::default(),
                 data,
-                ..Default::default()
+                namespace: Default::default(),
             },
         }
     }
