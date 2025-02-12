@@ -243,7 +243,7 @@ impl<S, P> Worker<Ready<S, P>> {
         Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, Error>> + Send + Unpin + 'static,
         Req: Send + 'static + Sync,
         Svc::Future: Send,
-        Svc::Response: 'static + Send + Sync + Serialize,
+        Svc::Response: 'static + Send + Sync,
         Svc::Error: Send + Sync + 'static + Into<BoxDynError>,
         Ctx: Send + 'static + Sync,
         Res: 'static,
@@ -287,7 +287,7 @@ impl<S, P> Worker<Ready<S, P>> {
         P: Backend<Request<Req, Ctx>, Res> + 'static,
         Req: Send + 'static + Sync,
         S::Future: Send,
-        S::Response: 'static + Send + Sync + Serialize,
+        S::Response: 'static + Send + Sync,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S>,
@@ -583,6 +583,7 @@ where
     }
 
     fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
+        request.parts.attempt.increment();
         self.ctx.track(self.service.call(request))
     }
 }

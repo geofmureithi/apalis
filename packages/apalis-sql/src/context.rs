@@ -32,7 +32,7 @@ impl SqlContext {
             run_at: Utc::now(),
             lock_at: None,
             done_at: None,
-            max_attempts: 25,
+            max_attempts: 5,
             last_error: None,
             lock_by: None,
         }

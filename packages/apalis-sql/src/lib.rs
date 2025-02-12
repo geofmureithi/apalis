@@ -12,7 +12,7 @@
 
 use std::{num::TryFromIntError, time::Duration};
 
-use apalis_core::{error::Error, request::State};
+use apalis_core::{error::Error, request::State, response::Response};
 
 /// The context of the sql job
 pub mod context;
@@ -35,6 +35,7 @@ pub mod sqlite;
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;
 
+use context::SqlContext;
 // Re-exports
 pub use sqlx;
 
@@ -165,11 +166,14 @@ impl Config {
 }
 
 /// Calculates the status from a result
-pub fn calculate_status<Res>(res: &Result<Res, Error>) -> State {
-    match res {
+pub fn calculate_status<Res>(ctx: &SqlContext, res: &Response<Res>) -> State {
+    match &res.inner {
         Ok(_) => State::Done,
         Err(e) => match &e {
             Error::Abort(_) => State::Killed,
+            Error::Failed(_) if ctx.max_attempts() as usize <= res.attempt.current() => {
+                State::Killed
+            }
             _ => State::Failed,
         },
     }
@@ -199,7 +203,7 @@ macro_rules! sql_storage_tests {
                 .await
                 .unwrap();
 
-            let (job_id, res) = storage.execute_next().await;
+            let (job_id, res) = storage.execute_next().await.unwrap();
             assert_eq!(res, Err("AbortError: Invalid character.".to_owned()));
             apalis_core::sleep(Duration::from_secs(1)).await;
             let job = storage
@@ -224,7 +228,7 @@ macro_rules! sql_storage_tests {
                 .await
                 .unwrap();
 
-            let (job_id, res) = storage.execute_next().await;
+            let (job_id, res) = storage.execute_next().await.unwrap();
             assert_eq!(res, Ok("()".to_owned()));
             apalis_core::sleep(Duration::from_secs(1)).await;
             let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
@@ -242,7 +246,7 @@ macro_rules! sql_storage_tests {
                 .await
                 .unwrap();
 
-            let (job_id, res) = storage.execute_next().await;
+            let (job_id, res) = storage.execute_next().await.unwrap();
             assert_eq!(
                 res,
                 Err("FailedError: Missing separator character '@'.".to_owned())
