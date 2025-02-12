@@ -122,7 +122,9 @@ members = [
   "examples/unmonitored-worker",
   "examples/fn-args",
   "examples/persisted-cron",
-  "examples/rest-api", "examples/stepped-tasks",
+  "examples/rest-api", 
+  "examples/stepped-tasks",
+  "examples/retries",
 ]
 
 

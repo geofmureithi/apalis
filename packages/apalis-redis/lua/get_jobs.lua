@@ -21,7 +21,7 @@ local count = table.getn(job_ids)
 local results = {}
 
 if count > 0 then
-  -- Add the jobs to the active set
+  -- Add the jobs to this consumer's inflight set
   redis.call("sadd", KEYS[3], unpack(job_ids))
 
   -- Remove the jobs from the active job list
