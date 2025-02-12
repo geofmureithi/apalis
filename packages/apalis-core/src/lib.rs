@@ -600,6 +600,7 @@ pub mod test_utils {
 
                 // This is testing resuming the same worker
                 // This ensures that the worker resumed any jobs lost during an interruption
+                apalis_core::sleep(Duration::from_secs(5)).await;
                 let res = t
                     .execute_next()
                     .await

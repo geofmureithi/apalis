@@ -6,7 +6,7 @@ use crate::request::Request;
 use crate::service_fn::FromRequest;
 use crate::task::task_id::TaskId;
 use call_all::CallAllUnordered;
-use futures::future::{join, select, BoxFuture};
+use futures::future::{select, BoxFuture};
 use futures::stream::BoxStream;
 use futures::{Future, FutureExt, Stream, StreamExt};
 use pin_project_lite::pin_project;
@@ -379,7 +379,7 @@ impl Future for Runnable {
             worker.start();
             this.running = true;
         }
-        let combined = Box::pin(join(poller_future, heartbeat.as_mut()));
+        let combined = Box::pin(select(poller_future.boxed(), heartbeat.as_mut()));
 
         let mut combined = select(
             combined,
