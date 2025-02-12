@@ -6,6 +6,7 @@ on:
       - "packages/apalis-sql/src/migrations/mysql/**"
       - "packages/apalis-sql/src/Cargo.toml"
       - ".github/workflows/mysql.yaml"
+      - "packages/apalis-core/**"
 
 name: Mysql CI
 

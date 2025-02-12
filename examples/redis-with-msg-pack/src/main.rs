@@ -4,8 +4,8 @@ use anyhow::Result;
 use apalis::prelude::*;
 use apalis_redis::RedisStorage;
 
+use apalis_redis::ConnectionManager;
 use email_service::{send_email, Email};
-use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -32,10 +32,11 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let conn = apalis_redis::connect("redis://127.0.0.1/").await?;
-    let config = apalis_redis::Config::default()
-        .set_namespace("apalis_redis-with-msg-pack")
-        .set_max_retries(5);
+    let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
+    let conn = apalis_redis::connect(redis_url)
+        .await
+        .expect("Could not connect");
+    let config = apalis_redis::Config::default().set_namespace("apalis_redis-with-msg-pack");
     let storage = RedisStorage::new_with_codec::<MessagePack>(conn, config);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;

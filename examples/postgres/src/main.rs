@@ -49,8 +49,8 @@ async fn main() -> Result<()> {
     Monitor::new()
         .register({
             WorkerBuilder::new("tasty-orange")
-                .enable_tracing()
                 .retry(RetryPolicy::retries(5))
+                .enable_tracing()
                 .backend(pg)
                 .build_fn(send_email)
         })

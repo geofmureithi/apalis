@@ -6,6 +6,8 @@ on:
       - "packages/apalis-sql/src/migrations/sqlite/**"
       - "packages/apalis-sql/src/Cargo.toml"
       - ".github/workflows/sqlite.yaml"
+      - "packages/apalis-core/**"
+
 
 name: Sqlite CI
 
