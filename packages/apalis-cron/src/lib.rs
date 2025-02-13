@@ -275,7 +275,7 @@ where
   
     type Codec = ();
 
-    fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll<Svc>(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let stream = self.into_stream_worker(worker);
         Poller::new(stream, futures::future::pending())
     }
