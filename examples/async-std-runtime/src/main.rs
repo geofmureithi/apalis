@@ -27,7 +27,7 @@ async fn send_in_background(reminder: Reminder) {
 async fn send_reminder(reminder: Reminder, worker: WorkerCtx) -> bool {
     // this will happen in the workers background and wont block the next tasks
     async_std::task::spawn(worker.track(send_in_background(reminder).in_current_span()));
-    false
+    true
 }
 
 #[async_std::main]
