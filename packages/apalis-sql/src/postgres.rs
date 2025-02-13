@@ -157,6 +157,8 @@ where
 
     type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, Res>;
 
+    type Codec = C;
+
     fn poll<Svc>(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let subscription = self.subscription.clone();

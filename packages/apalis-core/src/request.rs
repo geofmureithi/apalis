@@ -165,6 +165,8 @@ impl<T, Res, Ctx> Backend<Request<T, Ctx>, Res> for RequestStream<Request<T, Ctx
 
     type Layer = Identity;
 
+    type Codec = ();
+
     fn poll<Svc>(self, _worker: &Worker<Context>) -> Poller<Self::Stream> {
         Poller {
             stream: self,

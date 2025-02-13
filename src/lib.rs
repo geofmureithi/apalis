@@ -89,6 +89,7 @@ pub mod prelude {
         request::{Request, RequestStream},
         response::IntoResponse,
         service_fn::{service_fn, FromRequest, ServiceFn},
+        step::*,
         storage::Storage,
         task::attempt::Attempt,
         task::task_id::TaskId,

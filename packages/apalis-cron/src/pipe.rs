@@ -29,6 +29,8 @@ where
 
     type Layer = Inner::Layer;
 
+    type Codec = Inner::Codec;
+
     fn poll<Svc: Service<Request<T, Ctx>, Response = Res>>(
         mut self,
         worker: &Worker<Context>,
