@@ -59,8 +59,7 @@ async fn main() -> Result<(), std::io::Error> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
     let conn = apalis_redis::connect("redis://127.0.0.1/").await.unwrap();
-    let config = apalis_redis::Config::default()
-        .set_namespace("apalis_redis-with-msg-pack");
+    let config = apalis_redis::Config::default().set_namespace("apalis_redis-with-msg-pack");
 
     let mut storage = RedisStorage::new_with_config(conn, config);
     produce_jobs(&mut storage).await;

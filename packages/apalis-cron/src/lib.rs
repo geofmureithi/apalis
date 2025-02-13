@@ -272,7 +272,7 @@ where
     type Stream = RequestStream<Request<Req, ()>>;
 
     type Layer = Identity;
-  
+
     type Codec = ();
 
     fn poll<Svc>(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
