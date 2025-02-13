@@ -4,7 +4,6 @@ use std::{
 };
 
 use futures::{future::BoxFuture, Future, FutureExt};
-use serde::Serialize;
 use tower::{Layer, Service};
 
 /// Shutdown utilities

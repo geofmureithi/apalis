@@ -242,7 +242,6 @@ pub mod test_utils {
             Send,
         <<B::Layer as Layer<TestEmitService<Svc>>>::Service as Service<Request<Req, Ctx>>>::Error:
             Send + Sync + Sync + std::error::Error,
-        
     {
             let (mut res_tx, res_rx) = channel(10);
             let should_next = Arc::new(AtomicBool::new(false));

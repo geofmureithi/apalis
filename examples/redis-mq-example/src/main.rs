@@ -56,7 +56,7 @@ where
 {
     type Stream = RequestStream<Request<Req, RedisMqContext>>;
 
-    type Layer = AckLayer<Self, Req, RedisMqContext>;
+    type Layer = AckLayer<Self, Req, RedisMqContext, C>;
     type Compact = Vec<u8>;
 
     fn poll(mut self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
@@ -84,7 +84,7 @@ where
     }
 }
 
-impl<T, C, Res> Ack<T, Res> for RedisMq<T, C>
+impl<T, C, Res> Ack<T, Res, C> for RedisMq<T, C>
 where
     T: Send,
     Res: Debug + Send + Sync,

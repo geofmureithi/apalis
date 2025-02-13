@@ -155,7 +155,7 @@ where
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
 
-    type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext>;
+    type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, C>;
 
     type Compact = Value;
 
@@ -527,8 +527,6 @@ where
         Ok(req.parts)
     }
 
-    
-
     async fn schedule_request(
         &mut self,
         req: Request<Self::Job, SqlContext>,
@@ -644,7 +642,7 @@ where
     }
 }
 
-impl<T, Res, C> Ack<T, Res> for PostgresStorage<T, C>
+impl<T, Res, C> Ack<T, Res, C> for PostgresStorage<T, C>
 where
     T: Sync + Send,
     Res: Serialize + Sync + Clone,

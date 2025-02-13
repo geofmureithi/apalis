@@ -474,7 +474,7 @@ where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
-    type Layer = AckLayer<SqliteStorage<T, C>, T, SqlContext>;
+    type Layer = AckLayer<SqliteStorage<T, C>, T, SqlContext, C>;
 
     type Compact = String;
 
@@ -539,7 +539,7 @@ where
     }
 }
 
-impl<T: Sync + Send, C: Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T, C> {
+impl<T: Sync + Send, C: Send, Res: Serialize + Sync> Ack<T, Res, C> for SqliteStorage<T, C> {
     type Context = SqlContext;
     type AckError = sqlx::Error;
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {

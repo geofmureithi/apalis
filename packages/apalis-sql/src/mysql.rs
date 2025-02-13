@@ -432,7 +432,7 @@ where
 {
     type Stream = BackendStream<RequestStream<Request<Req, SqlContext>>>;
 
-    type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext>;
+    type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, C>;
 
     type Compact = Value;
 
@@ -541,7 +541,7 @@ where
     }
 }
 
-impl<T, Res, C> Ack<T, Res> for MysqlStorage<T, C>
+impl<T, Res, C> Ack<T, Res, C> for MysqlStorage<T, C>
 where
     T: Sync + Send,
     Res: Serialize + Send + 'static + Sync,
