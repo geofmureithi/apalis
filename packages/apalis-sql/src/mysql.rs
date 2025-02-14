@@ -52,7 +52,7 @@ where
 
 impl<T, C> fmt::Debug for MysqlStorage<T, C>
 where
-    C: Debug + Codec,
+    C: Codec,
     C::Compact: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -61,7 +61,7 @@ where
             .field("job_type", &"PhantomData<T>")
             .field("controller", &self.controller)
             .field("config", &self.config)
-            .field("codec", &self.codec)
+            .field("codec", &std::any::type_name::<C>())
             .field("ack_notify", &self.ack_notify)
             .finish()
     }
@@ -69,7 +69,7 @@ where
 
 impl<T, C> Clone for MysqlStorage<T, C>
 where
-    C: Debug + Codec,
+    C: Codec,
 {
     fn clone(&self) -> Self {
         let pool = self.pool.clone();
@@ -133,7 +133,7 @@ where
 
 impl<T, C> MysqlStorage<T, C>
 where
-    T: DeserializeOwned + Send + Unpin + Sync + 'static,
+    T: DeserializeOwned + Send + Sync + 'static,
     C: Codec<Compact = Value> + Send + 'static,
 {
     fn stream_jobs(
@@ -227,7 +227,8 @@ where
 impl<T, C> Storage for MysqlStorage<T, C>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
-    C: Codec<Compact = Value> + Send,
+    C: Codec<Compact = Value> + Send + Sync + 'static,
+    C::Error: std::error::Error + 'static + Send + Sync,
 {
     type Job = T;
 
@@ -238,6 +239,28 @@ where
     async fn push_request(
         &mut self,
         job: Request<Self::Job, SqlContext>,
+    ) -> Result<Parts<SqlContext>, sqlx::Error> {
+        let (args, parts) = job.take_parts();
+        let query =
+            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL)";
+        let pool = self.pool.clone();
+
+        let job = C::encode(args)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+        let job_type = self.config.namespace.clone();
+        sqlx::query(query)
+            .bind(job)
+            .bind(parts.task_id.to_string())
+            .bind(job_type.to_string())
+            .bind(parts.context.max_attempts())
+            .execute(&pool)
+            .await?;
+        Ok(parts)
+    }
+
+    async fn push_raw_request(
+        &mut self,
+        job: Request<Self::Compact, SqlContext>,
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
         let (args, parts) = job.take_parts();
         let query =
@@ -399,19 +422,21 @@ pub enum MysqlPollError {
     ReenqueueOrphanedError(sqlx::Error),
 }
 
-impl<Req, Res, C> Backend<Request<Req, SqlContext>, Res> for MysqlStorage<Req, C>
+impl<Req, C> Backend<Request<Req, SqlContext>> for MysqlStorage<Req, C>
 where
-    Req: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
-    C: Debug + Codec<Compact = Value> + Clone + Send + 'static + Sync,
+    Req: Serialize + DeserializeOwned + Sync + Send + 'static,
+    C: Codec<Compact = Value> + Send + 'static + Sync,
     C::Error: std::error::Error + 'static + Send + Sync,
 {
     type Stream = BackendStream<RequestStream<Request<Req, SqlContext>>>;
 
-    type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, Res>;
+    type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, C>;
 
     type Codec = C;
 
-    fn poll<Svc>(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    type Compact = Value;
+
+    fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
@@ -516,7 +541,7 @@ where
     }
 }
 
-impl<T, Res, C> Ack<T, Res> for MysqlStorage<T, C>
+impl<T, Res, C> Ack<T, Res, C> for MysqlStorage<T, C>
 where
     T: Sync + Send,
     Res: Serialize + Send + 'static + Sync,

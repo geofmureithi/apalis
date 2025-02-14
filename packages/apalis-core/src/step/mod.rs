@@ -261,7 +261,7 @@ impl<Req, P, M, Compact, Ctx> StepWorkerFactory<Req, Ctx, Compact>
 where
     M: Layer<StepService<Ctx, Compact, P>>,
     Req: Send + 'static + Sync,
-    P: Backend<Request<Req, Ctx>, Compact> + 'static,
+    P: Backend<Request<Req, Ctx>> + 'static,
     P: Storage + Clone,
     M: 'static,
 {
@@ -269,7 +269,7 @@ where
 
     type Service = M::Service;
 
-    type Codec = P::Codec;
+    type Codec = <P as Backend<Request<Req, Ctx>>>::Codec;
 
     fn build_steps(
         self,
