@@ -249,7 +249,7 @@ where
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait StepWorkerFactory<Req, Ctx, Compact, Input, Output> {
+pub trait StepWorkerFactory<Ctx, Compact, Input, Output> {
     /// The request source for the worker
     type Source;
 
@@ -271,12 +271,12 @@ pub trait StepWorkerFactory<Req, Ctx, Compact, Input, Output> {
     ) -> Worker<Ready<Self::Service, Self::Source>>;
 }
 
-impl<Req, P, M, Compact, Ctx, Input, Output> StepWorkerFactory<Req, Ctx, Compact, Input, Output>
-    for WorkerBuilder<Req, Ctx, P, M, StepService<Ctx, Compact, P>>
+impl<P, M, Compact, Ctx, Input, Output> StepWorkerFactory<Ctx, Compact, Input, Output>
+    for WorkerBuilder<StepRequest<Compact>, Ctx, P, M, StepService<Ctx, Compact, P>>
 where
     M: Layer<StepService<Ctx, Compact, P>>,
-    Req: Send + 'static + Sync,
-    P: Backend<Request<Req, Ctx>> + 'static,
+    Compact: Send + 'static + Sync,
+    P: Backend<Request<StepRequest<Compact>, Ctx>> + 'static,
     P: Storage + Clone,
     M: 'static,
 {
@@ -284,7 +284,7 @@ where
 
     type Service = M::Service;
 
-    type Codec = <P as Backend<Request<Req, Ctx>>>::Codec;
+    type Codec = <P as Backend<Request<StepRequest<Compact>, Ctx>>>::Codec;
 
     fn build_stepped(
         self,
