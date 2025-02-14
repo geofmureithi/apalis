@@ -27,21 +27,25 @@ pub enum GoTo<N = ()> {
     Done(N),
 }
 
-pub struct StepBuilder<Ctx, Compact, Current, Encode> {
+pub struct StepBuilder<Ctx, Compact, Input, Current, Encode> {
     steps: Vec<BoxedService<Request<StepRequest<Compact>, Ctx>, GoTo<Compact>>>,
     current: PhantomData<Current>,
     codec: PhantomData<Encode>,
+    input: PhantomData<Input>,
 }
 
-impl<Ctx, Compact, Current, Encode> StepBuilder<Ctx, Compact, Current, Encode> {
+impl<Ctx, Compact, Input, Encode> StepBuilder<Ctx, Compact, Input, Input, Encode> {
     pub fn new() -> Self {
         Self {
             steps: Vec::new(),
             current: PhantomData,
             codec: PhantomData,
+            input: PhantomData,
         }
     }
+}
 
+impl<Ctx, Compact, Input, Current, Encode> StepBuilder<Ctx, Compact, Input, Current, Encode> {
     pub fn build<S>(self, store: S) -> StepService<Ctx, Compact, S> {
         StepService {
             inner: self.steps,
@@ -181,60 +185,71 @@ pub struct StepRequest<T> {
     pub current: usize,
 }
 
-pub trait Step<Compact, Ctx, S, Input, Output, Encode> {
-    fn step(self, service: S) -> StepBuilder<Ctx, Compact, Output, Encode>;
+pub trait Step<Compact, Ctx, S, Input, Current, Next, Encode> {
+    fn step(self, service: S) -> StepBuilder<Ctx, Compact, Input, Next, Encode>;
 }
 
-impl<S, Ctx, Input, Output, Compact, Encode> Step<Compact, Ctx, S, Input, Output, Encode>
-    for StepBuilder<Ctx, Compact, Input, Encode>
+impl<S, Ctx, Input, Current, Next, Compact, Encode>
+    Step<Compact, Ctx, S, Input, Current, Next, Encode>
+    for StepBuilder<Ctx, Compact, Input, Current, Encode>
 where
-    S: Service<Request<Input, Ctx>, Response = GoTo<Output>, Error = crate::error::Error>
+    S: Service<Request<Current, Ctx>, Response = GoTo<Next>, Error = crate::error::Error>
         + Send
         + 'static
         + Sync,
     S::Future: Send + 'static,
-    Input: DeserializeOwned,
+    Current: DeserializeOwned + Send + 'static,
     S::Response: 'static,
     Input: Send + 'static + Serialize,
     Ctx: Default + Send,
-    Output: 'static + Send + Serialize,
+    Next: 'static + Send + Serialize,
     Compact: Send + 'static,
     Encode: Codec<Compact = Compact> + Send + 'static,
     Encode::Error: Debug,
 {
-    fn step(mut self, service: S) -> StepBuilder<Ctx, Compact, Output, Encode> {
+    fn step(mut self, service: S) -> StepBuilder<Ctx, Compact, Input, Next, Encode> {
         self.steps.push(BoxedService::new(TransformingService::<
             S,
             Compact,
             Encode,
-            Input,
-            Output,
+            Current,
+            Next,
         >::new(service)));
         StepBuilder {
             steps: self.steps,
             current: PhantomData,
             codec: PhantomData,
+            input: PhantomData,
         }
     }
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait StepFn<Compact, Ctx, F, FnArgs, Input, Output, Codec> {
-    fn step_fn(self, f: F) -> StepBuilder<Ctx, Compact, Output, Codec>;
+pub trait StepFn<Compact, Ctx, F, FnArgs, Input, Current, Next, Codec> {
+    fn step_fn(self, f: F) -> StepBuilder<Ctx, Compact, Input, Next, Codec>;
 }
 
-impl<S, Ctx: Send + Sync, F: Send + Sync, FnArgs: Send + Sync, Input, Output, Compact, Encode>
-    StepFn<Compact, Ctx, F, FnArgs, Input, Output, Encode> for S
+impl<
+        S,
+        Ctx: Send + Sync,
+        F: Send + Sync,
+        FnArgs: Send + Sync,
+        Input,
+        Current,
+        Next,
+        Compact,
+        Encode,
+    > StepFn<Compact, Ctx, F, FnArgs, Input, Current, Next, Encode> for S
 where
-    S: Step<Compact, Ctx, ServiceFn<F, Input, Ctx, FnArgs>, Input, Output, Encode>,
+    S: Step<Compact, Ctx, ServiceFn<F, Current, Ctx, FnArgs>, Input, Current, Next, Encode>,
 {
-    fn step_fn(self, f: F) -> StepBuilder<Ctx, Compact, Output, Encode> {
+    fn step_fn(self, f: F) -> StepBuilder<Ctx, Compact, Input, Next, Encode> {
         self.step(service_fn(f))
     }
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait StepWorkerFactory<Req, Ctx, Compact, Output> {
+pub trait StepWorkerFactory<Req, Ctx, Compact, Input, Output> {
     /// The request source for the worker
     type Source;
 
@@ -252,11 +267,11 @@ pub trait StepWorkerFactory<Req, Ctx, Compact, Output> {
     ///
     fn build_stepped(
         self,
-        builder: StepBuilder<Ctx, Compact, Output, Self::Codec>,
+        builder: StepBuilder<Ctx, Compact, Input, Output, Self::Codec>,
     ) -> Worker<Ready<Self::Service, Self::Source>>;
 }
 
-impl<Req, P, M, Compact, Ctx, Output> StepWorkerFactory<Req, Ctx, Compact, Output>
+impl<Req, P, M, Compact, Ctx, Input, Output> StepWorkerFactory<Req, Ctx, Compact, Input, Output>
     for WorkerBuilder<Req, Ctx, P, M, StepService<Ctx, Compact, P>>
 where
     M: Layer<StepService<Ctx, Compact, P>>,
@@ -273,7 +288,7 @@ where
 
     fn build_stepped(
         self,
-        builder: StepBuilder<Ctx, Compact, Output, Self::Codec>,
+        builder: StepBuilder<Ctx, Compact, Input, Output, Self::Codec>,
     ) -> Worker<Ready<M::Service, P>> {
         let worker_id = self.id;
         let poller = self.source;
@@ -293,21 +308,25 @@ pub enum StepError {
     StorageError(BoxDynError),
 }
 
-pub trait StorageStep<S: Storage, Codec, Compact> {
+pub trait StorageStep<S: Storage, Codec, Compact, Input> {
     async fn push_step<T: Serialize>(
         &mut self,
         step: &StepRequest<T>,
     ) -> Result<Parts<S::Context>, StepError>;
 
-    async fn start_stepped<T: Serialize>(&mut self, step: T) -> Result<Parts<S::Context>, StepError> {
+    async fn start_stepped(&mut self, step: Input) -> Result<Parts<S::Context>, StepError>
+    where
+        Input: Serialize,
+    {
         self.push_step(&StepRequest {
             inner: step,
             current: 0,
-        }).await
+        })
+        .await
     }
 }
 
-impl<S, Encode, Compact> StorageStep<S, Encode, Compact> for S
+impl<S, Encode, Compact, Input> StorageStep<S, Encode, Compact, Input> for S
 where
     S: Storage<Job = StepRequest<Compact>, Codec = Encode>
         + Backend<Request<StepRequest<Compact>, <S as Storage>::Context>>,
