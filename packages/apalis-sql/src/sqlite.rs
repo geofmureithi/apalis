@@ -702,13 +702,13 @@ mod tests {
     ) -> Worker<Context> {
         let worker_id = WorkerId::new("test-worker");
 
+        let worker = Worker::new(worker_id, Default::default());
         storage
-            .keep_alive_at::<DummyService>(&worker_id, last_seen)
+            .keep_alive_at(&worker, last_seen)
             .await
             .expect("failed to register worker");
-        let wrk = Worker::new(worker_id, Context::default());
-        wrk.start();
-        wrk
+        worker.start();
+        worker
     }
 
     async fn register_worker(storage: &mut SqliteStorage<Email>) -> Worker<Context> {
