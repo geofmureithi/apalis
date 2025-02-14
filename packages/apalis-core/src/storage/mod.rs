@@ -3,12 +3,13 @@ use std::time::Duration;
 use futures::Future;
 
 use crate::{
+    backend::Backend,
     request::{Parts, Request},
     task::task_id::TaskId,
 };
 
 /// Represents a [Storage] that can persist a request.
-pub trait Storage {
+pub trait Storage: Backend<Request<Self::Job, Self::Context>> {
     /// The type of job that can be persisted
     type Job;
 
@@ -17,6 +18,9 @@ pub trait Storage {
 
     /// This is the type that storages store as the metadata related to a job
     type Context: Default;
+
+    /// The encoding and decoding solution for the backend
+    type Codec;
 
     /// Pushes a job to a storage
     fn push(
@@ -30,6 +34,12 @@ pub trait Storage {
     fn push_request(
         &mut self,
         req: Request<Self::Job, Self::Context>,
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send;
+
+    /// Pushes a constructed request to a storage
+    fn push_raw_request(
+        &mut self,
+        req: Request<Self::Compact, Self::Context>,
     ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send;
 
     /// Push a job with defaults into the scheduled set

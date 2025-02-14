@@ -49,16 +49,17 @@ impl<T, C> Clone for RedisMq<T, C> {
     }
 }
 
-impl<Req, C, Res> Backend<Request<Req, RedisMqContext>, Res> for RedisMq<Req, C>
+impl<Req, C> Backend<Request<Req, RedisMqContext>> for RedisMq<Req, C>
 where
     Req: Send + DeserializeOwned + 'static,
     C: Codec<Compact = Vec<u8>>,
 {
     type Stream = RequestStream<Request<Req, RedisMqContext>>;
 
-    type Layer = AckLayer<Self, Req, RedisMqContext, Res>;
+    type Layer = AckLayer<Self, Req, RedisMqContext, C>;
+    type Compact = Vec<u8>;
 
-    fn poll<Svc>(mut self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll(mut self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.get_buffer_size());
         let stream: RequestStream<Request<Req, RedisMqContext>> = Box::pin(rx);
         let layer = AckLayer::new(self.clone());
@@ -83,7 +84,7 @@ where
     }
 }
 
-impl<T, C, Res> Ack<T, Res> for RedisMq<T, C>
+impl<T, C, Res> Ack<T, Res, C> for RedisMq<T, C>
 where
     T: Send,
     Res: Debug + Send + Sync,
@@ -114,10 +115,36 @@ where
 {
     type Error = RsmqError;
 
+    type Codec = C;
+
+    type Context = RedisMqContext;
+
     async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
         let bytes = C::encode(Request::<Message, RedisMqContext>::new(message))
             .map_err(Into::into)
             .unwrap();
+        self.conn
+            .send_message(self.config.get_namespace(), bytes, None)
+            .await?;
+        Ok(())
+    }
+
+    async fn enqueue_request(
+        &mut self,
+        message: Request<Message, RedisMqContext>,
+    ) -> Result<(), Self::Error> {
+        let bytes = C::encode(message).map_err(Into::into).unwrap();
+        self.conn
+            .send_message(self.config.get_namespace(), bytes, None)
+            .await?;
+        Ok(())
+    }
+
+    async fn enqueue_raw_request(
+        &mut self,
+        message: Request<Self::Compact, RedisMqContext>,
+    ) -> Result<(), Self::Error> {
+        let bytes = C::encode(message).map_err(Into::into).unwrap();
         self.conn
             .send_message(self.config.get_namespace(), bytes, None)
             .await?;
@@ -133,6 +160,20 @@ where
                 let req: Request<Message, RedisMqContext> =
                     C::decode(r.message).map_err(Into::into).unwrap();
                 req.args
+            }))
+    }
+
+    async fn dequeue_request(
+        &mut self,
+    ) -> Result<Option<Request<Message, RedisMqContext>>, Self::Error> {
+        Ok(self
+            .conn
+            .receive_message(self.config.get_namespace(), None)
+            .await?
+            .map(|r| {
+                let req: Request<Message, RedisMqContext> =
+                    C::decode(r.message).map_err(Into::into).unwrap();
+                req
             }))
     }
 
