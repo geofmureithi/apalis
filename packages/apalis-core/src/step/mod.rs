@@ -46,21 +46,23 @@ impl<Ctx, Compact, Input, Encode> StepBuilder<Ctx, Compact, Input, Input, Encode
 }
 
 impl<Ctx, Compact, Input, Current, Encode> StepBuilder<Ctx, Compact, Input, Current, Encode> {
-    pub fn build<S>(self, store: S) -> StepService<Ctx, Compact, S> {
+    pub fn build<S>(self, store: S) -> StepService<Ctx, Compact, Input, S> {
         StepService {
             inner: self.steps,
             storage: store,
+            input: PhantomData,
         }
     }
 }
 
-pub struct StepService<Ctx, Compact, S> {
+pub struct StepService<Ctx, Compact, Input, S> {
     inner: Vec<BoxedService<Request<StepRequest<Compact>, Ctx>, GoTo<Compact>>>,
     storage: S,
+    input: PhantomData<Input>,
 }
 
-impl<Ctx, Compact, S: Storage<Job = StepRequest<Compact>> + Send + Clone + 'static>
-    Service<Request<StepRequest<Compact>, Ctx>> for StepService<Ctx, Compact, S>
+impl<Ctx, Compact, S: Storage<Job = StepRequest<Compact>> + Send + Clone + 'static, Input>
+    Service<Request<StepRequest<Compact>, Ctx>> for StepService<Ctx, Compact, Input, S>
 where
     Compact: DeserializeOwned + Send + Clone + 'static,
     S::Error: Send + Sync + std::error::Error,
@@ -80,7 +82,6 @@ where
             .inner
             .get_mut(index)
             .expect("Invalid index in inner services");
-
         // Call the service and save the result to the store.
         let fut = service.call(req);
         let mut storage = self.storage.clone();
@@ -121,15 +122,18 @@ where
     }
 }
 
-pub struct TransformingService<S, Compact, Codec, Input, Output> {
+pub struct TransformingService<S, Compact, Input, Current, Next, Codec> {
     inner: S,
     _req: PhantomData<Compact>,
     _input: PhantomData<Input>,
     _codec: PhantomData<Codec>,
-    _output: PhantomData<Output>,
+    _output: PhantomData<Next>,
+    _current: PhantomData<Current>,
 }
 
-impl<S, Compact, Codec, Input, Output> TransformingService<S, Compact, Codec, Input, Output> {
+impl<S, Compact, Codec, Input, Current, Next>
+    TransformingService<S, Compact, Input, Current, Next, Codec>
+{
     pub fn new(inner: S) -> Self {
         TransformingService {
             inner,
@@ -137,18 +141,19 @@ impl<S, Compact, Codec, Input, Output> TransformingService<S, Compact, Codec, In
             _input: PhantomData,
             _output: PhantomData,
             _codec: PhantomData,
+            _current: PhantomData,
         }
     }
 }
 
-impl<S, Ctx, Input, Output, Compact, Encode> Service<Request<StepRequest<Compact>, Ctx>>
-    for TransformingService<S, Compact, Encode, Input, Output>
+impl<S, Ctx, Input, Current, Next, Compact, Encode> Service<Request<StepRequest<Compact>, Ctx>>
+    for TransformingService<S, Compact, Input, Current, Next, Encode>
 where
-    S: Service<Request<Input, Ctx>, Response = GoTo<Output>>,
+    S: Service<Request<Current, Ctx>, Response = GoTo<Next>>,
     Ctx: Default,
     S::Future: Send + 'static,
-    Input: DeserializeOwned,
-    Output: Serialize,
+    Current: DeserializeOwned,
+    Next: Serialize,
     Encode: Codec<Compact = Compact>,
     Encode::Error: Debug,
 {
@@ -161,7 +166,7 @@ where
     }
 
     fn call(&mut self, req: Request<StepRequest<Compact>, Ctx>) -> Self::Future {
-        let transformed_req: Request<Input, Ctx> =
+        let transformed_req: Request<Current, Ctx> =
             { Request::new_with_parts(Encode::decode(req.args.inner).unwrap(), req.parts) };
         let fut = self.inner.call(transformed_req).map(|res| match res {
             Ok(o) => Ok(match o {
@@ -185,12 +190,12 @@ pub struct StepRequest<T> {
     pub current: usize,
 }
 
-pub trait Step<Compact, Ctx, S, Input, Current, Next, Encode> {
+pub trait Step<S, Ctx, Compact, Input, Current, Next, Encode> {
     fn step(self, service: S) -> StepBuilder<Ctx, Compact, Input, Next, Encode>;
 }
 
 impl<S, Ctx, Input, Current, Next, Compact, Encode>
-    Step<Compact, Ctx, S, Input, Current, Next, Encode>
+    Step<S, Ctx, Compact, Input, Current, Next, Encode>
     for StepBuilder<Ctx, Compact, Input, Current, Encode>
 where
     S: Service<Request<Current, Ctx>, Response = GoTo<Next>, Error = crate::error::Error>
@@ -211,9 +216,10 @@ where
         self.steps.push(BoxedService::new(TransformingService::<
             S,
             Compact,
-            Encode,
+            Input,
             Current,
             Next,
+            Encode,
         >::new(service)));
         StepBuilder {
             steps: self.steps,
@@ -225,7 +231,7 @@ where
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait StepFn<Compact, Ctx, F, FnArgs, Input, Current, Next, Codec> {
+pub trait StepFn<F, FnArgs, Ctx, Compact, Input, Current, Next, Codec> {
     fn step_fn(self, f: F) -> StepBuilder<Ctx, Compact, Input, Next, Codec>;
 }
 
@@ -239,9 +245,9 @@ impl<
         Next,
         Compact,
         Encode,
-    > StepFn<Compact, Ctx, F, FnArgs, Input, Current, Next, Encode> for S
+    > StepFn<F, FnArgs, Ctx, Compact, Input, Current, Next, Encode> for S
 where
-    S: Step<Compact, Ctx, ServiceFn<F, Current, Ctx, FnArgs>, Input, Current, Next, Encode>,
+    S: Step<ServiceFn<F, Current, Ctx, FnArgs>, Ctx, Compact, Input, Current, Next, Encode>,
 {
     fn step_fn(self, f: F) -> StepBuilder<Ctx, Compact, Input, Next, Encode> {
         self.step(service_fn(f))
@@ -257,8 +263,8 @@ pub trait StepWorkerFactory<Ctx, Compact, Input, Output> {
     type Service;
 
     type Codec;
-    /// Builds a [`WorkerFactory`] using a [`tower`] service
-    /// that can be used to generate a new [`Worker`] using the `build` method
+    /// Builds a [`StepWorkerFactory`] using a [`tower`] service
+    /// that can be used to generate a new [`Worker`] using the `build_stepped` method
     /// # Arguments
     ///
     /// * `service` - A tower service
@@ -271,14 +277,13 @@ pub trait StepWorkerFactory<Ctx, Compact, Input, Output> {
     ) -> Worker<Ready<Self::Service, Self::Source>>;
 }
 
-impl<P, M, Compact, Ctx, Input, Output> StepWorkerFactory<Ctx, Compact, Input, Output>
-    for WorkerBuilder<StepRequest<Compact>, Ctx, P, M, StepService<Ctx, Compact, P>>
+impl<Req, P, M, Ctx, Input, Compact, Output> StepWorkerFactory<Ctx, Compact, Input, Output>
+    for WorkerBuilder<Req, Ctx, P, M, StepService<Ctx, Compact, Input, P>>
 where
-    M: Layer<StepService<Ctx, Compact, P>>,
     Compact: Send + 'static + Sync,
     P: Backend<Request<StepRequest<Compact>, Ctx>> + 'static,
-    P: Storage + Clone,
-    M: 'static,
+    P: Storage<Job = StepRequest<Compact>> + Clone,
+    M: Layer<StepService<Ctx, Compact, Input, P>> + 'static,
 {
     type Source = P;
 

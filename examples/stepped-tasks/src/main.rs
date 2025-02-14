@@ -60,10 +60,10 @@ async fn main() -> Result<(), std::io::Error> {
     let config = apalis_redis::Config::default().set_namespace("apalis_redis-with-msg-pack");
 
     let mut storage = RedisStorage::new_with_config(conn, config);
-    // storage
-    //     .start_stepped(&FirstMonthEmail { second_user_id: 1})
-    //     .await
-    //     .unwrap();
+    storage
+        .start_stepped(WelcomeEmail { welcome_id: 1 })
+        .await
+        .unwrap();
 
     let welcome = ServiceBuilder::new()
         .retry(RetryPolicy::retries(5)) // welcome will specifically be retried 5 times
