@@ -1,30 +1,34 @@
-use std::time::Duration;
+use std::{fmt::Debug, time::Duration};
 
-use apalis::prelude::*;
+use apalis::{
+    layers::{retry::RetryPolicy, tracing::TraceLayer},
+    prelude::*,
+};
 use apalis_redis::RedisStorage;
 use serde::{Deserialize, Serialize};
+use tower::ServiceBuilder;
 use tracing::info;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct WelcomeEmail {
-    user_id: usize,
+    welcome_id: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 
 struct FirstWeekEmail {
-    user_id: usize,
+    first_user_id: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 
 struct FirstMonthEmail {
-    user_id: usize,
+    second_user_id: usize,
 }
 
 async fn welcome(req: WelcomeEmail, ctx: Data<()>) -> Result<GoTo<FirstWeekEmail>, Error> {
     Ok::<_, _>(GoTo::Next(FirstWeekEmail {
-        user_id: req.user_id + 1,
+        first_user_id: req.welcome_id + 1,
     }))
 }
 
@@ -34,24 +38,17 @@ async fn first_week_email(
 ) -> Result<GoTo<FirstMonthEmail>, Error> {
     Ok::<_, _>(GoTo::Delay {
         next: FirstMonthEmail {
-            user_id: req.user_id + 1,
+            second_user_id: req.first_user_id + 1,
         },
         delay: Duration::from_secs(10),
     })
 }
 
-async fn first_month_email(req: FirstMonthEmail, ctx: Data<()>) -> Result<GoTo<()>, Error> {
-    Ok::<_, _>(GoTo::Done)
-}
-
-async fn produce_jobs(storage: &mut RedisStorage<StepRequest<Vec<u8>>>) {
-    storage
-        .push(StepRequest {
-            current: 0,
-            inner: serde_json::to_vec(&WelcomeEmail { user_id: 1 }).unwrap(),
-        })
-        .await
-        .unwrap();
+async fn first_month_email(
+    req: FirstMonthEmail,
+    ctx: Data<()>,
+) -> Result<GoTo<&'static str>, Error> {
+    Ok::<_, _>(GoTo::Done("Completed job successfully"))
 }
 
 #[tokio::main]
@@ -62,11 +59,17 @@ async fn main() -> Result<(), std::io::Error> {
     let config = apalis_redis::Config::default().set_namespace("apalis_redis-with-msg-pack");
 
     let mut storage = RedisStorage::new_with_config(conn, config);
-    produce_jobs(&mut storage).await;
+    storage
+        .start_stepped(&WelcomeEmail { welcome_id: 1 })
+        .await
+        .unwrap();
 
+    let welcome = ServiceBuilder::new()
+        .retry(RetryPolicy::retries(5)) // welcome will specifically be retried 5 times
+        .service(service_fn(welcome));
     // Build steps
     let steps = StepBuilder::new()
-        .step_fn(welcome)
+        .step(welcome)
         .step_fn(first_week_email)
         .step_fn(first_month_email);
 
@@ -75,7 +78,7 @@ async fn main() -> Result<(), std::io::Error> {
         .enable_tracing()
         .concurrency(2)
         .backend(storage)
-        .build_steps(steps)
+        .build_stepped(steps)
         .on_event(|e| info!("{e}"))
         .run()
         .await;

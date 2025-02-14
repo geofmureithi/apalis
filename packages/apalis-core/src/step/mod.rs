@@ -1,8 +1,8 @@
 use crate::backend::Backend;
 use crate::builder::WorkerBuilder;
 use crate::codec::Codec;
-use crate::error::Error;
-use crate::request::Request;
+use crate::error::{BoxDynError, Error};
+use crate::request::{Parts, Request};
 use crate::service_fn::{service_fn, ServiceFn};
 use crate::storage::Storage;
 use crate::worker::{Ready, Worker};
@@ -24,7 +24,7 @@ type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, crate:
 pub enum GoTo<N = ()> {
     Next(N),
     Delay { next: N, delay: Duration },
-    Done,
+    Done(N),
 }
 
 pub struct StepBuilder<Ctx, Compact, Current, Encode> {
@@ -105,7 +105,7 @@ where
                                 .await
                                 .map_err(|e| Error::SourceError(Arc::new(e.into())))?;
                         }
-                        GoTo::Done => {
+                        GoTo::Done(_) => {
                             // Ignore
                         }
                     };
@@ -166,7 +166,7 @@ where
                     next: Encode::encode(next).unwrap(),
                     delay,
                 },
-                GoTo::Done => GoTo::Done,
+                GoTo::Done(res) => GoTo::Done(Encode::encode(res).unwrap()),
             }),
             Err(e) => Err(e),
         });
@@ -234,7 +234,7 @@ where
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait StepWorkerFactory<Req, Ctx, Compact> {
+pub trait StepWorkerFactory<Req, Ctx, Compact, Output> {
     /// The request source for the worker
     type Source;
 
@@ -250,13 +250,13 @@ pub trait StepWorkerFactory<Req, Ctx, Compact> {
     ///
     /// # Examples
     ///
-    fn build_steps(
+    fn build_stepped(
         self,
-        builder: StepBuilder<Ctx, Compact, (), Self::Codec>,
+        builder: StepBuilder<Ctx, Compact, Output, Self::Codec>,
     ) -> Worker<Ready<Self::Service, Self::Source>>;
 }
 
-impl<Req, P, M, Compact, Ctx> StepWorkerFactory<Req, Ctx, Compact>
+impl<Req, P, M, Compact, Ctx, Output> StepWorkerFactory<Req, Ctx, Compact, Output>
     for WorkerBuilder<Req, Ctx, P, M, StepService<Ctx, Compact, P>>
 where
     M: Layer<StepService<Ctx, Compact, P>>,
@@ -271,9 +271,9 @@ where
 
     type Codec = <P as Backend<Request<Req, Ctx>>>::Codec;
 
-    fn build_steps(
+    fn build_stepped(
         self,
-        builder: StepBuilder<Ctx, Compact, (), Self::Codec>,
+        builder: StepBuilder<Ctx, Compact, Output, Self::Codec>,
     ) -> Worker<Ready<M::Service, P>> {
         let worker_id = self.id;
         let poller = self.source;
@@ -282,5 +282,48 @@ where
         let service = middleware.service(service);
 
         Worker::new(worker_id, Ready::new(service, poller))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StepError {
+    #[error("CodecError: {0}")]
+    CodecError(BoxDynError),
+    #[error("StorageError: {0}")]
+    StorageError(BoxDynError),
+}
+
+pub trait StorageStep<S: Storage, Codec, Compact> {
+    async fn push_step<T: Serialize>(
+        &mut self,
+        step: &StepRequest<T>,
+    ) -> Result<Parts<S::Context>, StepError>;
+
+    async fn start_stepped<T: Serialize>(&mut self, step: T) -> Result<Parts<S::Context>, StepError> {
+        self.push_step(&StepRequest {
+            inner: step,
+            current: 0,
+        }).await
+    }
+}
+
+impl<S, Encode, Compact> StorageStep<S, Encode, Compact> for S
+where
+    S: Storage<Job = StepRequest<Compact>, Codec = Encode>
+        + Backend<Request<StepRequest<Compact>, <S as Storage>::Context>>,
+    Encode: Codec<Compact = Compact>,
+    Encode::Error: std::error::Error + Send + Sync + 'static,
+    S::Error: std::error::Error + Send + Sync + 'static,
+{
+    async fn push_step<T: Serialize>(
+        &mut self,
+        step: &StepRequest<T>,
+    ) -> Result<Parts<S::Context>, StepError> {
+        self.push(StepRequest {
+            current: step.current,
+            inner: Encode::encode(&step.inner).map_err(|e| StepError::CodecError(Box::new(e)))?,
+        })
+        .await
+        .map_err(|e| StepError::StorageError(Box::new(e)))
     }
 }
