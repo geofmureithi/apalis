@@ -12,45 +12,69 @@ use tracing::info;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct WelcomeEmail {
-    welcome_id: usize,
+    user_id: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 
-struct FirstWeekEmail {
-    first_user_id: usize,
+struct CampaignEmail {
+    campaign_id: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 
-struct FirstMonthEmail {
-    second_user_id: usize,
+struct CompleteCampaign {
+    completion_id: usize,
 }
 
-async fn welcome(req: WelcomeEmail, ctx: Data<()>) -> Result<GoTo<FirstWeekEmail>, Error> {
-    Ok::<_, _>(GoTo::Next(FirstWeekEmail {
-        first_user_id: req.welcome_id + 1,
+async fn welcome(req: WelcomeEmail, ctx: Data<()>) -> Result<GoTo<CampaignEmail>, Error> {
+    Ok::<_, _>(GoTo::Next(CampaignEmail {
+        campaign_id: req.user_id + 1,
     }))
 }
 
-async fn first_week_email(
-    req: FirstWeekEmail,
-    ctx: Data<()>,
-) -> Result<GoTo<FirstMonthEmail>, Error> {
+async fn campaign(req: CampaignEmail, ctx: Data<()>) -> Result<GoTo<CompleteCampaign>, Error> {
     Ok::<_, _>(GoTo::Delay {
-        next: FirstMonthEmail {
-            second_user_id: req.first_user_id + 1,
+        next: CompleteCampaign {
+            completion_id: req.campaign_id + 1,
         },
         delay: Duration::from_secs(10),
     })
 }
 
-async fn first_month_email(
-    req: FirstMonthEmail,
+async fn complete_campaign(
+    req: CompleteCampaign,
     ctx: Data<()>,
 ) -> Result<GoTo<&'static str>, Error> {
     Ok::<_, _>(GoTo::Done("Completed job successfully"))
 }
+
+// #[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+// enum Steps {
+//     #[default]
+//     Welcome,
+//     Campaign {
+//         count: usize,
+//     },
+//     CompleteCampaign,
+//     Done,
+// }
+
+// impl StepIndex for Steps {
+//     fn next(&self) -> Self {
+//         match self {
+//             Steps::Welcome => Self::Campaign { count: 0 },
+//             Steps::Campaign { count } => {
+//                 if *count < 3 {
+//                     return Steps::Campaign { count: *count + 1 };
+//                 }
+//                 Self::CompleteCampaign
+//             }
+//             Steps::CompleteCampaign => Self::Done,
+//             Self::Done => unreachable!(),
+//         }
+//     }
+// }
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
@@ -61,18 +85,15 @@ async fn main() -> Result<(), std::io::Error> {
 
     let mut storage = RedisStorage::new_with_config(conn, config);
     storage
-        .start_stepped(WelcomeEmail { welcome_id: 1 })
+        .start_step(WelcomeEmail { user_id: 1 })
         .await
         .unwrap();
 
-    let welcome = ServiceBuilder::new()
-        .retry(RetryPolicy::retries(5)) // welcome will specifically be retried 5 times
-        .service(service_fn(welcome));
     // Build steps
     let steps = StepBuilder::new()
-        .step(welcome)
-        .step_fn(first_week_email)
-        .step_fn(first_month_email);
+        .step_fn(welcome)
+        .step_fn(campaign)
+        .step_fn(complete_campaign);
 
     WorkerBuilder::new("tasty-banana")
         .data(())

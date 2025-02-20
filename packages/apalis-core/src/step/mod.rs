@@ -10,7 +10,9 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -27,17 +29,29 @@ pub enum GoTo<N = ()> {
     Done(N),
 }
 
-pub struct StepBuilder<Ctx, Compact, Input, Current, Encode> {
-    steps: Vec<BoxedService<Request<StepRequest<Compact>, Ctx>, GoTo<Compact>>>,
+pub struct StepBuilder<Ctx, Compact, Input, Current, Encode, Index = usize> {
+    steps: HashMap<Index, BoxedService<Request<StepRequest<Compact, Index>, Ctx>, GoTo<Compact>>>,
+    current_index: Index,
     current: PhantomData<Current>,
     codec: PhantomData<Encode>,
     input: PhantomData<Input>,
 }
 
-impl<Ctx, Compact, Input, Encode> StepBuilder<Ctx, Compact, Input, Input, Encode> {
+impl<Ctx, Compact, Input, Encode> StepBuilder<Ctx, Compact, Input, Input, Encode, usize> {
     pub fn new() -> Self {
         Self {
-            steps: Vec::new(),
+            steps: HashMap::new(),
+            current_index: usize::default(),
+            current: PhantomData,
+            codec: PhantomData,
+            input: PhantomData,
+        }
+    }
+
+    pub fn new_with_stepper<I: Default>() -> StepBuilder<Ctx, Compact, Input, Input, Encode, I> {
+        StepBuilder {
+            steps: HashMap::new(),
+            current_index: I::default(),
             current: PhantomData,
             codec: PhantomData,
             input: PhantomData,
@@ -45,8 +59,25 @@ impl<Ctx, Compact, Input, Encode> StepBuilder<Ctx, Compact, Input, Input, Encode
     }
 }
 
-impl<Ctx, Compact, Input, Current, Encode> StepBuilder<Ctx, Compact, Input, Current, Encode> {
-    pub fn build<S>(self, store: S) -> StepService<Ctx, Compact, Input, S> {
+// impl<Ctx, Compact, Input, Encode, Index> StepBuilder<Ctx, Compact, Input, Input, Encode, Index> {
+//     pub fn new_with_index<I>() -> Self
+//     where
+//         Index: Default,
+//     {
+//         Self {
+//             steps: HashMap::new(),
+//             current_index: Index::default(),
+//             current: PhantomData,
+//             codec: PhantomData,
+//             input: PhantomData,
+//         }
+//     }
+// }
+
+impl<Ctx, Compact, Input, Current, Encode, Index>
+    StepBuilder<Ctx, Compact, Input, Current, Encode, Index>
+{
+    pub fn build<S>(self, store: S) -> StepService<Ctx, Compact, Input, S, Index> {
         StepService {
             inner: self.steps,
             storage: store,
@@ -55,17 +86,24 @@ impl<Ctx, Compact, Input, Current, Encode> StepBuilder<Ctx, Compact, Input, Curr
     }
 }
 
-pub struct StepService<Ctx, Compact, Input, S> {
-    inner: Vec<BoxedService<Request<StepRequest<Compact>, Ctx>, GoTo<Compact>>>,
+pub struct StepService<Ctx, Compact, Input, S, Index> {
+    inner: HashMap<Index, BoxedService<Request<StepRequest<Compact, Index>, Ctx>, GoTo<Compact>>>,
     storage: S,
     input: PhantomData<Input>,
 }
 
-impl<Ctx, Compact, S: Storage<Job = StepRequest<Compact>> + Send + Clone + 'static, Input>
-    Service<Request<StepRequest<Compact>, Ctx>> for StepService<Ctx, Compact, Input, S>
+impl<
+        Ctx,
+        Compact,
+        S: Storage<Job = StepRequest<Compact, Index>> + Send + Clone + 'static,
+        Input,
+        Index,
+    > Service<Request<StepRequest<Compact, Index>, Ctx>>
+    for StepService<Ctx, Compact, Input, S, Index>
 where
     Compact: DeserializeOwned + Send + Clone + 'static,
     S::Error: Send + Sync + std::error::Error,
+    Index: StepIndex + Send + Sync + 'static,
 {
     type Response = GoTo<Compact>;
     type Error = crate::error::Error;
@@ -75,8 +113,9 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<StepRequest<Compact>, Ctx>) -> Self::Future {
-        let index = req.args.current;
+    fn call(&mut self, req: Request<StepRequest<Compact, Index>, Ctx>) -> Self::Future {
+        let index = &req.args.index;
+        let next_index = index.next();
 
         let service = self
             .inner
@@ -92,8 +131,8 @@ where
                         GoTo::Next(resp) => {
                             storage
                                 .push(StepRequest {
-                                    current: index + 1,
-                                    inner: resp.clone(),
+                                    index: next_index,
+                                    step: resp.clone(),
                                 })
                                 .await
                                 .map_err(|e| Error::SourceError(Arc::new(e.into())))?;
@@ -102,8 +141,8 @@ where
                             storage
                                 .schedule(
                                     StepRequest {
-                                        current: index + 1,
-                                        inner: next.clone(),
+                                        index: next_index,
+                                        step: next.clone(),
                                     },
                                     delay.as_secs().try_into().unwrap(),
                                 )
@@ -146,7 +185,8 @@ impl<S, Compact, Codec, Input, Current, Next>
     }
 }
 
-impl<S, Ctx, Input, Current, Next, Compact, Encode> Service<Request<StepRequest<Compact>, Ctx>>
+impl<S, Ctx, Input, Current, Next, Compact, Encode, Index>
+    Service<Request<StepRequest<Compact, Index>, Ctx>>
     for TransformingService<S, Compact, Input, Current, Next, Encode>
 where
     S: Service<Request<Current, Ctx>, Response = GoTo<Next>>,
@@ -165,17 +205,28 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Request<StepRequest<Compact>, Ctx>) -> Self::Future {
-        let transformed_req: Request<Current, Ctx> =
-            { Request::new_with_parts(Encode::decode(req.args.inner).unwrap(), req.parts) };
+    fn call(&mut self, req: Request<StepRequest<Compact, Index>, Ctx>) -> Self::Future {
+        let transformed_req: Request<Current, Ctx> = {
+            Request::new_with_parts(
+                Encode::decode(req.args.step).expect(&format!(
+                    "Could not decode step, expecting {}",
+                    std::any::type_name::<Current>()
+                )),
+                req.parts,
+            )
+        };
         let fut = self.inner.call(transformed_req).map(|res| match res {
             Ok(o) => Ok(match o {
-                GoTo::Next(next) => GoTo::Next(Encode::encode(next).unwrap()),
+                GoTo::Next(next) => {
+                    GoTo::Next(Encode::encode(next).expect("Could not encode the next step"))
+                }
                 GoTo::Delay { next, delay } => GoTo::Delay {
-                    next: Encode::encode(next).unwrap(),
+                    next: Encode::encode(next).expect("Could not encode the next step"),
                     delay,
                 },
-                GoTo::Done(res) => GoTo::Done(Encode::encode(res).unwrap()),
+                GoTo::Done(res) => {
+                    GoTo::Done(Encode::encode(res).expect("Could not encode the next step"))
+                }
             }),
             Err(e) => Err(e),
         });
@@ -185,18 +236,34 @@ where
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct StepRequest<T> {
-    pub inner: T,
-    pub current: usize,
+pub struct StepRequest<T, Index = usize> {
+    step: T,
+    index: Index,
 }
 
-pub trait Step<S, Ctx, Compact, Input, Current, Next, Encode> {
-    fn step(self, service: S) -> StepBuilder<Ctx, Compact, Input, Next, Encode>;
+impl<T, Index> StepRequest<T, Index> {
+    pub fn new(step: T) -> Self
+    where
+        Index: Default,
+    {
+        Self {
+            step,
+            index: Index::default(),
+        }
+    }
+
+    pub fn new_with_index(step: T, index: Index) -> Self {
+        Self { step, index }
+    }
 }
 
-impl<S, Ctx, Input, Current, Next, Compact, Encode>
-    Step<S, Ctx, Compact, Input, Current, Next, Encode>
-    for StepBuilder<Ctx, Compact, Input, Current, Encode>
+pub trait Step<S, Ctx, Compact, Input, Current, Next, Encode, Index> {
+    fn step(self, service: S) -> StepBuilder<Ctx, Compact, Input, Next, Encode, Index>;
+}
+
+impl<S, Ctx, Input, Current, Next, Compact, Encode, Index>
+    Step<S, Ctx, Compact, Input, Current, Next, Encode, Index>
+    for StepBuilder<Ctx, Compact, Input, Current, Encode, Index>
 where
     S: Service<Request<Current, Ctx>, Response = GoTo<Next>, Error = crate::error::Error>
         + Send
@@ -211,28 +278,34 @@ where
     Compact: Send + 'static,
     Encode: Codec<Compact = Compact> + Send + 'static,
     Encode::Error: Debug,
+    Index: StepIndex,
 {
-    fn step(mut self, service: S) -> StepBuilder<Ctx, Compact, Input, Next, Encode> {
-        self.steps.push(BoxedService::new(TransformingService::<
-            S,
-            Compact,
-            Input,
-            Current,
-            Next,
-            Encode,
-        >::new(service)));
+    fn step(mut self, service: S) -> StepBuilder<Ctx, Compact, Input, Next, Encode, Index> {
+        let next = self.current_index.next();
+        self.steps.insert(
+            self.current_index,
+            BoxedService::new(TransformingService::<
+                S,
+                Compact,
+                Input,
+                Current,
+                Next,
+                Encode,
+            >::new(service)),
+        );
         StepBuilder {
             steps: self.steps,
             current: PhantomData,
             codec: PhantomData,
             input: PhantomData,
+            current_index: next,
         }
     }
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait StepFn<F, FnArgs, Ctx, Compact, Input, Current, Next, Codec> {
-    fn step_fn(self, f: F) -> StepBuilder<Ctx, Compact, Input, Next, Codec>;
+pub trait StepFn<F, FnArgs, Ctx, Compact, Input, Current, Next, Codec, Index> {
+    fn step_fn(self, f: F) -> StepBuilder<Ctx, Compact, Input, Next, Codec, Index>;
 }
 
 impl<
@@ -245,17 +318,18 @@ impl<
         Next,
         Compact,
         Encode,
-    > StepFn<F, FnArgs, Ctx, Compact, Input, Current, Next, Encode> for S
+        Index,
+    > StepFn<F, FnArgs, Ctx, Compact, Input, Current, Next, Encode, Index> for S
 where
-    S: Step<ServiceFn<F, Current, Ctx, FnArgs>, Ctx, Compact, Input, Current, Next, Encode>,
+    S: Step<ServiceFn<F, Current, Ctx, FnArgs>, Ctx, Compact, Input, Current, Next, Encode, Index>,
 {
-    fn step_fn(self, f: F) -> StepBuilder<Ctx, Compact, Input, Next, Encode> {
+    fn step_fn(self, f: F) -> StepBuilder<Ctx, Compact, Input, Next, Encode, Index> {
         self.step(service_fn(f))
     }
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait StepWorkerFactory<Ctx, Compact, Input, Output> {
+pub trait StepWorkerFactory<Ctx, Compact, Input, Output, Index> {
     /// The request source for the worker
     type Source;
 
@@ -273,27 +347,28 @@ pub trait StepWorkerFactory<Ctx, Compact, Input, Output> {
     ///
     fn build_stepped(
         self,
-        builder: StepBuilder<Ctx, Compact, Input, Output, Self::Codec>,
+        builder: StepBuilder<Ctx, Compact, Input, Output, Self::Codec, Index>,
     ) -> Worker<Ready<Self::Service, Self::Source>>;
 }
 
-impl<Req, P, M, Ctx, Input, Compact, Output> StepWorkerFactory<Ctx, Compact, Input, Output>
-    for WorkerBuilder<Req, Ctx, P, M, StepService<Ctx, Compact, Input, P>>
+impl<Req, P, M, Ctx, Input, Compact, Output, Index>
+    StepWorkerFactory<Ctx, Compact, Input, Output, Index>
+    for WorkerBuilder<Req, Ctx, P, M, StepService<Ctx, Compact, Input, P, Index>>
 where
     Compact: Send + 'static + Sync,
-    P: Backend<Request<StepRequest<Compact>, Ctx>> + 'static,
-    P: Storage<Job = StepRequest<Compact>> + Clone,
-    M: Layer<StepService<Ctx, Compact, Input, P>> + 'static,
+    P: Backend<Request<StepRequest<Compact, Index>, Ctx>> + 'static,
+    P: Storage<Job = StepRequest<Compact, Index>> + Clone,
+    M: Layer<StepService<Ctx, Compact, Input, P, Index>> + 'static,
 {
     type Source = P;
 
     type Service = M::Service;
 
-    type Codec = <P as Backend<Request<StepRequest<Compact>, Ctx>>>::Codec;
+    type Codec = <P as Backend<Request<StepRequest<Compact, Index>, Ctx>>>::Codec;
 
     fn build_stepped(
         self,
-        builder: StepBuilder<Ctx, Compact, Input, Output, Self::Codec>,
+        builder: StepBuilder<Ctx, Compact, Input, Output, Self::Codec, Index>,
     ) -> Worker<Ready<M::Service, P>> {
         let worker_id = self.id;
         let poller = self.source;
@@ -305,6 +380,7 @@ where
     }
 }
 
+/// Errors encountered while stepping through jobs
 #[derive(Debug, thiserror::Error)]
 pub enum StepError {
     #[error("CodecError: {0}")]
@@ -313,41 +389,59 @@ pub enum StepError {
     StorageError(BoxDynError),
 }
 
-pub trait StorageStep<S: Storage, Codec, Compact, Input> {
+/// Helper trait that transforms a storage with stepping capability
+pub trait SteppableStorage<S: Storage, Codec, Compact, Input, Index> {
     async fn push_step<T: Serialize>(
         &mut self,
-        step: &StepRequest<T>,
+        step: StepRequest<T, Index>,
     ) -> Result<Parts<S::Context>, StepError>;
 
-    async fn start_stepped(&mut self, step: Input) -> Result<Parts<S::Context>, StepError>
+    async fn start_step(&mut self, step: Input) -> Result<Parts<S::Context>, StepError>
     where
         Input: Serialize,
+        Index: Default,
     {
-        self.push_step(&StepRequest {
-            inner: step,
-            current: 0,
+        self.push_step(StepRequest {
+            step,
+            index: Index::default(),
         })
         .await
     }
 }
 
-impl<S, Encode, Compact, Input> StorageStep<S, Encode, Compact, Input> for S
+impl<S, Encode, Compact, Input, Index> SteppableStorage<S, Encode, Compact, Input, Index> for S
 where
-    S: Storage<Job = StepRequest<Compact>, Codec = Encode>
-        + Backend<Request<StepRequest<Compact>, <S as Storage>::Context>>,
+    S: Storage<Job = StepRequest<Compact, Index>, Codec = Encode>
+        + Backend<Request<StepRequest<Compact, Index>, <S as Storage>::Context>>,
     Encode: Codec<Compact = Compact>,
     Encode::Error: std::error::Error + Send + Sync + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
 {
     async fn push_step<T: Serialize>(
         &mut self,
-        step: &StepRequest<T>,
+        step: StepRequest<T, Index>,
     ) -> Result<Parts<S::Context>, StepError> {
         self.push(StepRequest {
-            current: step.current,
-            inner: Encode::encode(&step.inner).map_err(|e| StepError::CodecError(Box::new(e)))?,
+            index: step.index,
+            step: Encode::encode(&step.step).map_err(|e| StepError::CodecError(Box::new(e)))?,
         })
         .await
         .map_err(|e| StepError::StorageError(Box::new(e)))
+    }
+}
+
+pub trait StepIndex: Eq + Hash {
+    fn next(&self) -> Self;
+}
+
+impl StepIndex for usize {
+    fn next(&self) -> Self {
+        *self + 1
+    }
+}
+
+impl StepIndex for u32 {
+    fn next(&self) -> Self {
+        *self + 1
     }
 }
