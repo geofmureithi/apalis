@@ -159,7 +159,7 @@ where
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
 
-    type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext>;
+    type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, C>;
 
     type Compact = Value;
 
@@ -173,9 +173,20 @@ where
         let pool = self.pool.clone();
         let worker = worker.clone();
         let heartbeat = async move {
+            // Lets reenqueue any jobs that belonged to this worker in case of a death
+            if let Err(e) = self
+                .reenqueue_orphaned((config.buffer_size * 10) as i32, Utc::now())
+                .await
+            {
+                worker.emit(Event::Error(Box::new(PgPollError::ReenqueueOrphanedError(
+                    e,
+                ))));
+            }
+
             let mut keep_alive_stm = apalis_core::interval::interval(config.keep_alive).fuse();
             let mut reenqueue_orphaned_stm =
                 apalis_core::interval::interval(config.poll_interval).fuse();
+
             let mut ack_stream = ack_notify.clone().ready_chunks(config.buffer_size).fuse();
 
             let poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
@@ -223,9 +234,10 @@ where
                         }
                     }
                     ids = ack_stream.next() => {
+
                         if let Some(ids) = ids {
-                            let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(_ctx, res)| {
-                                (res.task_id.to_string(), worker.id().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(&res.inner).to_string(), (res.attempt.current() + 1) as u64 )
+                            let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(ctx, res)| {
+                                (res.task_id.to_string(), worker.id().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(ctx,res).to_string(), res.attempt.current() as u64)
                             }).collect();
                             let query =
                                 "UPDATE apalis.jobs
@@ -613,7 +625,7 @@ where
     }
 
     async fn len(&mut self) -> Result<i64, sqlx::Error> {
-        let query = "Select Count(*) as count from apalis.jobs where status='Pending'";
+        let query = "Select Count(*) as count from apalis.jobs where status='Pending' OR (status = 'Failed' AND attempts < max_attempts)";
         let record = sqlx::query(query).fetch_one(&self.pool).await?;
         record.try_get("count")
     }
@@ -679,7 +691,7 @@ where
     }
 }
 
-impl<T, Res, C> Ack<T, Res> for PostgresStorage<T, C>
+impl<T, Res, C> Ack<T, Res, C> for PostgresStorage<T, C>
 where
     T: Sync + Send,
     Res: Serialize + Sync + Clone,
@@ -859,7 +871,7 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         PostgresStorage::setup(&pool).await.unwrap();
-        let config = Config::new("apalis-ci-tests").set_buffer_size(1);
+        let config = Config::new("apalis-tests").set_buffer_size(1);
         let mut storage = PostgresStorage::new_with_config(pool, config);
         cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage

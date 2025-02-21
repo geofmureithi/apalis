@@ -1,5 +1,5 @@
 use apalis_core::codec::json::JsonCodec;
-use apalis_core::error::Error;
+use apalis_core::error::{BoxDynError, Error};
 use apalis_core::layers::{Ack, AckLayer, Service};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
@@ -78,7 +78,7 @@ pub struct RedisQueueInfo {
 }
 
 #[derive(Clone, Debug)]
-struct RedisScript {
+pub(crate) struct RedisScript {
     done_job: Script,
     enqueue_scheduled: Script,
     get_jobs: Script,
@@ -90,14 +90,25 @@ struct RedisScript {
     retry_job: Script,
     schedule_job: Script,
     vacuum: Script,
+    pub(crate) stats: Script,
 }
 
 /// The context for a redis storage job
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RedisContext {
     max_attempts: usize,
     lock_by: Option<WorkerId>,
     run_at: Option<SystemTime>,
+}
+
+impl Default for RedisContext {
+    fn default() -> Self {
+        Self {
+            max_attempts: 5,
+            lock_by: None,
+            run_at: None,
+        }
+    }
 }
 
 impl<Req> FromRequest<Request<Req, RedisContext>> for RedisContext {
@@ -139,7 +150,6 @@ pub enum RedisPollError {
 pub struct Config {
     poll_interval: Duration,
     buffer_size: usize,
-    max_retries: usize,
     keep_alive: Duration,
     enqueue_scheduled: Duration,
     reenqueue_orphaned_after: Duration,
@@ -151,7 +161,6 @@ impl Default for Config {
         Self {
             poll_interval: Duration::from_millis(100),
             buffer_size: 10,
-            max_retries: 5,
             keep_alive: Duration::from_secs(30),
             enqueue_scheduled: Duration::from_secs(30),
             reenqueue_orphaned_after: Duration::from_secs(300),
@@ -169,11 +178,6 @@ impl Config {
     /// Get the number of jobs to fetch
     pub fn get_buffer_size(&self) -> usize {
         self.buffer_size
-    }
-
-    /// Get the max retries
-    pub fn get_max_retries(&self) -> usize {
-        self.max_retries
     }
 
     /// get the keep live rate
@@ -203,12 +207,6 @@ impl Config {
         self
     }
 
-    /// set the max-retries setting
-    pub fn set_max_retries(mut self, max_retries: usize) -> Self {
-        self.max_retries = max_retries;
-        self
-    }
-
     /// set the keep-alive setting
     pub fn set_keep_alive(mut self, keep_alive: Duration) -> Self {
         self.keep_alive = keep_alive;
@@ -227,11 +225,11 @@ impl Config {
         self
     }
 
-    /// Returns the Redis key for the list of active jobs associated with the queue.
+    /// Returns the Redis key for the list of pending jobs associated with the queue.
     /// The key is dynamically generated using the namespace of the queue.
     ///
     /// # Returns
-    /// A `String` representing the Redis key for the active jobs list.
+    /// A `String` representing the Redis key for the pending jobs list.
     pub fn active_jobs_list(&self) -> String {
         ACTIVE_JOBS_LIST.replace("{queue}", &self.namespace)
     }
@@ -329,17 +327,16 @@ impl Config {
 }
 
 /// Represents a [Storage] that uses Redis for storage.
-pub struct RedisStorage<T, Conn = ConnectionManager, C = JsonCodec<Vec<u8>>, Res = ()> {
+pub struct RedisStorage<T, Conn = ConnectionManager, C = JsonCodec<Vec<u8>>> {
     conn: Conn,
     job_type: PhantomData<T>,
-    scripts: RedisScript,
+    pub(super) scripts: RedisScript,
     controller: Controller,
     config: Config,
     codec: PhantomData<C>,
-    res: PhantomData<Res>,
 }
 
-impl<T, Conn, C, Res> fmt::Debug for RedisStorage<T, Conn, C, Res> {
+impl<T, Conn, C> fmt::Debug for RedisStorage<T, Conn, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RedisStorage")
             .field("conn", &"ConnectionManager")
@@ -350,7 +347,7 @@ impl<T, Conn, C, Res> fmt::Debug for RedisStorage<T, Conn, C, Res> {
     }
 }
 
-impl<T, Conn: Clone, C, Res> Clone for RedisStorage<T, Conn, C, Res> {
+impl<T, Conn: Clone, C> Clone for RedisStorage<T, Conn, C> {
     fn clone(&self) -> Self {
         Self {
             conn: self.conn.clone(),
@@ -359,14 +356,13 @@ impl<T, Conn: Clone, C, Res> Clone for RedisStorage<T, Conn, C, Res> {
             controller: self.controller.clone(),
             config: self.config.clone(),
             codec: self.codec,
-            res: self.res,
         }
     }
 }
 
-impl<T: Serialize + DeserializeOwned, Conn, Res> RedisStorage<T, Conn, JsonCodec<Vec<u8>>, Res> {
+impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn, JsonCodec<Vec<u8>>> {
     /// Start a new connection
-    pub fn new(conn: Conn) -> RedisStorage<T, Conn, JsonCodec<Vec<u8>>, Res> {
+    pub fn new(conn: Conn) -> RedisStorage<T, Conn, JsonCodec<Vec<u8>>> {
         Self::new_with_codec::<JsonCodec<Vec<u8>>>(
             conn,
             Config::default().set_namespace(type_name::<T>()),
@@ -377,12 +373,12 @@ impl<T: Serialize + DeserializeOwned, Conn, Res> RedisStorage<T, Conn, JsonCodec
     pub fn new_with_config(
         conn: Conn,
         config: Config,
-    ) -> RedisStorage<T, Conn, JsonCodec<Vec<u8>>, Res> {
+    ) -> RedisStorage<T, Conn, JsonCodec<Vec<u8>>> {
         Self::new_with_codec::<JsonCodec<Vec<u8>>>(conn, config)
     }
 
     /// Start a new connection providing custom config and a codec
-    pub fn new_with_codec<K>(conn: Conn, config: Config) -> RedisStorage<T, Conn, K, Res>
+    pub fn new_with_codec<K>(conn: Conn, config: Config) -> RedisStorage<T, Conn, K>
     where
         K: Codec + Sync + Send + 'static,
     {
@@ -392,7 +388,6 @@ impl<T: Serialize + DeserializeOwned, Conn, Res> RedisStorage<T, Conn, JsonCodec
             controller: Controller::new(),
             config,
             codec: PhantomData::<K>,
-            res: PhantomData::<Res>,
             scripts: RedisScript {
                 done_job: redis::Script::new(include_str!("../lua/done_job.lua")),
                 push_job: redis::Script::new(include_str!("../lua/push_job.lua")),
@@ -411,6 +406,7 @@ impl<T: Serialize + DeserializeOwned, Conn, Res> RedisStorage<T, Conn, JsonCodec
                 )),
                 schedule_job: redis::Script::new(include_str!("../lua/schedule_job.lua")),
                 vacuum: redis::Script::new(include_str!("../lua/vacuum.lua")),
+                stats: redis::Script::new(include_str!("../lua/stats.lua")),
             },
         }
     }
@@ -433,16 +429,15 @@ impl<T, Conn, C> RedisStorage<T, Conn, C> {
     }
 }
 
-impl<T, Conn, C, Res> Backend<Request<T, RedisContext>> for RedisStorage<T, Conn, C, Res>
+impl<T, Conn, C> Backend<Request<T, RedisContext>> for RedisStorage<T, Conn, C>
 where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
-    Res: Serialize + Send + Sync + 'static
 {
     type Stream = BackendStream<RequestStream<Request<T, RedisContext>>>;
 
-    type Layer = AckLayer<Sender<(RedisContext, Response<Res>)>, T, RedisContext>;
+    type Layer = AckLayer<Sender<(RedisContext, Response<Self::Compact>)>, T, RedisContext, C>;
 
     type Compact = Vec<u8>;
 
@@ -451,13 +446,24 @@ where
         worker: &Worker<apalis_core::worker::Context>,
     ) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
-        let (ack, ack_rx) = mpsc::channel::<(RedisContext, Response<Res>)>(self.config.buffer_size);
+        let (ack, ack_rx) =
+            mpsc::channel::<(RedisContext, Response<Self::Compact>)>(self.config.buffer_size);
         let layer = AckLayer::new(ack);
         let controller = self.controller.clone();
         let config = self.config.clone();
         let stream: RequestStream<Request<T, RedisContext>> = Box::pin(rx);
         let worker = worker.clone();
         let heartbeat = async move {
+            // Lets reenqueue any jobs that belonged to this worker in case of a death
+            if let Err(e) = self
+                .reenqueue_orphaned((config.buffer_size * 10) as i32, Utc::now())
+                .await
+            {
+                worker.emit(Event::Error(Box::new(
+                    RedisPollError::ReenqueueOrphanedError(e),
+                )));
+            }
+
             let mut reenqueue_orphaned_stm =
                 apalis_core::interval::interval(config.poll_interval).fuse();
 
@@ -531,16 +537,26 @@ where
     }
 }
 
-impl<T, Conn, C, Res> Ack<T, Res> for RedisStorage<T, Conn, C, Res>
+impl<T, Conn, C, Res> Ack<T, Res, C> for RedisStorage<T, Conn, C>
 where
-    T: Sync + Send,
+    T: Sync + Send + Serialize + DeserializeOwned + Unpin + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
-    C: Codec<Compact = Vec<u8>> + Send,
-    Res: Serialize + Sync + Send,
+    C: Codec<Compact = Vec<u8>> + Send + 'static,
+    Res: Serialize + Sync + Send + 'static,
 {
     type Context = RedisContext;
     type AckError = RedisError;
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), RedisError> {
+        // Lets update the number of attempts
+        // TODO: move attempts to its own key
+        let mut task = self
+            .fetch_by_id(&res.task_id)
+            .await?
+            .expect("must be a valid task");
+        task.parts.attempt = res.attempt.clone();
+        self.update(task).await?;
+        // End of expensive update
+
         let inflight_set = format!(
             "{}:{}",
             self.config.inflight_jobs_set(),
@@ -565,38 +581,33 @@ where
             }
             Err(e) => match e {
                 Error::Abort(e) => {
-                    let kill_job = self.scripts.kill_job.clone();
-                    let kill_jobs_set = &self.config.dead_jobs_set();
-                    kill_job
-                        .key(inflight_set)
-                        .key(kill_jobs_set)
-                        .key(self.config.job_data_hash())
-                        .arg(task_id)
-                        .arg(now)
-                        .arg(e.to_string())
-                        .invoke_async(&mut self.conn)
-                        .await
+                    let worker_id = ctx.lock_by.as_ref().unwrap();
+                    self.kill(worker_id, &res.task_id, &e).await
                 }
                 _ => {
-                    // TODO: Increase the attempts
-                    let retry_job = self.scripts.retry_job.clone();
-                    let retry_jobs_set = &self.config.scheduled_jobs_set();
-                    retry_job
-                        .key(inflight_set)
-                        .key(retry_jobs_set)
-                        .key(self.config.job_data_hash())
-                        .arg(task_id)
-                        .arg(now)
-                        .arg(e.to_string())
-                        .invoke_async(&mut self.conn)
+                    if ctx.max_attempts > res.attempt.current() {
+                        let worker_id = ctx.lock_by.as_ref().unwrap();
+                        self.retry(worker_id, &res.task_id).await.map(|_| ())
+                    } else {
+                        let worker_id = ctx.lock_by.as_ref().unwrap();
+
+                        self.kill(
+                            worker_id,
+                            &res.task_id,
+                            &(Box::new(io::Error::new(
+                                io::ErrorKind::Interrupted,
+                                format!("Max retries of {} exceeded", ctx.max_attempts),
+                            )) as BoxDynError),
+                        )
                         .await
+                    }
                 }
             },
         }
     }
 }
 
-impl<T, Conn, C, Res> RedisStorage<T, Conn, C, Res>
+impl<T, Conn, C> RedisStorage<T, Conn, C>
 where
     T: DeserializeOwned + Send + Unpin + Send + Sync + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
@@ -630,8 +641,8 @@ where
                 let mut processed = vec![];
                 for job in jobs {
                     let bytes = deserialize_job(&job)?;
-                    let mut request: Request<T, RedisContext> = C::decode(bytes.clone())
-                        .map_err(|e| build_error(&e.into().to_string()))?;
+                    let mut request: Request<T, RedisContext> =
+                        C::decode(bytes.clone()).map_err(|e| build_error(&e.into().to_string()))?;
                     request.parts.context.lock_by = Some(worker_id.clone());
                     request.parts.namespace = Some(Namespace(namespace.clone()));
                     processed.push(request)
@@ -672,7 +683,7 @@ fn deserialize_job(job: &Value) -> Result<&Vec<u8>, RedisError> {
     }
 }
 
-impl<T, Conn: ConnectionLike, C, Res> RedisStorage<T, Conn, C, Res> {
+impl<T, Conn: ConnectionLike, C> RedisStorage<T, Conn, C> {
     async fn keep_alive(&mut self, worker_id: &WorkerId) -> Result<(), RedisError> {
         let register_consumer = self.scripts.register_consumer.clone();
         let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
@@ -689,12 +700,11 @@ impl<T, Conn: ConnectionLike, C, Res> RedisStorage<T, Conn, C, Res> {
     }
 }
 
-impl<T, Conn, C, Res> Storage for RedisStorage<T, Conn, C, Res>
+impl<T, Conn, C> Storage for RedisStorage<T, Conn, C>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
-    Res: Serialize + Send + Sync + 'static
 {
     type Job = T;
     type Error = RedisError;
@@ -770,17 +780,12 @@ where
     }
 
     async fn len(&mut self) -> Result<i64, RedisError> {
-        let all_jobs: i64 = redis::cmd("HLEN")
-            .arg(self.config.job_data_hash())
+        let pending_jobs: i64 = redis::cmd("LLEN")
+            .arg(self.config.active_jobs_list())
             .query_async(&mut self.conn)
             .await?;
-        let done_jobs: i64 = redis::cmd("ZCOUNT")
-            .arg(self.config.done_jobs_set())
-            .arg("-inf")
-            .arg("+inf")
-            .query_async(&mut self.conn)
-            .await?;
-        Ok(all_jobs - done_jobs)
+
+        Ok(pending_jobs)
     }
 
     async fn fetch_by_id(
@@ -864,12 +869,10 @@ where
     }
 }
 
-impl<T, Conn, C, Res> RedisStorage<T, Conn, C, Res>
+impl<T, Conn, C> RedisStorage<T, Conn, C>
 where
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
-    Res: Serialize + Send + Sync + 'static
-
 {
     /// Attempt to retry a job
     pub async fn retry(&mut self, worker_id: &WorkerId, task_id: &TaskId) -> Result<i32, RedisError>
@@ -880,7 +883,6 @@ where
         let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
         let scheduled_jobs_set = self.config.scheduled_jobs_set();
         let job_data_hash = self.config.job_data_hash();
-        let failed_jobs_set = self.config.failed_jobs_set();
         let job_fut = self.fetch_by_id(task_id);
         let now: i64 = Utc::now().timestamp();
         let res = job_fut.await?;
@@ -888,14 +890,17 @@ where
         match res {
             Some(job) => {
                 let attempt = &job.parts.attempt;
-                if attempt.current() >= self.config.max_retries {
-                    redis::cmd("ZADD")
-                        .arg(failed_jobs_set)
-                        .arg(now)
-                        .arg(task_id.to_string())
-                        .query_async(conn)
-                        .await?;
-                    self.kill(worker_id, task_id).await?;
+                let max_attempts = &job.parts.context.max_attempts;
+                if &attempt.current() >= &max_attempts {
+                    self.kill(
+                        worker_id,
+                        task_id,
+                        &(Box::new(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            format!("Max retries of {} exceeded", max_attempts),
+                        )) as BoxDynError),
+                    )
+                    .await?;
                     return Ok(1);
                 }
                 let job = C::encode(job)
@@ -920,10 +925,12 @@ where
     }
 
     /// Attempt to kill a job
-    pub async fn kill(&mut self, worker_id: &WorkerId, task_id: &TaskId) -> Result<(), RedisError>
-    where
-        T: Send + DeserializeOwned + Serialize + Unpin + Sync + 'static,
-    {
+    pub async fn kill(
+        &mut self,
+        worker_id: &WorkerId,
+        task_id: &TaskId,
+        error: &BoxDynError,
+    ) -> Result<(), RedisError> {
         let kill_job = self.scripts.kill_job.clone();
         let current_worker_id = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
         let job_data_hash = self.config.job_data_hash();
@@ -935,7 +942,7 @@ where
             .key(job_data_hash)
             .arg(task_id.to_string())
             .arg(now)
-            .arg("AbortError")
+            .arg(error.to_string())
             .invoke_async(&mut self.conn)
             .await
     }
@@ -964,7 +971,7 @@ where
     /// Re-enqueue some jobs that might be abandoned.
     pub async fn reenqueue_active(&mut self, job_ids: Vec<&TaskId>) -> Result<(), RedisError> {
         let reenqueue_active = self.scripts.reenqueue_active.clone();
-        let inflight_set = self.config.inflight_jobs_set().to_string();
+        let inflight_set: String = self.config.inflight_jobs_set().to_string();
         let active_jobs_list = self.config.active_jobs_list();
         let signal_list = self.config.signal_list();
 
@@ -1029,7 +1036,10 @@ mod tests {
         // (different runtimes are created for each test),
         // we don't share the storage and tests must be run sequentially.
         let conn = connect(redis_url).await.unwrap();
-        let mut storage = RedisStorage::new(conn);
+        let config = Config::default()
+            .set_namespace("apalis::test")
+            .set_enqueue_scheduled(Duration::from_millis(500)); // Instantly return jobs to the queue
+        let mut storage = RedisStorage::new_with_config(conn, config);
         cleanup(&mut storage, &WorkerId::new("test-worker")).await;
         storage
     }
@@ -1059,9 +1069,9 @@ mod tests {
         let stream = storage.fetch_next(worker_id);
         stream
             .await
-            .expect("stream is empty")
-            .first()
             .expect("failed to poll job")
+            .first()
+            .expect("stream is empty")
             .clone()
     }
 
@@ -1137,7 +1147,14 @@ mod tests {
         let job_id = &job.parts.task_id;
 
         storage
-            .kill(&worker.id(), &job_id)
+            .kill(
+                &worker.id(),
+                &job_id,
+                &(Box::new(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "Some unforeseen error occurred",
+                )) as BoxDynError),
+            )
             .await
             .expect("failed to kill job");
 
@@ -1196,5 +1213,26 @@ mod tests {
         // assert!(ctx.lock_at().is_some());
         // assert_eq!(*ctx.last_error(), None);
         assert_eq!(job.parts.attempt.current(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_stats() {
+        use apalis_core::backend::BackendExpose;
+
+        let mut storage = setup().await;
+        let stats = storage.stats().await.expect("failed to get stats");
+        assert_eq!(stats.pending, 0);
+        assert_eq!(stats.running, 0);
+        push_email(&mut storage, example_email()).await;
+        let stats = storage.stats().await.expect("failed to get stats");
+        assert_eq!(stats.pending, 1);
+
+        let worker = register_worker(&mut storage).await;
+
+        let _job = consume_one(&mut storage, &worker.id()).await;
+
+        let stats = storage.stats().await.expect("failed to get stats");
+        assert_eq!(stats.pending, 0);
+        assert_eq!(stats.running, 1);
     }
 }

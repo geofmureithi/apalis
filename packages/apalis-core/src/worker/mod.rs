@@ -293,6 +293,9 @@ impl<S, P> Worker<Ready<S, P>> {
             Send + Into<BoxDynError>,
         Ctx: Send + 'static,
     {
+        fn type_name_of_val<T>(_t: &T) -> &'static str {
+            std::any::type_name::<T>()
+        }
         let service = self.state.service;
         let worker_id = self.id;
         let ctx = Context {
@@ -302,7 +305,7 @@ impl<S, P> Worker<Ready<S, P>> {
             shutdown: self.state.shutdown,
             event_handler: self.state.event_handler.clone(),
             is_ready: Arc::default(),
-            service: std::any::type_name_of_val(&service).to_owned(),
+            service: type_name_of_val(&service).to_owned(),
         };
         let worker = Worker {
             id: worker_id.clone(),
@@ -587,6 +590,7 @@ where
     }
 
     fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
+        request.parts.attempt.increment();
         self.ctx.track(self.service.call(request))
     }
 }
