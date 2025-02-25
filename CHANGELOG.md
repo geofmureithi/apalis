@@ -9,6 +9,7 @@ All notable changes to this project are documented in this file.
 - **generic retry**: Persist check for tasks ([#498](https://github.com/geofmureithi/apalis/pull/498))
 
 ### Fixed
+- **PostgresStorage**: PostgresStorage get_jobs status conditional ([#524](https://github.com/geofmureithi/apalis/pull/524))
 - **cron heartbeat**: Refactor and fix cron heartbeat ([#513](https://github.com/geofmureithi/apalis/pull/513))
 - **RedisStorage**: Correct `running_count` statistic ([#506](https://github.com/geofmureithi/apalis/pull/506))
 - **orphaned tasks**: Re-enqueue orphaned jobs before starting streaming ([#507](https://github.com/geofmureithi/apalis/pull/507))
