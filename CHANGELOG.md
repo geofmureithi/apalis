@@ -15,6 +15,7 @@ All notable changes to this project are documented in this file.
 - **RedisStorage**: Correct `running_count` statistic ([#506](https://github.com/geofmureithi/apalis/pull/506))
 - **orphaned tasks**: Re-enqueue orphaned jobs before starting streaming ([#507](https://github.com/geofmureithi/apalis/pull/507))
 - **deps**: Update Rust crate `redis` to `0.28` ([#495](https://github.com/geofmureithi/apalis/pull/495))
+- **deps**: Update Rust crate `redis` to `0.29` and `deadpool-redis` to `0.20` ([#527](https://github.com/geofmureithi/apalis/pull/527))
 
 ### Tests
 - **Integration tests**: Aborting jobs and panicking workers ([#508](https://github.com/geofmureithi/apalis/pull/508))
