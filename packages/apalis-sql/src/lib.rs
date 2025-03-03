@@ -9,6 +9,20 @@
 //! # apalis-sql
 //! apalis offers Sqlite, Mysql and Postgres storages for its workers.
 //! See relevant modules for examples
+//!
+//! **Features**
+//!
+//! These features can be used to enable SQLx functionalities:
+//! - `mysql` - MySQL support.
+//! - `postgres` - PostgreSQL support.
+//! - `sqlite` - SQLite support.
+//! - `migrate` - Migrations for Apalis tables.
+//! - `async-std-comp` - Use [async-std](https://async.rs/) runtime and [rustls](https://docs.rs/rustls/latest/rustls/).
+//! - `async-std-comp-native-tls` - Use [async-std](https://async.rs/) runtime and [native-tls](https://docs.rs/native-tls/latest/native_tls/).
+//! - `tokio-comp` - Use [Tokio](https://tokio.rs/) runtime and [rustls](https://docs.rs/rustls/latest/rustls/).
+//! - `tokio-comp-native-tls` - Use [Tokio](https://tokio.rs/) runtime and [native-tls](https://docs.rs/native-tls/latest/native_tls/).
+//!
+//! For more information about the runtime and TLS features, see the [SQLx features documentation](https://docs.rs/sqlx/latest/sqlx/).
 
 use std::{num::TryFromIntError, time::Duration};
 
