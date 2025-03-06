@@ -211,9 +211,9 @@ pub mod test_utils {
 
     impl<B, Req, Res, Ctx> TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req, Ctx>, Res> + Send + Sync + 'static + Clone,
-        Req: Send + 'static + Sync,
-        Ctx: Send + Sync,
+        B: Backend<Request<Req, Ctx>> + Send + Sync + 'static + Clone,
+        Req: Send + 'static,
+        Ctx: Send,
         B::Stream: Send + 'static,
         B::Stream: Stream<Item = Result<Option<Request<Req, Ctx>>, crate::error::Error>> + Unpin,
         Res: Debug,
@@ -227,7 +227,7 @@ pub mod test_utils {
         Svc::Response: Send + Sync + 'static,
         Svc::Error: Send + Sync + std::error::Error,
         Ctx: Send + Sync + 'static,
-        B: Backend<Request<Req, Ctx>, Res> + 'static,
+        B: Backend<Request<Req, Ctx>> + 'static,
         B::Layer: Layer<Svc>,
         <B::Layer as Layer<Svc>>::Service: Service<Request<Req, Ctx>, Response = Res> + Send + Sync,
         B::Stream: Unpin + Send,
@@ -318,7 +318,7 @@ pub mod test_utils {
 
     impl<B, Req, Res, Ctx> Deref for TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req, Ctx>, Res>,
+        B: Backend<Request<Req, Ctx>>,
     {
         type Target = B;
 
@@ -329,7 +329,7 @@ pub mod test_utils {
 
     impl<B, Req, Ctx, Res> DerefMut for TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req, Ctx>, Res>,
+        B: Backend<Request<Req, Ctx>>,
     {
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.backend
@@ -612,6 +612,30 @@ pub mod test_utils {
                 t.vacuum().await.unwrap();
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 0, "After vacuuming, there should be nothing");
+            }
+            #[tokio::test]
+            async fn integration_test_shared_push_and_consume() {
+                let backend = $setup().await;
+                let mut sharable = apalis_core::backend::Shared::new(backend);
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Ok::<_, io::Error>(request.args)
+                });
+                let backend = sharable.make_shared().unwrap();
+                let (mut t, poller) = TestWrapper::new_with_service(backend, service);
+                tokio::spawn(poller);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "There should be no jobs");
+                t.push(1).await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1, "There should be 1 job");
+                let res = t.execute_next().await.unwrap();
+                assert_eq!(res.1, Ok("1".to_owned()));
+
+                apalis_core::sleep(Duration::from_secs(1)).await;
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "There should be no jobs");
+
+                t.vacuum().await.unwrap();
             }
         };
     }

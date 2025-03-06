@@ -233,20 +233,18 @@ impl<S, P> Worker<Ready<S, P>> {
         self
     }
 
-    fn poll_jobs<Svc, Stm, Req, Res, Ctx>(
+    fn poll_jobs<Svc, Stm, Req, Ctx>(
         worker: Worker<Context>,
         service: Svc,
         stream: Stm,
     ) -> BoxStream<'static, ()>
     where
-        Svc: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
+        Svc: Service<Request<Req, Ctx>> + Send + 'static,
         Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, Error>> + Send + Unpin + 'static,
-        Req: Send + 'static + Sync,
+        Req: Send + 'static,
         Svc::Future: Send,
-        Svc::Response: 'static + Send + Sync,
-        Svc::Error: Send + Sync + 'static + Into<BoxDynError>,
-        Ctx: Send + 'static + Sync,
-        Res: 'static,
+        Svc::Error: Send + 'static + Into<BoxDynError>,
+        Ctx: Send + 'static,
     {
         let w = worker.clone();
         let stream = stream.filter_map(move |result| {
@@ -281,23 +279,24 @@ impl<S, P> Worker<Ready<S, P>> {
         stream.boxed()
     }
     /// Start a worker
-    pub fn run<Req, Res, Ctx>(self) -> Runnable
+    pub fn run<Req, Ctx>(self) -> Runnable
     where
-        S: Service<Request<Req, Ctx>, Response = Res> + Send + 'static,
-        P: Backend<Request<Req, Ctx>, Res> + 'static,
-        Req: Send + 'static + Sync,
-        S::Future: Send,
-        S::Response: 'static + Send + Sync,
-        S::Error: Send + Sync + 'static + Into<BoxDynError>,
+        S: Service<Request<Req, Ctx>> + 'static,
+        P: Backend<Request<Req, Ctx>> + 'static,
+        Req: Send + 'static,
+        S::Error: Send + 'static + Into<BoxDynError>,
         P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S>,
-        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>, Response = Res> + Send,
+        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>> + Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
         <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
-            Send + Into<BoxDynError> + Sync,
-        Ctx: Send + 'static + Sync,
-        Res: 'static,
+            Send + Into<BoxDynError>,
+        Ctx: Send + 'static,
     {
+        fn type_name_of_val<T>(_t: &T) -> &'static str {
+            std::any::type_name::<T>()
+        }
+        let service = self.state.service;
         let worker_id = self.id;
         let ctx = Context {
             running: Arc::default(),
@@ -306,14 +305,15 @@ impl<S, P> Worker<Ready<S, P>> {
             shutdown: self.state.shutdown,
             event_handler: self.state.event_handler.clone(),
             is_ready: Arc::default(),
+            service: type_name_of_val(&service).to_owned(),
         };
         let worker = Worker {
             id: worker_id.clone(),
             state: ctx.clone(),
         };
         let backend = self.state.backend;
-        let service = self.state.service;
-        let poller = backend.poll::<S>(&worker);
+
+        let poller = backend.poll(&worker);
         let stream = poller.stream;
         let heartbeat = poller.heartbeat.boxed();
         let layer = poller.layer;
@@ -405,6 +405,7 @@ pub struct Context {
     shutdown: Option<Shutdown>,
     event_handler: EventHandler,
     is_ready: Arc<AtomicBool>,
+    service: String,
 }
 
 impl fmt::Debug for Context {
@@ -413,6 +414,7 @@ impl fmt::Debug for Context {
             .field("shutdown", &["Shutdown handle"])
             .field("task_count", &self.task_count)
             .field("running", &self.running)
+            .field("service", &self.service)
             .finish()
     }
 }
@@ -524,6 +526,11 @@ impl Context {
     /// Returns if the worker is ready to consume new tasks
     pub fn is_ready(&self) -> bool {
         self.is_ready.load(Ordering::Acquire) && !self.is_shutting_down()
+    }
+
+    /// Get the type of service
+    pub fn get_service(&self) -> &String {
+        &self.service
     }
 }
 

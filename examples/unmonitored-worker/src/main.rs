@@ -12,7 +12,7 @@ struct SelfMonitoringJob {
 
 async fn self_monitoring_task(task: SelfMonitoringJob, worker: Worker<Context>) {
     info!("task: {:?}, {:?}", task, worker);
-    if task.id == 1 {
+    if task.id == 99 {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -45,9 +45,10 @@ async fn main() -> Result<(), std::io::Error> {
     produce_jobs(&mut sqlite).await;
 
     WorkerBuilder::new("tasty-banana")
-        .concurrency(2)
+        .enable_tracing()
+        .concurrency(20)
         .backend(sqlite)
-        .build_fn(self_monitoring_task)
+        .build(service_fn(self_monitoring_task))
         .on_event(|e| info!("{e}"))
         .run()
         .await;

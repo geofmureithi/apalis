@@ -6,7 +6,8 @@ use std::{
 
 use futures::{
     channel::mpsc::{channel, Receiver, Sender, TrySendError},
-    Stream, StreamExt,
+    future::BoxFuture,
+    FutureExt, Stream, StreamExt,
 };
 
 /// The `Notify` struct encapsulates asynchronous, multi-producer, single-consumer (MPSC) channel functionality.
@@ -54,6 +55,23 @@ impl<T> Notify<T> {
             .next()
             .await
             .expect("sender is dropped");
+    }
+
+    pub fn pipe_stream<S: Stream<Item = T> + Unpin + Send + 'static>(
+        mut stream: S,
+    ) -> (BoxFuture<'static, ()>, Notify<T>)
+    where
+        T: Send + Sync + 'static,
+    {
+        let notify = Notify::new();
+        let n = notify.clone();
+        let poller = async move {
+            while let Some(value) = stream.next().await {
+                n.notify(value).unwrap();
+            }
+        }
+        .boxed();
+        (poller, notify)
     }
 }
 
