@@ -1126,7 +1126,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
         let res: Vec<SqlRequest<serde_json::Value>> = sqlx::query_as(fetch_query)
             .bind(status)
             .bind(self.config().namespace())
-            .bind(((page - 1) * 10).to_string())
+            .bind(((page - 1) * 10) as i64)
             .fetch_all(self.pool())
             .await?;
         Ok(res
@@ -1358,5 +1358,79 @@ mod tests {
         assert!(ctx.lock_at().is_some());
         assert_eq!(*ctx.last_error(), None);
         assert_eq!(job.parts.attempt.current(), 0);
+    }
+
+    // This test pushes a scheduled request (scheduled 5 minutes in the future)
+    // and then asserts that fetch_next returns nothing.
+    #[tokio::test]
+    async fn test_scheduled_request_not_fetched() {
+        // Setup storage using the provided helper; scheduled jobs use the same table as regular ones.
+        let mut storage = setup().await;
+
+        // Schedule a request 5 minutes in the future.
+        let run_at = Utc::now().timestamp() + 300; // 5 minutes = 300 secs
+        let scheduled_req = Request::new(example_email());
+
+        storage
+            .schedule_request(scheduled_req, run_at)
+            .await
+            .expect("failed to schedule request");
+
+        // Fetch the next jobs for a worker; expect empty since the job is scheduled for the future.
+        let worker = register_worker(&mut storage).await;
+        let jobs = storage
+            .fetch_next(worker.id())
+            .await
+            .expect("failed to fetch next jobs");
+        assert!(
+            jobs.is_empty(),
+            "Scheduled job should not be fetched before its scheduled time"
+        );
+
+        // List jobs with status 'Pending' and expect the scheduled job to be there.
+        let jobs = storage
+            .list_jobs(&State::Pending, 1)
+            .await
+            .expect("failed to list jobs");
+        assert_eq!(jobs.len(), 1, "Expected one job to be listed");
+    }
+
+    // This test pushes a request using one job_type, then uses a worker with a different job_type
+    // to fetch jobs and asserts that it returns nothing.
+    #[tokio::test]
+    async fn test_fetch_with_different_job_type_returns_empty() {
+        // Setup one storage with its config namespace (job_type)
+        let mut storage_email = setup().await;
+
+        // Create a second storage using the same pool but with a different namespace.
+        let pool = storage_email.pool().clone();
+        let sms_config = Config::new("sms-test").set_buffer_size(1);
+        let mut storage_sms: PostgresStorage<Email> =
+            PostgresStorage::new_with_config(pool, sms_config);
+
+        // Push a job using the first storage (job_type = storage_email.config.namespace)
+        push_email(&mut storage_email, example_email()).await;
+
+        // Attempt to fetch the job with a worker associated with the different job_type.
+        let worker_id = WorkerId::new("sms-worker");
+        let worker = Worker::new(worker_id, Context::default());
+        worker.start();
+
+        let jobs = storage_sms
+            .fetch_next(worker.id())
+            .await
+            .expect("failed to fetch next jobs");
+        assert!(
+            jobs.is_empty(),
+            "A worker with a different job_type should not fetch jobs"
+        );
+
+        // Fetch the job with a worker associated with the correct job_type.
+        let worker = register_worker(&mut storage_email).await;
+        let jobs = storage_email
+            .fetch_next(worker.id())
+            .await
+            .expect("failed to fetch next jobs");
+        assert!(!jobs.is_empty(), "Worker should fetch the job");
     }
 }
