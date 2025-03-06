@@ -1,0 +1,23 @@
+[package]
+name = "shared-postgres-conn"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1"
+apalis = { path = "../../", features = ["retry"] }
+apalis-sql = { path = "../../packages/apalis-sql", features = [
+    "postgres",
+    "tokio-comp",
+] }
+serde = "1"
+tracing-subscriber = "0.3.11"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+tokio = { version = "1", features = ["full"] }
+email-service = { path = "../email-service" }
+tower = { version = "*", features = ["buffer"] }
+
+[dependencies.tracing]
+default-features = false
+version = "0.1"

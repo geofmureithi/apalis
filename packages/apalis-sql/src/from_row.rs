@@ -12,14 +12,8 @@ use crate::context::SqlContext;
 pub struct SqlRequest<T> {
     /// The inner request
     pub req: Request<T, SqlContext>,
+    pub job_type: String,
     pub(crate) _priv: (),
-}
-
-impl<T> SqlRequest<T> {
-    /// Creates a new SqlRequest.
-    pub fn new(req: Request<T, SqlContext>) -> Self {
-        SqlRequest { req, _priv: () }
-    }
 }
 
 #[cfg(feature = "sqlite")]
@@ -80,8 +74,10 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
                 })?,
         );
         parts.context = context;
+        let job_type = row.get("job_type");
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),
+            job_type,
             _priv: (),
         })
     }
@@ -144,8 +140,10 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
                 })?,
         );
         parts.context = context;
+        let job_type = row.get("job_type");
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),
+            job_type,
             _priv: (),
         })
     }
@@ -207,8 +205,10 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
                 })?,
         );
         parts.context = context;
+        let job_type = row.get("job_type");
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),
+            job_type,
             _priv: (),
         })
     }

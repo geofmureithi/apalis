@@ -40,7 +40,7 @@
 //! ```
 use crate::context::SqlContext;
 use crate::{calculate_status, Config, SqlError};
-use apalis_core::backend::{BackendExpose, MakeShared, Stat, WorkerState};
+use apalis_core::backend::{BackendConnection, BackendExpose, Sharable, Stat, WorkerState};
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::{BoxDynError, Error};
 use apalis_core::layers::{Ack, AckLayer};
@@ -57,19 +57,20 @@ use apalis_core::worker::{Context, Event, Worker, WorkerId};
 use apalis_core::{backend::Backend, codec::Codec};
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc::{self, Receiver};
-use futures::future::BoxFuture;
-use futures::StreamExt;
-use futures::{select, stream, SinkExt};
-use log::error;
+use futures::future::{self, BoxFuture, Shared};
+use futures::lock::Mutex;
+use futures::{select, stream, SinkExt, TryStreamExt};
+use futures::{FutureExt, StreamExt};
+use log::{error, warn};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use sqlx::postgres::PgListener;
 use sqlx::{Pool, Postgres, Row};
 use std::any::type_name;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::{fmt, io};
 use std::{marker::PhantomData, time::Duration};
 
@@ -89,10 +90,9 @@ where
     job_type: PhantomData<T>,
     codec: PhantomData<C>,
     config: Config,
-    controller: Controller,
-    ack_notify: Notify<(SqlContext, Response<C::Compact>)>,
-    subscription: Option<PgSubscription>,
-    receiver: Option<Notify<Vec<Request<T, SqlContext>>>>,
+    ack: Notify<(SqlContext, Response<C::Compact>)>,
+    poller: Shared<BoxFuture<'static, ()>>,
+    connection: BackendConnection<C::Compact, SqlContext>,
 }
 
 impl<T, C: Codec> Clone for PostgresStorage<T, C> {
@@ -102,10 +102,9 @@ impl<T, C: Codec> Clone for PostgresStorage<T, C> {
             job_type: PhantomData,
             codec: PhantomData,
             config: self.config.clone(),
-            controller: self.controller.clone(),
-            ack_notify: self.ack_notify.clone(),
-            subscription: self.subscription.clone(),
-            receiver: self.receiver.clone(),
+            ack: self.ack.clone(),
+            poller: self.poller.clone(),
+            connection: self.connection.clone(),
         }
     }
 }
@@ -115,10 +114,8 @@ impl<T, C: Codec> fmt::Debug for PostgresStorage<T, C> {
         f.debug_struct("PostgresStorage")
             .field("pool", &self.pool)
             .field("job_type", &"PhantomData<T>")
-            .field("controller", &self.controller)
             .field("config", &self.config)
             .field("codec", &std::any::type_name::<C>())
-            // .field("ack_notify", &std::any::type_name_of_val(&self.ack_notify))
             .finish()
     }
 }
@@ -157,7 +154,7 @@ where
     C: Codec<Compact = Value> + Send + 'static,
     C::Error: std::error::Error + 'static + Send + Sync,
 {
-    type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
+    type Stream = RequestStream<Request<T, SqlContext>>;
 
     type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, C>;
 
@@ -165,13 +162,75 @@ where
 
     fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
-        let subscription = self.subscription.clone();
         let config = self.config.clone();
-        let controller = self.controller.clone();
-        let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
-        let ack_notify = self.ack_notify.clone();
         let pool = self.pool.clone();
         let worker = worker.clone();
+        let mut ack_stream = self
+            .ack
+            .clone()
+            .ready_chunks(config.buffer_size)
+            .boxed()
+            .fuse();
+        let shared_poller = self.poller.clone();
+        let worker_id = worker.id().clone();
+        let receiver = match &self.connection {
+            BackendConnection::Shared { receiver, .. } => receiver
+                .clone()
+                .map(move |req| match req {
+                    Ok(Some(req)) => {
+                        let (args, mut parts) = req.take_parts();
+                        let args: T = C::decode(args)
+                            .map_err(|e| Error::SourceError(Arc::new(Box::new(e))))?;
+                        parts.context.set_lock_by(Some(worker_id.clone()));
+                        Ok(Some(Request::new_with_parts(args, parts)))
+                    }
+                    Ok(None) => Ok(None),
+                    Err(e) => Err(e),
+                })
+                .boxed(),
+            BackendConnection::StandAlone { subscription, .. } => {
+                let pg_notification = subscription.clone().boxed().fuse();
+                let poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
+
+                async fn fetch_next_batch<
+                    T: Unpin + DeserializeOwned + Send + 'static,
+                    C: Codec<Compact = Value>,
+                >(
+                    pool: Pool<Postgres>,
+                    config: Config,
+                    worker: WorkerId,
+                ) -> Vec<Result<Option<Request<T, SqlContext>>, Error>> {
+                    let res = fetch_next::<T, C>(&pool, &config, &worker)
+                        .await
+                        .map_err(|e| Error::SourceError(Arc::new(Box::new(e))))
+                        .unwrap();
+                    let mut jobs = Vec::new();
+                    for job in res {
+                        jobs.push(Ok(Some(job)));
+                    }
+                    jobs
+                }
+                let w = worker.clone();
+                let combined = poll_next_stm
+                    .ready_chunks(self.config.buffer_size)
+                    .chain(pg_notification.ready_chunks(self.config.buffer_size));
+                let pool = self.pool.clone();
+                let config = self.config.clone();
+                let worker_id = worker.id().clone();
+                combined
+                    .filter_map(move |s| {
+                        let w = w.clone();
+                        async move { w.is_ready().then_some(s) }
+                    })
+                    .then(move |_| {
+                        fetch_next_batch::<T, C>(pool.clone(), config.clone(), worker_id.clone())
+                    })
+                    .map(|s| stream::iter(s))
+                    .flatten()
+                    .boxed()
+            }
+            _ => unimplemented!(),
+        };
         let heartbeat = async move {
             // Lets reenqueue any jobs that belonged to this worker in case of a death
             if let Err(e) = self
@@ -187,44 +246,12 @@ where
             let mut reenqueue_orphaned_stm =
                 apalis_core::interval::interval(config.poll_interval).fuse();
 
-            let mut ack_stream = ack_notify.clone().ready_chunks(config.buffer_size).fuse();
-
-            let poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
-
-            let pg_notification = subscription
-                .map(|stm| stm.notify.boxed().fuse())
-                .unwrap_or(stream::iter(vec![]).boxed().fuse());
-
-            async fn fetch_next_batch<
-                T: Unpin + DeserializeOwned + Send + 'static,
-                C: Codec<Compact = Value>,
-            >(
-                storage: &mut PostgresStorage<T, C>,
-                worker: &WorkerId,
-                tx: &mut mpsc::Sender<Result<Option<Request<T, SqlContext>>, Error>>,
-            ) -> Result<(), Error> {
-                let res = storage
-                    .fetch_next(worker)
-                    .await
-                    .map_err(|e| Error::SourceError(Arc::new(Box::new(e))))?;
-                for job in res {
-                    tx.send(Ok(Some(job)))
-                        .await
-                        .map_err(|e| Error::SourceError(Arc::new(Box::new(e))))?;
-                }
-                Ok(())
-            }
-
             if let Err(e) = self
                 .keep_alive_at::<Self::Layer>(worker.id(), Utc::now().timestamp())
                 .await
             {
                 worker.emit(Event::Error(Box::new(PgPollError::KeepAliveError(e))));
             }
-
-            let mut combined = poll_next_stm
-                .ready_chunks(self.config.buffer_size)
-                .chain(pg_notification.ready_chunks(self.config.buffer_size));
 
             loop {
                 select! {
@@ -236,66 +263,11 @@ where
                     ids = ack_stream.next() => {
 
                         if let Some(ids) = ids {
-                            let ack_ids: Vec<(String, String, String, String, u64)> = ids.iter().map(|(ctx, res)| {
-                                (res.task_id.to_string(), worker.id().to_string(), serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string())).expect("Could not convert response to json"), calculate_status(ctx,res).to_string(), res.attempt.current() as u64)
-                            }).collect();
-                            let query =
-                                "UPDATE apalis.jobs
-                                    SET status = Q.status, 
-                                        done_at = now(), 
-                                        lock_by = Q.worker_id, 
-                                        last_error = Q.result, 
-                                        attempts = Q.attempts 
-                                    FROM (
-                                        SELECT (value->>0)::text as id, 
-                                            (value->>1)::text as worker_id, 
-                                            (value->>2)::text as result, 
-                                            (value->>3)::text as status, 
-                                            (value->>4)::int as attempts 
-                                        FROM json_array_elements($1::json)
-                                    ) Q
-                                    WHERE apalis.jobs.id = Q.id;
-                                    ";
-                            let codec_res = C::encode(&ack_ids);
-                            match codec_res {
-                                Ok(val) => {
-                                    if let Err(e) = sqlx::query(query)
-                                        .bind(val)
-                                        .execute(&pool)
-                                        .await
-                                    {
-                                        worker.emit(Event::Error(Box::new(PgPollError::AckError(e))));
-                                    }
-                                }
-                                Err(e) => {
-                                    worker.emit(Event::Error(Box::new(PgPollError::CodecError(e.into()))));
-                                }
-                            }
-
+                            acknowledge_jobs::<C>(pool.clone(), ids).await;
                         }
                     }
-                    _ = combined.next() => {
-                        if worker.is_ready() {
-                            match &mut self.receiver {
-                                Some(receiver) => {
-                                    if let Some(res) = receiver.next().await {
-                                        for job in res {
-                                            if let Err(e) = tx.send(Ok(Some(job)))
-                                                .await
-                                                .map_err(|e| Error::SourceError(Arc::new(Box::new(e)))) {
-                                                    worker.emit(Event::Error(Box::new(PgPollError::FetchNextError(e))));
-                                                }
-                                        }
-                                    }
-                                },
-                                None => {
-                                    if let Err(e) = fetch_next_batch(&mut self, worker.id(), &mut tx).await {
-                                        worker.emit(Event::Error(Box::new(PgPollError::FetchNextError(e))));
-                                    }
-                                },
-                            };
+                    _ = shared_poller.clone().fuse() => {
 
-                        }
                     }
                     _ = reenqueue_orphaned_stm.next() => {
                         let dead_since = Utc::now()
@@ -309,8 +281,62 @@ where
                 };
             }
         };
-        Poller::new_with_layer(BackendStream::new(rx.boxed(), controller), heartbeat, layer)
+        Poller::new_with_layer(receiver.boxed(), heartbeat, layer)
     }
+}
+
+pub async fn acknowledge_jobs<C: Codec<Compact = Value>>(
+    pool: PgPool,
+    ids: Vec<(SqlContext, Response<Value>)>,
+) -> Result<(), Error> {
+    let ack_ids: Vec<(String, String, String, String, u64)> = ids
+        .iter()
+        .map(|(ctx, res)| {
+            (
+                res.task_id.to_string(),
+                ctx.lock_by().as_ref().unwrap().to_string(),
+                serde_json::to_string(&res.inner.as_ref().map_err(|e| e.to_string()))
+                    .expect("Could not convert response to json"),
+                calculate_status(ctx, res).to_string(),
+                res.attempt.current() as u64,
+            )
+        })
+        .collect();
+
+    let query = "UPDATE apalis.jobs
+            SET status = Q.status, 
+                done_at = now(), 
+                lock_by = Q.worker_id, 
+                last_error = Q.result, 
+                attempts = Q.attempts 
+            FROM (
+                SELECT (value->>0)::text as id, 
+                    (value->>1)::text as worker_id, 
+                    (value->>2)::text as result, 
+                    (value->>3)::text as status, 
+                    (value->>4)::int as attempts 
+                FROM json_array_elements($1::json)
+            ) Q
+            WHERE apalis.jobs.id = Q.id;";
+
+    match C::encode(&ack_ids) {
+        Ok(val) => {
+            if let Err(e) = sqlx::query(query).bind(val).execute(&pool).await {
+                // return error
+                // if let Some(worker) = worker {
+                //     worker.emit(Event::Error(Box::new(PgPollError::AckError(e))));
+                // }
+            }
+        }
+        Err(e) => {
+            // return error
+            // if let Some(worker) = worker {
+            //     worker.emit(Event::Error(Box::new(PgPollError::CodecError(e.into()))));
+            // }
+        }
+    }
+
+    Ok(())
 }
 
 impl PostgresStorage<()> {
@@ -335,15 +361,17 @@ impl<T> PostgresStorage<T> {
     }
     /// New Storage from [PgPool] and custom config
     pub fn new_with_config(pool: PgPool, config: Config) -> Self {
+        let starter = stream::iter(vec![()]); // Emit first tick instantly
+        let basic_interval = starter.chain(apalis_core::interval::interval(config.poll_interval));
+        let (poller, subscription) = Notify::pipe_stream(basic_interval);
         Self {
             pool,
             job_type: PhantomData,
             codec: PhantomData,
             config,
-            controller: Controller::new(),
-            ack_notify: Notify::new(),
-            subscription: None,
-            receiver: None
+            poller: poller.shared(),
+            ack: Notify::new(),
+            connection: BackendConnection::StandAlone { subscription },
         }
     }
 
@@ -358,35 +386,368 @@ impl<T> PostgresStorage<T> {
     }
 }
 
-#[derive(Debug)]
-pub struct SharedPostgresStorage {
-    listener: PgListen,
-    instances: HashMap<String, Receiver<Value>>,
-    pool: PgPool,
-    config: Config,
+impl<Args, C: Codec<Compact = Value>> Sharable<PostgresStorage<Args, C>, C>
+    for PostgresStorage<C::Compact, C>
+{
+    type Config = Config;
+    type Context = SqlContext;
+    type MakeError = ();
+
+    fn share(
+        parent: &mut apalis_core::backend::Shared<Self, Self::Context, C, Self::Config>,
+    ) -> Result<PostgresStorage<Args, C>, Self::MakeError> {
+        let config = parent
+            .backend
+            .config
+            .clone()
+            .set_namespace(type_name::<Args>());
+        Self::share_with_config(parent, config)
+    }
+    fn share_with_config(
+        parent: &mut apalis_core::backend::Shared<Self, Self::Context, C, Self::Config>,
+        config: Self::Config,
+    ) -> Result<PostgresStorage<Args, C>, Self::MakeError> {
+        let p = parent.backend.pool.clone();
+        let instances = parent.instances.clone();
+        // let i = instances.clone();
+        let ack = Notify::new();
+        let a = ack.clone();
+        let poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
+        let receiver = Notify::new();
+        instances
+            .write()
+            .unwrap()
+            .insert(config.namespace.clone(), receiver.clone());
+        let fut = async move {
+            let mut listener = PgListener::connect_with(&p).await.unwrap();
+            listener.listen("apalis::job::insert").await.unwrap();
+            let instances = instances.clone();
+
+            let notification = listener
+                .into_stream()
+                .try_filter(|notification| {
+                    let payload = notification.payload().to_owned();
+                    let instances = instances.clone();
+                    async move {
+                        let instances = instances.read().unwrap();
+                        let mut keys = instances.keys();
+                        keys.find(|key| payload.starts_with(*key)).is_some()
+                    }
+                })
+                .filter_map(|s| future::ready(s.ok()))
+                .ready_chunks(config.buffer_size)
+                .map(|notifications| {
+                    let job_ids: HashSet<String> = notifications
+                        .into_iter()
+                        .map(|n| {
+                            n.payload()
+                                .to_owned()
+                                .split("::")
+                                .last()
+                                .unwrap()
+                                .to_owned()
+                        })
+                        .collect();
+                    job_ids
+                })
+                .then(|job_ids| {
+                    let pool = p.clone();
+                    fetch_next_by_ids(pool, job_ids)
+                });
+
+            let starter = stream::iter(vec![()]); // Emit first tick instantly
+
+            let poll_stream = starter
+                .chain(poll_next_stm)
+                .ready_chunks(config.buffer_size)
+                .map(|_| {
+                    // TODO: Possibly get the keys from worker.jobtype
+                    let instances = instances.read().unwrap();
+                    instances
+                        .keys()
+                        .map(|key| key.to_owned())
+                        .collect::<HashSet<String>>()
+                })
+                .then(|job_types| {
+                    let fetch_count = (instances.read().unwrap().len() * config.buffer_size) as i32;
+
+                    let pool = p.clone();
+                    fetch_next_shared_batch(pool, job_types, fetch_count)
+                });
+            let combined = futures::stream::select(poll_stream, notification);
+
+            let poller = combined
+                .map_ok(|jobs| {
+                    jobs.into_iter()
+                        .map(|job| {
+                            let instances = instances.read().unwrap();
+                            let listener = instances
+                                .get(&job.parts.namespace.as_ref().unwrap().0)
+                                .unwrap();
+
+                            listener.notify(Ok(Some(job))).unwrap();
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .for_each(|i| async {
+                    if let Err(e) = i {
+                        warn!("Encountered error during FETCH_NEXT_SHARED {e}");
+                    }
+                })
+                .boxed();
+            let ack = a
+                .ready_chunks(config.buffer_size)
+                .then(|ids| {
+                    let pool = p.clone();
+                    acknowledge_jobs::<JsonCodec<Value>>(pool, ids)
+                })
+                .for_each(|i| async {
+                    if let Err(e) = i {
+                        warn!("Encountered error during ACK {e}");
+                    }
+                })
+                .boxed();
+            future::join(poller, ack).await;
+        };
+        Ok(PostgresStorage {
+            pool: parent.backend.pool.clone(),
+            job_type: PhantomData,
+            codec: PhantomData,
+            config,
+            ack: parent.ack.clone(),
+            poller: fut.boxed().shared(),
+            connection: BackendConnection::Shared { receiver },
+        })
+    }
 }
 
-// impl PostgresStorage<Shared> {
-//     /// New Sharable
-//     pub fn new_shared(pool: PgPool) -> Self {
-//         Self::new_with_config(pool, Config::new(type_name::<Shared>()))
+async fn fetch_next_shared_batch(
+    pool: PgPool,
+    job_types: HashSet<String>,
+    job_count: i32,
+) -> Result<Vec<Request<Value, SqlContext>>, sqlx::Error> {
+    let job_types: Vec<&str> = job_types.iter().map(AsRef::as_ref).collect();
+
+    let rows: Vec<SqlRequest<serde_json::Value>> =
+        sqlx::query_as("SELECT * FROM apalis.get_jobs_shared($1, $2)")
+            .bind(job_types)
+            .bind(job_count)
+            .fetch_all(&pool)
+            .await?;
+
+    let jobs = rows
+        .into_iter()
+        .map(|job| {
+            let namespace = job.job_type;
+            let (req, parts) = job.req.take_parts();
+            let mut req = Request::new_with_parts(req, parts);
+            req.parts.namespace = Some(Namespace(namespace));
+            req
+        })
+        .collect();
+
+    Ok(jobs)
+}
+
+pub async fn fetch_next_by_ids(
+    pool: PgPool,
+    job_ids: HashSet<String>,
+) -> Result<Vec<Request<Value, SqlContext>>, sqlx::Error> {
+    let job_ids: Vec<&str> = job_ids.iter().map(AsRef::as_ref).collect();
+
+    let rows: Vec<SqlRequest<serde_json::Value>> =
+        sqlx::query_as("SELECT * FROM apalis.get_jobs_by_ids($1)")
+            .bind(job_ids)
+            .fetch_all(&pool)
+            .await?;
+
+    let jobs = rows
+        .into_iter()
+        .map(|job| {
+            let namespace = job.job_type;
+            let (req, parts) = job.req.take_parts();
+            let mut req = Request::new_with_parts(req, parts);
+            req.parts.namespace = Some(Namespace(namespace));
+            req
+        })
+        .collect();
+
+    Ok(jobs)
+}
+
+// #[derive(Debug)]
+// pub struct SharedPostgresStorage<C: Codec> {
+//     instances: Arc<RwLock<HashMap<String, Notify<Request<C::Compact, SqlContext>>>>>,
+//     ack: Notify<(SqlContext, Response<C::Compact>)>,
+//     pool: PgPool,
+//     config: Config,
+//     poller: Shared<BoxFuture<'static, ()>>,
+// }
+
+// pub struct Shared<C: Codec, Context, Config> {
+//     instances: Arc<RwLock<HashMap<String, Notify<Request<C::Compact, Context>>>>>,
+//     ack: Notify<(SqlContext, Response<C::Compact>)>,
+//     config: Config,
+//     poller: Shared<BoxFuture<'static, ()>>,
+// }
+
+// impl SharedPostgresStorage<JsonCodec<Value>> {
+//     pub fn new(pool: Pool<Postgres>) -> Self {
+//         Self::new_with_config(pool, Config::default())
+//     }
+//     pub fn new_with_config(pool: Pool<Postgres>, config: Config) -> Self {
+//         let instances: Arc<RwLock<HashMap<String, Notify<Request<Value, SqlContext>>>>> =
+//             Arc::default();
+
+//         let p = pool.clone();
+//         let i = instances.clone();
+//         let ack = Notify::new();
+//         let a = ack.clone();
+//         let poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
+//         let fut = async move {
+//             let mut listener = PgListener::connect_with(&p).await.unwrap();
+//             listener.listen("apalis::job::insert").await.unwrap();
+//             let instances = instances.clone();
+
+//             let notification = listener
+//                 .into_stream()
+//                 .try_filter(|notification| {
+//                     let payload = notification.payload().to_owned();
+//                     let instances = instances.clone();
+//                     async move {
+//                         let instances = instances.read().unwrap();
+//                         let mut keys = instances.keys();
+//                         keys.find(|key| payload.starts_with(*key)).is_some()
+//                     }
+//                 })
+//                 .filter_map(|s| future::ready(s.ok()))
+//                 .ready_chunks(config.buffer_size)
+//                 .map(|notifications| {
+//                     let job_ids: HashSet<String> = notifications
+//                         .into_iter()
+//                         .map(|n| {
+//                             n.payload()
+//                                 .to_owned()
+//                                 .split("::")
+//                                 .last()
+//                                 .unwrap()
+//                                 .to_owned()
+//                         })
+//                         .collect();
+//                     job_ids
+//                 })
+//                 .then(|job_ids| {
+//                     let pool = p.clone();
+//                     fetch_next_by_ids(pool, job_ids)
+//                 });
+
+//             let poll_stream = poll_next_stm
+//                 .ready_chunks(config.buffer_size)
+//                 .map(|_| {
+//                     // TODO: Possibly get the keys from worker.jobtype
+//                     let instances = instances.read().unwrap();
+//                     instances
+//                         .keys()
+//                         .map(|key| key.to_owned())
+//                         .collect::<HashSet<String>>()
+//                 })
+//                 .then(|job_types| {
+//                     let fetch_count = (instances.read().unwrap().len() * config.buffer_size) as i32;
+
+//                     let pool = p.clone();
+//                     fetch_next_shared_batch(pool, job_types, fetch_count)
+//                 });
+//             let combined = futures::stream::select(poll_stream, notification);
+
+//             let poller = combined
+//                 .map_ok(|jobs| {
+//                     jobs.into_iter()
+//                         .map(|job| {
+//                             let instances = instances.read().unwrap();
+//                             let listener = instances
+//                                 .get(&job.parts.namespace.as_ref().unwrap().0)
+//                                 .unwrap();
+
+//                             listener.notify(job).unwrap();
+//                         })
+//                         .collect::<Vec<_>>()
+//                 })
+//                 .for_each(|i| async {
+//                     if let Err(e) = i {
+//                         warn!("Encountered error during FETCH_NEXT_SHARED {e}");
+//                     }
+//                 })
+//                 .boxed();
+//             let ack = a
+//                 .ready_chunks(config.buffer_size)
+//                 .then(|ids| {
+//                     let pool = p.clone();
+//                     acknowledge_jobs::<JsonCodec<Value>>(pool, ids)
+//                 })
+//                 .for_each(|i| async {
+//                     if let Err(e) = i {
+//                         warn!("Encountered error during ACK {e}");
+//                     }
+//                 })
+//                 .boxed();
+//             future::join(poller, ack).await;
+//         };
+//         Self {
+//             instances: i,
+//             ack,
+//             pool,
+//             config,
+//             poller: fut.boxed().shared(),
+//         }
 //     }
 // }
 
-impl<Req: Send + 'static> MakeShared<Req> for SharedPostgresStorage {
-    type MakeError = ();
-    type Backend = PostgresStorage<Req>;
-    type Future = BoxFuture<'static, Result<Self::Backend, Self::MakeError>>;
-
-    fn make_shared(&mut self) -> Self::Future {
-        let pool = self.pool.clone();
-        let mut config = self.config.clone();
-        config.namespace = std::any::type_name::<Req>().into();
-        let mut pg = PostgresStorage::new_with_config(pool, config);
-        self.listener.subscribe_with(&mut pg);
-        Box::pin(async { Ok(pg) })
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum SharedPostgresError {
+    #[error("instances were poisoned")]
+    PoisonError,
 }
+
+// impl<Req: Send + 'static, Compact, C> MakeShared<Req> for SharedPostgresStorage<C>
+// where
+//     C: Codec<Compact = Compact> + Send + Sync + 'static,
+//     C::Compact: Send,
+//     Compact: std::marker::Send,
+// {
+//     type MakeError = SharedPostgresError;
+//     type Backend = PostgresStorage<Req, C>;
+//     type Config = Config;
+
+//     fn make_shared(&mut self) -> Result<Self::Backend, Self::MakeError> {
+//         let mut config = self.config.clone();
+//         config.namespace = std::any::type_name::<Req>().into();
+//         Self::make_shared_with_config(self, config)
+//     }
+
+//     fn make_shared_with_config(
+//         &mut self,
+//         config: Self::Config,
+//     ) -> Result<Self::Backend, Self::MakeError> {
+//         let pool = self.pool.clone();
+//         let receiver = Notify::new();
+//         self.instances
+//             .write()
+//             .map_err(|_| SharedPostgresError::PoisonError)?
+//             .insert(config.namespace.clone(), receiver.clone());
+//         let pg = PostgresStorage {
+//             pool,
+//             job_type: PhantomData,
+//             codec: PhantomData,
+//             config,
+//             connection: Connection::Shared {
+//                 ack: self.ack.clone(),
+//                 receiver,
+//                 poller: self.poller.clone(),
+//             },
+//         };
+//         Ok(pg)
+//     }
+// }
 
 impl<T, C: Codec> PostgresStorage<T, C> {
     /// Expose the codec
@@ -420,101 +781,47 @@ impl<T, C: Codec> PostgresStorage<T, C> {
     }
 }
 
-/// A listener that listens to Postgres notifications
-#[derive(Debug)]
-pub struct PgListen {
-    listener: PgListener,
-    subscriptions: Vec<(String, PgSubscription)>,
-}
-
 /// A postgres subscription
 #[derive(Debug, Clone)]
 pub struct PgSubscription {
     notify: Notify<()>,
 }
 
-impl PgListen {
-    /// Build a new listener.
-    ///
-    /// Maintaining a connection can be expensive, its encouraged you only create one [PgListen] and share it with multiple [PostgresStorage]
-    pub async fn new(pool: PgPool) -> Result<Self, sqlx::Error> {
-        let listener = PgListener::connect_with(&pool).await?;
-        Ok(Self {
-            listener,
-            subscriptions: Vec::new(),
-        })
-    }
-
-    /// Add a new subscription with a storage
-    pub fn subscribe_with<T>(&mut self, storage: &mut PostgresStorage<T>) {
-        let sub = PgSubscription {
-            notify: Notify::new(),
-        };
-        self.subscriptions
-            .push((storage.config.namespace.to_owned(), sub.clone()));
-        storage.subscription = Some(sub)
-    }
-
-    /// Add a new subscription
-    pub fn subscribe(&mut self, namespace: &str) -> PgSubscription {
-        let sub = PgSubscription {
-            notify: Notify::new(),
-        };
-        self.subscriptions.push((namespace.to_owned(), sub.clone()));
-        sub
-    }
-    /// Start listening to jobs
-    pub async fn listen(mut self) -> Result<(), sqlx::Error> {
-        self.listener.listen("apalis::job").await?;
-        let mut notification = self.listener.into_stream();
-        while let Some(Ok(res)) = notification.next().await {
-            let _: Vec<_> = self
-                .subscriptions
-                .iter()
-                .filter(|s| s.0 == res.payload())
-                .map(|s| s.1.notify.notify(()))
-                .collect();
-        }
-        Ok(())
-    }
-}
-
-impl<T, C> PostgresStorage<T, C>
+async fn fetch_next<T, C>(
+    pool: &Pool<Postgres>,
+    config: &Config,
+    worker_id: &WorkerId,
+) -> Result<Vec<Request<T, SqlContext>>, sqlx::Error>
 where
     T: DeserializeOwned + Send + Unpin + 'static,
     C: Codec<Compact = Value>,
 {
-    async fn fetch_next(
-        &mut self,
-        worker_id: &WorkerId,
-    ) -> Result<Vec<Request<T, SqlContext>>, sqlx::Error> {
-        let config = &self.config;
-        let job_type = &config.namespace;
-        let fetch_query = "Select * from apalis.get_jobs($1, $2, $3);";
-        let jobs: Vec<SqlRequest<serde_json::Value>> = sqlx::query_as(fetch_query)
-            .bind(worker_id.to_string())
-            .bind(job_type)
-            // https://docs.rs/sqlx/latest/sqlx/postgres/types/index.html
-            .bind(
-                i32::try_from(config.buffer_size)
-                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?,
-            )
-            .fetch_all(&self.pool)
-            .await?;
-        let jobs: Vec<_> = jobs
-            .into_iter()
-            .map(|job| {
-                let (req, parts) = job.req.take_parts();
-                let req = C::decode(req)
-                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
-                    .expect("Unable to decode");
-                let mut req = Request::new_with_parts(req, parts);
-                req.parts.namespace = Some(Namespace(self.config.namespace.clone()));
-                req
-            })
-            .collect();
-        Ok(jobs)
-    }
+    let job_type = &config.namespace;
+    let fetch_query = "Select * from apalis.get_jobs($1, $2, $3);";
+    let jobs: Vec<SqlRequest<serde_json::Value>> = sqlx::query_as(fetch_query)
+        .bind(worker_id.to_string())
+        .bind(job_type)
+        // https://docs.rs/sqlx/latest/sqlx/postgres/types/index.html
+        .bind(
+            i32::try_from(config.buffer_size)
+                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?,
+        )
+        .fetch_all(pool)
+        .await?;
+    let jobs: Vec<_> = jobs
+        .into_iter()
+        .map(|mut job| {
+            job.req.parts.context.set_lock_by(Some(worker_id.clone()));
+            let (req, parts) = job.req.take_parts();
+            let req = C::decode(req)
+                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+                .expect("Unable to decode");
+            let mut req = Request::new_with_parts(req, parts);
+            req.parts.namespace = Some(Namespace(config.namespace.clone()));
+            req
+        })
+        .collect();
+    Ok(jobs)
 }
 
 impl<Req, C> Storage for PostgresStorage<Req, C>
@@ -706,7 +1013,9 @@ where
                 .expect("Could not encode result")
         });
 
-        self.ack_notify
+        let ack_notify = &mut self.ack;
+
+        ack_notify
             .notify((ctx.clone(), res))
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::Interrupted, e)))?;
 

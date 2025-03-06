@@ -1,6 +1,6 @@
 use crate::context::SqlContext;
 use crate::{calculate_status, Config, SqlError};
-use apalis_core::backend::{BackendExpose, Stat, WorkerState};
+use apalis_core::backend::{BackendExpose, Sharable, Stat, WorkerState};
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
 use apalis_core::layers::{Ack, AckLayer};
@@ -152,6 +152,43 @@ impl<T, C> SqliteStorage<T, C> {
     /// Expose the code used
     pub fn codec(&self) -> &PhantomData<C> {
         &self.codec
+    }
+}
+
+impl<T, C> Sharable<SqliteStorage<T, C>, C> for SqliteStorage<String, C>
+where
+    C: Codec,
+{
+    type Context = SqlContext;
+
+    type Config = Config;
+
+    type MakeError = ();
+
+    fn share(
+        parent: &mut apalis_core::backend::Shared<Self, Self::Context, C, Self::Config>,
+    ) -> Result<SqliteStorage<T, C>, Self::MakeError> {
+        Self::share_with_config(
+            parent,
+            parent
+                .backend
+                .config
+                .clone()
+                .set_namespace(type_name::<T>()),
+        )
+    }
+
+    fn share_with_config(
+        parent: &mut apalis_core::backend::Shared<Self, Self::Context, C, Self::Config>,
+        config: Self::Config,
+    ) -> Result<SqliteStorage<T, C>, Self::MakeError> {
+        Ok(SqliteStorage {
+            pool: parent.backend.pool.clone(),
+            job_type: PhantomData,
+            controller: Default::default(),
+            config,
+            codec: PhantomData,
+        })
     }
 }
 

@@ -74,6 +74,8 @@ pub mod prelude {
         backend::BackendExpose,
         backend::Stat,
         backend::WorkerState,
+        backend::Sharable,
+        backend::Shared,
         builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
         codec::Codec,
         data::Extensions,
