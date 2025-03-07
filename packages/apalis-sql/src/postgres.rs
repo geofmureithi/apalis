@@ -190,7 +190,7 @@ where
                 .unwrap_or(stream::iter(vec![]).boxed().fuse());
 
             async fn fetch_next_batch<
-                T: Unpin + DeserializeOwned + Send + 'static,
+                T: Unpin + Serialize + DeserializeOwned + Send + 'static,
                 C: Codec<Compact = Value>,
             >(
                 storage: &mut PostgresStorage<T, C>,
@@ -430,7 +430,7 @@ impl PgListen {
 
 impl<T, C> PostgresStorage<T, C>
 where
-    T: DeserializeOwned + Send + Unpin + 'static,
+    T: Serialize + DeserializeOwned + Send + Unpin + 'static,
     C: Codec<Compact = serde_json::Value>,
 {
     async fn fetch_next(
@@ -464,6 +464,37 @@ where
             .collect();
         Ok(jobs)
     }
+
+    /// Push a job to Postgres [Storage] with a specified priority
+    /// Lower is higher (default is 0).
+    ///
+    /// # SQL Example
+    ///
+    /// ```sql
+    /// Select apalis.push_job(job_type => job_type::text,
+    ///                        job => job::json,
+    ///                        priority => priority::integer);
+    /// ```
+    pub async fn push_request_with_priority(
+        &mut self,
+        req: Request<T, SqlContext>,
+        priority: i32,
+    ) -> Result<Parts<SqlContext>, sqlx::Error> {
+        let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL, $5)";
+
+        let args = C::encode(&req.args)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+        let job_type = self.config.namespace.clone();
+        sqlx::query(query)
+            .bind(args)
+            .bind(req.parts.task_id.to_string())
+            .bind(&job_type)
+            .bind(req.parts.context.max_attempts())
+            .bind(priority)
+            .execute(&self.pool)
+            .await?;
+        Ok(req.parts)
+    }
 }
 
 impl<Req, C> Storage for PostgresStorage<Req, C>
@@ -488,19 +519,7 @@ where
         &mut self,
         req: Request<Self::Job, SqlContext>,
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
-        let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL)";
-
-        let args = C::encode(&req.args)
-            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-        let job_type = self.config.namespace.clone();
-        sqlx::query(query)
-            .bind(args)
-            .bind(req.parts.task_id.to_string())
-            .bind(&job_type)
-            .bind(req.parts.context.max_attempts())
-            .execute(&self.pool)
-            .await?;
-        Ok(req.parts)
+        self.push_request_with_priority(req, 0).await
     }
 
     async fn schedule_request(
@@ -509,7 +528,7 @@ where
         on: Timestamp,
     ) -> Result<Parts<Self::Context>, sqlx::Error> {
         let query =
-            "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, $5, NULL, NULL, NULL, NULL)";
+            "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, $5, NULL, NULL, NULL, NULL, 0)";
         let task_id = req.parts.task_id.to_string();
         let parts = req.parts;
         let on = DateTime::from_timestamp(on, 0);
