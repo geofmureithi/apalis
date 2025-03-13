@@ -52,7 +52,7 @@ where
 
 impl<T, C> fmt::Debug for MysqlStorage<T, C>
 where
-    C: Debug + Codec,
+    C: Codec,
     C::Compact: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -61,7 +61,7 @@ where
             .field("job_type", &"PhantomData<T>")
             .field("controller", &self.controller)
             .field("config", &self.config)
-            .field("codec", &self.codec)
+            .field("codec", &std::any::type_name::<C>())
             .field("ack_notify", &self.ack_notify)
             .finish()
     }
@@ -69,7 +69,7 @@ where
 
 impl<T, C> Clone for MysqlStorage<T, C>
 where
-    C: Debug + Codec,
+    C: Codec,
 {
     fn clone(&self) -> Self {
         let pool = self.pool.clone();
@@ -133,7 +133,7 @@ where
 
 impl<T, C> MysqlStorage<T, C>
 where
-    T: DeserializeOwned + Send + Unpin + Sync + 'static,
+    T: DeserializeOwned + Send + Sync + 'static,
     C: Codec<Compact = Value> + Send + 'static,
 {
     fn stream_jobs(
@@ -227,7 +227,8 @@ where
 impl<T, C> Storage for MysqlStorage<T, C>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
-    C: Codec<Compact = Value> + Send,
+    C: Codec<Compact = Value> + Send + Sync + 'static,
+    C::Error: std::error::Error + 'static + Send + Sync,
 {
     type Job = T;
 
@@ -235,13 +236,15 @@ where
 
     type Context = SqlContext;
 
+    type Codec = C;
+
     async fn push_request(
         &mut self,
         job: Request<Self::Job, SqlContext>,
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
         let (args, parts) = job.take_parts();
         let query =
-            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL)";
+            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL, ?)";
         let pool = self.pool.clone();
 
         let job = C::encode(args)
@@ -252,6 +255,30 @@ where
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
             .bind(parts.context.max_attempts())
+            .bind(parts.context.get_priority())
+            .execute(&pool)
+            .await?;
+        Ok(parts)
+    }
+
+    async fn push_raw_request(
+        &mut self,
+        job: Request<Self::Compact, SqlContext>,
+    ) -> Result<Parts<SqlContext>, sqlx::Error> {
+        let (args, parts) = job.take_parts();
+        let query =
+            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL, ?)";
+        let pool = self.pool.clone();
+
+        let job = C::encode(args)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+        let job_type = self.config.namespace.clone();
+        sqlx::query(query)
+            .bind(job)
+            .bind(parts.task_id.to_string())
+            .bind(job_type.to_string())
+            .bind(parts.context.max_attempts())
+            .bind(parts.context.get_priority())
             .execute(&pool)
             .await?;
         Ok(parts)
@@ -262,7 +289,8 @@ where
         req: Request<Self::Job, SqlContext>,
         on: i64,
     ) -> Result<Parts<Self::Context>, sqlx::Error> {
-        let query = "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, ?, NULL, NULL, NULL, NULL)";
+        let query =
+            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, ?, NULL, NULL, NULL, NULL, ?)";
         let pool = self.pool.clone();
 
         let args = C::encode(&req.args)
@@ -275,6 +303,7 @@ where
             .bind(job_type)
             .bind(req.parts.context.max_attempts())
             .bind(on)
+            .bind(req.parts.context.get_priority())
             .execute(&pool)
             .await?;
         Ok(req.parts)
@@ -345,10 +374,11 @@ where
         let lock_by = ctx.lock_by().clone();
         let lock_at = *ctx.lock_at();
         let last_error = ctx.last_error().clone();
+        let priority = *ctx.get_priority();
         let job_id = job.parts.task_id;
         let mut tx = pool.acquire().await?;
         let query =
-                "UPDATE jobs SET status = ?, attempts = ?, done_at = ?, lock_by = ?, lock_at = ?, last_error = ? WHERE id = ?";
+                "UPDATE jobs SET status = ?, attempts = ?, done_at = ?, lock_by = ?, lock_at = ?, last_error = ?, priority = ? WHERE id = ?";
         sqlx::query(query)
             .bind(status.to_owned())
             .bind::<i64>(
@@ -361,6 +391,7 @@ where
             .bind(lock_by.map(|w| w.name().to_string()))
             .bind(lock_at)
             .bind(last_error)
+            .bind(priority)
             .bind(job_id.to_string())
             .execute(&mut *tx)
             .await?;
@@ -399,17 +430,19 @@ pub enum MysqlPollError {
     ReenqueueOrphanedError(sqlx::Error),
 }
 
-impl<Req, Res, C> Backend<Request<Req, SqlContext>, Res> for MysqlStorage<Req, C>
+impl<Req, C> Backend<Request<Req, SqlContext>> for MysqlStorage<Req, C>
 where
-    Req: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
-    C: Debug + Codec<Compact = Value> + Clone + Send + 'static + Sync,
+    Req: Serialize + DeserializeOwned + Sync + Send + 'static,
+    C: Codec<Compact = Value> + Send + 'static + Sync,
     C::Error: std::error::Error + 'static + Send + Sync,
 {
     type Stream = BackendStream<RequestStream<Request<Req, SqlContext>>>;
 
-    type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, Res>;
+    type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, C>;
 
-    fn poll<Svc>(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    type Compact = Value;
+
+    fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
@@ -514,7 +547,7 @@ where
     }
 }
 
-impl<T, Res, C> Ack<T, Res> for MysqlStorage<T, C>
+impl<T, Res, C> Ack<T, Res, C> for MysqlStorage<T, C>
 where
     T: Sync + Send,
     Res: Serialize + Send + 'static + Sync,

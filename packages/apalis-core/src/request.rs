@@ -160,12 +160,14 @@ pub type RequestFuture<T> = BoxFuture<'static, T>;
 /// Represents a stream for T.
 pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, Error>>;
 
-impl<T, Res, Ctx> Backend<Request<T, Ctx>, Res> for RequestStream<Request<T, Ctx>> {
+impl<T, Ctx> Backend<Request<T, Ctx>> for RequestStream<Request<T, Ctx>> {
     type Stream = Self;
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, _worker: &Worker<Context>) -> Poller<Self::Stream> {
+    type Compact = ();
+
+    fn poll(self, _worker: &Worker<Context>) -> Poller<Self::Stream> {
         Poller {
             stream: self,
             heartbeat: Box::pin(futures::future::pending()),

@@ -147,17 +147,19 @@ pub enum PgPollError {
     CodecError(BoxDynError),
 }
 
-impl<T, C, Res> Backend<Request<T, SqlContext>, Res> for PostgresStorage<T, C>
+impl<T, C> Backend<Request<T, SqlContext>> for PostgresStorage<T, C>
 where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
-    C: Codec<Compact = serde_json::Value> + Send + 'static,
+    C: Codec<Compact = Value> + Send + 'static,
     C::Error: std::error::Error + 'static + Send + Sync,
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
 
-    type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, Res>;
+    type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, C>;
 
-    fn poll<Svc>(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    type Compact = Value;
+
+    fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let subscription = self.subscription.clone();
         let config = self.config.clone();
@@ -190,7 +192,7 @@ where
                 .unwrap_or(stream::iter(vec![]).boxed().fuse());
 
             async fn fetch_next_batch<
-                T: Unpin + Serialize + DeserializeOwned + Send + 'static,
+                T: Unpin + DeserializeOwned + Send + 'static,
                 C: Codec<Compact = Value>,
             >(
                 storage: &mut PostgresStorage<T, C>,
@@ -430,8 +432,8 @@ impl PgListen {
 
 impl<T, C> PostgresStorage<T, C>
 where
-    T: Serialize + DeserializeOwned + Send + Unpin + 'static,
-    C: Codec<Compact = serde_json::Value>,
+    T: DeserializeOwned + Send + Unpin + 'static,
+    C: Codec<Compact = Value>,
 {
     async fn fetch_next(
         &mut self,
@@ -464,49 +466,21 @@ where
             .collect();
         Ok(jobs)
     }
-
-    /// Push a job to Postgres [Storage] with a specified priority
-    /// Lower is higher (default is 0).
-    ///
-    /// # SQL Example
-    ///
-    /// ```sql
-    /// Select apalis.push_job(job_type => job_type::text,
-    ///                        job => job::json,
-    ///                        priority => priority::integer);
-    /// ```
-    pub async fn push_request_with_priority(
-        &mut self,
-        req: Request<T, SqlContext>,
-        priority: i32,
-    ) -> Result<Parts<SqlContext>, sqlx::Error> {
-        let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL, $5)";
-
-        let args = C::encode(&req.args)
-            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-        let job_type = self.config.namespace.clone();
-        sqlx::query(query)
-            .bind(args)
-            .bind(req.parts.task_id.to_string())
-            .bind(&job_type)
-            .bind(req.parts.context.max_attempts())
-            .bind(priority)
-            .execute(&self.pool)
-            .await?;
-        Ok(req.parts)
-    }
 }
 
 impl<Req, C> Storage for PostgresStorage<Req, C>
 where
     Req: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
     C: Codec<Compact = Value> + Send + 'static,
+    C::Error: Send + std::error::Error + Sync + 'static,
 {
     type Job = Req;
 
     type Error = sqlx::Error;
 
     type Context = SqlContext;
+
+    type Codec = C;
 
     /// Push a job to Postgres [Storage]
     ///
@@ -519,7 +493,40 @@ where
         &mut self,
         req: Request<Self::Job, SqlContext>,
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
-        self.push_request_with_priority(req, 0).await
+        let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL, $5)";
+
+        let args = C::encode(&req.args)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+        let job_type = self.config.namespace.clone();
+        sqlx::query(query)
+            .bind(args)
+            .bind(req.parts.task_id.to_string())
+            .bind(&job_type)
+            .bind(req.parts.context.max_attempts())
+            .bind(req.parts.context.get_priority())
+            .execute(&self.pool)
+            .await?;
+        Ok(req.parts)
+    }
+
+    async fn push_raw_request(
+        &mut self,
+        req: Request<Self::Compact, SqlContext>,
+    ) -> Result<Parts<SqlContext>, sqlx::Error> {
+        let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL, $5)";
+
+        let args = C::encode(&req.args)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+        let job_type = self.config.namespace.clone();
+        sqlx::query(query)
+            .bind(args)
+            .bind(req.parts.task_id.to_string())
+            .bind(&job_type)
+            .bind(req.parts.context.max_attempts())
+            .bind(req.parts.context.get_priority())
+            .execute(&self.pool)
+            .await?;
+        Ok(req.parts)
     }
 
     async fn schedule_request(
@@ -528,7 +535,7 @@ where
         on: Timestamp,
     ) -> Result<Parts<Self::Context>, sqlx::Error> {
         let query =
-            "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, $5, NULL, NULL, NULL, NULL, 0)";
+            "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, $5, NULL, NULL, NULL, NULL, $6)";
         let task_id = req.parts.task_id.to_string();
         let parts = req.parts;
         let on = DateTime::from_timestamp(on, 0);
@@ -541,6 +548,7 @@ where
             .bind(job_type)
             .bind(parts.context.max_attempts())
             .bind(on)
+            .bind(parts.context.get_priority())
             .execute(&self.pool)
             .await?;
         Ok(parts)
@@ -609,10 +617,11 @@ where
         let lock_by = ctx.lock_by().clone();
         let lock_at = *ctx.lock_at();
         let last_error = ctx.last_error().clone();
+        let priority = *ctx.get_priority();
 
         let mut tx = self.pool.acquire().await?;
         let query =
-                "UPDATE apalis.jobs SET status = $1, attempts = $2, done_at = $3, lock_by = $4, lock_at = $5, last_error = $6 WHERE id = $7";
+                "UPDATE apalis.jobs SET status = $1, attempts = $2, done_at = $3, lock_by = $4, lock_at = $5, last_error = $6, priority = $7 WHERE id = $8";
         sqlx::query(query)
             .bind(status.to_owned())
             .bind(attempts)
@@ -620,6 +629,7 @@ where
             .bind(lock_by.map(|w| w.name().to_string()))
             .bind(lock_at)
             .bind(last_error)
+            .bind(priority)
             .bind(job_id.to_string())
             .execute(&mut *tx)
             .await?;
@@ -637,7 +647,7 @@ where
     }
 }
 
-impl<T, Res, C> Ack<T, Res> for PostgresStorage<T, C>
+impl<T, Res, C> Ack<T, Res, C> for PostgresStorage<T, C>
 where
     T: Sync + Send,
     Res: Serialize + Sync + Clone,
