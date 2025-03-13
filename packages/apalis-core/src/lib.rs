@@ -613,6 +613,30 @@ pub mod test_utils {
                 let res = t.len().await.unwrap();
                 assert_eq!(res, 0, "After vacuuming, there should be nothing");
             }
+            #[tokio::test]
+            async fn integration_test_shared_push_and_consume() {
+                let backend = $setup().await;
+                let mut sharable = apalis_core::backend::Shared::new(backend);
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Ok::<_, io::Error>(request.args)
+                });
+                let backend = sharable.make_shared().unwrap();
+                let (mut t, poller) = TestWrapper::new_with_service(backend, service);
+                tokio::spawn(poller);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "There should be no jobs");
+                t.push(1).await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1, "There should be 1 job");
+                let res = t.execute_next().await.unwrap();
+                assert_eq!(res.1, Ok("1".to_owned()));
+
+                apalis_core::sleep(Duration::from_secs(1)).await;
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "There should be no jobs");
+
+                t.vacuum().await.unwrap();
+            }
         };
     }
 }

@@ -124,6 +124,7 @@ members = [
   "examples/persisted-cron",
   "examples/rest-api",
   "examples/retries",
+  "examples/shared-postgres-conn",
 ]
 
 
