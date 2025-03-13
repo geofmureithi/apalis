@@ -263,7 +263,7 @@ where
     }
 }
 
-impl<Req, Tz, Res> Backend<Request<Req, ()>, Res> for CronStream<Req, Tz>
+impl<Req, Tz> Backend<Request<Req, ()>> for CronStream<Req, Tz>
 where
     Req: From<DateTime<Tz>> + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
@@ -273,7 +273,9 @@ where
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    type Compact = ();
+
+    fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let stream = self.into_stream_worker(worker);
         Poller::new(stream, futures::future::pending())
     }
