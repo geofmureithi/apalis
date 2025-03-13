@@ -1,3 +1,4 @@
+use crate::codec::Codec;
 use crate::error::{BoxDynError, Error};
 use crate::request::Request;
 use crate::response::Response;
@@ -5,6 +6,7 @@ use futures::channel::mpsc::{SendError, Sender};
 use futures::SinkExt;
 use futures::{future::BoxFuture, Future, FutureExt};
 use serde::Serialize;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::{fmt, sync::Arc};
 pub use tower::{
@@ -158,7 +160,7 @@ pub mod extensions {
 /// A trait for acknowledging successful processing
 /// This trait is called even when a task fails.
 /// This is a way of a [`Backend`] to save the result of a job or message
-pub trait Ack<Task, Res> {
+pub trait Ack<Task, Res, Codec> {
     /// The data to fetch from context to allow acknowledgement
     type Context;
     /// The error returned by the ack
@@ -172,8 +174,11 @@ pub trait Ack<Task, Res> {
     ) -> impl Future<Output = Result<(), Self::AckError>> + Send;
 }
 
-impl<T, Res: Clone + Send + Sync, Ctx: Clone + Send + Sync> Ack<T, Res>
-    for Sender<(Ctx, Response<Res>)>
+impl<T, Res: Clone + Send + Sync + Serialize, Ctx: Clone + Send + Sync, Cdc: Codec> Ack<T, Res, Cdc>
+    for Sender<(Ctx, Response<Cdc::Compact>)>
+where
+    Cdc::Error: Debug,
+    Cdc::Compact: Send,
 {
     type AckError = SendError;
     type Context = Ctx;
@@ -183,84 +188,80 @@ impl<T, Res: Clone + Send + Sync, Ctx: Clone + Send + Sync> Ack<T, Res>
         result: &Response<Res>,
     ) -> Result<(), Self::AckError> {
         let ctx = ctx.clone();
-        self.send((ctx, result.clone())).await.unwrap();
+        let res = result.map(|res| Cdc::encode(res).unwrap());
+        self.send((ctx, res)).await.unwrap();
         Ok(())
     }
 }
 
 /// A layer that acknowledges a job completed successfully
 #[derive(Debug)]
-pub struct AckLayer<A, Req, Ctx, Res> {
+pub struct AckLayer<A, Req, Ctx, Cdc> {
     ack: A,
     job_type: PhantomData<Request<Req, Ctx>>,
-    res: PhantomData<Res>,
+    codec: PhantomData<Cdc>,
 }
 
-impl<A, Req, Ctx, Res> AckLayer<A, Req, Ctx, Res> {
+impl<A, Req, Ctx, Cdc> AckLayer<A, Req, Ctx, Cdc> {
     /// Build a new [AckLayer] for a job
     pub fn new(ack: A) -> Self {
         Self {
             ack,
             job_type: PhantomData,
-            res: PhantomData,
+            codec: PhantomData,
         }
     }
 }
 
-impl<A, Req, Ctx, S, Res> Layer<S> for AckLayer<A, Req, Ctx, Res>
+impl<A, Req, Ctx, S, Cdc> Layer<S> for AckLayer<A, Req, Ctx, Cdc>
 where
     S: Service<Request<Req, Ctx>> + Send + 'static,
     S::Error: std::error::Error + Send + Sync + 'static,
     S::Future: Send + 'static,
-    A: Ack<Req, S::Response> + Clone + Send + Sync + 'static,
+    A: Ack<Req, S::Response, Cdc> + Clone + Send + Sync + 'static,
 {
-    type Service = AckService<S, A, Req, Ctx, S::Response>;
+    type Service = AckService<S, A, Req, Ctx, Cdc>;
 
     fn layer(&self, service: S) -> Self::Service {
         AckService {
             service,
             ack: self.ack.clone(),
             job_type: PhantomData,
-            res: PhantomData,
+            codec: PhantomData,
         }
     }
 }
 
 /// The underlying service for an [AckLayer]
 #[derive(Debug)]
-pub struct AckService<SV, A, Req, Ctx, Res> {
+pub struct AckService<SV, A, Req, Ctx, Cdc> {
     service: SV,
     ack: A,
     job_type: PhantomData<Request<Req, Ctx>>,
-    res: PhantomData<Res>,
+    codec: PhantomData<Cdc>,
 }
 
-impl<Sv: Clone, A: Clone, Req, Ctx, Res> Clone for AckService<Sv, A, Req, Ctx, Res> {
+impl<Sv: Clone, A: Clone, Req, Ctx, Cdc> Clone for AckService<Sv, A, Req, Ctx, Cdc> {
     fn clone(&self) -> Self {
         Self {
             ack: self.ack.clone(),
             job_type: PhantomData,
             service: self.service.clone(),
-            res: PhantomData,
+            codec: PhantomData,
         }
     }
 }
 
-impl<SV, A, Req, Res, Ctx> Service<Request<Req, Ctx>> for AckService<SV, A, Req, Ctx, Res>
+impl<SV, A, Req, Ctx, Cdc> Service<Request<Req, Ctx>> for AckService<SV, A, Req, Ctx, Cdc>
 where
-    SV: Service<Request<Req, Ctx>> + Send + Sync + 'static,
-    <SV as Service<Request<Req, Ctx>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
-    <SV as Service<Request<Req, Ctx>>>::Future: std::marker::Send + 'static,
-    A: Ack<Req, <SV as Service<Request<Req, Ctx>>>::Response, Context = Ctx>
-        + Send
-        + 'static
-        + Clone
-        + Send
-        + Sync,
+    SV: Service<Request<Req, Ctx>> + Send + 'static,
+    SV::Error: Into<BoxDynError> + Send + 'static,
+    SV::Future: Send + 'static,
+    A: Ack<Req, SV::Response, Cdc, Context = Ctx> + Send + 'static + Clone,
     Req: 'static + Send,
-    <SV as Service<Request<Req, Ctx>>>::Response: std::marker::Send + fmt::Debug + Sync + Serialize,
-    <A as Ack<Req, SV::Response>>::Context: Sync + Send + Clone,
-    <A as Ack<Req, <SV as Service<Request<Req, Ctx>>>::Response>>::Context: 'static,
+    SV::Response: std::marker::Send + Serialize,
+    <A as Ack<Req, SV::Response, Cdc>>::Context: Send + Clone,
+    <A as Ack<Req, SV::Response, Cdc>>::Context: 'static,
     Ctx: Clone,
 {
     type Response = SV::Response;

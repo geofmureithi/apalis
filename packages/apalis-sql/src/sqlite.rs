@@ -53,7 +53,7 @@ impl<T, C> fmt::Debug for SqliteStorage<T, C> {
     }
 }
 
-impl<T> Clone for SqliteStorage<T> {
+impl<T, C> Clone for SqliteStorage<T, C> {
     fn clone(&self) -> Self {
         SqliteStorage {
             pool: self.pool.clone(),
@@ -90,7 +90,7 @@ impl SqliteStorage<()> {
     }
 }
 
-impl<T: Serialize + DeserializeOwned> SqliteStorage<T> {
+impl<T> SqliteStorage<T> {
     /// Create a new instance
     pub fn new(pool: SqlitePool) -> Self {
         Self {
@@ -112,10 +112,12 @@ impl<T: Serialize + DeserializeOwned> SqliteStorage<T> {
             codec: PhantomData,
         }
     }
+}
+impl<T, C> SqliteStorage<T, C> {
     /// Keeps a storage notified that the worker is still alive manually
-    pub async fn keep_alive_at<Service>(
+    pub async fn keep_alive_at(
         &mut self,
-        worker_id: &WorkerId,
+        worker: &Worker<Context>,
         last_seen: i64,
     ) -> Result<(), sqlx::Error> {
         let worker_type = self.config.namespace.clone();
@@ -125,10 +127,10 @@ impl<T: Serialize + DeserializeOwned> SqliteStorage<T> {
                 ON CONFLICT (id) DO
                    UPDATE SET last_seen = EXCLUDED.last_seen";
         sqlx::query(query)
-            .bind(worker_id.to_string())
+            .bind(worker.id().to_string())
             .bind(worker_type)
             .bind(storage_name)
-            .bind(std::any::type_name::<Service>())
+            .bind(worker.get_service())
             .bind(last_seen)
             .execute(&self.pool)
             .await?;
@@ -227,8 +229,9 @@ where
 
 impl<T, C> Storage for SqliteStorage<T, C>
 where
-    T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync + Debug,
-    C: Codec<Compact = String> + Send,
+    T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
+    C: Codec<Compact = String> + Send + 'static + Sync,
+    C::Error: std::error::Error + Send + Sync + 'static,
 {
     type Job = T;
 
@@ -236,9 +239,30 @@ where
 
     type Context = SqlContext;
 
+    type Codec = C;
+
     async fn push_request(
         &mut self,
         job: Request<Self::Job, SqlContext>,
+    ) -> Result<Parts<SqlContext>, Self::Error> {
+        let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, strftime('%s','now'), NULL, NULL, NULL, NULL)";
+        let (task, parts) = job.take_parts();
+        let raw = C::encode(&task)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+        let job_type = self.config.namespace.clone();
+        sqlx::query(query)
+            .bind(raw)
+            .bind(parts.task_id.to_string())
+            .bind(job_type.to_string())
+            .bind(parts.context.max_attempts())
+            .execute(&self.pool)
+            .await?;
+        Ok(parts)
+    }
+
+    async fn push_raw_request(
+        &mut self,
+        job: Request<Self::Compact, SqlContext>,
     ) -> Result<Parts<SqlContext>, Self::Error> {
         let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, strftime('%s','now'), NULL, NULL, NULL, NULL)";
         let (task, parts) = job.take_parts();
@@ -373,7 +397,7 @@ where
     }
 }
 
-impl<T> SqliteStorage<T> {
+impl<T, C> SqliteStorage<T, C> {
     /// Puts the job instantly back into the queue
     /// Another Worker may consume
     pub async fn retry(
@@ -443,13 +467,18 @@ pub enum SqlitePollError {
     ReenqueueOrphanedError(sqlx::Error),
 }
 
-impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
-    Backend<Request<T, SqlContext>, Res> for SqliteStorage<T>
+impl<T, C> Backend<Request<T, SqlContext>> for SqliteStorage<T, C>
+where
+    C: Codec<Compact = String> + Send + 'static + Sync,
+    C::Error: std::error::Error + 'static + Send + Sync,
+    T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
-    type Layer = AckLayer<SqliteStorage<T>, T, SqlContext, Res>;
+    type Layer = AckLayer<SqliteStorage<T, C>, T, SqlContext, C>;
 
-    fn poll<Svc>(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    type Compact = String;
+
+    fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
@@ -471,7 +500,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
             }
             loop {
                 let now: i64 = Utc::now().timestamp();
-                if let Err(e) = self.keep_alive_at::<Self::Layer>(w.id(), now).await {
+                if let Err(e) = self.keep_alive_at(&w, now).await {
                     w.emit(Event::Error(Box::new(SqlitePollError::KeepAliveError(e))));
                 }
                 apalis_core::sleep(Duration::from_secs(30)).await;
@@ -510,7 +539,7 @@ impl<T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static, Res>
     }
 }
 
-impl<T: Sync + Send, Res: Serialize + Sync> Ack<T, Res> for SqliteStorage<T> {
+impl<T: Sync + Send, C: Send, Res: Serialize + Sync> Ack<T, Res, C> for SqliteStorage<T, C> {
     type Context = SqlContext;
     type AckError = sqlx::Error;
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {
@@ -673,13 +702,13 @@ mod tests {
     ) -> Worker<Context> {
         let worker_id = WorkerId::new("test-worker");
 
+        let worker = Worker::new(worker_id, Default::default());
         storage
-            .keep_alive_at::<DummyService>(&worker_id, last_seen)
+            .keep_alive_at(&worker, last_seen)
             .await
             .expect("failed to register worker");
-        let wrk = Worker::new(worker_id, Context::default());
-        wrk.start();
-        wrk
+        worker.start();
+        worker
     }
 
     async fn register_worker(storage: &mut SqliteStorage<Email>) -> Worker<Context> {

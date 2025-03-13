@@ -21,20 +21,19 @@ impl<Inner: fmt::Debug> fmt::Debug for CronPipe<Inner> {
     }
 }
 
-impl<T, Res, Ctx, Inner> Backend<Request<T, Ctx>, Res> for CronPipe<Inner>
+impl<T, Ctx, Inner> Backend<Request<T, Ctx>> for CronPipe<Inner>
 where
-    Inner: Backend<Request<T, Ctx>, Res>,
+    Inner: Backend<Request<T, Ctx>>,
 {
     type Stream = Inner::Stream;
 
     type Layer = Inner::Layer;
 
-    fn poll<Svc: Service<Request<T, Ctx>, Response = Res>>(
-        mut self,
-        worker: &Worker<Context>,
-    ) -> Poller<Self::Stream, Self::Layer> {
+    type Compact = ();
+
+    fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let pipe_heartbeat = async move { while (self.stream.next().await).is_some() {} };
-        let inner = self.inner.poll::<Svc>(worker);
+        let inner = self.inner.poll(worker);
         let heartbeat = inner.heartbeat;
 
         Poller::new_with_layer(
