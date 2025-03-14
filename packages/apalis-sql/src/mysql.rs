@@ -255,7 +255,7 @@ where
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
             .bind(parts.context.max_attempts())
-            .bind(parts.context.get_priority())
+            .bind(parts.context.priority())
             .execute(&pool)
             .await?;
         Ok(parts)
@@ -278,7 +278,7 @@ where
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
             .bind(parts.context.max_attempts())
-            .bind(parts.context.get_priority())
+            .bind(parts.context.priority())
             .execute(&pool)
             .await?;
         Ok(parts)
@@ -303,7 +303,7 @@ where
             .bind(job_type)
             .bind(req.parts.context.max_attempts())
             .bind(on)
-            .bind(req.parts.context.get_priority())
+            .bind(req.parts.context.priority())
             .execute(&pool)
             .await?;
         Ok(req.parts)
@@ -374,7 +374,7 @@ where
         let lock_by = ctx.lock_by().clone();
         let lock_at = *ctx.lock_at();
         let last_error = ctx.last_error().clone();
-        let priority = *ctx.get_priority();
+        let priority = *ctx.priority();
         let job_id = job.parts.task_id;
         let mut tx = pool.acquire().await?;
         let query =

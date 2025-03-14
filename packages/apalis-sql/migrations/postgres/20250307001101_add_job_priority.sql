@@ -22,7 +22,7 @@ WHERE id IN (
         WHERE (status='Pending' OR (status = 'Failed' AND attempts < max_attempts))
             AND run_at < now()
             AND job_type = v_job_type
-        ORDER BY priority, run_at ASC
+        ORDER BY priority DESC, run_at ASC
         LIMIT v_job_count FOR
         UPDATE SKIP LOCKED
     )
@@ -67,7 +67,7 @@ CREATE OR REPLACE FUNCTION apalis.push_job(
                 NULL,
                 NULL,
                 NULL,
-                priority,
+                priority
             )
             returning * INTO v_job_row;
             RETURN v_job_row;
