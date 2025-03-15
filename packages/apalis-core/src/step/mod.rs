@@ -23,7 +23,8 @@ use tower::Service;
 
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, crate::error::Error>;
 
-type SteppedService<Compact, Index, Ctx> = BoxedService<Request<StepRequest<Compact, Index>, Ctx>, GoTo<Compact>>;
+type SteppedService<Compact, Index, Ctx> =
+    BoxedService<Request<StepRequest<Compact, Index>, Ctx>, GoTo<Compact>>;
 
 /// Allows control of the next step
 #[derive(Debug, Serialize, Deserialize, Clone)]
