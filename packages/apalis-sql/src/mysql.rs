@@ -158,7 +158,7 @@ where
                 let job_type = self.config.namespace.clone();
                 let mut tx = pool.begin().await?;
                 let fetch_query = "SELECT id FROM jobs
-                WHERE (status='Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE SKIP LOCKED";
+                WHERE (status='Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at <= NOW() AND job_type = ? ORDER BY priority DESC, run_at ASC LIMIT ? FOR UPDATE SKIP LOCKED";
                 let task_ids: Vec<MySqlRow> = sqlx::query(fetch_query)
                     .bind(job_type)
                     .bind(buffer_size)

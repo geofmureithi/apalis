@@ -43,7 +43,7 @@ pub struct SqliteStorage<T, C = JsonCodec<String>> {
 
 impl<T, C> fmt::Debug for SqliteStorage<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MysqlStorage")
+        f.debug_struct("SqliteStorage")
             .field("pool", &self.pool)
             .field("job_type", &"PhantomData<T>")
             .field("controller", &self.controller)
@@ -200,7 +200,7 @@ where
                 let mut tx = tx.acquire().await?;
                 let job_type = &config.namespace;
                 let fetch_query = "SELECT id FROM Jobs
-                    WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at < ?1 AND job_type = ?2 LIMIT ?3";
+                    WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at < ?1 AND job_type = ?2 ORDER BY priority DESC LIMIT ?3";
                 let now: i64 = Utc::now().timestamp();
                 let ids: Vec<(String,)> = sqlx::query_as(fetch_query)
                     .bind(now)
