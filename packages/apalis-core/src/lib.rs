@@ -601,6 +601,7 @@ pub mod test_utils {
                 let (mut t, poller) = TestWrapper::new_with_service(t.backend, service);
                 tokio::spawn(poller);
 
+                apalis_core::sleep(Duration::from_secs(1)).await;
                 // This is testing resuming the same worker
                 // This ensures that the worker resumed any jobs lost during an interruption
                 let res = t

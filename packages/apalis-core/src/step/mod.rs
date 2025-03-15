@@ -23,6 +23,8 @@ use tower::Service;
 
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, crate::error::Error>;
 
+type SteppedService<Compact, Index, Ctx> = BoxedService<Request<StepRequest<Compact, Index>, Ctx>, GoTo<Compact>>;
+
 /// Allows control of the next step
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum GoTo<N = ()> {
@@ -42,11 +44,25 @@ pub enum GoTo<N = ()> {
 /// A type that allows building the steps order
 #[derive(Debug)]
 pub struct StepBuilder<Ctx, Compact, Input, Current, Encode, Index = usize> {
-    steps: HashMap<Index, BoxedService<Request<StepRequest<Compact, Index>, Ctx>, GoTo<Compact>>>,
+    steps: HashMap<Index, SteppedService<Compact, Index, Ctx>>,
     current_index: Index,
     current: PhantomData<Current>,
     codec: PhantomData<Encode>,
     input: PhantomData<Input>,
+}
+
+impl<Ctx, Compact, Input, Encode, Index: Default> Default
+    for StepBuilder<Ctx, Compact, Input, Input, Encode, Index>
+{
+    fn default() -> Self {
+        Self {
+            steps: HashMap::new(),
+            current_index: Index::default(),
+            current: PhantomData,
+            codec: PhantomData,
+            input: PhantomData,
+        }
+    }
 }
 
 impl<Ctx, Compact, Input, Encode> StepBuilder<Ctx, Compact, Input, Input, Encode, usize> {
@@ -104,7 +120,7 @@ impl<Ctx, Compact, Input, Current, Encode, Index>
 /// Represents the tower service holding the different steps
 #[derive(Debug)]
 pub struct StepService<Ctx, Compact, Input, S, Index> {
-    inner: HashMap<Index, BoxedService<Request<StepRequest<Compact, Index>, Ctx>, GoTo<Compact>>>,
+    inner: HashMap<Index, SteppedService<Compact, Index, Ctx>>,
     storage: S,
     input: PhantomData<Input>,
 }
