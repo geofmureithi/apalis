@@ -18,18 +18,12 @@
 //! use apalis::{prelude::*, layers::retry::RetryPolicy};
 //! use std::str::FromStr;
 //! use apalis_cron::{CronStream, Schedule};
-//! use chrono::{DateTime, Utc};
+//! use chrono::Local;
 //!
 //! #[derive(Default, Debug, Clone)]
-//! struct Reminder(DateTime<Utc>);
+//! struct Reminder;
 //!
-//! impl From<DateTime<Utc>> for Reminder {
-//!    fn from(t: DateTime<Utc>) -> Self {
-//!        Reminder(t)
-//!    }
-//! }
-//!
-//! async fn handle_tick(job: Reminder, data: Data<usize>) {
+//! async fn handle_tick(_: Reminder, ctx: CronContext<Local>, data: Data<usize>) {
 //!     // Do something with the current tick
 //! }
 //!
@@ -86,7 +80,7 @@ use apalis_core::request::RequestStream;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::worker::{Context, Worker};
-use apalis_core::{error::Error, request::Request};
+use apalis_core::{error::Error, request::Request, service_fn::FromRequest};
 use chrono::{DateTime, OutOfRangeError, TimeZone, Utc};
 pub use cron::Schedule;
 use futures::StreamExt;
@@ -134,9 +128,9 @@ where
 fn build_stream<Tz: TimeZone, Req>(
     timezone: &Tz,
     schedule: &Schedule,
-) -> RequestStream<Request<Req, ()>>
+) -> RequestStream<Request<Req, CronContext<Tz>>>
 where
-    Req: From<DateTime<Tz>> + Send + Sync + 'static,
+    Req: Default + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync,
 {
@@ -155,7 +149,7 @@ where
                             apalis_core::sleep(to_sleep).await;
                             let timestamp = timezone.from_utc_datetime(&Utc::now().naive_utc());
                             let namespace = Namespace(format!("{}:{timestamp:?}", schedule));
-                            let mut req = Request::new(Req::from(timestamp));
+                            let mut req = Request::new_with_ctx(Default::default(), CronContext { timestamp });
                             req.parts.namespace = Some(namespace);
                             yield Ok(Some(req));
                         },
@@ -176,16 +170,19 @@ where
 }
 impl<Req, Tz> CronStream<Req, Tz>
 where
-    Req: From<DateTime<Tz>> + Send + Sync + 'static,
+    Req: Default + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync,
 {
     /// Convert to consumable
-    fn into_stream(self) -> RequestStream<Request<Req, ()>> {
+    fn into_stream(self) -> RequestStream<Request<Req, CronContext<Tz>>> {
         build_stream(&self.timezone, &self.schedule)
     }
 
-    fn into_stream_worker(self, worker: &Worker<Context>) -> RequestStream<Request<Req, ()>> {
+    fn into_stream_worker(
+        self,
+        worker: &Worker<Context>,
+    ) -> RequestStream<Request<Req, CronContext<Tz>>> {
         let worker = worker.clone();
         let mut poller = build_stream(&self.timezone, &self.schedule);
         let stream = async_stream::stream! {
@@ -263,13 +260,48 @@ where
     }
 }
 
-impl<Req, Tz> Backend<Request<Req, ()>> for CronStream<Req, Tz>
+/// Context for all cron jobs
+#[derive(Debug, Clone)]
+pub struct CronContext<Tz: TimeZone> {
+    timestamp: DateTime<Tz>,
+}
+
+impl<Tz: TimeZone> Default for CronContext<Tz>
 where
-    Req: From<DateTime<Tz>> + Send + Sync + 'static,
+    DateTime<Tz>: Default,
+{
+    fn default() -> Self {
+        Self {
+            timestamp: Default::default(),
+        }
+    }
+}
+
+impl<Tz: TimeZone> CronContext<Tz> {
+    /// Create a new context provided a timestamp
+    pub fn new(timestamp: DateTime<Tz>) -> Self {
+        Self { timestamp }
+    }
+
+    /// Get the inner timestamp
+    pub fn get_timestamp(&self) -> &DateTime<Tz> {
+        &self.timestamp
+    }
+}
+
+impl<Req, Tz: TimeZone> FromRequest<Request<Req, CronContext<Tz>>> for CronContext<Tz> {
+    fn from_request(req: &Request<Req, CronContext<Tz>>) -> Result<Self, Error> {
+        Ok(req.parts.context.clone())
+    }
+}
+
+impl<Req, Tz> Backend<Request<Req, CronContext<Tz>>> for CronStream<Req, Tz>
+where
+    Req: Default + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync,
 {
-    type Stream = RequestStream<Request<Req, ()>>;
+    type Stream = RequestStream<Request<Req, CronContext<Tz>>>;
 
     type Layer = Identity;
 
