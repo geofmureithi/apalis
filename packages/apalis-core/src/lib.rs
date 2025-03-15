@@ -211,9 +211,9 @@ pub mod test_utils {
 
     impl<B, Req, Res, Ctx> TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req, Ctx>, Res> + Send + Sync + 'static + Clone,
-        Req: Send + 'static + Sync,
-        Ctx: Send + Sync,
+        B: Backend<Request<Req, Ctx>> + Send + Sync + 'static + Clone,
+        Req: Send + 'static,
+        Ctx: Send,
         B::Stream: Send + 'static,
         B::Stream: Stream<Item = Result<Option<Request<Req, Ctx>>, crate::error::Error>> + Unpin,
         Res: Debug,
@@ -227,7 +227,7 @@ pub mod test_utils {
         Svc::Response: Send + Sync + 'static,
         Svc::Error: Send + Sync + std::error::Error,
         Ctx: Send + Sync + 'static,
-        B: Backend<Request<Req, Ctx>, Res> + 'static,
+        B: Backend<Request<Req, Ctx>> + 'static,
         B::Layer: Layer<Svc>,
         <B::Layer as Layer<Svc>>::Service: Service<Request<Req, Ctx>, Response = Res> + Send + Sync,
         B::Stream: Unpin + Send,
@@ -318,7 +318,7 @@ pub mod test_utils {
 
     impl<B, Req, Res, Ctx> Deref for TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req, Ctx>, Res>,
+        B: Backend<Request<Req, Ctx>>,
     {
         type Target = B;
 
@@ -329,7 +329,7 @@ pub mod test_utils {
 
     impl<B, Req, Ctx, Res> DerefMut for TestWrapper<B, Request<Req, Ctx>, Res>
     where
-        B: Backend<Request<Req, Ctx>, Res>,
+        B: Backend<Request<Req, Ctx>>,
     {
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.backend

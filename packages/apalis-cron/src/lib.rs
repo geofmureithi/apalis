@@ -18,18 +18,12 @@
 //! use apalis::{prelude::*, layers::retry::RetryPolicy};
 //! use std::str::FromStr;
 //! use apalis_cron::{CronStream, Schedule};
-//! use chrono::{DateTime, Utc};
+//! use chrono::Local;
 //!
 //! #[derive(Default, Debug, Clone)]
-//! struct Reminder(DateTime<Utc>);
+//! struct Reminder;
 //!
-//! impl From<DateTime<Utc>> for Reminder {
-//!    fn from(t: DateTime<Utc>) -> Self {
-//!        Reminder(t)
-//!    }
-//! }
-//!
-//! async fn handle_tick(job: Reminder, data: Data<usize>) {
+//! async fn handle_tick(_: Reminder, ctx: CronContext<Local>, data: Data<usize>) {
 //!     // Do something with the current tick
 //! }
 //!
@@ -87,10 +81,11 @@ use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::worker::{Context, Worker};
 use apalis_core::{error::Error, request::Request, service_fn::FromRequest};
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, OutOfRangeError, TimeZone, Utc};
 pub use cron::Schedule;
 use futures::StreamExt;
 use pipe::CronPipe;
+use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -129,6 +124,50 @@ where
         }
     }
 }
+
+fn build_stream<Tz: TimeZone, Req>(
+    timezone: &Tz,
+    schedule: &Schedule,
+) -> RequestStream<Request<Req, CronContext<Tz>>>
+where
+    Req: Default + Send + Sync + 'static,
+    Tz: TimeZone + Send + Sync + 'static,
+    Tz::Offset: Send + Sync,
+{
+    let timezone = timezone.clone();
+    let schedule = schedule.clone();
+    let mut queue_schedule = schedule.upcoming_owned(timezone.clone());
+    let stream = async_stream::stream! {
+        loop {
+            let next = queue_schedule.next();
+            match next {
+                Some(tick) => {
+                    let to_sleep = tick.clone() - timezone.from_utc_datetime(&Utc::now().naive_utc());
+                    let to_sleep_res = to_sleep.to_std();
+                    match to_sleep_res {
+                        Ok(to_sleep) => {
+                            apalis_core::sleep(to_sleep).await;
+                            let timestamp = timezone.from_utc_datetime(&Utc::now().naive_utc());
+                            let namespace = Namespace(format!("{}:{timestamp:?}", schedule));
+                            let mut req = Request::new_with_ctx(Default::default(), CronContext { timestamp });
+                            req.parts.namespace = Some(namespace);
+                            yield Ok(Some(req));
+                        },
+                        Err(e) => {
+                            yield Err(Error::SourceError(Arc::new(Box::new(CronStreamError::OutOfRangeError { inner: e, tick }))))
+                        },
+                    }
+
+
+                },
+                None => {
+                    yield Ok(None);
+                }
+            }
+        }
+    };
+    stream.boxed()
+}
 impl<Req, Tz> CronStream<Req, Tz>
 where
     Req: Default + Send + Sync + 'static,
@@ -137,25 +176,23 @@ where
 {
     /// Convert to consumable
     fn into_stream(self) -> RequestStream<Request<Req, CronContext<Tz>>> {
-        let timezone = self.timezone.clone();
+        build_stream(&self.timezone, &self.schedule)
+    }
+
+    fn into_stream_worker(
+        self,
+        worker: &Worker<Context>,
+    ) -> RequestStream<Request<Req, CronContext<Tz>>> {
+        let worker = worker.clone();
+        let mut poller = build_stream(&self.timezone, &self.schedule);
         let stream = async_stream::stream! {
-            let mut schedule = self.schedule.upcoming_owned(timezone.clone());
             loop {
-                let next = schedule.next();
-                match next {
-                    Some(next) => {
-                        let to_sleep = next - timezone.from_utc_datetime(&Utc::now().naive_utc());
-                        let to_sleep = to_sleep.to_std().map_err(|e| Error::SourceError(Arc::new(e.into())))?;
-                        apalis_core::sleep(to_sleep).await;
-                        let timestamp = timezone.from_utc_datetime(&Utc::now().naive_utc());
-                        let namespace = Namespace(format!("{}:{timestamp:?}", self.schedule));
-                        let mut req = Request::new_with_ctx(Req::default(), CronContext::new(timestamp));
-                        req.parts.namespace = Some(namespace);
-                        yield Ok(Some(req));
-                    },
-                    None => {
-                        yield Ok(None);
-                    }
+                if worker.is_shutting_down() {
+                    break;
+                }
+                match poller.next().await {
+                    Some(res) => yield res,
+                    None => break,
                 }
             }
         };
@@ -258,7 +295,7 @@ impl<Req, Tz: TimeZone> FromRequest<Request<Req, CronContext<Tz>>> for CronConte
     }
 }
 
-impl<Req, Tz, Res> Backend<Request<Req, CronContext<Tz>>, Res> for CronStream<Req, Tz>
+impl<Req, Tz> Backend<Request<Req, CronContext<Tz>>> for CronStream<Req, Tz>
 where
     Req: Default + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
@@ -268,8 +305,58 @@ where
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
-        let stream = self.into_stream();
+    type Compact = ();
+
+    fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+        let stream = self.into_stream_worker(worker);
         Poller::new(stream, futures::future::pending())
+    }
+}
+
+/// Represents an error emitted by `CronStream` polling
+pub enum CronStreamError<Tz: TimeZone> {
+    /// The cron stream might not always be polled consistently, such as when the worker is blocked.
+    /// If polling is delayed, some ticks may be skipped. When this occurs, an out-of-range error is triggered
+    /// because the missed tick is now in the past.
+    OutOfRangeError {
+        /// The inner error
+        inner: OutOfRangeError,
+        /// The missed tick
+        tick: DateTime<Tz>,
+    },
+}
+
+impl<Tz: TimeZone> fmt::Display for CronStreamError<Tz> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CronStreamError::OutOfRangeError { inner, tick } => {
+                write!(
+                    f,
+                    "Cron tick {} is out of range: {}",
+                    tick.timestamp(),
+                    inner
+                )
+            }
+        }
+    }
+}
+
+impl<Tz: TimeZone> std::error::Error for CronStreamError<Tz> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            CronStreamError::OutOfRangeError { inner, .. } => Some(inner),
+        }
+    }
+}
+
+impl<Tz: TimeZone> fmt::Debug for CronStreamError<Tz> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CronStreamError::OutOfRangeError { inner, tick } => f
+                .debug_struct("OutOfRangeError")
+                .field("tick", tick)
+                .field("inner", inner)
+                .finish(),
+        }
     }
 }
