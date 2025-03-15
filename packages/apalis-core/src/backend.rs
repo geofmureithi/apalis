@@ -4,6 +4,7 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    codec::Codec,
     poller::Poller,
     request::State,
     worker::{Context, Worker},
@@ -22,9 +23,7 @@ pub trait Backend<Req> {
     type Layer;
 
     /// Specifies the codec type used by the backend
-    type Codec;
-    /// The way data is stored in the backend
-    type Compact;
+    type Codec: Codec;
 
     /// Returns a poller that is ready for streaming
     fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer>;

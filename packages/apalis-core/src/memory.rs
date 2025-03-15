@@ -1,8 +1,8 @@
 use crate::{
     backend::Backend,
+    codec::NoopCodec,
     mq::MessageQueue,
-    poller::Poller,
-    poller::{controller::Controller, stream::BackendStream},
+    poller::{controller::Controller, stream::BackendStream, Poller},
     request::{Request, RequestStream},
     worker::{self, Worker},
 };
@@ -102,9 +102,7 @@ impl<T: Send + 'static + Sync> Backend<Request<T, ()>> for MemoryStorage<T> {
 
     type Layer = Identity;
 
-    type Codec = ();
-
-    type Compact = ();
+    type Codec = NoopCodec<Request<T, ()>>;
 
     fn poll(self, _worker: &Worker<worker::Context>) -> Poller<Self::Stream> {
         let stream = self.inner.map(|r| Ok(Some(r))).boxed();
@@ -120,7 +118,7 @@ impl<T: Send + 'static + Sync> Backend<Request<T, ()>> for MemoryStorage<T> {
 impl<Message: Send + 'static + Sync> MessageQueue<Message> for MemoryStorage<Message> {
     type Context = ();
     type Error = ();
-    type Codec = ();
+    type Compact = Message;
 
     async fn enqueue_request(
         &mut self,

@@ -8,12 +8,16 @@ All notable changes to this project are documented in this file.
 - **api** add associated types to the Backend trait ([#516](https://github.com/geofmureithi/apalis/pull/516))
 - **retry layer**: Integrate retry logic with task handling ([#512](https://github.com/geofmureithi/apalis/pull/512))
 - **generic retry**: Persist check for tasks ([#498](https://github.com/geofmureithi/apalis/pull/498))
+- **native TLS**: Add `async-std-comp-native-tls` and `tokio-comp-native-tls` features ([#525](https://github.com/geofmureithi/apalis/pull/525))
+- **cron** : Introduce CronContext ([#488](https://github.com/geofmureithi/apalis/pull/488))
 
 ### Fixed
+- **PostgresStorage**: PostgresStorage get_jobs status conditional ([#524](https://github.com/geofmureithi/apalis/pull/524))
 - **cron heartbeat**: Refactor and fix cron heartbeat ([#513](https://github.com/geofmureithi/apalis/pull/513))
 - **RedisStorage**: Correct `running_count` statistic ([#506](https://github.com/geofmureithi/apalis/pull/506))
 - **orphaned tasks**: Re-enqueue orphaned jobs before starting streaming ([#507](https://github.com/geofmureithi/apalis/pull/507))
 - **deps**: Update Rust crate `redis` to `0.28` ([#495](https://github.com/geofmureithi/apalis/pull/495))
+- **deps**: Update Rust crate `redis` to `0.29` and `deadpool-redis` to `0.20` ([#527](https://github.com/geofmureithi/apalis/pull/527))
 
 ### Tests
 - **Integration tests**: Aborting jobs and panicking workers ([#508](https://github.com/geofmureithi/apalis/pull/508))

@@ -239,6 +239,8 @@ where
 
     type Context = SqlContext;
 
+    type Compact = String;
+
     async fn push_request(
         &mut self,
         job: Request<Self::Job, SqlContext>,
@@ -475,8 +477,6 @@ where
     type Layer = AckLayer<SqliteStorage<T, C>, T, SqlContext, C>;
 
     type Codec = JsonCodec<String>;
-
-    type Compact = String;
 
     fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());

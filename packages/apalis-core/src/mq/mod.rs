@@ -14,8 +14,8 @@ pub trait MessageQueue<Message: Send>: Backend<Request<Message, Self::Context>> 
     /// The error produced by the queue
     type Error;
 
-    /// The encoding and decoding solution for the backend
-    type Codec;
+    /// The format that the storage persists the jobs usually `Vec<u8>`
+    type Compact;
 
     /// Enqueues a message to the queue.
     fn enqueue(

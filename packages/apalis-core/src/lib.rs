@@ -62,6 +62,7 @@ pub mod task;
 /// Codec for handling data
 pub mod codec;
 
+/// Allows stepped tasks
 pub mod step;
 
 /// Sleep utilities

@@ -1,13 +1,8 @@
 use std::{fmt::Debug, time::Duration};
 
-use apalis::{
-    layers::{retry::RetryPolicy, tracing::TraceLayer},
-    prelude::*,
-};
-use apalis_core::codec::json::JsonCodec;
-use apalis_redis::{RedisContext, RedisStorage};
+use apalis::prelude::*;
+use apalis_redis::RedisStorage;
 use serde::{Deserialize, Serialize};
-use tower::ServiceBuilder;
 use tracing::info;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -27,13 +22,13 @@ struct CompleteCampaign {
     completion_id: usize,
 }
 
-async fn welcome(req: WelcomeEmail, ctx: Data<()>) -> Result<GoTo<CampaignEmail>, Error> {
+async fn welcome(req: WelcomeEmail, _ctx: Data<()>) -> Result<GoTo<CampaignEmail>, Error> {
     Ok::<_, _>(GoTo::Next(CampaignEmail {
         campaign_id: req.user_id + 1,
     }))
 }
 
-async fn campaign(req: CampaignEmail, ctx: Data<()>) -> Result<GoTo<CompleteCampaign>, Error> {
+async fn campaign(req: CampaignEmail, _ctx: Data<()>) -> Result<GoTo<CompleteCampaign>, Error> {
     Ok::<_, _>(GoTo::Delay {
         next: CompleteCampaign {
             completion_id: req.campaign_id + 1,
@@ -43,38 +38,11 @@ async fn campaign(req: CampaignEmail, ctx: Data<()>) -> Result<GoTo<CompleteCamp
 }
 
 async fn complete_campaign(
-    req: CompleteCampaign,
-    ctx: Data<()>,
+    _req: CompleteCampaign,
+    _ctx: Data<()>,
 ) -> Result<GoTo<&'static str>, Error> {
     Ok::<_, _>(GoTo::Done("Completed job successfully"))
 }
-
-// #[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-// enum Steps {
-//     #[default]
-//     Welcome,
-//     Campaign {
-//         count: usize,
-//     },
-//     CompleteCampaign,
-//     Done,
-// }
-
-// impl StepIndex for Steps {
-//     fn next(&self) -> Self {
-//         match self {
-//             Steps::Welcome => Self::Campaign { count: 0 },
-//             Steps::Campaign { count } => {
-//                 if *count < 3 {
-//                     return Steps::Campaign { count: *count + 1 };
-//                 }
-//                 Self::CompleteCampaign
-//             }
-//             Steps::CompleteCampaign => Self::Done,
-//             Self::Done => unreachable!(),
-//         }
-//     }
-// }
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
@@ -85,7 +53,7 @@ async fn main() -> Result<(), std::io::Error> {
 
     let mut storage = RedisStorage::new_with_config(conn, config);
     storage
-        .start_step(WelcomeEmail { user_id: 1 })
+        .start_stepped(WelcomeEmail { user_id: 1 })
         .await
         .unwrap();
 
