@@ -239,7 +239,7 @@ where
 
     type Context = SqlContext;
 
-    type Codec = C;
+    type Compact = String;
 
     async fn push_request(
         &mut self,
@@ -476,7 +476,7 @@ where
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
     type Layer = AckLayer<SqliteStorage<T, C>, T, SqlContext, C>;
 
-    type Compact = String;
+    type Codec = JsonCodec<String>;
 
     fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());

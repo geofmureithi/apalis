@@ -19,8 +19,8 @@ pub trait Storage: Backend<Request<Self::Job, Self::Context>> {
     /// This is the type that storages store as the metadata related to a job
     type Context: Default;
 
-    /// The encoding and decoding solution for the backend
-    type Codec;
+    /// The format that the storage persists the jobs usually `Vec<u8>`
+    type Compact;
 
     /// Pushes a job to a storage
     fn push(

@@ -6,6 +6,7 @@ use std::{fmt, fmt::Debug, pin::Pin, str::FromStr};
 
 use crate::{
     backend::Backend,
+    codec::NoopCodec,
     data::Extensions,
     error::Error,
     poller::Poller,
@@ -173,7 +174,7 @@ impl<T, Ctx> Backend<Request<T, Ctx>> for RequestStream<Request<T, Ctx>> {
 
     type Layer = Identity;
 
-    type Compact = ();
+    type Codec = NoopCodec<Request<T, Ctx>>;
 
     fn poll(self, _worker: &Worker<Context>) -> Poller<Self::Stream> {
         Poller {

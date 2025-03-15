@@ -72,6 +72,7 @@
 //! ```
 
 use apalis_core::backend::Backend;
+use apalis_core::codec::NoopCodec;
 use apalis_core::error::BoxDynError;
 use apalis_core::layers::Identity;
 use apalis_core::mq::MessageQueue;
@@ -305,7 +306,7 @@ where
 
     type Layer = Identity;
 
-    type Compact = ();
+    type Codec = NoopCodec<Request<Req, CronContext<Tz>>>;
 
     fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let stream = self.into_stream_worker(worker);

@@ -57,7 +57,8 @@ where
     type Stream = RequestStream<Request<Req, RedisMqContext>>;
 
     type Layer = AckLayer<Self, Req, RedisMqContext, C>;
-    type Compact = Vec<u8>;
+
+    type Codec = C;
 
     fn poll(mut self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.get_buffer_size());
@@ -115,7 +116,7 @@ where
 {
     type Error = RsmqError;
 
-    type Codec = C;
+    type Compact = Vec<u8>;
 
     type Context = RedisMqContext;
 

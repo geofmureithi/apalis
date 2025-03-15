@@ -28,7 +28,7 @@ where
 
     type Layer = Inner::Layer;
 
-    type Compact = ();
+    type Codec = Inner::Codec;
 
     fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let pipe_heartbeat = async move { while (self.stream.next().await).is_some() {} };
