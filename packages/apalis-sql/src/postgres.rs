@@ -157,7 +157,7 @@ where
 
     type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, C>;
 
-    type Compact = Value;
+    type Codec = C;
 
     fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
@@ -480,7 +480,7 @@ where
 
     type Context = SqlContext;
 
-    type Codec = C;
+    type Compact = Value;
 
     /// Push a job to Postgres [Storage]
     ///

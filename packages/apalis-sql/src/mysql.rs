@@ -236,7 +236,7 @@ where
 
     type Context = SqlContext;
 
-    type Codec = C;
+    type Compact = Value;
 
     async fn push_request(
         &mut self,
@@ -440,7 +440,7 @@ where
 
     type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, C>;
 
-    type Compact = Value;
+    type Codec = C;
 
     fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
