@@ -1,6 +1,6 @@
 use crate::context::SqlContext;
 use crate::{calculate_status, Config, SqlError};
-use apalis_core::backend::{BackendExpose, Sharable, Stat, WorkerState};
+use apalis_core::backend::{BackendConnection, BackendExpose, Sharable, Stat, WorkerState};
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
 use apalis_core::layers::{Ack, AckLayer};
@@ -33,15 +33,22 @@ pub use sqlx::sqlite::SqlitePool;
 
 /// Represents a [Storage] that persists to Sqlite
 // #[derive(Debug)]
-pub struct SqliteStorage<T, C = JsonCodec<String>> {
+pub struct SqliteStorage<T, C = JsonCodec<String>>
+where
+    C: Codec,
+{
     pool: Pool<Sqlite>,
     job_type: PhantomData<T>,
     controller: Controller,
     config: Config,
     codec: PhantomData<C>,
+    connection: BackendConnection<C::Compact, SqlContext>,
 }
 
-impl<T, C> fmt::Debug for SqliteStorage<T, C> {
+impl<T, C: Codec> fmt::Debug for SqliteStorage<T, C>
+where
+    C::Compact: Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MysqlStorage")
             .field("pool", &self.pool)
@@ -49,11 +56,12 @@ impl<T, C> fmt::Debug for SqliteStorage<T, C> {
             .field("controller", &self.controller)
             .field("config", &self.config)
             .field("codec", &std::any::type_name::<C>())
+            .field("connection", &self.connection)
             .finish()
     }
 }
 
-impl<T, C> Clone for SqliteStorage<T, C> {
+impl<T, C: Codec> Clone for SqliteStorage<T, C> {
     fn clone(&self) -> Self {
         SqliteStorage {
             pool: self.pool.clone(),
@@ -61,6 +69,7 @@ impl<T, C> Clone for SqliteStorage<T, C> {
             controller: self.controller.clone(),
             config: self.config.clone(),
             codec: self.codec,
+            connection: self.connection.clone(),
         }
     }
 }

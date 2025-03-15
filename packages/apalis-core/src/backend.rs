@@ -77,7 +77,7 @@ where
     }
 }
 
-// #[derive(Debug)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum BackendConnection<Compact, Context> {
     StandAlone {
