@@ -158,7 +158,7 @@ where
 
     type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, C>;
 
-    type Compact = Value;
+    type Codec = C;
 
     fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
@@ -409,7 +409,6 @@ impl<Args, C: Codec<Compact = Value>> Sharable<PostgresStorage<Args, C>, C>
     ) -> Result<PostgresStorage<Args, C>, Self::MakeError> {
         let p = parent.backend.pool.clone();
         let instances = parent.instances.clone();
-        // let i = instances.clone();
         let ack = Notify::new();
         let a = ack.clone();
         let poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
@@ -836,7 +835,7 @@ where
 
     type Context = SqlContext;
 
-    type Codec = C;
+    type Compact = Value;
 
     /// Push a job to Postgres [Storage]
     ///

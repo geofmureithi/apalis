@@ -4,7 +4,6 @@ use apalis_core::request::BoxStream;
 use apalis_core::{poller::Poller, request::Request, worker::Context, worker::Worker};
 use futures::StreamExt;
 use std::{error, fmt};
-use tower::Service;
 
 /// A generic Pipe that wraps an inner type along with a `RequestStream`.
 pub struct CronPipe<Inner> {
@@ -29,7 +28,7 @@ where
 
     type Layer = Inner::Layer;
 
-    type Compact = ();
+    type Codec = Inner::Codec;
 
     fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let pipe_heartbeat = async move { while (self.stream.next().await).is_some() {} };

@@ -4,6 +4,7 @@ use apalis_core::backend::{BackendConnection, BackendExpose, Sharable, Stat, Wor
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
 use apalis_core::layers::{Ack, AckLayer};
+use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
@@ -21,6 +22,7 @@ use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{Pool, Row, Sqlite};
 use std::any::type_name;
+use std::collections::HashSet;
 use std::convert::TryInto;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -108,6 +110,9 @@ impl<T> SqliteStorage<T> {
             controller: Controller::new(),
             config: Config::new(type_name::<T>()),
             codec: PhantomData,
+            connection: BackendConnection::StandAlone {
+                subscription: Notify::new(),
+            },
         }
     }
 
@@ -119,10 +124,13 @@ impl<T> SqliteStorage<T> {
             controller: Controller::new(),
             config,
             codec: PhantomData,
+            connection: BackendConnection::StandAlone {
+                subscription: Notify::new(),
+            },
         }
     }
 }
-impl<T, C> SqliteStorage<T, C> {
+impl<T, C: Codec> SqliteStorage<T, C> {
     /// Keeps a storage notified that the worker is still alive manually
     pub async fn keep_alive_at(
         &mut self,
@@ -157,7 +165,7 @@ impl<T, C> SqliteStorage<T, C> {
     }
 }
 
-impl<T, C> SqliteStorage<T, C> {
+impl<T, C: Codec> SqliteStorage<T, C> {
     /// Expose the code used
     pub fn codec(&self) -> &PhantomData<C> {
         &self.codec
@@ -191,12 +199,79 @@ where
         parent: &mut apalis_core::backend::Shared<Self, Self::Context, C, Self::Config>,
         config: Self::Config,
     ) -> Result<SqliteStorage<T, C>, Self::MakeError> {
+        let p = parent.backend.pool.clone();
+        let instances = parent.instances.clone();
+        // let i = instances.clone();
+        let ack: Notify<T> = Notify::new();
+        let a = ack.clone();
+        let poll_next_stm = apalis_core::interval::interval(config.poll_interval).fuse();
+        let receiver = Notify::new();
+        instances
+            .write()
+            .unwrap()
+            .insert(config.namespace.clone(), receiver.clone());
+
+        // let fut = async move {
+        //     let instances = instances.clone();
+
+        //     let starter = stream::iter(vec![()]); // Emit first tick instantly
+
+        //     let poll_stream = starter
+        //         .chain(poll_next_stm)
+        //         .ready_chunks(config.buffer_size)
+        //         .map(|_| {
+        //             let instances = instances.read().unwrap();
+        //             instances
+        //                 .keys()
+        //                 .map(|key| key.to_owned())
+        //                 .collect::<HashSet<String>>()
+        //         })
+        //         .then(|job_types| {
+        //             let fetch_count = (instances.read().unwrap().len() * config.buffer_size) as i32;
+
+        //             let pool = p.clone();
+        //             fetch_next_shared_batch(pool, job_types, fetch_count)
+        //         });
+        //     let poller = poll_stream
+        //         .map_ok(|jobs| {
+        //             jobs.into_iter()
+        //                 .map(|job| {
+        //                     let instances = instances.read().unwrap();
+        //                     let listener = instances
+        //                         .get(&job.parts.namespace.as_ref().unwrap().0)
+        //                         .unwrap();
+
+        //                     listener.notify(Ok(Some(job))).unwrap();
+        //                 })
+        //                 .collect::<Vec<_>>()
+        //         })
+        //         .for_each(|i| async {
+        //             if let Err(e) = i {
+        //                 warn!("Encountered error during FETCH_NEXT_SHARED {e}");
+        //             }
+        //         })
+        //         .boxed();
+        //     let ack = a
+        //         .ready_chunks(config.buffer_size)
+        //         .then(|ids| {
+        //             let pool = p.clone();
+        //             acknowledge_jobs::<JsonCodec<Value>>(pool, ids)
+        //         })
+        //         .for_each(|i| async {
+        //             if let Err(e) = i {
+        //                 warn!("Encountered error during ACK {e}");
+        //             }
+        //         })
+        //         .boxed();
+        //     future::join(poller, ack).await;
+        // };
         Ok(SqliteStorage {
             pool: parent.backend.pool.clone(),
             job_type: PhantomData,
             controller: Default::default(),
             config,
             codec: PhantomData,
+            connection: BackendConnection::Shared { receiver },
         })
     }
 }
@@ -218,6 +293,34 @@ async fn fetch_next(
         .await?;
 
     Ok(job)
+}
+
+async fn fetch_next_shared_batch(
+    pool: Pool<Sqlite>,
+    job_types: HashSet<String>,
+    job_count: i32,
+) -> Result<Vec<Request<String, SqlContext>>, sqlx::Error> {
+    let job_types: Vec<&str> = job_types.iter().map(AsRef::as_ref).collect();
+
+    let rows: Vec<SqlRequest<String>> = vec![];
+    // sqlx::query_as("UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4")
+    //     .bind(job_types)
+    //     .bind(job_count)
+    //     .fetch_all(&pool)
+    //     .await?;
+
+    let jobs = rows
+        .into_iter()
+        .map(|job| {
+            let namespace = job.job_type;
+            let (req, parts) = job.req.take_parts();
+            let mut req = Request::new_with_parts(req, parts);
+            req.parts.namespace = Some(Namespace(namespace));
+            req
+        })
+        .collect();
+
+    Ok(jobs)
 }
 
 impl<T, C> SqliteStorage<T, C>
@@ -285,7 +388,7 @@ where
 
     type Context = SqlContext;
 
-    type Codec = C;
+    type Compact = String;
 
     async fn push_request(
         &mut self,
@@ -443,7 +546,7 @@ where
     }
 }
 
-impl<T, C> SqliteStorage<T, C> {
+impl<T, C: Codec> SqliteStorage<T, C> {
     /// Puts the job instantly back into the queue
     /// Another Worker may consume
     pub async fn retry(
@@ -522,7 +625,7 @@ where
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
     type Layer = AckLayer<SqliteStorage<T, C>, T, SqlContext, C>;
 
-    type Compact = String;
+    type Codec = JsonCodec<String>;
 
     fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
@@ -585,7 +688,13 @@ where
     }
 }
 
-impl<T: Sync + Send, C: Send, Res: Serialize + Sync> Ack<T, Res, C> for SqliteStorage<T, C> {
+impl<T, C, Res> Ack<T, Res, C> for SqliteStorage<T, C>
+where
+    T: Sync + Send,
+    C: Codec + Send,
+    Res: Serialize + Sync,
+    C::Compact: Send,
+{
     type Context = SqlContext;
     type AckError = sqlx::Error;
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {

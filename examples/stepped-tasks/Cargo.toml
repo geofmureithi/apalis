@@ -1,0 +1,20 @@
+[package]
+name = "stepped-tasks"
+version = "0.1.0"
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+tower = { version = "0.5", features = ["util"] }
+tokio = { version = "1", features = ["full"] }
+apalis = { path = "../../", features = ["limit", "catch-panic", "retry"] }
+apalis-redis = { path = "../../packages/apalis-redis" }
+serde = "1"
+serde_json = "1"
+tracing-subscriber = "0.3.11"
+futures = "0.3"
+apalis-core = { path = "../../packages/apalis-core" }
+
+[dependencies.tracing]
+default-features = false
+version = "0.1"

@@ -32,8 +32,8 @@ pub trait Backend<Req> {
     /// Returns the final decoration of layers
     type Layer;
 
-    /// The way data is stored in the backend
-    type Compact;
+    /// Specifies the codec type used by the backend
+    type Codec: Codec;
 
     /// Returns a poller that is ready for streaming
     fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer>;
@@ -104,6 +104,7 @@ impl<Compact, Context> Clone for BackendConnection<Compact, Context> {
 /// Trait to make multiple backends using a shared connection
 /// This can improve performance for example sql engines since it leads to only one query for multiple job types
 pub trait Sharable<Backend, Codec: crate::codec::Codec>: Sized {
+    /// The context of the Backend being shared
     type Context;
     /// The Config for the backend
     type Config;

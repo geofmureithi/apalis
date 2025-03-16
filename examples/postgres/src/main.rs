@@ -3,7 +3,7 @@ use apalis::layers::retry::RetryPolicy;
 
 use apalis::prelude::*;
 use apalis_sql::{
-    postgres::{PgListen, PgPool, PostgresStorage},
+    postgres::{PgPool, PostgresStorage},
     Config,
 };
 use email_service::{send_email, Email};
@@ -38,13 +38,13 @@ async fn main() -> Result<()> {
     let mut pg = PostgresStorage::new_with_config(pool.clone(), Config::new("apalis::Email"));
     produce_jobs(&mut pg).await?;
 
-    let mut listener = PgListen::new(pool).await?;
+    // let mut listener = PgListen::new(pool).await?;
 
-    listener.subscribe_with(&mut pg);
+    // listener.subscribe_with(&mut pg);
 
-    tokio::spawn(async move {
-        listener.listen().await.unwrap();
-    });
+    // tokio::spawn(async move {
+    //     listener.listen().await.unwrap();
+    // });
 
     Monitor::new()
         .register({

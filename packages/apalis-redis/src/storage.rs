@@ -1,6 +1,6 @@
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::{BoxDynError, Error};
-use apalis_core::layers::{Ack, AckLayer, Service};
+use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
@@ -437,9 +437,9 @@ where
 {
     type Stream = BackendStream<RequestStream<Request<T, RedisContext>>>;
 
-    type Layer = AckLayer<Sender<(RedisContext, Response<Self::Compact>)>, T, RedisContext, C>;
+    type Layer = AckLayer<Sender<(RedisContext, Response<Vec<u8>>)>, T, RedisContext, C>;
 
-    type Compact = Vec<u8>;
+    type Codec = C;
 
     fn poll(
         mut self,
@@ -447,7 +447,7 @@ where
     ) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
         let (ack, ack_rx) =
-            mpsc::channel::<(RedisContext, Response<Self::Compact>)>(self.config.buffer_size);
+            mpsc::channel::<(RedisContext, Response<Vec<u8>>)>(self.config.buffer_size);
         let layer = AckLayer::new(ack);
         let controller = self.controller.clone();
         let config = self.config.clone();
@@ -710,7 +710,7 @@ where
     type Error = RedisError;
     type Context = RedisContext;
 
-    type Codec = C;
+    type Compact = Vec<u8>;
 
     async fn push_request(
         &mut self,

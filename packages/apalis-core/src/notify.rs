@@ -57,6 +57,7 @@ impl<T> Notify<T> {
             .expect("sender is dropped");
     }
 
+    /// Allows one to pipe a stream generating a heartbeat and a [`Notify`] instance
     pub fn pipe_stream<S: Stream<Item = T> + Unpin + Send + 'static>(
         mut stream: S,
     ) -> (BoxFuture<'static, ()>, Notify<T>)
