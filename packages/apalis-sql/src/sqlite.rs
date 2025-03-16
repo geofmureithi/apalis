@@ -5,6 +5,7 @@ use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::Error;
 use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::poller::controller::Controller;
+use apalis_core::poller::policy::{BackoffSchedule, FetchNext, FetchPolicy, FetchStream};
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
 use apalis_core::request::{Parts, Request, RequestStream, State};
@@ -14,9 +15,10 @@ use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
 use apalis_core::worker::{Context, Event, Worker, WorkerId};
 use apalis_core::{backend::Backend, codec::Codec};
-use async_stream::try_stream;
 use chrono::{DateTime, Utc};
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures::future::BoxFuture;
+use futures::{stream, FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures_lite::future::block_on;
 use log::error;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{Pool, Row, Sqlite};
@@ -33,15 +35,16 @@ pub use sqlx::sqlite::SqlitePool;
 
 /// Represents a [Storage] that persists to Sqlite
 // #[derive(Debug)]
-pub struct SqliteStorage<T, C = JsonCodec<String>> {
+pub struct SqliteStorage<T, C = JsonCodec<String>, P = BackoffSchedule<SqlRequest<String>>> {
     pool: Pool<Sqlite>,
     job_type: PhantomData<T>,
     controller: Controller,
     config: Config,
     codec: PhantomData<C>,
+    poll_policy: P,
 }
 
-impl<T, C> fmt::Debug for SqliteStorage<T, C> {
+impl<T, C, P> fmt::Debug for SqliteStorage<T, C, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MysqlStorage")
             .field("pool", &self.pool)
@@ -49,11 +52,12 @@ impl<T, C> fmt::Debug for SqliteStorage<T, C> {
             .field("controller", &self.controller)
             .field("config", &self.config)
             .field("codec", &std::any::type_name::<C>())
+            .field("poll_policy", &std::any::type_name::<P>())
             .finish()
     }
 }
 
-impl<T, C> Clone for SqliteStorage<T, C> {
+impl<T, C, P: Clone> Clone for SqliteStorage<T, C, P> {
     fn clone(&self) -> Self {
         SqliteStorage {
             pool: self.pool.clone(),
@@ -61,6 +65,7 @@ impl<T, C> Clone for SqliteStorage<T, C> {
             controller: self.controller.clone(),
             config: self.config.clone(),
             codec: self.codec,
+            poll_policy: self.poll_policy.clone(),
         }
     }
 }
@@ -93,18 +98,23 @@ impl SqliteStorage<()> {
 impl<T> SqliteStorage<T> {
     /// Create a new instance
     pub fn new(pool: SqlitePool) -> Self {
+        let config = Config::new(type_name::<T>());
+        let base_delay = config.poll_interval();
         Self {
             pool,
             job_type: PhantomData,
             controller: Controller::new(),
             config: Config::new(type_name::<T>()),
             codec: PhantomData,
+            poll_policy: BackoffSchedule::new(*base_delay),
         }
     }
 
     /// Create a new instance with a custom config
     pub fn new_with_config(pool: SqlitePool, config: Config) -> Self {
+        let base_delay = config.poll_interval();
         Self {
+            poll_policy: BackoffSchedule::new(*base_delay),
             pool,
             job_type: PhantomData,
             controller: Controller::new(),
@@ -113,7 +123,7 @@ impl<T> SqliteStorage<T> {
         }
     }
 }
-impl<T, C> SqliteStorage<T, C> {
+impl<T, C, P> SqliteStorage<T, C, P> {
     /// Keeps a storage notified that the worker is still alive manually
     pub async fn keep_alive_at(
         &mut self,
@@ -146,92 +156,75 @@ impl<T, C> SqliteStorage<T, C> {
     pub fn get_config(&self) -> &Config {
         &self.config
     }
+
+    /// Customize the poll policy
+    pub fn set_poll_policy<NP>(self, poll_policy: NP) -> SqliteStorage<T, C, NP> {
+        SqliteStorage {
+            pool: self.pool,
+            job_type: self.job_type,
+            controller: self.controller,
+            config: self.config,
+            codec: self.codec,
+            poll_policy,
+        }
+    }
 }
 
-impl<T, C> SqliteStorage<T, C> {
+impl<T, C, P> SqliteStorage<T, C, P> {
     /// Expose the code used
     pub fn codec(&self) -> &PhantomData<C> {
         &self.codec
     }
 }
 
-async fn fetch_next(
-    pool: &Pool<Sqlite>,
-    worker_id: &WorkerId,
-    id: String,
-    config: &Config,
-) -> Result<Option<SqlRequest<String>>, sqlx::Error> {
-    let now: i64 = Utc::now().timestamp();
-    let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
-    let job: Option<SqlRequest<String>> = sqlx::query_as(update_query)
-        .bind(id.to_string())
-        .bind(worker_id.to_string())
-        .bind(now)
-        .bind(config.namespace.clone())
-        .fetch_optional(pool)
-        .await?;
-
-    Ok(job)
-}
-
-impl<T, C> SqliteStorage<T, C>
+impl<T, C, P> SqliteStorage<T, C, P>
 where
-    T: DeserializeOwned + Send + Unpin,
+    T: DeserializeOwned + Send + Unpin + 'static,
     C: Codec<Compact = String>,
+    P: FetchPolicy<Item = SqlRequest<String>> + Clone + Send + Sync + 'static,
 {
     fn stream_jobs(
         &self,
         worker: &Worker<Context>,
-        interval: Duration,
-        buffer_size: usize,
     ) -> impl Stream<Item = Result<Option<Request<T, SqlContext>>, sqlx::Error>> {
-        let pool = self.pool.clone();
-        let worker = worker.clone();
-        let config = self.config.clone();
-        let namespace = Namespace(self.config.namespace.clone());
-        try_stream! {
-            loop {
-                apalis_core::sleep(interval).await;
-                if !worker.is_ready() {
-                    continue;
-                }
-                let worker_id = worker.id();
-                let tx = pool.clone();
-                let mut tx = tx.acquire().await?;
-                let job_type = &config.namespace;
-                let fetch_query = "SELECT id FROM Jobs
-                    WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at < ?1 AND job_type = ?2 LIMIT ?3";
-                let now: i64 = Utc::now().timestamp();
-                let ids: Vec<(String,)> = sqlx::query_as(fetch_query)
-                    .bind(now)
-                    .bind(job_type)
-                    .bind(i64::try_from(buffer_size).map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?)
-                    .fetch_all(&mut *tx)
-                    .await?;
-                for id in ids {
-                    let res = fetch_next(&pool, worker_id, id.0, &config).await?;
-                    yield match res {
-                        None => None::<Request<T, SqlContext>>,
-                        Some(job) => {
-                            let (req, parts) = job.req.take_parts();
-                            let args = C::decode(req)
-                                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-                            let mut req = Request::new_with_parts(args, parts);
-                            req.parts.namespace = Some(namespace.clone());
-                            Some(req)
-                        }
-                    }
-                };
-            }
-        }
+        let namespace = self.config.namespace.clone();
+        let stream = FetchStream::new(
+            FetchNextBatch {
+                pool: self.pool.clone(),
+                config: self.config.clone(),
+                worker_id: worker.id().clone(),
+            },
+            self.poll_policy.clone(),
+        )
+        .map_ok(move |jobs| {
+            let jobs: Vec<Request<T, SqlContext>> = jobs
+                .into_iter()
+                .map(|job| {
+                    let (req, parts) = job.req.take_parts();
+                    let args = C::decode(req)
+                        .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+                        .unwrap();
+                    let mut req = Request::new_with_parts(args, parts);
+                    req.parts.namespace = Some(namespace.clone().into());
+                    req
+                })
+                .collect();
+            jobs
+        })
+        .flat_map(|result| match result {
+            Ok(vec) => stream::iter(vec.into_iter().map(Some).map(Ok)).boxed(),
+            Err(err) => stream::iter(vec![Err(err)]).boxed(),
+        });
+        stream
     }
 }
 
-impl<T, C> Storage for SqliteStorage<T, C>
+impl<T, C, P> Storage for SqliteStorage<T, C, P>
 where
     T: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
     C: Codec<Compact = String> + Send + 'static + Sync,
     C::Error: std::error::Error + Send + Sync + 'static,
+    P: Send + FetchPolicy<Item = SqlRequest<String>> + Clone + Send + Sync + 'static,
 {
     type Job = T;
 
@@ -397,7 +390,7 @@ where
     }
 }
 
-impl<T, C> SqliteStorage<T, C> {
+impl<T, C, P> SqliteStorage<T, C, P> {
     /// Puts the job instantly back into the queue
     /// Another Worker may consume
     pub async fn retry(
@@ -467,14 +460,54 @@ pub enum SqlitePollError {
     ReenqueueOrphanedError(sqlx::Error),
 }
 
-impl<T, C> Backend<Request<T, SqlContext>> for SqliteStorage<T, C>
+async fn fetch_next_batch(
+    pool: Pool<Sqlite>,
+    worker_id: WorkerId,
+    config: Config,
+) -> Result<Vec<SqlRequest<String>>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let now: i64 = Utc::now().timestamp();
+    let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?1, lock_at = ?2 WHERE id IN (SELECT id from Jobs WHERE job_type = ?3 AND status = 'Pending' AND lock_by IS NULL LIMIT ?4) RETURNING *";
+    let jobs: Vec<SqlRequest<String>> = sqlx::query_as(update_query)
+        .bind(worker_id.to_string())
+        .bind(now)
+        .bind(&config.namespace)
+        .bind(config.buffer_size() as u32)
+        .fetch_all(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(jobs)
+}
+
+struct FetchNextBatch {
+    pool: Pool<Sqlite>,
+    worker_id: WorkerId,
+    config: Config,
+}
+
+impl FetchNext<SqlRequest<String>> for FetchNextBatch {
+    type Error = sqlx::Error;
+
+    type Future = BoxFuture<'static, Result<Vec<SqlRequest<String>>, Self::Error>>;
+    fn fetch_next(&mut self) -> Option<Self::Future> {
+        let fut = fetch_next_batch(
+            self.pool.clone(),
+            self.worker_id.clone(),
+            self.config.clone(),
+        );
+        Some(fut.boxed())
+    }
+}
+
+impl<T, C, P> Backend<Request<T, SqlContext>> for SqliteStorage<T, C, P>
 where
     C: Codec<Compact = String> + Send + 'static + Sync,
     C::Error: std::error::Error + 'static + Send + Sync,
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
+    P: FetchPolicy<Item = SqlRequest<String>> + Clone + Send + Sync + 'static,
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
-    type Layer = AckLayer<SqliteStorage<T, C>, T, SqlContext, C>;
+    type Layer = AckLayer<SqliteStorage<T, C, P>, T, SqlContext, C>;
 
     type Codec = JsonCodec<String>;
 
@@ -483,12 +516,12 @@ where
         let config = self.config.clone();
         let controller = self.controller.clone();
         let stream = self
-            .stream_jobs(worker, config.poll_interval, config.buffer_size)
+            .stream_jobs(worker)
             .map_err(|e| Error::SourceError(Arc::new(Box::new(e))));
         let stream = BackendStream::new(stream.boxed(), controller);
         let requeue_storage = self.clone();
         let w = worker.clone();
-        let heartbeat = async move {
+        let ensure_worker_ready = async {
             // Lets reenqueue any jobs that belonged to this worker in case of a death
             if let Err(e) = self
                 .reenqueue_orphaned((config.buffer_size * 10) as i32, Utc::now())
@@ -498,12 +531,17 @@ where
                     SqlitePollError::ReenqueueOrphanedError(e),
                 )));
             }
+            let now: i64 = Utc::now().timestamp();
+            self.keep_alive_at(&w, now).await.unwrap()
+        };
+        block_on(ensure_worker_ready);
+        let heartbeat = async move {
             loop {
+                apalis_core::sleep(Duration::from_secs(30)).await;
                 let now: i64 = Utc::now().timestamp();
                 if let Err(e) = self.keep_alive_at(&w, now).await {
                     w.emit(Event::Error(Box::new(SqlitePollError::KeepAliveError(e))));
                 }
-                apalis_core::sleep(Duration::from_secs(30)).await;
             }
         }
         .boxed();
@@ -539,7 +577,9 @@ where
     }
 }
 
-impl<T: Sync + Send, C: Send, Res: Serialize + Sync> Ack<T, Res, C> for SqliteStorage<T, C> {
+impl<T: Sync + Send, C: Send, Res: Serialize + Sync, P: Send> Ack<T, Res, C>
+    for SqliteStorage<T, C, P>
+{
     type Context = SqlContext;
     type AckError = sqlx::Error;
     async fn ack(&mut self, ctx: &Self::Context, res: &Response<Res>) -> Result<(), sqlx::Error> {
@@ -565,8 +605,8 @@ impl<T: Sync + Send, C: Send, Res: Serialize + Sync> Ack<T, Res, C> for SqliteSt
     }
 }
 
-impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExpose<J>
-    for SqliteStorage<J, JsonCodec<String>>
+impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync, P: Sync> BackendExpose<J>
+    for SqliteStorage<J, JsonCodec<String>, P>
 {
     type Request = Request<J, Parts<SqlContext>>;
     type Error = SqlError;
@@ -685,9 +725,7 @@ mod tests {
         storage: &mut SqliteStorage<Email>,
         worker: &Worker<Context>,
     ) -> Request<Email, SqlContext> {
-        let mut stream = storage
-            .stream_jobs(worker, std::time::Duration::from_secs(10), 1)
-            .boxed();
+        let mut stream = storage.stream_jobs(worker).boxed();
         stream
             .next()
             .await

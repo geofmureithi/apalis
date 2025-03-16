@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
         })
         .register({
             WorkerBuilder::new("tasty-mango")
-                // .enable_tracing()
+                .enable_tracing()
                 .backend(notification_storage)
                 .build_fn(job::notify)
         })

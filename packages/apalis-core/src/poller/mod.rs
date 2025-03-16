@@ -7,6 +7,9 @@ pub mod controller;
 /// Util for controlled stream
 pub mod stream;
 
+/// Utils for controlling polling strategies
+pub mod policy;
+
 /// A poller type that allows fetching from a stream and a heartbeat future that can be used to do periodic tasks
 pub struct Poller<S, L = Identity> {
     /// The stream of jobs
