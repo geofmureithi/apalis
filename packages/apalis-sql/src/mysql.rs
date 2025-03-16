@@ -793,6 +793,20 @@ mod tests {
         storage.push(email).await.expect("failed to push a job");
     }
 
+    async fn push_email_priority(
+        storage: &mut MysqlStorage<Email>,
+        email: Email,
+        priority: i32,
+    ) -> TaskId {
+        let mut ctx = SqlContext::new();
+        ctx.set_priority(priority);
+        storage
+            .push_request(Request::new_with_ctx(email, ctx))
+            .await
+            .expect("failed to push a job")
+            .task_id
+    }
+
     async fn get_job(
         storage: &mut MysqlStorage<Email>,
         job_id: &TaskId,
@@ -816,6 +830,26 @@ mod tests {
         let job = consume_one(&mut storage, &worker).await;
         let ctx = job.parts.context;
         // TODO: Fix assertions
+        assert_eq!(*ctx.status(), State::Running);
+        assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
+        assert!(ctx.lock_at().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_consume_highest_priority_job() {
+        let mut storage = setup().await;
+        let worker = register_worker(&mut storage).await;
+
+        // push a job with high priority, then another with lower
+        let job_id = push_email_priority(&mut storage, example_email(), 10).await;
+        push_email_priority(&mut storage, example_email(), 5).await;
+
+        let len = storage.len().await.expect("Could not fetch the jobs count");
+        assert_eq!(len, 2);
+
+        let job = consume_one(&mut storage, &worker).await;
+        let ctx = job.parts.context;
+        assert_eq!(job.parts.task_id, job_id);
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
