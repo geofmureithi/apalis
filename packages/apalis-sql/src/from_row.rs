@@ -147,6 +147,10 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
                     source: "Could not parse lock_by as a WorkerId".into(),
                 })?,
         );
+
+        let priority: i32 = row.try_get("priority").unwrap_or_default();
+        context.set_priority(priority);
+
         parts.context = context;
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),
@@ -210,6 +214,10 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
                     source: "Could not parse lock_by as a WorkerId".into(),
                 })?,
         );
+
+        let priority: i32 = row.try_get("priority").unwrap_or_default();
+        context.set_priority(priority);
+
         parts.context = context;
         Ok(SqlRequest {
             req: Request::new_with_parts(job, parts),

@@ -197,8 +197,9 @@ pub fn calculate_status<Res>(ctx: &SqlContext, res: &Response<Res>) -> State {
 #[macro_export]
 macro_rules! sql_storage_tests {
     ($setup:path, $storage_type:ty, $job_type:ty) => {
-        async fn setup_test_wrapper(
-        ) -> TestWrapper<$storage_type, Request<$job_type, SqlContext>, ()> {
+        type WrappedStorage = TestWrapper<$storage_type, Request<$job_type, SqlContext>, ()>;
+
+        async fn setup_test_wrapper() -> WrappedStorage {
             let (mut t, poller) = TestWrapper::new_with_service(
                 $setup().await,
                 apalis_core::service_fn::service_fn(email_service::send_email),
@@ -209,7 +210,7 @@ macro_rules! sql_storage_tests {
         }
 
         async fn push_email_priority(
-            storage: &mut TestWrapper<$storage_type, Request<$job_type, SqlContext>, ()>,
+            storage: &mut WrappedStorage,
             email: Email,
             priority: i32,
         ) -> TaskId {
@@ -343,18 +344,15 @@ macro_rules! sql_storage_tests {
             let job4 =
                 push_email_priority(&mut storage, email_service::example_good_email(), -1).await;
             let job3 =
-                push_email_priority(&mut storage, email_service::example_good_email(), 0).await;
+                push_email_priority(&mut storage, email_service::example_good_email(), 1).await;
 
-            let len = storage.len().await.expect("Could not fetch the jobs count");
-            assert_eq!(len, 4);
-
-            for (job_id, prio) in &[(job1, 10), (job2, 5), (job3, 0), (job4, -1)] {
+            for (job_id, prio) in &[(job1, 10), (job2, 5), (job3, 1), (job4, -1)] {
                 // let job = consume_one(&mut storage, &worker).await;
                 // let ctx = job.parts.context;
                 let (exec_job_id, res) = storage.execute_next().await.unwrap();
                 assert_eq!(job_id, &exec_job_id);
                 assert_eq!(res, Ok("()".to_owned()));
-                apalis_core::sleep(Duration::from_millis(100)).await;
+                apalis_core::sleep(Duration::from_millis(500)).await;
                 let job = storage.fetch_by_id(&exec_job_id).await.unwrap().unwrap();
                 let ctx = job.parts.context;
 

@@ -735,20 +735,6 @@ mod tests {
             .expect("no job found by id")
     }
 
-    // async fn push_email_priority(
-    //     storage: &mut SqliteStorage<Email>,
-    //     email: Email,
-    //     priority: i32,
-    // ) -> TaskId {
-    //     let mut ctx = SqlContext::new();
-    //     ctx.set_priority(priority);
-    //     storage
-    //         .push_request(Request::new_with_ctx(email, ctx))
-    //         .await
-    //         .expect("failed to push a job")
-    //         .task_id
-    // }
-
     #[tokio::test]
     async fn test_consume_last_pushed_job() {
         let mut storage = setup().await;
@@ -764,32 +750,6 @@ mod tests {
         assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
     }
-
-    // #[tokio::test]
-    // async fn test_consume_jobs_with_priority() {
-    //     let mut storage = setup().await;
-    //     let worker = register_worker(&mut storage).await;
-
-    //     // push several jobs with differing priorities, then ensure they get executed
-    //     // in priority order.
-    //     let job2 = push_email_priority(&mut storage, example_good_email(), 5).await;
-    //     let job1 = push_email_priority(&mut storage, example_good_email(), 10).await;
-    //     let job4 = push_email_priority(&mut storage, example_good_email(), -1).await;
-    //     let job3 = push_email_priority(&mut storage, example_good_email(), 0).await;
-
-    //     let len = storage.len().await.expect("Could not fetch the jobs count");
-    //     assert_eq!(len, 4);
-
-    //     for (job_id, prio) in &[(job1, 10), (job2, 5), (job3, 0), (job4, -1)] {
-    //         let job = consume_one(&mut storage, &worker).await;
-    //         let ctx = job.parts.context;
-    //         assert_eq!(&job.parts.task_id, job_id);
-    //         assert_eq!(ctx.priority(), prio);
-    //         assert_eq!(*ctx.status(), State::Running);
-    //         assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
-    //         assert!(ctx.lock_at().is_some());
-    //     }
-    // }
 
     #[tokio::test]
     async fn test_acknowledge_job() {
