@@ -1,8 +1,8 @@
 use crate::{
     backend::Backend,
+    codec::NoopCodec,
     mq::MessageQueue,
-    poller::Poller,
-    poller::{controller::Controller, stream::BackendStream},
+    poller::{controller::Controller, stream::BackendStream, Poller},
     request::{Request, RequestStream},
     worker::{self, Worker},
 };
@@ -97,12 +97,14 @@ impl<T> Stream for MemoryWrapper<T> {
 }
 
 // MemoryStorage as a Backend
-impl<T: Send + 'static + Sync, Res> Backend<Request<T, ()>, Res> for MemoryStorage<T> {
+impl<T: Send + 'static + Sync> Backend<Request<T, ()>> for MemoryStorage<T> {
     type Stream = BackendStream<RequestStream<Request<T, ()>>>;
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, _worker: &Worker<worker::Context>) -> Poller<Self::Stream> {
+    type Codec = NoopCodec<Request<T, ()>>;
+
+    fn poll(self, _worker: &Worker<worker::Context>) -> Poller<Self::Stream> {
         let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         Poller {
             stream: BackendStream::new(stream, self.controller),
@@ -114,24 +116,27 @@ impl<T: Send + 'static + Sync, Res> Backend<Request<T, ()>, Res> for MemoryStora
 }
 
 impl<Message: Send + 'static + Sync> MessageQueue<Message> for MemoryStorage<Message> {
+    type Context = ();
     type Error = ();
-    async fn enqueue(&mut self, message: Message) -> Result<(), Self::Error> {
-        self.inner
-            .sender
-            .try_send(Request::new(message))
-            .map_err(|_| ())?;
+    type Compact = Message;
+
+    async fn enqueue_request(
+        &mut self,
+        req: Request<Message, Self::Context>,
+    ) -> Result<(), Self::Error> {
+        self.inner.sender.try_send(req).map_err(|_| ())?;
         Ok(())
     }
 
-    async fn dequeue(&mut self) -> Result<Option<Message>, ()> {
-        Ok(self
-            .inner
-            .receiver
-            .lock()
-            .await
-            .next()
-            .await
-            .map(|r| r.args))
+    async fn enqueue_raw_request(
+        &mut self,
+        _req: Request<Self::Compact, Self::Context>,
+    ) -> Result<(), Self::Error> {
+        unreachable!("Cannot push a generic message")
+    }
+
+    async fn dequeue_request(&mut self) -> Result<Option<Request<Message, Self::Context>>, ()> {
+        Ok(self.inner.receiver.lock().await.next().await)
     }
 
     async fn size(&mut self) -> Result<usize, ()> {

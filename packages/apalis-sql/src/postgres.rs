@@ -147,17 +147,19 @@ pub enum PgPollError {
     CodecError(BoxDynError),
 }
 
-impl<T, C, Res> Backend<Request<T, SqlContext>, Res> for PostgresStorage<T, C>
+impl<T, C> Backend<Request<T, SqlContext>> for PostgresStorage<T, C>
 where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
-    C: Codec<Compact = serde_json::Value> + Send + 'static,
+    C: Codec<Compact = Value> + Send + 'static,
     C::Error: std::error::Error + 'static + Send + Sync,
 {
     type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
 
-    type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, Res>;
+    type Layer = AckLayer<PostgresStorage<T, C>, T, SqlContext, C>;
 
-    fn poll<Svc>(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    type Codec = C;
+
+    fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let subscription = self.subscription.clone();
         let config = self.config.clone();
@@ -431,7 +433,7 @@ impl PgListen {
 impl<T, C> PostgresStorage<T, C>
 where
     T: DeserializeOwned + Send + Unpin + 'static,
-    C: Codec<Compact = serde_json::Value>,
+    C: Codec<Compact = Value>,
 {
     async fn fetch_next(
         &mut self,
@@ -470,12 +472,15 @@ impl<Req, C> Storage for PostgresStorage<Req, C>
 where
     Req: Serialize + DeserializeOwned + Send + 'static + Unpin + Sync,
     C: Codec<Compact = Value> + Send + 'static,
+    C::Error: Send + std::error::Error + Sync + 'static,
 {
     type Job = Req;
 
     type Error = sqlx::Error;
 
     type Context = SqlContext;
+
+    type Compact = Value;
 
     /// Push a job to Postgres [Storage]
     ///
@@ -487,6 +492,25 @@ where
     async fn push_request(
         &mut self,
         req: Request<Self::Job, SqlContext>,
+    ) -> Result<Parts<SqlContext>, sqlx::Error> {
+        let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL)";
+
+        let args = C::encode(&req.args)
+            .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+        let job_type = self.config.namespace.clone();
+        sqlx::query(query)
+            .bind(args)
+            .bind(req.parts.task_id.to_string())
+            .bind(&job_type)
+            .bind(req.parts.context.max_attempts())
+            .execute(&self.pool)
+            .await?;
+        Ok(req.parts)
+    }
+
+    async fn push_raw_request(
+        &mut self,
+        req: Request<Self::Compact, SqlContext>,
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
         let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL)";
 
@@ -618,7 +642,7 @@ where
     }
 }
 
-impl<T, Res, C> Ack<T, Res> for PostgresStorage<T, C>
+impl<T, Res, C> Ack<T, Res, C> for PostgresStorage<T, C>
 where
     T: Sync + Send,
     Res: Serialize + Sync + Clone,

@@ -1,6 +1,6 @@
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::error::{BoxDynError, Error};
-use apalis_core::layers::{Ack, AckLayer, Service};
+use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
@@ -24,7 +24,6 @@ use std::any::type_name;
 use std::fmt::{self, Debug};
 use std::io;
 use std::num::TryFromIntError;
-use std::sync::Arc;
 use std::time::SystemTime;
 use std::{marker::PhantomData, time::Duration};
 
@@ -361,9 +360,9 @@ impl<T, Conn: Clone, C> Clone for RedisStorage<T, Conn, C> {
     }
 }
 
-impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn> {
+impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn, JsonCodec<Vec<u8>>> {
     /// Start a new connection
-    pub fn new(conn: Conn) -> Self {
+    pub fn new(conn: Conn) -> RedisStorage<T, Conn, JsonCodec<Vec<u8>>> {
         Self::new_with_codec::<JsonCodec<Vec<u8>>>(
             conn,
             Config::default().set_namespace(type_name::<T>()),
@@ -371,21 +370,24 @@ impl<T: Serialize + DeserializeOwned, Conn> RedisStorage<T, Conn> {
     }
 
     /// Start a connection with a custom config
-    pub fn new_with_config(conn: Conn, config: Config) -> Self {
+    pub fn new_with_config(
+        conn: Conn,
+        config: Config,
+    ) -> RedisStorage<T, Conn, JsonCodec<Vec<u8>>> {
         Self::new_with_codec::<JsonCodec<Vec<u8>>>(conn, config)
     }
 
     /// Start a new connection providing custom config and a codec
-    pub fn new_with_codec<C>(conn: Conn, config: Config) -> RedisStorage<T, Conn, C>
+    pub fn new_with_codec<K>(conn: Conn, config: Config) -> RedisStorage<T, Conn, K>
     where
-        C: Codec + Sync + Send + 'static,
+        K: Codec + Sync + Send + 'static,
     {
         RedisStorage {
             conn,
             job_type: PhantomData,
             controller: Controller::new(),
             config,
-            codec: PhantomData::<C>,
+            codec: PhantomData::<K>,
             scripts: RedisScript {
                 done_job: redis::Script::new(include_str!("../lua/done_job.lua")),
                 push_job: redis::Script::new(include_str!("../lua/push_job.lua")),
@@ -427,23 +429,25 @@ impl<T, Conn, C> RedisStorage<T, Conn, C> {
     }
 }
 
-impl<T, Conn, C, Res> Backend<Request<T, RedisContext>, Res> for RedisStorage<T, Conn, C>
+impl<T, Conn, C> Backend<Request<T, RedisContext>> for RedisStorage<T, Conn, C>
 where
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
-    Res: Send + Serialize + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
 {
     type Stream = BackendStream<RequestStream<Request<T, RedisContext>>>;
 
-    type Layer = AckLayer<Sender<(RedisContext, Response<Res>)>, T, RedisContext, Res>;
+    type Layer = AckLayer<Sender<(RedisContext, Response<Vec<u8>>)>, T, RedisContext, C>;
 
-    fn poll<Svc: Service<Request<T, RedisContext>>>(
+    type Codec = C;
+
+    fn poll(
         mut self,
         worker: &Worker<apalis_core::worker::Context>,
     ) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
-        let (ack, ack_rx) = mpsc::channel(self.config.buffer_size);
+        let (ack, ack_rx) =
+            mpsc::channel::<(RedisContext, Response<Vec<u8>>)>(self.config.buffer_size);
         let layer = AckLayer::new(ack);
         let controller = self.controller.clone();
         let config = self.config.clone();
@@ -533,12 +537,12 @@ where
     }
 }
 
-impl<T, Conn, Res, C> Ack<T, Res> for RedisStorage<T, Conn, C>
+impl<T, Conn, C, Res> Ack<T, Res, C> for RedisStorage<T, Conn, C>
 where
-    Res: Serialize + Sync + Send + 'static,
-    T: Sync + Send + DeserializeOwned + Serialize + Unpin + 'static,
+    T: Sync + Send + Serialize + DeserializeOwned + Unpin + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
     C: Codec<Compact = Vec<u8>> + Send + 'static,
+    Res: Serialize + Sync + Send + 'static,
 {
     type Context = RedisContext;
     type AckError = RedisError;
@@ -637,8 +641,8 @@ where
                 let mut processed = vec![];
                 for job in jobs {
                     let bytes = deserialize_job(&job)?;
-                    let mut request: Request<T, RedisContext> = C::decode(bytes.to_vec())
-                        .map_err(|e| build_error(&e.into().to_string()))?;
+                    let mut request: Request<T, RedisContext> =
+                        C::decode(bytes.clone()).map_err(|e| build_error(&e.into().to_string()))?;
                     request.parts.context.lock_by = Some(worker_id.clone());
                     request.parts.namespace = Some(Namespace(namespace.clone()));
                     processed.push(request)
@@ -706,10 +710,35 @@ where
     type Error = RedisError;
     type Context = RedisContext;
 
+    type Compact = Vec<u8>;
+
     async fn push_request(
         &mut self,
         req: Request<T, RedisContext>,
     ) -> Result<Parts<Self::Context>, RedisError> {
+        let conn = &mut self.conn;
+        let push_job = self.scripts.push_job.clone();
+        let job_data_hash = self.config.job_data_hash();
+        let active_jobs_list = self.config.active_jobs_list();
+        let signal_list = self.config.signal_list();
+
+        let job = C::encode(&req)
+            .map_err(|e| (ErrorKind::IoError, "Encode error", e.into().to_string()))?;
+        push_job
+            .key(job_data_hash)
+            .key(active_jobs_list)
+            .key(signal_list)
+            .arg(req.parts.task_id.to_string())
+            .arg(job)
+            .invoke_async(conn)
+            .await?;
+        Ok(req.parts)
+    }
+
+    async fn push_raw_request(
+        &mut self,
+        req: Request<Self::Compact, Self::Context>,
+    ) -> Result<Parts<Self::Context>, Self::Error> {
         let conn = &mut self.conn;
         let push_job = self.scripts.push_job.clone();
         let job_data_hash = self.config.job_data_hash();

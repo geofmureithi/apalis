@@ -5,9 +5,12 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **api** add associated types to the Backend trait ([#516](https://github.com/geofmureithi/apalis/pull/516))
 - **retry layer**: Integrate retry logic with task handling ([#512](https://github.com/geofmureithi/apalis/pull/512))
 - **generic retry**: Persist check for tasks ([#498](https://github.com/geofmureithi/apalis/pull/498))
 - **native TLS**: Add `async-std-comp-native-tls` and `tokio-comp-native-tls` features ([#525](https://github.com/geofmureithi/apalis/pull/525))
+- **cron** : Introduce CronContext ([#488](https://github.com/geofmureithi/apalis/pull/488))
+- **stepped tasks** : adds ability to execute stepped tasks ([#478](https://github.com/geofmureithi/apalis/pull/478))
 
 ### Fixed
 - **PostgresStorage**: PostgresStorage get_jobs status conditional ([#524](https://github.com/geofmureithi/apalis/pull/524))

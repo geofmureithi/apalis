@@ -6,6 +6,7 @@ use std::{fmt, fmt::Debug, pin::Pin, str::FromStr};
 
 use crate::{
     backend::Backend,
+    codec::NoopCodec,
     data::Extensions,
     error::Error,
     poller::Poller,
@@ -46,9 +47,12 @@ pub struct Parts<Ctx> {
     //TODO: add State
 }
 
-impl<T, Ctx: Default> Request<T, Ctx> {
+impl<T, Ctx> Request<T, Ctx> {
     /// Creates a new [Request]
-    pub fn new(args: T) -> Self {
+    pub fn new(args: T) -> Self
+    where
+        Ctx: Default,
+    {
         Self::new_with_data(args, Extensions::default(), Ctx::default())
     }
 
@@ -63,7 +67,10 @@ impl<T, Ctx: Default> Request<T, Ctx> {
             args: req,
             parts: Parts {
                 context: ctx,
-                ..Default::default()
+                task_id: Default::default(),
+                attempt: Default::default(),
+                data: Default::default(),
+                namespace: Default::default(),
             },
         }
     }
@@ -74,8 +81,10 @@ impl<T, Ctx: Default> Request<T, Ctx> {
             args: req,
             parts: Parts {
                 context: ctx,
+                task_id: Default::default(),
+                attempt: Default::default(),
                 data,
-                ..Default::default()
+                namespace: Default::default(),
             },
         }
     }
@@ -160,12 +169,14 @@ pub type RequestFuture<T> = BoxFuture<'static, T>;
 /// Represents a stream for T.
 pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, Error>>;
 
-impl<T, Res, Ctx> Backend<Request<T, Ctx>, Res> for RequestStream<Request<T, Ctx>> {
+impl<T, Ctx> Backend<Request<T, Ctx>> for RequestStream<Request<T, Ctx>> {
     type Stream = Self;
 
     type Layer = Identity;
 
-    fn poll<Svc>(self, _worker: &Worker<Context>) -> Poller<Self::Stream> {
+    type Codec = NoopCodec<Request<T, Ctx>>;
+
+    fn poll(self, _worker: &Worker<Context>) -> Poller<Self::Stream> {
         Poller {
             stream: self,
             heartbeat: Box::pin(futures::future::pending()),

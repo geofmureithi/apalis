@@ -2,9 +2,9 @@ use std::{any::type_name, future::Future};
 
 use futures::Stream;
 use serde::{Deserialize, Serialize};
-use tower::Service;
 
 use crate::{
+    codec::Codec,
     poller::Poller,
     request::State,
     worker::{Context, Worker},
@@ -15,18 +15,18 @@ use crate::{
 ///
 /// [`Storage`]: crate::storage::Storage
 /// [`MessageQueue`]: crate::mq::MessageQueue
-pub trait Backend<Req, Res> {
+pub trait Backend<Req> {
     /// The stream to be produced by the backend
     type Stream: Stream<Item = Result<Option<Req>, crate::error::Error>>;
 
     /// Returns the final decoration of layers
     type Layer;
 
+    /// Specifies the codec type used by the backend
+    type Codec: Codec;
+
     /// Returns a poller that is ready for streaming
-    fn poll<Svc: Service<Req, Response = Res>>(
-        self,
-        worker: &Worker<Context>,
-    ) -> Poller<Self::Stream, Self::Layer>;
+    fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer>;
 }
 
 /// Represents functionality that allows reading of jobs and stats from a backend
