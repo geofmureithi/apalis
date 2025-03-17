@@ -56,3 +56,28 @@ async fn main() -> Result<()> {
     future::try_join(http, worker).await?;
     Ok(())
 }
+
+// #[cfg(test)]
+// mod tests {
+
+//     async fn push_email_test() -> () {
+//         // curl an email
+//         // check redis if email job exists
+//         let client = reqwest::Client::new();
+//         let res = client
+//             .post("http://localhost:8000/emails/push")
+//             .body(
+//                 "{
+//                     'to': 'test@gmail.com',
+//                     'subject': 'Message from Web',
+//                     'text': 'This is the text'
+//                 }",
+//             )
+//             .send()
+//             .await?;
+        
+//         let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
+//         let conn = apalis_redis::connect(redis_url);
+//         let exists: bool = conn
+//     }
+// }
