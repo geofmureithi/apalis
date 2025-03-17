@@ -16,6 +16,7 @@ pub struct SqlContext {
     lock_at: Option<i64>,
     lock_by: Option<WorkerId>,
     done_at: Option<i64>,
+    priority: i32,
 }
 
 impl Default for SqlContext {
@@ -35,6 +36,7 @@ impl SqlContext {
             max_attempts: 5,
             last_error: None,
             lock_by: None,
+            priority: 0,
         }
     }
 
@@ -106,6 +108,16 @@ impl SqlContext {
     /// Set the last error
     pub fn set_last_error(&mut self, error: Option<String>) {
         self.last_error = error;
+    }
+
+    /// Set the job priority. Larger values will run sooner. Default is 0.
+    pub fn set_priority(&mut self, priority: i32) {
+        self.priority = priority
+    }
+
+    /// Get the job priority
+    pub fn priority(&self) -> &i32 {
+        &self.priority
     }
 }
 

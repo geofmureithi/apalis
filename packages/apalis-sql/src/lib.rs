@@ -197,8 +197,9 @@ pub fn calculate_status<Res>(ctx: &SqlContext, res: &Response<Res>) -> State {
 #[macro_export]
 macro_rules! sql_storage_tests {
     ($setup:path, $storage_type:ty, $job_type:ty) => {
-        async fn setup_test_wrapper(
-        ) -> TestWrapper<$storage_type, Request<$job_type, SqlContext>, ()> {
+        type WrappedStorage = TestWrapper<$storage_type, Request<$job_type, SqlContext>, ()>;
+
+        async fn setup_test_wrapper() -> WrappedStorage {
             let (mut t, poller) = TestWrapper::new_with_service(
                 $setup().await,
                 apalis_core::service_fn::service_fn(email_service::send_email),
@@ -206,6 +207,20 @@ macro_rules! sql_storage_tests {
             tokio::spawn(poller);
             t.vacuum().await.unwrap();
             t
+        }
+
+        async fn push_email_priority(
+            storage: &mut WrappedStorage,
+            email: Email,
+            priority: i32,
+        ) -> TaskId {
+            let mut ctx = SqlContext::new();
+            ctx.set_priority(priority);
+            storage
+                .push_request(Request::new_with_ctx(email, ctx))
+                .await
+                .expect("failed to push a job")
+                .task_id
         }
 
         #[tokio::test]
@@ -314,6 +329,34 @@ macro_rules! sql_storage_tests {
             };
 
             tokio::join!(runner, wkr);
+        }
+
+        #[tokio::test]
+        async fn test_consume_jobs_with_priority() {
+            let mut storage = setup_test_wrapper().await;
+
+            // push several jobs with differing priorities, then ensure they get executed
+            // in priority order.
+            let job2 =
+                push_email_priority(&mut storage, email_service::example_good_email(), 5).await;
+            let job1 =
+                push_email_priority(&mut storage, email_service::example_good_email(), 10).await;
+            let job4 =
+                push_email_priority(&mut storage, email_service::example_good_email(), -1).await;
+            let job3 =
+                push_email_priority(&mut storage, email_service::example_good_email(), 1).await;
+
+            for (job_id, prio) in &[(job1, 10), (job2, 5), (job3, 1), (job4, -1)] {
+                let (exec_job_id, res) = storage.execute_next().await.unwrap();
+                assert_eq!(job_id, &exec_job_id);
+                assert_eq!(res, Ok("()".to_owned()));
+                apalis_core::sleep(Duration::from_millis(500)).await;
+                let job = storage.fetch_by_id(&exec_job_id).await.unwrap().unwrap();
+                let ctx = job.parts.context;
+
+                assert_eq!(*ctx.status(), State::Done);
+                assert_eq!(ctx.priority(), prio);
+            }
         }
     };
 }
