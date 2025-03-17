@@ -177,7 +177,7 @@ where
                     query.execute(&mut *tx).await?;
                     tx.commit().await?;
 
-                    let fetch_query = format!("SELECT * FROM jobs WHERE ID IN ({})", id_params);
+                    let fetch_query = format!("SELECT * FROM jobs WHERE ID IN ({}) ORDER BY priority DESC, run_at ASC", id_params);
                     let mut query = sqlx::query_as(&fetch_query);
                     for i in task_ids {
                         query = query.bind(i);

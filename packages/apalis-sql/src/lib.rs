@@ -347,8 +347,6 @@ macro_rules! sql_storage_tests {
                 push_email_priority(&mut storage, email_service::example_good_email(), 1).await;
 
             for (job_id, prio) in &[(job1, 10), (job2, 5), (job3, 1), (job4, -1)] {
-                // let job = consume_one(&mut storage, &worker).await;
-                // let ctx = job.parts.context;
                 let (exec_job_id, res) = storage.execute_next().await.unwrap();
                 assert_eq!(job_id, &exec_job_id);
                 assert_eq!(res, Ok("()".to_owned()));
