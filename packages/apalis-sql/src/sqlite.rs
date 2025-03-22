@@ -884,4 +884,27 @@ mod tests {
         assert_eq!(*ctx.last_error(), Some("{\"Ok\":\"success\"}".to_owned()));
         assert_eq!(job.parts.attempt.current(), 1);
     }
+
+    /// Pushes email jobs and verifies they are listed correctly.
+    #[tokio::test]
+    async fn test_push_and_list_100_jobs() {
+        let mut storage = setup().await;
+
+        // Push 100 email jobs
+        for i in 0..100 {
+            push_email(
+                &mut storage,
+                Email {
+                    subject: format!("Test Subject {i}"),
+                    to: format!("user{i}@example.com"),
+                    text: format!("This is test email number {i}"),
+                },
+            ).await;
+        }
+
+        // Verify the count of jobs
+        let jobs_num = storage.list_jobs(&State::Pending, 100).await.expect("Failed to get job Count");
+        println!("There are {:?} jobs", jobs_num.len());
+        assert_eq!(jobs_num.len(), 100);
+    }
 }
