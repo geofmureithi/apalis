@@ -894,13 +894,12 @@ mod tests {
                     to: format!("user{i}@example.com"),
                     text: format!("This is test email number {i}"),
                 },
-            )
-            .await;
+            ).await;
         }
 
         // Verify the count of jobs
-        let job_count = storage.len().await.expect("Failed to get job count");
-        assert_eq!(job_count, 100);
-
+        let jobs_num = storage.list_jobs(&State::Pending, 100).await.expect("Failed to get job Count");
+        println!("There are {:?} jobs", jobs_num.len());
+        assert_eq!(jobs_num.len(), 100);
     }
 }
