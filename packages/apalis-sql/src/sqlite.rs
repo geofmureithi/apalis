@@ -643,7 +643,6 @@ mod tests {
 
     use super::*;
     use apalis_core::request::State;
-    use apalis_core::test_utils::DummyService;
     use chrono::Utc;
     use email_service::example_good_email;
     use email_service::Email;
