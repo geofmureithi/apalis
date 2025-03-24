@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.7.0](https://github.com/geofmureithi/apalis/releases/tag/v0.7.0)
 
 ### Added
 - **api** add associated types to the Backend trait ([#516](https://github.com/geofmureithi/apalis/pull/516))
