@@ -297,12 +297,16 @@ pub mod test_utils {
             self.should_next.store(true, Ordering::Release);
             #[cfg(feature = "sleep")]
             let fut = async {
-                crate::sleep(std::time::Duration::from_secs(2)).boxed().await;
-            }.boxed();
+                crate::sleep(std::time::Duration::from_secs(2))
+                    .boxed()
+                    .await;
+            }
+            .boxed();
             #[cfg(not(feature = "sleep"))]
             let fut = async {
                 std::future::pending::<()>().await;
-            }.boxed();
+            }
+            .boxed();
 
             let res = futures::future::select(self.res_rx.next(), fut).await;
             match res {
