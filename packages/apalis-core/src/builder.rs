@@ -176,7 +176,6 @@ pub trait WorkerFactory<Req, Ctx, S> {
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-
 pub trait WorkerFactoryFn<Req, Ctx, F, FnArgs> {
     /// The request source for the [`Worker`]
     type Source;

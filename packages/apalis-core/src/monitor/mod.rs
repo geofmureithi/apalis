@@ -118,7 +118,6 @@ impl Monitor {
     /// If a timeout has been set using the `Monitor::shutdown_timeout` method, the monitor
     /// will wait for all workers to complete up to the timeout duration before exiting.
     /// If the timeout is reached and workers have not completed, the monitor will exit forcefully.
-
     pub async fn run_with_signal<S>(self, signal: S) -> std::io::Result<()>
     where
         S: Send + Future<Output = std::io::Result<()>>,
