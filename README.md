@@ -64,8 +64,8 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.6", features = "limit" } # Limit for concurrency
-apalis-redis = { version = "0.6" } # Use redis for persistence
+apalis = { version = "0.7", features = "limit" } # Limit for concurrency
+apalis-redis = { version = "0.7" } # Use redis for persistence
 ```
 
 ## Usage
@@ -111,6 +111,45 @@ async fn produce_route_jobs(storage: &mut RedisStorage<Email>) -> Result<()> {
             to: "test@example.com".to_string(),
         })
         .await?;
+}
+```
+
+### Stepped Tasks
+
+Apalis has beta support for stepped tasks. See [complete example](https://github.com/geofmureithi/apalis/tree/main/examples/stepped-tasks) 
+
+```rs
+#[tokio::main]
+async fn main() -> Result<(), std::io::Error> {
+    std::env::set_var("RUST_LOG", "debug");
+    tracing_subscriber::fmt::init();
+    let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
+    let conn = apalis_redis::connect(redis_url).await.unwrap();
+    let config = apalis_redis::Config::default().set_namespace("stepped-email-task");
+
+
+    let mut storage = RedisStorage::new_with_config(conn, config);
+    storage
+        .start_stepped(WelcomeEmail { user_id: 1 })
+        .await
+        .unwrap();
+
+    // Build steps
+    let steps = StepBuilder::new()
+        .step_fn(welcome) // Steps are tower services
+        .step_fn(campaign)
+        .step_fn(complete_campaign);
+
+    WorkerBuilder::new("tasty-banana")
+        .data(()) // Shared data for all steps
+        .enable_tracing()
+        .concurrency(2)
+        .backend(storage)
+        .build_stepped(steps)
+        .on_event(|e| info!("{e}"))
+        .run()
+        .await;
+    Ok(())
 }
 ```
 
