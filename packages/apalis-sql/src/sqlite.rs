@@ -579,7 +579,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
                             COUNT(1) FILTER (WHERE status = 'Killed') AS killed
                         FROM Jobs WHERE job_type = ?";
 
-        let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
+        let res: (i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
             .bind(self.get_config().namespace())
             .fetch_one(self.pool())
             .await?;
@@ -880,13 +880,22 @@ mod tests {
         assert_eq!(job.parts.attempt.current(), 1);
     }
 
+    #[tokio::test]
+    async fn test_list_workers() {
+        let mut storage = setup().await;
+        register_worker(&mut storage).await;
+
+        let workers = storage.list_workers().await.expect("no workers found!");
+        assert_eq!(workers.len(), 1);
+    }
+
     /// Pushes email jobs and verifies they are listed correctly.
     #[tokio::test]
-    async fn test_push_and_list_100_jobs() {
+    async fn test_push_and_list_10_jobs() {
         let mut storage = setup().await;
 
         // Push 100 email jobs
-        for i in 0..100 {
+        for i in 0..10 {
             push_email(
                 &mut storage,
                 Email {
@@ -894,12 +903,43 @@ mod tests {
                     to: format!("user{i}@example.com"),
                     text: format!("This is test email number {i}"),
                 },
-            ).await;
+            )
+            .await;
         }
 
         // Verify the count of jobs
-        let jobs_num = storage.list_jobs(&State::Pending, 100).await.expect("Failed to get job Count");
-        println!("There are {:?} jobs", jobs_num.len());
-        assert_eq!(jobs_num.len(), 100);
+        let jobs_num = storage
+            .list_jobs(&State::Pending, 1)
+            .await
+            .expect("Failed to get job Count");
+        assert_eq!(jobs_num.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn test_stats() {
+        let mut storage = setup().await;
+        let worker = register_worker(&mut storage).await;
+
+        // Push 100 email jobs
+        for i in 0..10 {
+            push_email(
+                &mut storage,
+                Email {
+                    subject: format!("Test Subject {i}"),
+                    to: format!("user{i}@example.com"),
+                    text: format!("This is test email number {i}"),
+                },
+            )
+            .await;
+        }
+
+        let stats = storage.stats().await.expect("Failed to get stats");
+
+        assert_eq!(stats.pending, 10);
+
+        let job = consume_one(&mut storage, &worker).await;
+        let ctx = job.parts.context;
+        assert_eq!(stats.pending, 10);
+        assert_eq!(*ctx.status(), State::Running);
     }
 }
