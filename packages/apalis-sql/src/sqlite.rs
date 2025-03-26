@@ -43,7 +43,7 @@ pub struct SqliteStorage<T, C = JsonCodec<String>> {
 
 impl<T, C> fmt::Debug for SqliteStorage<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MysqlStorage")
+        f.debug_struct("SqliteStorage")
             .field("pool", &self.pool)
             .field("job_type", &"PhantomData<T>")
             .field("controller", &self.controller)
@@ -200,7 +200,7 @@ where
                 let mut tx = tx.acquire().await?;
                 let job_type = &config.namespace;
                 let fetch_query = "SELECT id FROM Jobs
-                    WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at < ?1 AND job_type = ?2 LIMIT ?3";
+                    WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at < ?1 AND job_type = ?2 ORDER BY priority DESC LIMIT ?3";
                 let now: i64 = Utc::now().timestamp();
                 let ids: Vec<(String,)> = sqlx::query_as(fetch_query)
                     .bind(now)
@@ -245,7 +245,7 @@ where
         &mut self,
         job: Request<Self::Job, SqlContext>,
     ) -> Result<Parts<SqlContext>, Self::Error> {
-        let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, strftime('%s','now'), NULL, NULL, NULL, NULL)";
+        let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, strftime('%s','now'), NULL, NULL, NULL, NULL, ?5)";
         let (task, parts) = job.take_parts();
         let raw = C::encode(&task)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
@@ -255,6 +255,7 @@ where
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
             .bind(parts.context.max_attempts())
+            .bind(parts.context.priority())
             .execute(&self.pool)
             .await?;
         Ok(parts)
@@ -264,7 +265,7 @@ where
         &mut self,
         job: Request<Self::Compact, SqlContext>,
     ) -> Result<Parts<SqlContext>, Self::Error> {
-        let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, strftime('%s','now'), NULL, NULL, NULL, NULL)";
+        let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, strftime('%s','now'), NULL, NULL, NULL, NULL, ?5)";
         let (task, parts) = job.take_parts();
         let raw = C::encode(&task)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
@@ -274,6 +275,7 @@ where
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
             .bind(parts.context.max_attempts())
+            .bind(parts.context.priority())
             .execute(&self.pool)
             .await?;
         Ok(parts)
@@ -285,7 +287,7 @@ where
         on: i64,
     ) -> Result<Parts<SqlContext>, Self::Error> {
         let query =
-            "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, ?5, NULL, NULL, NULL, NULL)";
+            "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, ?5, NULL, NULL, NULL, NULL, ?6)";
         let id = &req.parts.task_id;
         let job = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
@@ -295,6 +297,7 @@ where
             .bind(id.to_string())
             .bind(job_type)
             .bind(req.parts.context.max_attempts())
+            .bind(req.parts.context.priority())
             .bind(on)
             .execute(&self.pool)
             .await?;
@@ -364,10 +367,11 @@ where
         let lock_by = ctx.lock_by().clone();
         let lock_at = *ctx.lock_at();
         let last_error = ctx.last_error().clone();
+        let priority = *ctx.priority();
         let job_id = job.parts.task_id;
         let mut tx = self.pool.acquire().await?;
         let query =
-                "UPDATE Jobs SET status = ?1, attempts = ?2, done_at = ?3, lock_by = ?4, lock_at = ?5, last_error = ?6 WHERE id = ?7";
+                "UPDATE Jobs SET status = ?1, attempts = ?2, done_at = ?3, lock_by = ?4, lock_at = ?5, last_error = ?6, priority = ?7 WHERE id = ?8";
         sqlx::query(query)
             .bind(status.to_owned())
             .bind::<i64>(
@@ -380,6 +384,7 @@ where
             .bind(lock_by.map(|w| w.name().to_string()))
             .bind(lock_at)
             .bind(last_error)
+            .bind(priority)
             .bind(job_id.to_string())
             .execute(&mut *tx)
             .await?;
@@ -638,7 +643,6 @@ mod tests {
 
     use super::*;
     use apalis_core::request::State;
-    use apalis_core::test_utils::DummyService;
     use chrono::Utc;
     use email_service::example_good_email;
     use email_service::Email;

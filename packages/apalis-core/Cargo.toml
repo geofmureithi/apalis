@@ -1,6 +1,6 @@
 [package]
 name = "apalis-core"
-version = "0.6.4"
+version = "0.7.0"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition.workspace = true
 repository.workspace = true
@@ -29,7 +29,7 @@ optional = true
 
 
 [features]
-default = ["test-utils"]
+default = []
 docsrs = ["document-features"]
 sleep = ["futures-timer"]
 json = ["serde_json"]

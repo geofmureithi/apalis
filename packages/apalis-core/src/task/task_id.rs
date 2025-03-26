@@ -68,7 +68,7 @@ impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for TaskId {
 
 struct TaskIdVisitor;
 
-impl<'de> Visitor<'de> for TaskIdVisitor {
+impl Visitor<'_> for TaskIdVisitor {
     type Value = TaskId;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

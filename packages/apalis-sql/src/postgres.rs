@@ -493,7 +493,7 @@ where
         &mut self,
         req: Request<Self::Job, SqlContext>,
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
-        let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL)";
+        let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL, $5)";
 
         let args = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
@@ -503,6 +503,7 @@ where
             .bind(req.parts.task_id.to_string())
             .bind(&job_type)
             .bind(req.parts.context.max_attempts())
+            .bind(req.parts.context.priority())
             .execute(&self.pool)
             .await?;
         Ok(req.parts)
@@ -512,7 +513,7 @@ where
         &mut self,
         req: Request<Self::Compact, SqlContext>,
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
-        let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL)";
+        let query = "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, NOW() , NULL, NULL, NULL, NULL, $5)";
 
         let args = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
@@ -522,6 +523,7 @@ where
             .bind(req.parts.task_id.to_string())
             .bind(&job_type)
             .bind(req.parts.context.max_attempts())
+            .bind(req.parts.context.priority())
             .execute(&self.pool)
             .await?;
         Ok(req.parts)
@@ -533,7 +535,7 @@ where
         on: Timestamp,
     ) -> Result<Parts<Self::Context>, sqlx::Error> {
         let query =
-            "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, $5, NULL, NULL, NULL, NULL)";
+            "INSERT INTO apalis.jobs VALUES ($1, $2, $3, 'Pending', 0, $4, $5, NULL, NULL, NULL, NULL, $6)";
         let task_id = req.parts.task_id.to_string();
         let parts = req.parts;
         let on = DateTime::from_timestamp(on, 0);
@@ -546,6 +548,7 @@ where
             .bind(job_type)
             .bind(parts.context.max_attempts())
             .bind(on)
+            .bind(parts.context.priority())
             .execute(&self.pool)
             .await?;
         Ok(parts)
@@ -614,10 +617,11 @@ where
         let lock_by = ctx.lock_by().clone();
         let lock_at = *ctx.lock_at();
         let last_error = ctx.last_error().clone();
+        let priority = *ctx.priority();
 
         let mut tx = self.pool.acquire().await?;
         let query =
-                "UPDATE apalis.jobs SET status = $1, attempts = $2, done_at = $3, lock_by = $4, lock_at = $5, last_error = $6 WHERE id = $7";
+                "UPDATE apalis.jobs SET status = $1, attempts = $2, done_at = $3, lock_by = $4, lock_at = $5, last_error = $6, priority = $7 WHERE id = $8";
         sqlx::query(query)
             .bind(status.to_owned())
             .bind(attempts)
@@ -625,6 +629,7 @@ where
             .bind(lock_by.map(|w| w.name().to_string()))
             .bind(lock_at)
             .bind(last_error)
+            .bind(priority)
             .bind(job_id.to_string())
             .execute(&mut *tx)
             .await?;

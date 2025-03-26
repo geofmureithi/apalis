@@ -158,7 +158,7 @@ where
                 let job_type = self.config.namespace.clone();
                 let mut tx = pool.begin().await?;
                 let fetch_query = "SELECT id FROM jobs
-                WHERE (status='Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at <= NOW() AND job_type = ? ORDER BY run_at ASC LIMIT ? FOR UPDATE SKIP LOCKED";
+                WHERE (status='Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at <= NOW() AND job_type = ? ORDER BY priority DESC, run_at ASC LIMIT ? FOR UPDATE SKIP LOCKED";
                 let task_ids: Vec<MySqlRow> = sqlx::query(fetch_query)
                     .bind(job_type)
                     .bind(buffer_size)
@@ -177,7 +177,7 @@ where
                     query.execute(&mut *tx).await?;
                     tx.commit().await?;
 
-                    let fetch_query = format!("SELECT * FROM jobs WHERE ID IN ({})", id_params);
+                    let fetch_query = format!("SELECT * FROM jobs WHERE ID IN ({}) ORDER BY priority DESC, run_at ASC", id_params);
                     let mut query = sqlx::query_as(&fetch_query);
                     for i in task_ids {
                         query = query.bind(i);
@@ -244,7 +244,7 @@ where
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
         let (args, parts) = job.take_parts();
         let query =
-            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL)";
+            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL, ?)";
         let pool = self.pool.clone();
 
         let job = C::encode(args)
@@ -255,6 +255,7 @@ where
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
             .bind(parts.context.max_attempts())
+            .bind(parts.context.priority())
             .execute(&pool)
             .await?;
         Ok(parts)
@@ -266,7 +267,7 @@ where
     ) -> Result<Parts<SqlContext>, sqlx::Error> {
         let (args, parts) = job.take_parts();
         let query =
-            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL)";
+            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL, ?)";
         let pool = self.pool.clone();
 
         let job = C::encode(args)
@@ -277,6 +278,7 @@ where
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
             .bind(parts.context.max_attempts())
+            .bind(parts.context.priority())
             .execute(&pool)
             .await?;
         Ok(parts)
@@ -287,7 +289,8 @@ where
         req: Request<Self::Job, SqlContext>,
         on: i64,
     ) -> Result<Parts<Self::Context>, sqlx::Error> {
-        let query = "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, ?, NULL, NULL, NULL, NULL)";
+        let query =
+            "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, ?, NULL, NULL, NULL, NULL, ?)";
         let pool = self.pool.clone();
 
         let args = C::encode(&req.args)
@@ -300,6 +303,7 @@ where
             .bind(job_type)
             .bind(req.parts.context.max_attempts())
             .bind(on)
+            .bind(req.parts.context.priority())
             .execute(&pool)
             .await?;
         Ok(req.parts)
@@ -370,10 +374,11 @@ where
         let lock_by = ctx.lock_by().clone();
         let lock_at = *ctx.lock_at();
         let last_error = ctx.last_error().clone();
+        let priority = *ctx.priority();
         let job_id = job.parts.task_id;
         let mut tx = pool.acquire().await?;
         let query =
-                "UPDATE jobs SET status = ?, attempts = ?, done_at = ?, lock_by = ?, lock_at = ?, last_error = ? WHERE id = ?";
+                "UPDATE jobs SET status = ?, attempts = ?, done_at = ?, lock_by = ?, lock_at = ?, last_error = ?, priority = ? WHERE id = ?";
         sqlx::query(query)
             .bind(status.to_owned())
             .bind::<i64>(
@@ -386,6 +391,7 @@ where
             .bind(lock_by.map(|w| w.name().to_string()))
             .bind(lock_at)
             .bind(last_error)
+            .bind(priority)
             .bind(job_id.to_string())
             .execute(&mut *tx)
             .await?;
