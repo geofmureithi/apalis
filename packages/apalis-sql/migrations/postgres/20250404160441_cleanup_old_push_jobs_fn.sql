@@ -3,5 +3,5 @@ DROP FUNCTION IF EXISTS apalis.push_job(
     job json,
     status text,
     run_at timestamptz,
-    max_attempts integer,
+    max_attempts integer
 );
