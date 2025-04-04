@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **PostgresStorage**: remove old, conflicting apalis.push_job database function ([#543](https://github.com/geofmureithi/apalis/pull/543))
+
 ## [0.7.0](https://github.com/geofmureithi/apalis/releases/tag/v0.7.0)
 
 ### Added
