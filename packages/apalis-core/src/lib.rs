@@ -295,24 +295,7 @@ pub mod test_utils {
         /// Gets the current state of results
         pub async fn execute_next(&mut self) -> Option<(TaskId, Result<String, String>)> {
             self.should_next.store(true, Ordering::Release);
-            #[cfg(feature = "sleep")]
-            let fut = async {
-                crate::sleep(std::time::Duration::from_secs(2))
-                    .boxed()
-                    .await;
-            }
-            .boxed();
-            #[cfg(not(feature = "sleep"))]
-            let fut = async {
-                std::future::pending::<()>().await;
-            }
-            .boxed();
-
-            let res = futures::future::select(self.res_rx.next(), fut).await;
-            match res {
-                Either::Left(next) => next.0,
-                Either::Right(_) => None,
-            }
+            self.res_rx.next().await
         }
 
         /// Gets the current state of results
