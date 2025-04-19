@@ -125,6 +125,7 @@ pub mod interval {
 }
 
 #[cfg(feature = "test-utils")]
+#[allow(unused)]
 /// Test utilities that allows you to test backends
 pub mod test_utils {
     use crate::backend::Backend;
@@ -133,7 +134,7 @@ pub mod test_utils {
     use crate::task::task_id::TaskId;
     use crate::worker::Worker;
     use futures::channel::mpsc::{self, channel, Receiver, Sender, TryRecvError};
-    use futures::future::{BoxFuture, Either};
+    use futures::future::BoxFuture;
     use futures::stream::{Stream, StreamExt};
     use futures::{FutureExt, SinkExt};
     use std::fmt::Debug;
