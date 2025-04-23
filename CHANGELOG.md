@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **SqliteStorage**: Consistent state fetch via returning update query and remove transactions ([#549](https://github.com/geofmureithi/apalis/pull/549))
+
 ### Fixed
 - **PostgresStorage**: remove old, conflicting apalis.push_job database function ([#543](https://github.com/geofmureithi/apalis/pull/543))
 - **deps**: update rust crate sentry-core to `0.37.0` ([#542](https://github.com/geofmureithi/apalis/pull/542))
