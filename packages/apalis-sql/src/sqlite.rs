@@ -162,7 +162,7 @@ async fn fetch_next(
     config: &Config,
 ) -> Result<Option<SqlRequest<String>>, sqlx::Error> {
     let now: i64 = Utc::now().timestamp();
-    let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL; Select * from Jobs where id = ?1 AND lock_by = ?2 AND job_type = ?4";
+    let update_query = "UPDATE Jobs SET status = 'Running', lock_by = ?2, lock_at = ?3 WHERE id = ?1 AND job_type = ?4 AND status = 'Pending' AND lock_by IS NULL RETURNING *";
     let job: Option<SqlRequest<String>> = sqlx::query_as(update_query)
         .bind(id.to_string())
         .bind(worker_id.to_string())
@@ -170,6 +170,19 @@ async fn fetch_next(
         .bind(config.namespace.clone())
         .fetch_optional(pool)
         .await?;
+
+    if job.is_none() {
+        // Retry path.
+        let job: Option<SqlRequest<String>> =
+            sqlx::query_as("SELECT * FROM Jobs WHERE id = ?1 AND lock_by = ?2 AND job_type = ?3")
+                .bind(id.to_string())
+                .bind(worker_id.to_string())
+                .bind(config.namespace.clone())
+                .fetch_optional(pool)
+                .await?;
+
+        return Ok(job);
+    }
 
     Ok(job)
 }
@@ -196,8 +209,6 @@ where
                     continue;
                 }
                 let worker_id = worker.id();
-                let tx = pool.clone();
-                let mut tx = tx.acquire().await?;
                 let job_type = &config.namespace;
                 let fetch_query = "SELECT id FROM Jobs
                     WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts)) AND run_at < ?1 AND job_type = ?2 ORDER BY priority DESC LIMIT ?3";
@@ -206,8 +217,9 @@ where
                     .bind(now)
                     .bind(job_type)
                     .bind(i64::try_from(buffer_size).map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?)
-                    .fetch_all(&mut *tx)
+                    .fetch_all(&pool)
                     .await?;
+
                 for id in ids {
                     let res = fetch_next(&pool, worker_id, id.0, &config).await?;
                     yield match res {
@@ -328,7 +340,7 @@ where
     }
 
     async fn len(&mut self) -> Result<i64, Self::Error> {
-        let query = "Select Count(*) as count from Jobs WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts))";
+        let query = "Select COUNT(*) AS count FROM Jobs WHERE (status = 'Pending' OR (status = 'Failed' AND attempts < max_attempts))";
         let record = sqlx::query(query).fetch_one(&self.pool).await?;
         record.try_get("count")
     }
@@ -345,7 +357,6 @@ where
             .try_into()
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
-        let mut tx = self.pool.acquire().await?;
         let query =
                 "UPDATE Jobs SET status = 'Failed', done_at = NULL, lock_by = NULL, lock_at = NULL, run_at = ?2 WHERE id = ?1";
         let now: i64 = Utc::now().timestamp();
@@ -354,7 +365,7 @@ where
         sqlx::query(query)
             .bind(task_id.to_string())
             .bind(wait_until)
-            .execute(&mut *tx)
+            .execute(self.pool())
             .await?;
         Ok(())
     }
@@ -369,7 +380,6 @@ where
         let last_error = ctx.last_error().clone();
         let priority = *ctx.priority();
         let job_id = job.parts.task_id;
-        let mut tx = self.pool.acquire().await?;
         let query =
                 "UPDATE Jobs SET status = ?1, attempts = ?2, done_at = ?3, lock_by = ?4, lock_at = ?5, last_error = ?6, priority = ?7 WHERE id = ?8";
         sqlx::query(query)
@@ -386,7 +396,7 @@ where
             .bind(last_error)
             .bind(priority)
             .bind(job_id.to_string())
-            .execute(&mut *tx)
+            .execute(self.pool())
             .await?;
         Ok(())
     }
@@ -410,28 +420,25 @@ impl<T, C> SqliteStorage<T, C> {
         worker_id: &WorkerId,
         job_id: &TaskId,
     ) -> Result<(), sqlx::Error> {
-        let mut tx = self.pool.acquire().await?;
         let query =
                 "UPDATE Jobs SET status = 'Pending', done_at = NULL, lock_by = NULL WHERE id = ?1 AND lock_by = ?2";
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut *tx)
+            .execute(self.pool())
             .await?;
         Ok(())
     }
 
     /// Kill a job
     pub async fn kill(&mut self, worker_id: &WorkerId, job_id: &TaskId) -> Result<(), sqlx::Error> {
-        let mut tx = self.pool.begin().await?;
         let query =
                 "UPDATE Jobs SET status = 'Killed', done_at = strftime('%s','now') WHERE id = ?1 AND lock_by = ?2";
         sqlx::query(query)
             .bind(job_id.to_string())
             .bind(worker_id.to_string())
-            .execute(&mut *tx)
+            .execute(self.pool())
             .await?;
-        tx.commit().await?;
         Ok(())
     }
 
@@ -442,7 +449,6 @@ impl<T, C> SqliteStorage<T, C> {
         dead_since: DateTime<Utc>,
     ) -> Result<(), sqlx::Error> {
         let job_type = self.config.namespace.clone();
-        let mut tx = self.pool.acquire().await?;
         let query = r#"Update Jobs
                             SET status = "Pending", done_at = NULL, lock_by = NULL, lock_at = NULL, attempts = attempts + 1, last_error ="Job was abandoned"
                             WHERE id in
@@ -454,7 +460,7 @@ impl<T, C> SqliteStorage<T, C> {
             .bind(dead_since.timestamp())
             .bind(job_type)
             .bind(count)
-            .execute(&mut *tx)
+            .execute(self.pool())
             .await?;
         Ok(())
     }
