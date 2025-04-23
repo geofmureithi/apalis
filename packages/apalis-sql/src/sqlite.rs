@@ -309,8 +309,8 @@ where
             .bind(id.to_string())
             .bind(job_type)
             .bind(req.parts.context.max_attempts())
-            .bind(req.parts.context.priority())
             .bind(on)
+            .bind(req.parts.context.priority())
             .execute(&self.pool)
             .await?;
         Ok(req.parts)
