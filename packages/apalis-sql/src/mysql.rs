@@ -296,6 +296,8 @@ where
         let args = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
+        let on = DateTime::from_timestamp(on, 0);
+
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(args)

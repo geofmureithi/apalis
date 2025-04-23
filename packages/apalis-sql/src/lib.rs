@@ -358,5 +358,64 @@ macro_rules! sql_storage_tests {
                 assert_eq!(ctx.priority(), prio);
             }
         }
+
+        #[tokio::test]
+        async fn test_schedule_request() {
+            use chrono::SubsecRound;
+
+            let mut storage = $setup().await;
+
+            let email = Email {
+                subject: "Scheduled Email".to_string(),
+                to: "scheduled@example.com".to_string(),
+                text: "This is a scheduled email.".to_string(),
+            };
+
+            // Schedule 1 minute in the future
+            let schedule_time = Utc::now() + Duration::from_secs(60);
+
+            let parts = storage
+                .schedule(email, schedule_time.timestamp())
+                .await
+                .expect("Failed to schedule request");
+
+            let job = get_job(&mut storage, &parts.task_id).await;
+            let ctx = &job.parts.context;
+
+            assert_eq!(*ctx.status(), State::Pending);
+            assert!(ctx.lock_by().is_none());
+            assert!(ctx.lock_at().is_none());
+            let expected_schedule_time = schedule_time.clone().trunc_subsecs(0);
+            assert_eq!(ctx.run_at(), &expected_schedule_time);
+        }
+
+        #[tokio::test]
+        async fn integration_test_shedule_and_run_job() {
+            let current = Utc::now();
+            let dur = Duration::from_secs(15);
+            let schedule_time = current + dur;
+            let mut storage = setup_test_wrapper().await;
+            storage
+                .schedule(
+                    email_service::example_good_email(),
+                    schedule_time.timestamp(),
+                )
+                .await
+                .unwrap();
+
+            let (job_id, res) = storage.execute_next().await.unwrap();
+            apalis_core::sleep(Duration::from_secs(1)).await;
+
+            assert_eq!(res, Ok("()".to_owned()));
+            let job = storage.fetch_by_id(&job_id).await.unwrap().unwrap();
+            let ctx = job.parts.context;
+            assert_eq!(*ctx.status(), State::Done);
+            assert!(
+                ctx.lock_at().unwrap() >= schedule_time.timestamp(),
+                "{} should be greater than {}",
+                ctx.lock_at().unwrap(),
+                schedule_time.timestamp()
+            );
+        }
     };
 }

@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file.
 ### Fixed
 - **PostgresStorage**: remove old, conflicting apalis.push_job database function ([#543](https://github.com/geofmureithi/apalis/pull/543))
 - **deps**: update rust crate sentry-core to `0.37.0` ([#542](https://github.com/geofmureithi/apalis/pull/542))
+- **apalis-sql**: Fix schedule job on sqlite and mysql + tests ([#553](https://github.com/geofmureithi/apalis/issues/553))
 
 ### Tests
 - **execute_next**: fix(tests): avoid execute_next timeout ([#548](https://github.com/geofmureithi/apalis/pull/548))

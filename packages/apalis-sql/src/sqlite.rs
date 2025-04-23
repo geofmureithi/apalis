@@ -643,7 +643,6 @@ mod tests {
 
     use super::*;
     use apalis_core::request::State;
-    use chrono::SubsecRound;
     use chrono::Utc;
     use email_service::example_good_email;
     use email_service::Email;
@@ -883,33 +882,5 @@ mod tests {
         assert!(ctx.lock_at().is_some());
         assert_eq!(*ctx.last_error(), Some("{\"Ok\":\"success\"}".to_owned()));
         assert_eq!(job.parts.attempt.current(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_schedule_request() {
-        let mut storage = setup().await;
-
-        let email = Email {
-            subject: "Scheduled Email".to_string(),
-            to: "scheduled@example.com".to_string(),
-            text: "This is a scheduled email.".to_string(),
-        };
-
-        // Schedule 1 minute in the future
-        let schedule_time = Utc::now() + Duration::from_secs(60);
-
-        let parts = storage
-            .schedule(email, schedule_time.timestamp())
-            .await
-            .expect("Failed to schedule request");
-
-        let job = get_job(&mut storage, &parts.task_id).await;
-        let ctx = &job.parts.context;
-
-        assert_eq!(*ctx.status(), State::Pending);
-        assert!(ctx.lock_by().is_none());
-        assert!(ctx.lock_at().is_none());
-        let expected_schedule_time = schedule_time.clone().trunc_subsecs(0);
-        assert_eq!(ctx.run_at(), &expected_schedule_time);
     }
 }
