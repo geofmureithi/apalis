@@ -788,7 +788,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
 
     async fn list_workers(&self) -> Result<Vec<Worker<WorkerState>>, Self::Error> {
         let fetch_query =
-            "SELECT id, layers, last_seen FROM apalis.workers WHERE worker_type = $1 ORDER BY last_seen DESC LIMIT 20 OFFSET $2";
+            "SELECT id, layers, cast(extract(epoch from last_seen) as bigint) FROM apalis.workers WHERE worker_type = $1 ORDER BY last_seen DESC LIMIT 20 OFFSET $2";
         let res: Vec<(String, String, i64)> = sqlx::query_as(fetch_query)
             .bind(self.config().namespace())
             .bind(0)
@@ -1104,7 +1104,7 @@ mod tests {
         let storage: PostgresStorage<Email> = setup().await;
 
         assert!(storage.stats().await.is_ok());
-        assert!(storage.list_jobs(&State::Pending, 0).await.is_ok());
+        assert!(storage.list_jobs(&State::Pending, 1).await.is_ok());
         assert!(storage.list_workers().await.is_ok());
     }
 }
