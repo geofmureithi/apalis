@@ -73,10 +73,7 @@ fn setup_metrics_recorder() -> PrometheusHandle {
     ];
 
     PrometheusBuilder::new()
-        .set_buckets_for_metric(
-            Matcher::Full("job_requests_duration_seconds".to_string()),
-            EXPONENTIAL_SECONDS,
-        )
+        .set_buckets_for_metric(Matcher::Prefix("request".to_string()), EXPONENTIAL_SECONDS)
         .expect("Could not setup Prometheus")
         .install_recorder()
         .expect("Could not install Prometheus recorder")
