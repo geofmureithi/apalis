@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## Fixed
+
+- **PostgresStorage**: fix type error when updating jobs ([#543](https://github.com/geofmureithi/apalis/issues/539))
+
 ## [0.7.1](https://github.com/geofmureithi/apalis/releases/tag/v0.7.1)
 
 ### Changed
