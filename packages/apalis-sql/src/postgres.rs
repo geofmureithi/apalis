@@ -893,8 +893,12 @@ mod tests {
         register_worker_at(storage, Utc::now().timestamp()).await
     }
 
-    async fn push_email(storage: &mut PostgresStorage<Email>, email: Email) {
-        storage.push(email).await.expect("failed to push a job");
+    async fn push_email(storage: &mut PostgresStorage<Email>, email: Email) -> TaskId {
+        storage
+            .push(email)
+            .await
+            .expect("failed to push a job")
+            .task_id
     }
 
     async fn get_job(
@@ -948,6 +952,20 @@ mod tests {
         let ctx = job.parts.context;
         assert_eq!(*ctx.status(), State::Killed);
         assert!(ctx.done_at().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_update_job() {
+        let mut storage = setup().await;
+
+        let task_id = push_email(&mut storage, example_email()).await;
+        let mut job = get_job(&mut storage, &task_id).await;
+        job.parts.context.set_status(State::Killed);
+        storage.update(job).await.expect("updating to succeed");
+
+        let job = get_job(&mut storage, &task_id).await;
+        let ctx = job.parts.context;
+        assert_eq!(*ctx.status(), State::Killed);
     }
 
     #[tokio::test]
