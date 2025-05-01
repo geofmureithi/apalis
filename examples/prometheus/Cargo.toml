@@ -14,6 +14,5 @@ serde = { version = "1.0", features = ["derive"] }
 apalis = { path = "../../", features = ["prometheus"] }
 apalis-redis = { path = "../../packages/apalis-redis" }
 futures = "0.3"
-metrics = "0.21"
-metrics-exporter-prometheus = "0.12"
+metrics-exporter-prometheus = "0.17"
 email-service = { path = "../email-service" }

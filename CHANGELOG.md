@@ -3,6 +3,8 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
+### Fixed
+- **examples** Prometheus example ([#562](https://github.com/geofmureithi/apalis/pull/562))
 
 ## [0.7.1](https://github.com/geofmureithi/apalis/releases/tag/v0.7.1)
 
