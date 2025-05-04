@@ -33,7 +33,8 @@ default = []
 docsrs = ["document-features"]
 sleep = ["futures-timer"]
 json = ["serde_json"]
-test-utils = []
+test-utils = ["retry"]
+retry = ["tower/retry"]
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

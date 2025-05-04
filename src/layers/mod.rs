@@ -5,7 +5,9 @@ pub mod prometheus;
 /// Retry job middleware
 #[cfg(feature = "retry")]
 #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
-pub mod retry;
+pub mod retry {
+    pub use apalis_core::retry::*;
+}
 /// Sentry integration for apalis.
 #[cfg(feature = "sentry")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sentry")))]

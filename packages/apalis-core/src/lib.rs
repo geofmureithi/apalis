@@ -59,6 +59,11 @@ pub mod memory;
 /// Task management utilities
 pub mod task;
 
+/// Handles in memory retries
+#[cfg(feature = "retry")]
+#[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
+pub mod retry;
+
 /// Codec for handling data
 pub mod codec;
 
@@ -528,6 +533,86 @@ pub mod test_utils {
                     5,
                     "should still have 5 attempts"
                 );
+
+                t.vacuum().await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "After vacuuming, there should be nothing");
+            }
+
+            #[tokio::test]
+            async fn integration_test_storage_retry_layer_persists() {
+                use apalis_core::layers::ServiceBuilder;
+                use apalis_core::retry::RetryPolicy;
+                use apalis_core::error::ErrorHandlingLayer;
+                use std::io::{Error, ErrorKind};
+                let mut backend = $setup().await;
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Err::<String, io::Error>(Error::new(ErrorKind::Other, "oh no!"))
+                });
+                let service = ServiceBuilder::new()
+                    .retry(RetryPolicy::retries(5))
+                    .layer(ErrorHandlingLayer::new())
+                    .service(service);
+                let (mut t, poller) = TestWrapper::new_with_service(backend.clone(), service);
+                tokio::spawn(poller);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "should have no jobs"); // No jobs
+                let parts = t.push(1).await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1, "should have 1 job"); // A job exists
+                let res = t.execute_next().await.unwrap();
+                assert_eq!(res.1, Err("AbortError: RetryPolicyError: Out of retries after 6 attempts: FailedError: oh no!".to_owned()));
+
+                apalis_core::sleep(Duration::from_secs(1)).await;
+
+                let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
+
+                assert_eq!(task.parts.attempt.current(), 6, "should have 6 attempt(first attempt + 5 retries)");
+
+                t.vacuum().await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "After vacuuming, there should be nothing");
+            }
+
+            #[tokio::test]
+            async fn integration_test_storage_retry_layer_with_backoff_persists() {
+                use apalis_core::layers::ServiceBuilder;
+                use apalis_core::retry::HasherRng;
+                use apalis_core::retry::RetryPolicy;
+                use apalis_core::error::ErrorHandlingLayer;
+                use apalis_core::retry::backoff::ExponentialBackoffMaker;
+                use apalis_core::retry::backoff::MakeBackoff;
+                use std::io::{Error, ErrorKind};
+                let mut backend = $setup().await;
+                let service = apalis_test_service_fn(|request: Request<u32, _>| async move {
+                    Err::<String, io::Error>(Error::new(ErrorKind::Other, "oh no!"))
+                });
+                let backoff = ExponentialBackoffMaker::new(
+                    Duration::from_millis(1000),
+                    Duration::from_millis(5000),
+                    1.25,
+                    HasherRng::default(),
+                ).unwrap()
+                .make_backoff();
+                let service = ServiceBuilder::new()
+                    .retry(RetryPolicy::retries(5).with_backoff(backoff))
+                    .layer(ErrorHandlingLayer::new())
+                    .service(service);
+                let (mut t, poller) = TestWrapper::new_with_service(backend.clone(), service);
+                tokio::spawn(poller);
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 0, "should have no jobs"); // No jobs
+                let parts = t.push(1).await.unwrap();
+                let res = t.len().await.unwrap();
+                assert_eq!(res, 1, "should have 1 job"); // A job exists
+                let res = t.execute_next().await.unwrap();
+                assert_eq!(res.1, Err("AbortError: RetryPolicyError: Out of retries after 6 attempts: FailedError: oh no!".to_owned()));
+
+                apalis_core::sleep(Duration::from_secs(1)).await;
+
+                let task = backend.fetch_by_id(&parts.task_id).await.unwrap().unwrap();
+
+                assert_eq!(task.parts.attempt.current(), 6, "should have 6 attempt(first attempt + 5 retries)");
 
                 t.vacuum().await.unwrap();
                 let res = t.len().await.unwrap();
