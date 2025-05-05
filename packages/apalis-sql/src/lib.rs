@@ -390,6 +390,15 @@ macro_rules! sql_storage_tests {
         }
 
         #[tokio::test]
+        async fn test_backend_expose_succeeds() {
+            let storage = setup_test_wrapper().await;
+
+            assert!(storage.stats().await.is_ok());
+            assert!(storage.list_jobs(&State::Pending, 1).await.is_ok());
+            assert!(storage.list_workers().await.is_ok());
+        }
+
+        #[tokio::test]
         async fn integration_test_shedule_and_run_job() {
             let current = Utc::now();
             let dur = Duration::from_secs(15);

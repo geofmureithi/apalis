@@ -1098,13 +1098,4 @@ mod tests {
             .expect("failed to fetch next jobs");
         assert!(!jobs.is_empty(), "Worker should fetch the job");
     }
-
-    #[tokio::test]
-    async fn test_backend_expose_succeeds() {
-        let storage: PostgresStorage<Email> = setup().await;
-
-        assert!(storage.stats().await.is_ok());
-        assert!(storage.list_jobs(&State::Pending, 1).await.is_ok());
-        assert!(storage.list_workers().await.is_ok());
-    }
 }
