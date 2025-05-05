@@ -590,7 +590,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
                             COUNT(1) FILTER (WHERE status = 'Killed') AS killed
                         FROM Jobs WHERE job_type = ?";
 
-        let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
+        let res: (i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
             .bind(self.get_config().namespace())
             .fetch_one(self.pool())
             .await?;
