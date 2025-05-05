@@ -30,7 +30,7 @@ sentry = ["sentry-core", "ulid?/uuid", "uuid"]
 ## Support Prometheus metrics
 prometheus = ["metrics", "metrics-exporter-prometheus"]
 ## Support direct retrying jobs
-retry = ["tower/retry"]
+retry = ["apalis-core/retry"]
 ## Support timeouts on jobs
 timeout = ["tower/timeout"]
 ## 💪 Limit the amount of jobs
