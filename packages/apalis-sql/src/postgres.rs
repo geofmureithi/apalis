@@ -621,7 +621,7 @@ where
 
         let mut tx = self.pool.acquire().await?;
         let query =
-                "UPDATE apalis.jobs SET status = $1, attempts = $2, done_at = $3, lock_by = $4, lock_at = $5, last_error = $6, priority = $7 WHERE id = $8";
+                "UPDATE apalis.jobs SET status = $1, attempts = $2, done_at = to_timestamp($3), lock_by = $4, lock_at = to_timestamp($5), last_error = $6, priority = $7 WHERE id = $8";
         sqlx::query(query)
             .bind(status.to_owned())
             .bind(attempts)
@@ -788,7 +788,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
 
     async fn list_workers(&self) -> Result<Vec<Worker<WorkerState>>, Self::Error> {
         let fetch_query =
-            "SELECT id, layers, last_seen FROM apalis.workers WHERE worker_type = $1 ORDER BY last_seen DESC LIMIT 20 OFFSET $2";
+            "SELECT id, layers, cast(extract(epoch from last_seen) as bigint) FROM apalis.workers WHERE worker_type = $1 ORDER BY last_seen DESC LIMIT 20 OFFSET $2";
         let res: Vec<(String, String, i64)> = sqlx::query_as(fetch_query)
             .bind(self.config().namespace())
             .bind(0)
@@ -893,8 +893,12 @@ mod tests {
         register_worker_at(storage, Utc::now().timestamp()).await
     }
 
-    async fn push_email(storage: &mut PostgresStorage<Email>, email: Email) {
-        storage.push(email).await.expect("failed to push a job");
+    async fn push_email(storage: &mut PostgresStorage<Email>, email: Email) -> TaskId {
+        storage
+            .push(email)
+            .await
+            .expect("failed to push a job")
+            .task_id
     }
 
     async fn get_job(
