@@ -955,20 +955,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_job() {
-        let mut storage = setup().await;
-
-        let task_id = push_email(&mut storage, example_email()).await;
-        let mut job = get_job(&mut storage, &task_id).await;
-        job.parts.context.set_status(State::Killed);
-        storage.update(job).await.expect("updating to succeed");
-
-        let job = get_job(&mut storage, &task_id).await;
-        let ctx = job.parts.context;
-        assert_eq!(*ctx.status(), State::Killed);
-    }
-
-    #[tokio::test]
     async fn test_heartbeat_renqueueorphaned_pulse_last_seen_6min() {
         let mut storage = setup().await;
 

@@ -250,6 +250,29 @@ macro_rules! sql_storage_tests {
         }
 
         #[tokio::test]
+        async fn integration_test_update_job() {
+            let mut storage = setup_test_wrapper().await;
+
+            let task_id = storage
+                .push(Email {
+                    subject: "Test Subject".to_string(),
+                    to: "example@sql".to_string(),
+                    text: "Some Text".to_string(),
+                })
+                .await
+                .expect("failed to push a job")
+                .task_id;
+
+            let mut job = get_job(&mut storage, &task_id).await;
+            job.parts.context.set_status(State::Killed);
+            storage.update(job).await.expect("updating to succeed");
+
+            let job = get_job(&mut storage, &task_id).await;
+            let ctx = job.parts.context;
+            assert_eq!(*ctx.status(), State::Killed);
+        }
+
+        #[tokio::test]
         async fn integration_test_acknowledge_good_job() {
             let mut storage = setup_test_wrapper().await;
             storage
