@@ -1,3 +1,10 @@
+--!df flags=allow-undeclared-keys
+-- FIXME: The previous line enables undeclared keys for dragonflydb. This is
+-- required because keys get programatically generated in the for loop counting
+-- running jobs. However, accessing undeclared keys is considered a bad practice
+-- by redis:
+-- https://redis.io/docs/latest/commands/eval/#:~:text=Important%3A%20to,in%20the%20database
+
 -- KEYS[1]: the pending jobs set ( aka active job list )
 -- KEYS[2]: the consumer set
 -- KEYS[3]: the dead jobs set
