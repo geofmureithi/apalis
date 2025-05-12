@@ -220,20 +220,24 @@ where
                     .fetch_all(&pool)
                     .await?;
 
-                for id in ids {
-                    let res = fetch_next(&pool, worker_id, id.0, &config).await?;
-                    yield match res {
-                        None => None::<Request<T, SqlContext>>,
-                        Some(job) => {
-                            let (req, parts) = job.req.take_parts();
-                            let args = C::decode(req)
-                                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-                            let mut req = Request::new_with_parts(args, parts);
-                            req.parts.namespace = Some(namespace.clone());
-                            Some(req)
-                        }
+                if ids.is_empty() {
+                    yield None::<Request<T, SqlContext>>;
+                } else {
+                    for id in ids {
+                        let res = fetch_next(&pool, worker_id, id.0, &config).await?;
+                        yield match res {
+                            None => None::<Request<T, SqlContext>>,
+                            Some(job) => {
+                                let (req, parts) = job.req.take_parts();
+                                let args = C::decode(req)
+                                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+                                let mut req = Request::new_with_parts(args, parts);
+                                req.parts.namespace = Some(namespace.clone());
+                                Some(req)
+                            }
+                        };
                     }
-                };
+                }
             }
         }
     }
