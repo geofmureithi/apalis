@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use apalis::layers::retry::RetryPolicy;
 
@@ -7,6 +9,7 @@ use apalis_sql::{
     Config,
 };
 use email_service::{send_email, Email};
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 async fn produce_jobs(storage: &mut PostgresStorage<Email>) -> Result<()> {
@@ -28,31 +31,47 @@ async fn produce_jobs(storage: &mut PostgresStorage<Email>) -> Result<()> {
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
     tracing_subscriber::fmt::init();
-    let database_url = std::env::var("DATABASE_URL").expect("Must specify path to db");
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or("postgres://postgres:postgres@localhost/postgres".to_owned());
 
     let pool = PgPool::connect(&database_url).await?;
     PostgresStorage::setup(&pool)
         .await
         .expect("unable to run migrations for postgres");
 
-    let mut pg = PostgresStorage::new_with_config(pool.clone(), Config::new("apalis::Email"));
-    produce_jobs(&mut pg).await?;
+    let backend = PostgresStorage::new(pool);
 
-    // let mut listener = PgListen::new(pool).await?;
+    let mut pg = Shared::new(backend);
 
-    // listener.subscribe_with(&mut pg);
+    let config = Config::new("apalis::Email")
+        .set_poll_interval(Duration::from_secs(100))
+        .set_buffer_size(1000);
 
-    // tokio::spawn(async move {
-    //     listener.listen().await.unwrap();
-    // });
+    let mut email_pg = pg.make_shared_with_config(config).unwrap();
+    produce_jobs(&mut email_pg).await?;
+
+    #[derive(Debug, Serialize, Deserialize, Clone)]
+    struct Sms {
+        to: String,
+        message: String,
+    }
+
+    let sms_pg = pg.make_shared().unwrap();
 
     Monitor::new()
         .register({
             WorkerBuilder::new("tasty-orange")
-                .retry(RetryPolicy::retries(5))
                 .enable_tracing()
-                .backend(pg)
+                .backend(email_pg)
                 .build_fn(send_email)
+        })
+        .register({
+            WorkerBuilder::new("tasty-sms")
+                .enable_tracing()
+                .backend(sms_pg)
+                .build_fn(|sms: Sms| async move {
+                    dbg!(sms);
+                })
         })
         .on_event(|e| debug!("{e}"))
         .run_with_signal(async {
