@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file.
 ### Fixed
 - **RedisStorage** the `stats` script is now compatible with dragonfly
 - **examples** Prometheus example ([#562](https://github.com/geofmureithi/apalis/pull/562))
+- **SqliteStorage** Event::Idle never trigger ([#571](https://github.com/geofmureithi/apalis/pull/571))
 
 ## Fixed
 
