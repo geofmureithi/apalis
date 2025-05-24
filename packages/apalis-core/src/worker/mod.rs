@@ -729,7 +729,6 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
-        use tower::ServiceExt;
         let in_memory = MemoryStorage::new();
         let mut handle = in_memory.clone();
 
@@ -749,26 +748,25 @@ mod tests {
             }
         }
 
-        async fn task(job: u32, ctx: WorkerContext) -> Result<(), Error> {
-            // tokio::time::sleep(Duration::from_secs(1)).await;
-            // count.fetch_add(1, Ordering::Relaxed);
-            // if job == ITEMS - 1 {
-            //     worker.stop();
-            // }
+        async fn task(job: u32, count: Data<Count>, ctx: WorkerContext) -> Result<(), BoxDynError> {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            count.fetch_add(1, Ordering::Relaxed);
+            if job == ITEMS - 1 {
+                ctx.stop();
+                return Err("Worker stopped!")?;
+            }
             Ok(())
         }
-        let svc = service_fn(task);
-        let res = svc.oneshot(5).await;
-        // let worker = WorkerBuilder::new("rango-tango")
-        //     .backend(in_memory)
-        //     .data(Count::default())
-        //     .record_attempts()
-        //     .long_running()
-        //     .on_event(|ctx, ev| {
-        //         println!("CTX {:?}, On Event = {:?}", ctx, ev);
-        //     })
-        //     .build();
-        // worker.run().await.unwrap();
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
+            .data(Count::default())
+            .record_attempts()
+            .long_running()
+            .on_event(|ctx, ev| {
+                println!("CTX {:?}, On Event = {:?}", ctx, ev);
+            })
+            .build_fn(task);
+        worker.run().await.unwrap();
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 use std::{any::Any, fmt::Debug, sync::Arc};
 
 use crate::{
-    error::Error,
+    error::{BoxDynError, Error},
     request::Parts,
     task::{attempt::Attempt, task_id::TaskId},
 };
@@ -36,10 +36,10 @@ impl<Res, Ctx> Response<Res, Ctx> {
     ///
     /// # Returns
     /// A new `Response` instance.
-    pub fn new(result: Result<Res, Error>, parts: &Parts<Ctx>) -> Self {
+    pub fn new(result: Result<Res, Error>, parts: Parts<Ctx>) -> Self {
         Response {
             result,
-            parts: parts.clone(),
+            parts,
             _priv: (),
         }
     }
@@ -53,7 +53,7 @@ impl<Res, Ctx> Response<Res, Ctx> {
     ///
     /// # Returns
     /// A `Response` instance containing the success value.
-    pub fn success(res: Res, parts: &Parts<Ctx>) -> Self {
+    pub fn success(res: Res, parts: Parts<Ctx>) -> Self {
         Self::new(Ok(res), parts)
     }
 
@@ -66,7 +66,7 @@ impl<Res, Ctx> Response<Res, Ctx> {
     ///
     /// # Returns
     /// A `Response` instance containing the error.
-    pub fn failure(error: Error, parts: &Parts<Ctx>) -> Self {
+    pub fn failure(error: Error, parts: Parts<Ctx>) -> Self {
         Self::new(Err(error), parts)
     }
 
@@ -75,7 +75,7 @@ impl<Res, Ctx> Response<Res, Ctx> {
     /// # Returns
     /// `true` if the `Response` is successful, `false` otherwise.
     pub fn is_success(&self) -> bool {
-        self.inner.is_ok()
+        self.result.is_ok()
     }
 
     /// Checks if the `Response` contains a failure (`Err`).
@@ -83,7 +83,7 @@ impl<Res, Ctx> Response<Res, Ctx> {
     /// # Returns
     /// `true` if the `Response` is a failure, `false` otherwise.
     pub fn is_failure(&self) -> bool {
-        self.inner.is_err()
+        self.result.is_err()
     }
 
     // /// Maps the success value (`Res`) of the `Response` to another type using the provided function.
@@ -111,39 +111,38 @@ impl<Res, Ctx> Response<Res, Ctx> {
 }
 
 /// Helper for Job Responses
-pub trait IntoResponse<Ctx> {
+pub trait IntoResponse {
+    /// The final result of the job
+    type Result;
+
     /// converts self into a Result
-    fn into_response(self, parts: &Parts<Ctx>) -> Response<Self, Ctx>;
+    fn into_response(self) -> Result<Self::Result, Error>;
 }
 
-impl<Ctx> IntoResponse<Ctx> for bool {
-    fn into_response(self, parts: &Parts<Ctx>) -> Response<Self, Ctx> {
-        let result = match self {
+impl IntoResponse for bool {
+    type Result = bool;
+    fn into_response(self) -> Result<bool, Error> {
+        match self {
             true => Ok(true),
             false => Err(Error::Failed(Arc::new(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Job returned false",
             ))))),
-        };
-        Response::new(result, parts)
+        }
     }
 }
 
-impl<T: Any, E: std::error::Error + Sync + Send + 'static + Any> IntoResponse
-    for std::result::Result<T, E>
-{
-    type Result = Result<T, Error>;
+impl<T, E: Into<BoxDynError> + Send + 'static> IntoResponse for std::result::Result<T, E> {
+    type Result = T;
     fn into_response(self) -> Result<T, Error> {
         match self {
             Ok(value) => Ok(value),
-            Err(e) => {
-                // Try to downcast the error to see if it is already of type `Error`
-                if let Some(custom_error) =
-                    (&e as &(dyn std::error::Error + 'static)).downcast_ref::<Error>()
-                {
+            Err(err) => {
+                let e: BoxDynError = err.into();
+                if let Some(custom_error) = e.downcast_ref::<Error>() {
                     return Err(custom_error.clone());
                 }
-                Err(Error::Failed(Arc::new(Box::new(e))))
+                Err(Error::Failed(Arc::new(e)))
             }
         }
     }
@@ -152,7 +151,7 @@ impl<T: Any, E: std::error::Error + Sync + Send + 'static + Any> IntoResponse
 macro_rules! SIMPLE_JOB_RESULT {
     ($type:ty) => {
         impl IntoResponse for $type {
-            type Result = std::result::Result<$type, Error>;
+            type Result = $type;
             fn into_response(self) -> std::result::Result<$type, Error> {
                 Ok(self)
             }

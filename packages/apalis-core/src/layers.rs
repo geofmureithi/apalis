@@ -170,7 +170,7 @@ pub trait Ack<Task, Res, Codec> {
     fn ack(
         &mut self,
         ctx: &Self::Context,
-        response: &Response<Res>,
+        response: &Response<Res, Self::Context>,
     ) -> impl Future<Output = Result<(), Self::AckError>> + Send;
 }
 
@@ -180,7 +180,7 @@ impl<
         Ctx: Clone + Send + Sync,
         Compact,
         Cdc: Encoder<Res, Compact = Compact>,
-    > Ack<T, Res, Cdc> for Sender<(Ctx, Response<Compact>)>
+    > Ack<T, Res, Cdc> for Sender<(Ctx, Response<Res, Compact>)>
 where
     Cdc::Error: Debug,
     Compact: Send,
@@ -190,11 +190,11 @@ where
     async fn ack(
         &mut self,
         ctx: &Self::Context,
-        result: &Response<Res>,
+        result: &Response<Res, Ctx>,
     ) -> Result<(), Self::AckError> {
         let ctx = ctx.clone();
-        let res = result.map(|res| Cdc::encode(res).unwrap());
-        self.send((ctx, res)).await.unwrap();
+        // let res = result.map(|res| Cdc::encode(res).unwrap());
+        // self.send((ctx, res)).await.unwrap();
         Ok(())
     }
 }
@@ -297,17 +297,18 @@ where
                 }
                 Error::Failed(Arc::new(e))
             });
-            let response = Response {
-                attempt,
-                inner: res,
-                task_id,
-                _priv: (),
-            };
-            if let Err(_e) = ack.ack(&ctx, &response).await {
-                // TODO: Implement tracing in apalis core
-                // tracing::error!("Acknowledgement Failed: {}", e);
-            }
-            response.inner
+            // let response = Response {
+            //     attempt,
+            //     inner: res,
+            //     task_id,
+            //     _priv: (),
+            // };
+            // if let Err(_e) = ack.ack(&ctx, &response).await {
+            //     // TODO: Implement tracing in apalis core
+            //     // tracing::error!("Acknowledgement Failed: {}", e);
+            // }
+            // response.inner
+            todo!()
         };
         fut_with_ack.boxed()
     }

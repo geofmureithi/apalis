@@ -591,7 +591,7 @@ mod tests {
             }
         }
 
-        async fn task1(job: u32) -> Result<GoTo, io::Error> {
+        async fn task1(job: u32) -> Result<GoTo, BoxDynError> {
             Ok(GoTo::Done(()))
         }
 
@@ -599,7 +599,7 @@ mod tests {
             job: u32,
             count: Data<Count>,
             worker: WorkerContext,
-        ) -> Result<GoTo<usize>, io::Error> {
+        ) -> Result<GoTo<usize>, BoxDynError> {
             let current = count.fetch_add(1, Ordering::Relaxed);
             if (current as u32) == ITEMS - 1 {
                 worker.stop();

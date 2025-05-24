@@ -57,7 +57,7 @@ pub mod task;
 pub mod codec;
 
 /// Allows stepped tasks
-// pub mod step;
+pub mod step;
 
 /// Sleep utilities
 #[cfg(feature = "sleep")]

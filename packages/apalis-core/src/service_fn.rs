@@ -55,17 +55,16 @@ impl<T: Clone + Send + Sync + 'static, Req, Ctx> FromRequest<Request<Req, Ctx>> 
 macro_rules! impl_service_fn {
     ($($K:ident),+) => {
         #[allow(unused_parens)]
-        impl<T, F, Req, E, R, Ctx, $($K),+> Service<Request<Req, Ctx>> for ServiceFn<T, Req, Ctx, ($($K),+)>
+        impl<T, F, Req, R, Ctx, $($K),+> Service<Request<Req, Ctx>> for ServiceFn<T, Req, Ctx, ($($K),+)>
         where
             T: FnMut(Req, $($K),+) -> F,
             F: Future,
-            F::Output: IntoResponse<Result = std::result::Result<R, E>>,
+            F::Output: IntoResponse<Result = R>,
             $($K: FromRequest<Request<Req, Ctx>>),+,
-            E: From<Error>
         {
             type Response = R;
-            type Error = E;
-            type Future = futures::future::Either<futures::future::Ready<Result<R, E>>, FnFuture<F, F::Output, R, E>>;
+            type Error = Error;
+            type Future = futures::future::Either<futures::future::Ready<Result<R, Error>>, FnFuture<F, F::Output, R, Error>>;
 
             fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
                 Poll::Ready(Ok(()))
@@ -75,7 +74,7 @@ macro_rules! impl_service_fn {
 
                 #[allow(non_snake_case)]
                 let fut = {
-                    let results: Result<($($K),+), E> = (|| {
+                    let results: Result<($($K),+), Error> = (|| {
                         Ok(($($K::from_request(&task)?),+))
                     })();
 
@@ -95,15 +94,15 @@ macro_rules! impl_service_fn {
     };
 }
 
-impl<T, F, Req, E, R, Ctx> Service<Request<Req, Ctx>> for ServiceFn<T, Req, Ctx, ()>
+impl<T, F, Req, R, Ctx> Service<Request<Req, Ctx>> for ServiceFn<T, Req, Ctx, ()>
 where
     T: FnMut(Req) -> F,
     F: Future,
-    F::Output: IntoResponse<Result = std::result::Result<R, E>>,
+    F::Output: IntoResponse<Result = R>,
 {
     type Response = R;
-    type Error = E;
-    type Future = FnFuture<F, F::Output, R, E>;
+    type Error = Error;
+    type Future = FnFuture<F, F::Output, R, Error>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
