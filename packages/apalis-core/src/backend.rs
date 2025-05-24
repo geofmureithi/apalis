@@ -1,14 +1,8 @@
-use std::{any::type_name, future::Future};
+use std::{future::Future, io};
 
 use futures::Stream;
-use serde::{Deserialize, Serialize};
 
-use crate::{
-    codec::Codec,
-    poller::Poller,
-    request::State,
-    worker::{Context, Worker},
-};
+use crate::worker::WorkerContext;
 
 /// A backend represents a task source
 /// Both [`Storage`] and [`MessageQueue`] need to implement it for workers to be able to consume tasks
@@ -16,77 +10,54 @@ use crate::{
 /// [`Storage`]: crate::storage::Storage
 /// [`MessageQueue`]: crate::mq::MessageQueue
 pub trait Backend<Req> {
-    /// The stream to be produced by the backend
-    type Stream: Stream<Item = Result<Option<Req>, crate::error::Error>>;
-
-    /// Returns the final decoration of layers
+    type Error: Send + Sync + std::error::Error + 'static;
+    type Stream: Stream<Item = Result<Option<Req>, Self::Error>>;
+    type Beat: Stream<Item = Result<(), Self::Error>>;
     type Layer;
-
-    /// Specifies the codec type used by the backend
-    type Codec: Codec;
-
-    /// Returns a poller that is ready for streaming
-    fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer>;
+    type Codec;
+    fn heartbeat(&self) -> Self::Beat;
+    fn middleware(&self) -> Self::Layer;
+    fn poll(self, worker: &WorkerContext) -> Self::Stream;
 }
 
-/// Represents functionality that allows reading of jobs and stats from a backend
-/// Some backends esp MessageQueues may not currently implement this
-pub trait BackendExpose<T>
-where
-    Self: Sized,
-{
-    /// The request type being handled by the backend
-    type Request;
-    /// The error returned during reading jobs and stats
+pub trait Encoder<T> {
     type Error;
-    /// List all Workers that are working on a backend
-    fn list_workers(
-        &self,
-    ) -> impl Future<Output = Result<Vec<Worker<WorkerState>>, Self::Error>> + Send;
+    type Compact;
 
-    /// Returns the counts of jobs in different states
-    fn stats(&self) -> impl Future<Output = Result<Stat, Self::Error>> + Send;
-
-    /// Fetch jobs persisted in a backend
-    fn list_jobs(
-        &self,
-        status: &State,
-        page: i32,
-    ) -> impl Future<Output = Result<Vec<Self::Request>, Self::Error>> + Send;
+    fn encode(val: &T) -> Result<Self::Compact, Self::Error>;
 }
 
-/// Represents the current statistics of a backend
-#[derive(Debug, Deserialize, Serialize, Default)]
-pub struct Stat {
-    /// Represents pending tasks
-    pub pending: usize,
-    /// Represents running tasks
-    pub running: usize,
-    /// Represents dead tasks
-    pub dead: usize,
-    /// Represents failed tasks
-    pub failed: usize,
-    /// Represents successful tasks
-    pub success: usize,
-}
-
-/// A serializable version of a worker's state.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct WorkerState {
-    /// Type of task being consumed by the worker, useful for display and filtering
-    pub r#type: String,
-    /// The type of job stream
-    pub source: String,
-    // TODO: // The layers that were loaded for worker.
-    // TODO: // pub layers: Vec<Layer>,
-    // TODO: // last_seen: Timestamp,
-}
-impl WorkerState {
-    /// Build a new state
-    pub fn new<S>(r#type: String) -> Self {
-        Self {
-            r#type,
-            source: type_name::<S>().to_string(),
-        }
+impl<T> Encoder<T> for () {
+    type Error = io::Error;
+    type Compact = ();
+    fn encode(_val: &T) -> Result<Self::Compact, Self::Error> {
+        Ok(())
     }
+}
+pub trait Decoder<T> {
+    type Error;
+    type Compact;
+
+    fn decode(val: &Self::Compact) -> Result<T, Self::Error>;
+}
+
+impl<T: Default> Decoder<T> for () {
+    type Error = io::Error;
+    type Compact = ();
+    fn decode(_: &Self::Compact) -> Result<T, Self::Error> {
+        Ok(T::default())
+    }
+}
+
+pub trait ListWorkers<Req>: Backend<Req> {
+    type Worker;
+    fn list_workers(&self) -> impl Future<Output = Result<Vec<Self::Worker>, Self::Error>> + Send;
+}
+
+pub trait ListTasks<Req>: Backend<Req> {
+    type Filter;
+    fn list_tasks(
+        &self,
+        filter: &Self::Filter,
+    ) -> impl Future<Output = Result<Vec<Req>, Self::Error>> + Send;
 }

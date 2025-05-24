@@ -53,7 +53,7 @@ use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::worker::{Context, Event, Worker, WorkerId};
+use apalis_core::worker::{Event, SimpleWorker, WorkerContext, WorkerId};
 use apalis_core::{backend::Backend, codec::Codec};
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc;
@@ -159,7 +159,7 @@ where
 
     type Codec = C;
 
-    fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll(mut self, worker: &WorkerContext) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let subscription = self.subscription.clone();
         let config = self.config.clone();
@@ -786,7 +786,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
             .collect())
     }
 
-    async fn list_workers(&self) -> Result<Vec<Worker<WorkerState>>, Self::Error> {
+    async fn list_workers(&self) -> Result<Vec<SimpleWorker<WorkerState>>, Self::Error> {
         let fetch_query =
             "SELECT id, layers, last_seen FROM apalis.workers WHERE worker_type = $1 ORDER BY last_seen DESC LIMIT 20 OFFSET $2";
         let res: Vec<(String, String, i64)> = sqlx::query_as(fetch_query)
@@ -796,7 +796,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
             .await?;
         Ok(res
             .into_iter()
-            .map(|w| Worker::new(WorkerId::new(w.0), WorkerState::new::<Self>(w.1)))
+            .map(|w| SimpleWorker::new(WorkerId::new(w.0), WorkerState::new::<Self>(w.1)))
             .collect())
     }
 }
@@ -877,19 +877,19 @@ mod tests {
     async fn register_worker_at(
         storage: &mut PostgresStorage<Email>,
         last_seen: Timestamp,
-    ) -> Worker<Context> {
+    ) -> WorkerContext {
         let worker_id = WorkerId::new("test-worker");
 
         storage
             .keep_alive_at::<DummyService>(&worker_id, last_seen)
             .await
             .expect("failed to register worker");
-        let wrk = Worker::new(worker_id, Context::default());
+        let wrk = SimpleWorker::new(worker_id, WorkerContext::default());
         wrk.start();
         wrk
     }
 
-    async fn register_worker(storage: &mut PostgresStorage<Email>) -> Worker<Context> {
+    async fn register_worker(storage: &mut PostgresStorage<Email>) -> WorkerContext {
         register_worker_at(storage, Utc::now().timestamp()).await
     }
 
@@ -1060,7 +1060,7 @@ mod tests {
 
         // Attempt to fetch the job with a worker associated with the different job_type.
         let worker_id = WorkerId::new("sms-worker");
-        let worker = Worker::new(worker_id, Context::default());
+        let worker = SimpleWorker::new(worker_id, WorkerContext::default());
         worker.start();
 
         let jobs = storage_sms

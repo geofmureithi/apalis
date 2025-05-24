@@ -1,4 +1,4 @@
-use crate::codec::Codec;
+use crate::backend::Encoder;
 use crate::error::{BoxDynError, Error};
 use crate::request::Request;
 use crate::response::Response;
@@ -174,11 +174,16 @@ pub trait Ack<Task, Res, Codec> {
     ) -> impl Future<Output = Result<(), Self::AckError>> + Send;
 }
 
-impl<T, Res: Clone + Send + Sync + Serialize, Ctx: Clone + Send + Sync, Cdc: Codec> Ack<T, Res, Cdc>
-    for Sender<(Ctx, Response<Cdc::Compact>)>
+impl<
+        T,
+        Res: Clone + Send + Sync + Serialize,
+        Ctx: Clone + Send + Sync,
+        Compact,
+        Cdc: Encoder<Res, Compact = Compact>,
+    > Ack<T, Res, Cdc> for Sender<(Ctx, Response<Compact>)>
 where
     Cdc::Error: Debug,
-    Cdc::Compact: Send,
+    Compact: Send,
 {
     type AckError = SendError;
     type Context = Ctx;

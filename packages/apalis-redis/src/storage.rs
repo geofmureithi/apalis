@@ -10,7 +10,7 @@ use apalis_core::service_fn::FromRequest;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::worker::{Event, Worker, WorkerId};
+use apalis_core::worker::{Event, SimpleWorker, WorkerId};
 use apalis_core::{backend::Backend, codec::Codec};
 use chrono::{DateTime, Utc};
 use futures::channel::mpsc::{self, SendError, Sender};
@@ -443,7 +443,7 @@ where
 
     fn poll(
         mut self,
-        worker: &Worker<apalis_core::worker::Context>,
+        worker: &SimpleWorker<apalis_core::worker::WorkerContext>,
     ) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.buffer_size);
         let (ack, ack_rx) =
@@ -1018,7 +1018,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use apalis_core::worker::Context;
+    use apalis_core::worker::WorkerContext;
     use apalis_core::{generic_storage_test, sleep};
     use email_service::Email;
 
@@ -1075,8 +1075,8 @@ mod tests {
             .clone()
     }
 
-    async fn register_worker_at(storage: &mut RedisStorage<Email>) -> Worker<Context> {
-        let worker = Worker::new(WorkerId::new("test-worker"), Context::default());
+    async fn register_worker_at(storage: &mut RedisStorage<Email>) -> WorkerContext {
+        let worker = SimpleWorker::new(WorkerId::new("test-worker"), WorkerContext::default());
         worker.start();
         storage
             .keep_alive(&worker.id())
@@ -1085,7 +1085,7 @@ mod tests {
         worker
     }
 
-    async fn register_worker(storage: &mut RedisStorage<Email>) -> Worker<Context> {
+    async fn register_worker(storage: &mut RedisStorage<Email>) -> WorkerContext {
         register_worker_at(storage).await
     }
 

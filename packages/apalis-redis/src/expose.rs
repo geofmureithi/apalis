@@ -7,7 +7,7 @@ use apalis_core::codec::json::JsonCodec;
 use apalis_core::codec::Codec;
 use apalis_core::request::Request;
 use apalis_core::request::State;
-use apalis_core::worker::Worker;
+use apalis_core::worker::SimpleWorker;
 use apalis_core::worker::WorkerId;
 use redis::{ErrorKind, Value};
 use serde::{de::DeserializeOwned, Serialize};
@@ -182,7 +182,7 @@ where
             }
         }
     }
-    async fn list_workers(&self) -> Result<Vec<Worker<WorkerState>>, redis::RedisError> {
+    async fn list_workers(&self) -> Result<Vec<SimpleWorker<WorkerState>>, redis::RedisError> {
         let queue = self.get_config();
         let consumers_set = &queue.consumers_set();
         let mut conn = self.get_connection().clone();
@@ -195,7 +195,7 @@ where
         Ok(workers
             .into_iter()
             .map(|w| {
-                Worker::new(
+                SimpleWorker::new(
                     WorkerId::new(w.replace(&format!("{}:", &queue.inflight_jobs_set()), "")),
                     WorkerState::new::<Self>(queue.get_namespace().to_owned()),
                 )

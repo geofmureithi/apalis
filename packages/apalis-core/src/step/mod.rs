@@ -1,11 +1,10 @@
-use crate::backend::Backend;
-use crate::builder::WorkerBuilder;
-use crate::codec::Codec;
+use crate::backend::{Backend, Decoder, Encoder};
+use crate::builder::{BuildWith, WorkerBuilder, WorkerFactory};
 use crate::error::{BoxDynError, Error};
 use crate::request::{Parts, Request};
 use crate::service_fn::{service_fn, ServiceFn};
-use crate::storage::Storage;
-use crate::worker::{Ready, Worker};
+use crate::storage::{Push, Schedule};
+use crate::worker::{Worker, WorkerContext};
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use serde::de::DeserializeOwned;
@@ -129,15 +128,20 @@ pub struct StepService<Ctx, Compact, Input, S, Index> {
 impl<
         Ctx,
         Compact,
-        S: Storage<Job = StepRequest<Compact, Index>> + Send + Clone + 'static,
+        S: Send
+            + Clone
+            + 'static
+            + Push<StepRequest<Compact, Index>, Ctx>
+            + Schedule<StepRequest<Compact, Index>, Ctx>,
         Input,
         Index,
     > Service<Request<StepRequest<Compact, Index>, Ctx>>
     for StepService<Ctx, Compact, Input, S, Index>
 where
     Compact: DeserializeOwned + Send + Clone + 'static,
-    S::Error: Send + Sync + std::error::Error,
     Index: StepIndex + Send + Sync + 'static,
+    S::Timestamp: From<Duration>,
+    Ctx: Default,
 {
     type Response = GoTo<Compact>;
     type Error = crate::error::Error;
@@ -178,7 +182,7 @@ where
                                         index: next_index,
                                         step: next.clone(),
                                     },
-                                    delay.as_secs().try_into().unwrap(),
+                                    (*delay).into(),
                                 )
                                 .await
                                 .map_err(|e| Error::SourceError(Arc::new(e.into())))?;
@@ -228,8 +232,9 @@ where
     S::Future: Send + 'static,
     Current: DeserializeOwned,
     Next: Serialize,
-    Encode: Codec<Compact = Compact>,
-    Encode::Error: Debug,
+    Encode: Encoder<Next, Compact = Compact> + Decoder<Current, Compact = Compact>,
+    <Encode as Decoder<Current>>::Error: Debug,
+    <Encode as Encoder<Next>>::Error: Debug,
 {
     type Response = GoTo<Compact>;
     type Error = S::Error;
@@ -242,7 +247,7 @@ where
     fn call(&mut self, req: Request<StepRequest<Compact, Index>, Ctx>) -> Self::Future {
         let transformed_req: Request<Current, Ctx> = {
             Request::new_with_parts(
-                Encode::decode(req.args.step).expect(&format!(
+                Encode::decode(&req.args.step).expect(&format!(
                     "Could not decode step, expecting {}",
                     std::any::type_name::<Current>()
                 )),
@@ -250,13 +255,13 @@ where
             )
         };
         let fut = self.inner.call(transformed_req).map(|res| match res {
-            Ok(o) => Ok(match o {
+            Ok(o) => Ok(match &o {
                 GoTo::Next(next) => {
                     GoTo::Next(Encode::encode(next).expect("Could not encode the next step"))
                 }
                 GoTo::Delay { next, delay } => GoTo::Delay {
                     next: Encode::encode(next).expect("Could not encode the next step"),
-                    delay,
+                    delay: *delay,
                 },
                 GoTo::Done(res) => {
                     GoTo::Done(Encode::encode(res).expect("Could not encode the next step"))
@@ -315,8 +320,9 @@ where
     Ctx: Default + Send,
     Next: 'static + Send + Serialize,
     Compact: Send + 'static,
-    Encode: Codec<Compact = Compact> + Send + 'static,
-    Encode::Error: Debug,
+    Encode: Encoder<Next, Compact = Compact> + Decoder<Current, Compact = Compact> + Send + 'static,
+    <Encode as Decoder<Current>>::Error: Debug,
+    <Encode as Encoder<Next>>::Error: Debug,
     Index: StepIndex,
 {
     fn step(mut self, service: S) -> StepBuilder<Ctx, Compact, Input, Next, Encode, Index> {
@@ -368,56 +374,29 @@ where
     }
 }
 
-/// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait StepWorkerFactory<Ctx, Compact, Input, Output, Index> {
-    /// The request source for the worker
-    type Source;
-
-    /// The service that the worker will run jobs against
-    type Service;
-
-    /// Represents the codec for the backend bound
-    type Codec;
-    /// Builds a [`StepWorkerFactory`] using a [`tower`] service
-    /// that can be used to generate a new [`Worker`] using the `build_stepped` method
-    /// # Arguments
-    ///
-    /// * `service` - A tower service
-    ///
-    /// # Examples
-    ///
-    fn build_stepped(
-        self,
-        builder: StepBuilder<Ctx, Compact, Input, Output, Self::Codec, Index>,
-    ) -> Worker<Ready<Self::Service, Self::Source>>;
-}
-
-impl<Req, P, M, Ctx, Input, Compact, Output, Index>
-    StepWorkerFactory<Ctx, Compact, Input, Output, Index>
-    for WorkerBuilder<Req, Ctx, P, M, StepService<Ctx, Compact, Input, P, Index>>
+impl<Ctx, Input, Compact, Output, Codec, Index, P, M>
+    BuildWith<WorkerBuilder<Request<StepRequest<Compact, Index>, Ctx>, P, M>>
+    for StepBuilder<Ctx, Compact, Input, Output, Codec, Index>
 where
     Compact: Send + 'static + Sync,
-    P: Backend<Request<StepRequest<Compact, Index>, Ctx>> + 'static,
-    P: Storage<Job = StepRequest<Compact, Index>> + Clone,
+    P: Backend<Request<StepRequest<Compact, Index>, Ctx>, Codec = Codec> + 'static + Clone,
     M: Layer<StepService<Ctx, Compact, Input, P, Index>> + 'static,
+    Compact: Clone,
+    Ctx: Default,
+    Index: StepIndex + Send + Sync,
+    P: Push<StepRequest<Compact, Index>, Ctx> + Schedule<StepRequest<Compact, Index>, Ctx> + Send,
 {
-    type Source = P;
-
-    type Service = M::Service;
-
-    type Codec = <P as Backend<Request<StepRequest<Compact, Index>, Ctx>>>::Codec;
-
-    fn build_stepped(
+    type Worker =
+        Worker<StepRequest<Compact, Index>, Ctx, P, StepService<Ctx, Compact, Input, P, Index>, M>;
+    fn builder_with(
         self,
-        builder: StepBuilder<Ctx, Compact, Input, Output, Self::Codec, Index>,
-    ) -> Worker<Ready<M::Service, P>> {
-        let worker_id = self.id;
-        let poller = self.source;
-        let middleware = self.layer;
-        let service = builder.build(poller.clone());
-        let service = middleware.service(service);
-
-        Worker::new(worker_id, Ready::new(service, poller))
+        builder: WorkerBuilder<Request<StepRequest<Compact, Index>, Ctx>, P, M>,
+    ) -> Self::Worker {
+        let worker_id = builder.id;
+        let poller = builder.source;
+        let middleware = builder.layer;
+        let service = self.build(poller.clone());
+        Worker::new(worker_id, poller, service, middleware)
     }
 }
 
@@ -433,22 +412,28 @@ pub enum StepError {
 }
 
 /// Helper trait that transforms a storage with stepping capability
-pub trait SteppableStorage<S: Storage, Codec, Compact, Input, Index> {
+pub trait StepDriver<S, Codec, Compact, Input, Index, Context> {
     /// Push a step with a custom index
-    fn push_step<T: Serialize + Send>(
+    fn push_step<T>(
         &mut self,
         step: StepRequest<T, Index>,
-    ) -> impl Future<Output = Result<Parts<S::Context>, StepError>> + Send;
+    ) -> impl Future<Output = Result<Parts<Context>, StepError>> + Send
+    where
+        Codec: Encoder<T, Compact = Compact>,
+        Codec::Error: std::error::Error + Send + Sync + 'static,
+        T: Send;
 
     /// Push the first step
     fn start_stepped(
         &mut self,
         step: Input,
-    ) -> impl Future<Output = Result<Parts<S::Context>, StepError>> + Send
+    ) -> impl Future<Output = Result<Parts<Context>, StepError>> + Send
     where
         Input: Serialize + Send,
         Index: Default,
         Self: Send,
+        Codec: Encoder<Input, Compact = Compact>,
+        Codec::Error: std::error::Error + Send + Sync + 'static,
     {
         async {
             self.push_step(StepRequest {
@@ -460,29 +445,32 @@ pub trait SteppableStorage<S: Storage, Codec, Compact, Input, Index> {
     }
 }
 
-impl<S, Encode, Compact, Input, Index> SteppableStorage<S, Encode, Compact, Input, Index> for S
-where
-    S: Storage<Job = StepRequest<Compact, Index>, Codec = Encode>
-        + Backend<Request<StepRequest<Compact, Index>, <S as Storage>::Context>>
-        + Send,
-    Encode: Codec<Compact = Compact>,
-    Encode::Error: std::error::Error + Send + Sync + 'static,
-    S::Error: std::error::Error + Send + Sync + 'static,
-    Compact: Send,
-    Index: Send,
-{
-    async fn push_step<T: Serialize + Send>(
-        &mut self,
-        step: StepRequest<T, Index>,
-    ) -> Result<Parts<S::Context>, StepError> {
-        self.push(StepRequest {
-            index: step.index,
-            step: Encode::encode(&step.step).map_err(|e| StepError::CodecError(Box::new(e)))?,
-        })
-        .await
-        .map_err(|e| StepError::StorageError(Box::new(e)))
-    }
-}
+// impl<S, Encode, Compact, Input, Index, Ctx> StepDriver<S, Encode, Compact, Input, Index, Ctx> for S
+// where
+//     S: Push<StepRequest<Compact, Index>, Ctx, Compact = Compact>
+//         + Send
+//         + Backend<Request<StepRequest<Compact, Index>, Ctx>, Codec = Encode>,
+
+//     // Encode::Error: std::error::Error + Send + Sync + 'static,
+//     S::Error: std::error::Error + Send + Sync + 'static,
+//     Compact: Send,
+//     Index: Send,
+//     Ctx: Default,
+// {
+//     async fn push_step<T>(&mut self, step: StepRequest<T, Index>) -> Result<Parts<Ctx>, StepError>
+//     where
+//         Encode: Encoder<T, Compact = Compact>,
+//         Encode::Error: std::error::Error + Send + Sync + 'static,
+//         T: Send,
+//     {
+//         self.push(StepRequest {
+//             index: step.index,
+//             step: Encode::encode(&step.step).map_err(|e| StepError::CodecError(Box::new(e)))?,
+//         })
+//         .await
+//         .map_err(|e| StepError::StorageError(Box::new(e)))
+//     }
+// }
 
 /// A helper trait for planning the step index
 /// TODO: This will need to be improved to offer more flexibility
@@ -500,5 +488,133 @@ impl StepIndex for usize {
 impl StepIndex for u32 {
     fn next(&self) -> Self {
         *self + 1
+    }
+}
+
+// pub trait SteppedWorkerFactory<Args, Ctx, Svc, Encode, Compact, Input, Current, Index> {
+//     type Worker;
+//     fn build_stepped(
+//         self,
+//         builder: StepBuilder<Ctx, Compact, Input, Current, Encode, Index>,
+//     ) -> Self::Worker;
+// }
+
+// impl<P, M, S, Ctx, Encode, Compact, Input, Current, Index>
+//     SteppedWorkerFactory<
+//         StepRequest<Compact, Index>,
+//         Ctx,
+//         S,
+//         Encode,
+//         Compact,
+//         Input,
+//         Current,
+//         Index,
+//     > for WorkerBuilder<Request<StepRequest<Compact, Index>, Ctx>, P, M>
+// where
+//     S: Service<Request<StepRequest<Compact, Index>, Ctx>>,
+//     M: Layer<S>,
+//     P: Backend<Request<StepRequest<Compact, Index>, Ctx>> + Clone,
+// {
+//     type Worker =
+//         Worker<StepRequest<Compact, Index>, Ctx, P, StepService<Ctx, Compact, Input, P, Index>, M>;
+//     fn build_stepped(
+//         self,
+//         builder: StepBuilder<Ctx, Compact, Input, Current, Encode, Index>,
+//     ) -> Self::Worker {
+//         let service = builder.build(self.source.clone());
+//         Worker::new(self.id, self.source, service, self.layer)
+//     }
+// }
+
+// pub trait Stepped<Compact, Ctx, Source, Middleware>: Sized {
+//     fn stepped(self) -> WorkerBuilder<Request<StepRequest<Compact>, Ctx>, Source, Middleware>;
+// }
+
+// impl<Compact, P, M, Ctx, Args> Stepped<Compact, Ctx, P, M>
+//     for WorkerBuilder<Request<Args, Ctx>, P, M>
+// {
+//     fn stepped(self) -> WorkerBuilder<Request<StepRequest<Compact>, Ctx>, P, M> {
+//         let this = self;
+//         WorkerBuilder {
+//             id: this.id,
+//             request: PhantomData,
+//             layer: this.layer,
+//             source: this.source,
+//         }
+//     }
+// }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io,
+        ops::Deref,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    use tower::layer::util::Stack;
+
+    use crate::{
+        builder::{
+            EventListener, LongRunningExt, LongRunningLayer, RecordAttempt, WorkerBuilder,
+            WorkerFactoryWith,
+        },
+        layers::extensions::Data,
+        memory::MemoryStorage,
+
+        service_fn::{self, service_fn, ServiceFn},
+        storage::Push,
+    };
+
+    use super::*;
+
+    const ITEMS: u32 = 100;
+
+    #[tokio::test]
+    async fn it_works() {
+        let in_memory = MemoryStorage::new();
+        let mut handle = in_memory.clone();
+
+        tokio::spawn(async move {
+            for i in 0..ITEMS {
+                handle.push(StepRequest::new(())).await.unwrap();
+            }
+        });
+
+        #[derive(Clone, Debug, Default)]
+        struct Count(Arc<AtomicUsize>);
+
+        impl Deref for Count {
+            type Target = Arc<AtomicUsize>;
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        async fn task1(job: u32) -> Result<GoTo, io::Error> {
+            Ok(GoTo::Done(()))
+        }
+
+        async fn task2(
+            job: u32,
+            count: Data<Count>,
+            worker: WorkerContext,
+        ) -> Result<GoTo<usize>, io::Error> {
+            let current = count.fetch_add(1, Ordering::Relaxed);
+            if (current as u32) == ITEMS - 1 {
+                worker.stop();
+            }
+            Ok(GoTo::Done(count.load(Ordering::Relaxed)))
+        }
+
+        let stepper = StepBuilder::new().step_fn(task1);
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
+            .data(Count::default())
+            .long_running()
+            .record_attempts()
+            .build_with(stepper);
+
+        worker.run().await.unwrap();
     }
 }

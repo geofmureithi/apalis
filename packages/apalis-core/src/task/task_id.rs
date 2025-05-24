@@ -1,5 +1,6 @@
 use std::{
     fmt::{Debug, Display},
+    hash::Hash,
     str::FromStr,
 };
 
@@ -7,6 +8,8 @@ use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use ulid::Ulid;
 
 use crate::{error::Error, request::Request, service_fn::FromRequest};
+
+pub trait TaskIdT: Hash + Eq + PartialEq {} // TODO: Simplify and add FromRequest
 
 /// A wrapper type that defines a task id.
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]

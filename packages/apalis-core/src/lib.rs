@@ -46,12 +46,6 @@ pub mod worker;
 
 /// Represents the utils needed to extend a task's context.
 pub mod data;
-/// Message queuing utilities
-pub mod mq;
-/// Allows async listening in a mpsc style.
-pub mod notify;
-/// Controlled polling and streaming
-pub mod poller;
 
 /// In-memory utilities for testing and mocking
 pub mod memory;
@@ -63,7 +57,7 @@ pub mod task;
 pub mod codec;
 
 /// Allows stepped tasks
-pub mod step;
+// pub mod step;
 
 /// Sleep utilities
 #[cfg(feature = "sleep")]
@@ -168,7 +162,7 @@ pub mod test_utils {
 
     /// A generic backend wrapper that polls and executes jobs
     #[derive(Debug)]
-    pub struct TestWrapper<B, Req, Res> {
+    pub struct TestWrapper<B, Req, Res, Worker> {
         stop_tx: Sender<()>,
         res_rx: Receiver<(TaskId, Result<String, String>)>,
         _p: PhantomData<Req>,
@@ -177,7 +171,7 @@ pub mod test_utils {
         /// The inner backend
         pub backend: B,
         /// The inner worker
-        pub worker: Worker<crate::worker::Context>,
+        pub worker: Worker,
     }
     /// A test wrapper to allow you to test without requiring a worker.
     /// Important for testing backends and jobs
@@ -212,7 +206,7 @@ pub mod test_utils {
     ///}
     /// ````
 
-    impl<B, Req, Res, Ctx> TestWrapper<B, Request<Req, Ctx>, Res>
+    impl<B, Req, Res, Ctx, Svc, Mw> TestWrapper<B, Request<Req, Ctx>, Res, Worker<Req, Ctx, B, Svc, Mw>>
     where
         B: Backend<Request<Req, Ctx>> + Send + Sync + 'static + Clone,
         Req: Send + 'static,
@@ -222,7 +216,7 @@ pub mod test_utils {
         Res: Debug,
     {
         /// Build a new instance provided a custom service
-    pub fn new_with_service<Svc>(backend: B, service: Svc) -> (Self, BoxFuture<'static, ()>)
+    pub fn new_with_service(backend: B, service: Svc) -> (Self, BoxFuture<'static, ()>)
     where
         Svc::Future: Send,
         Svc: Send + Sync + Service<Request<Req, Ctx>, Response = Res> + 'static,
@@ -255,24 +249,24 @@ pub mod test_utils {
                     should_next: should_next.clone(),
                 })
                 .service(service);
-            let worker = WorkerBuilder::new("test-worker")
-                .backend(backend.clone())
-                .build(service)
-                .run();
-            let handle = worker.get_handle();
+            // let worker = WorkerBuilder::new("test-worker")
+            //     .backend(backend.clone())
+            //     .build(service);
+            let handle = todo!();
             let (stop_tx, mut stop_rx) = channel::<()>(1);
 
             let poller = async move {
-                let worker = worker.shared();
-                loop {
-                    futures::select! {
-                        _ = stop_rx.next().fuse() => break,
-                        _ = worker.clone().fuse() => {
+                todo!();
+                // let worker = worker.run().shared();
+                // loop {
+                //     futures::select! {
+                //         _ = stop_rx.next().fuse() => break,
+                //         _ = worker.clone().fuse() => {
 
-                        },
-                    }
-                }
-                res_tx.close_channel();
+                //         },
+                //     }
+                // }
+                // res_tx.close_channel();
             };
             (
                 TestWrapper {
@@ -308,26 +302,6 @@ pub mod test_utils {
                 self.should_next.store(false, Ordering::Release);
                 res
             })
-        }
-    }
-
-    impl<B, Req, Res, Ctx> Deref for TestWrapper<B, Request<Req, Ctx>, Res>
-    where
-        B: Backend<Request<Req, Ctx>>,
-    {
-        type Target = B;
-
-        fn deref(&self) -> &Self::Target {
-            &self.backend
-        }
-    }
-
-    impl<B, Req, Ctx, Res> DerefMut for TestWrapper<B, Request<Req, Ctx>, Res>
-    where
-        B: Backend<Request<Req, Ctx>>,
-    {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.backend
         }
     }
 

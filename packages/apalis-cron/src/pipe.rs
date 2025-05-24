@@ -1,7 +1,7 @@
 use apalis_core::backend::Backend;
 use apalis_core::error::BoxDynError;
 use apalis_core::request::BoxStream;
-use apalis_core::{poller::Poller, request::Request, worker::Context, worker::Worker};
+use apalis_core::{poller::Poller, request::Request, worker::SimpleWorker, worker::WorkerContext};
 use futures::StreamExt;
 use std::{error, fmt};
 
@@ -30,7 +30,7 @@ where
 
     type Codec = Inner::Codec;
 
-    fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll(mut self, worker: &WorkerContext) -> Poller<Self::Stream, Self::Layer> {
         let pipe_heartbeat = async move { while (self.stream.next().await).is_some() {} };
         let inner = self.inner.poll(worker);
         let heartbeat = inner.heartbeat;

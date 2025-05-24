@@ -29,7 +29,7 @@ optional = true
 
 
 [features]
-default = []
+default = ["test-utils"]
 docsrs = ["document-features"]
 sleep = ["futures-timer"]
 json = ["serde_json"]

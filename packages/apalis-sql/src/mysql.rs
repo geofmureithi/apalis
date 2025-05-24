@@ -11,7 +11,7 @@ use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::worker::{Context, Event, Worker, WorkerId};
+use apalis_core::worker::{Event, SimpleWorker, WorkerContext, WorkerId};
 use apalis_core::{backend::Backend, codec::Codec};
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -138,7 +138,7 @@ where
 {
     fn stream_jobs(
         self,
-        worker: &Worker<Context>,
+        worker: &WorkerContext,
         interval: Duration,
         buffer_size: usize,
     ) -> impl Stream<Item = Result<Option<Request<T, SqlContext>>, sqlx::Error>> {
@@ -444,7 +444,7 @@ where
 
     type Codec = C;
 
-    fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll(self, worker: &WorkerContext) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
@@ -680,7 +680,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
             .collect())
     }
 
-    async fn list_workers(&self) -> Result<Vec<Worker<WorkerState>>, Self::Error> {
+    async fn list_workers(&self) -> Result<Vec<SimpleWorker<WorkerState>>, Self::Error> {
         let fetch_query =
             "SELECT id, layers, last_seen FROM workers WHERE worker_type = ? ORDER BY last_seen DESC LIMIT 20 OFFSET ?";
         let res: Vec<(String, String, i64)> = sqlx::query_as(fetch_query)
@@ -690,7 +690,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
             .await?;
         Ok(res
             .into_iter()
-            .map(|w| Worker::new(WorkerId::new(w.0), WorkerState::new::<Self>(w.1)))
+            .map(|w| SimpleWorker::new(WorkerId::new(w.0), WorkerState::new::<Self>(w.1)))
             .collect())
     }
 }
@@ -750,7 +750,7 @@ mod tests {
 
     async fn consume_one(
         storage: &mut MysqlStorage<Email>,
-        worker: &Worker<Context>,
+        worker: &WorkerContext,
     ) -> Request<Email, SqlContext> {
         let mut stream = storage
             .clone()
@@ -774,9 +774,9 @@ mod tests {
     async fn register_worker_at(
         storage: &mut MysqlStorage<Email>,
         last_seen: DateTime<Utc>,
-    ) -> Worker<Context> {
+    ) -> WorkerContext {
         let worker_id = WorkerId::new("test-worker");
-        let wrk = Worker::new(worker_id, Context::default());
+        let wrk = SimpleWorker::new(worker_id, WorkerContext::default());
         wrk.start();
         storage
             .keep_alive_at::<DummyService>(&wrk.id(), last_seen)
@@ -785,7 +785,7 @@ mod tests {
         wrk
     }
 
-    async fn register_worker(storage: &mut MysqlStorage<Email>) -> Worker<Context> {
+    async fn register_worker(storage: &mut MysqlStorage<Email>) -> WorkerContext {
         let now = Utc::now();
 
         register_worker_at(storage, now).await
@@ -859,7 +859,7 @@ mod tests {
 
         // register a worker not responding since 6 minutes ago
         let worker_id = WorkerId::new("test-worker");
-        let worker = Worker::new(worker_id, Context::default());
+        let worker = SimpleWorker::new(worker_id, WorkerContext::default());
         worker.start();
         let five_minutes_ago = Utc::now() - Duration::from_secs(5 * 60);
 

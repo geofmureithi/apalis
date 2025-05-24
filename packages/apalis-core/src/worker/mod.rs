@@ -1,37 +1,54 @@
 use crate::backend::Backend;
+
+use crate::builder::EventListener;
 use crate::error::{BoxDynError, Error};
-use crate::layers::extensions::Data;
+use crate::layers::extensions::{AddExtension, Data};
 use crate::monitor::shutdown::Shutdown;
 use crate::request::Request;
 use crate::service_fn::FromRequest;
 use crate::task::task_id::TaskId;
 use call_all::CallAllUnordered;
+use futures::channel::mpsc;
 use futures::future::{join, select, BoxFuture};
 use futures::stream::BoxStream;
-use futures::{Future, FutureExt, Stream, StreamExt};
+use futures::{Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project_lite::pin_project;
 use serde::{Deserialize, Serialize};
+use std::any::type_name;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::task::{Context as TaskCtx, Poll, Waker};
+use std::time::Duration;
 use thiserror::Error;
+use tower::layer::util::Identity;
 use tower::{Layer, Service, ServiceBuilder};
+use traits::WorkerStream;
 
 mod call_all;
+pub mod traits;
 
 /// A worker name wrapper usually used by Worker builder
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct WorkerId {
     name: String,
 }
 
+impl Default for WorkerId {
+    fn default() -> Self {
+        WorkerId::new("default-worker")
+    }
+}
+
 /// An event handler for [`Worker`]
-pub type EventHandler = Arc<RwLock<Option<Box<dyn Fn(Worker<Event>) + Send + Sync>>>>;
+pub type EventHandler = Arc<RwLock<Option<Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>>>>;
+
+pub type CtxEventHandler = Arc<Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>>;
 
 impl FromStr for WorkerId {
     type Err = ();
@@ -71,8 +88,13 @@ pub enum Event {
     Engage(TaskId),
     /// Worker is idle, stream has no new request for now
     Idle,
+
+    /// Worker did a heartbeat
+    HeartBeat,
     /// A custom event
     Custom(String),
+    /// A result of processing
+    Success,
     /// Worker encountered an error
     Error(BoxDynError),
     /// Worker stopped
@@ -81,9 +103,9 @@ pub enum Event {
     Exit,
 }
 
-impl fmt::Display for Worker<Event> {
+impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let event_description = match &self.state {
+        let event_description = match &self {
             Event::Start => "Worker started".to_string(),
             Event::Engage(task_id) => format!("Worker engaged with Task ID: {}", task_id),
             Event::Idle => "Worker is idle".to_string(),
@@ -91,9 +113,11 @@ impl fmt::Display for Worker<Event> {
             Event::Error(err) => format!("Worker encountered an error: {}", err),
             Event::Stop => "Worker stopped".to_string(),
             Event::Exit => "Worker completed all pending tasks and exited".to_string(),
+            Event::HeartBeat => "Worker Heartbeat".to_owned(),
+            Event::Success => "Worker completed task successfully".to_string(),
         };
 
-        write!(f, "Worker [{}]: {}", self.id.name, event_description)
+        write!(f, "WorkerEvent: {}", event_description)
     }
 }
 
@@ -112,225 +136,287 @@ pub enum WorkerError {
 }
 
 /// A worker that is ready for running
-pub struct Ready<S, P> {
-    service: S,
-    backend: P,
+pub struct Worker<Args, Ctx, Backend, Svc, Middleware> {
+    pub(crate) id: WorkerId,
+    pub(crate) backend: Backend,
+    pub(crate) service: Svc,
+    pub(crate) middleware: ServiceBuilder<Middleware>,
+    pub(crate) req: PhantomData<Request<Args, Ctx>>,
     pub(crate) shutdown: Option<Shutdown>,
-    pub(crate) event_handler: EventHandler,
+    pub(crate) event_handler: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>,
 }
 
-impl<S, P> fmt::Debug for Ready<S, P>
+impl<Args, Ctx, B, Svc, Middleware> fmt::Debug for Worker<Args, Ctx, B, Svc, Middleware>
 where
-    S: fmt::Debug,
-    P: fmt::Debug,
+    Svc: fmt::Debug,
+    B: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Ready")
+        f.debug_struct("BasicWorker")
             .field("service", &self.service)
             .field("backend", &self.backend)
-            .field("shutdown", &self.shutdown)
-            .field("event_handler", &"...") // Avoid dumping potentially sensitive or verbose data
             .finish()
     }
 }
 
-impl<S, P> Clone for Ready<S, P>
-where
-    S: Clone,
-    P: Clone,
-{
-    fn clone(&self) -> Self {
-        Ready {
-            service: self.service.clone(),
-            backend: self.backend.clone(),
-            shutdown: self.shutdown.clone(),
-            event_handler: self.event_handler.clone(),
-        }
-    }
-}
-
-impl<S, P> Ready<S, P> {
+impl<Args, Ctx, B, Svc, M> Worker<Args, Ctx, B, Svc, M> {
     /// Build a worker that is ready for execution
-    pub fn new(service: S, poller: P) -> Self {
-        Ready {
+    pub fn new(id: WorkerId, backend: B, service: Svc, layers: ServiceBuilder<M>) -> Self {
+        Worker {
+            id,
+            backend,
             service,
-            backend: poller,
+            middleware: layers,
+            req: PhantomData,
             shutdown: None,
-            event_handler: EventHandler::default(),
+            event_handler: Box::new(|_, _| {}),
         }
     }
 }
 
-/// Represents a generic [Worker] that can be in many different states
-#[derive(Debug, Clone, Serialize)]
-pub struct Worker<T> {
-    pub(crate) id: WorkerId,
-    pub(crate) state: T,
-}
-
-impl<T> Worker<T> {
-    /// Create a new worker instance
-    pub fn new(id: WorkerId, state: T) -> Self {
-        Self { id, state }
-    }
-
-    /// Get the inner state
-    pub fn inner(&self) -> &T {
-        &self.state
-    }
-
-    /// Get the worker id
-    pub fn id(&self) -> &WorkerId {
-        &self.id
-    }
-}
-
-impl<T> Deref for Worker<T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        &self.state
-    }
-}
-
-impl<T> DerefMut for Worker<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state
-    }
-}
-
-impl Worker<Context> {
+impl WorkerContext {
     /// Allows workers to emit events
     pub fn emit(&self, event: Event) -> bool {
-        if let Some(handler) = self.state.event_handler.read().unwrap().as_ref() {
-            handler(Worker {
-                id: self.id().clone(),
-                state: event,
-            });
-            return true;
-        }
-        false
+        let handler = self.event_handler.as_ref();
+        handler(self, &event);
+        return true;
     }
     /// Start running the worker
     pub fn start(&self) {
-        self.state.running.store(true, Ordering::Relaxed);
-        self.state.is_ready.store(true, Ordering::Release);
-        self.emit(Event::Start);
+        self.running.store(true, Ordering::Relaxed);
+        self.is_ready.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn wrap_listener<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
+        &mut self,
+        f: F,
+    ) {
+        let cur = self.event_handler.clone();
+        let new: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync + 'static> =
+            Box::new(move |ctx, ev| {
+                f(&ctx, &ev);
+                cur(&ctx, &ev);
+            });
+        self.event_handler = Arc::new(new);
+    }
+
+    pub fn new<S>(id: &WorkerId) -> Self {
+        Self {
+            id: Arc::new(id.clone()),
+            service: type_name::<S>(),
+            task_count: Default::default(),
+            waker: Default::default(),
+            running: Default::default(),
+            shutdown: Default::default(),
+            event_handler: Arc::new(Box::new(|_, _| {
+                // noop
+            })),
+            is_ready: Default::default(),
+        }
     }
 }
 
-impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for Worker<Context> {
+impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for WorkerContext {
     fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
         req.parts.data.get_checked().cloned()
     }
 }
 
-impl<S, P> Worker<Ready<S, P>> {
-    /// Add an event handler to the worker
-    pub fn on_event<F: Fn(Worker<Event>) + Send + Sync + 'static>(self, f: F) -> Self {
-        let _ = self.event_handler.write().map(|mut res| {
-            let _ = res.insert(Box::new(f));
-        });
-        self
+impl<Args, Ctx, S, B, M> Worker<Args, Ctx, B, S, M>
+where
+    B: Backend<Request<Args, Ctx>, Error = crate::error::Error>,
+    S: Service<Request<Args, Ctx>> + Send + 'static,
+    B::Stream: Unpin + Send + 'static,
+    B::Beat: Unpin + Send + 'static,
+    Args: Send + 'static,
+    Ctx: Send + 'static,
+    // S::Future: Send,
+    // S::Error: std::error::Error + Send + Sync + 'static,
+    // TrackerLayer, Stack<ReadinessLayer, Stack<ServiceBuilder<M>, Stack<Data<WorkerContext>, Identity>>>
+    M: Layer<ReadinessService<TrackerService<S>>>,
+    // M: Layer<AddExtension<ReadinessService<TrackerService<S>>, WorkerContext>>,
+    B::Layer: Layer<M::Service>,
+    <B::Layer as Layer<M::Service>>::Service: Service<Request<Args, Ctx>> + Send + 'static,
+    <<B::Layer as Layer<M::Service>>::Service as Service<Request<Args, Ctx>>>::Error:
+        std::error::Error + Send + Sync + 'static,
+    <<B::Layer as Layer<M::Service>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
+    M::Service: Service<Request<Args, Ctx>> + Send + 'static,
+    <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
+    <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Error: std::error::Error + Send + Sync +'static
+{
+    pub fn run(self) -> BoxFuture<'static, Result<(), ()>> {
+        let mut ctx = WorkerContext::new::<M::Service>(&self.id);
+        self.run_with_ctx(&mut ctx)
     }
 
-    fn poll_jobs<Svc, Stm, Req, Ctx>(
-        worker: Worker<Context>,
-        service: Svc,
-        stream: Stm,
-    ) -> BoxStream<'static, ()>
-    where
-        Svc: Service<Request<Req, Ctx>> + Send + 'static,
-        Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, Error>> + Send + Unpin + 'static,
-        Req: Send + 'static,
-        Svc::Future: Send,
-        Svc::Error: Send + 'static + Into<BoxDynError>,
-        Ctx: Send + 'static,
-    {
-        let w = worker.clone();
-        let stream = stream.filter_map(move |result| {
-            let worker = worker.clone();
-
-            async move {
-                match result {
-                    Ok(Some(request)) => {
-                        worker.emit(Event::Engage(request.parts.task_id.clone()));
-                        Some(request)
-                    }
-                    Ok(None) => {
-                        worker.emit(Event::Idle);
-                        None
-                    }
-                    Err(err) => {
-                        worker.emit(Event::Error(Box::new(err)));
-                        None
-                    }
-                }
-            }
-        });
-        let stream = CallAllUnordered::new(service, stream).map(move |res| {
-            if let Err(error) = res {
-                let error = error.into();
-                if let Some(Error::MissingData(_)) = error.downcast_ref::<Error>() {
-                    w.stop();
-                }
-                w.emit(Event::Error(error));
-            }
-        });
-        stream.boxed()
-    }
-    /// Start a worker
-    pub fn run<Req, Ctx>(self) -> Runnable
-    where
-        S: Service<Request<Req, Ctx>> + 'static,
-        P: Backend<Request<Req, Ctx>> + 'static,
-        Req: Send + 'static,
-        S::Error: Send + 'static + Into<BoxDynError>,
-        P::Stream: Unpin + Send + 'static,
-        P::Layer: Layer<S>,
-        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>> + Send,
-        <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
-        <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
-            Send + Into<BoxDynError>,
-        Ctx: Send + 'static,
-    {
-        fn type_name_of_val<T>(_t: &T) -> &'static str {
-            std::any::type_name::<T>()
-        }
-        let service = self.state.service;
-        let worker_id = self.id;
-        let ctx = Context {
-            running: Arc::default(),
-            task_count: Arc::default(),
-            waker: Arc::default(),
-            shutdown: self.state.shutdown,
-            event_handler: self.state.event_handler.clone(),
-            is_ready: Arc::default(),
-            service: type_name_of_val(&service).to_owned(),
-        };
-        let worker = Worker {
-            id: worker_id.clone(),
-            state: ctx.clone(),
-        };
-        let backend = self.state.backend;
-
-        let poller = backend.poll(&worker);
-        let stream = poller.stream;
-        let heartbeat = poller.heartbeat.boxed();
-        let layer = poller.layer;
+    pub fn run_with_ctx(self, ctx: &mut WorkerContext) -> BoxFuture<'static, Result<(), ()>> {
+        let backend = self.backend;
+        let event_handler = self.event_handler;
+        ctx.wrap_listener(event_handler);
+        let worker = ctx.clone();
         let service = ServiceBuilder::new()
-            .layer(TrackerLayer::new(worker.state.clone()))
-            .layer(ReadinessLayer::new(worker.state.is_ready.clone()))
             .layer(Data::new(worker.clone()))
-            .layer(layer)
-            .service(service);
+            .layer(self.middleware.into_inner())
+            .layer(ReadinessLayer::new(worker.is_ready.clone()))
+            .layer(TrackerLayer::new(worker.clone()))
+            .service(self.service);
+        let mut heartbeat = backend.heartbeat();
+        let heartbeat = async move {
+            while let Some(_) = heartbeat.next().await {
 
-        Runnable {
-            poller: Self::poll_jobs(worker.clone(), service, stream),
-            heartbeat,
-            worker,
-            running: false,
+            }
         }
+        .boxed();
+
+        let mut stream = backend.poll(&worker);
+
+        let mut jobs = poll_jobs(service, stream);
+        let w = worker.clone();
+        let poller_future = async move {
+            while let Some(event) = jobs.next().await {
+                w.emit(event);
+            }
+        };
+        let combined = Box::pin(join(poller_future, heartbeat));
+        let w = worker.clone();
+        let mut combined =
+            select(combined, worker.clone().map(move |_| w.emit(Event::Stop))).boxed();
+
+        let fut = async move {
+            worker.start();
+            worker.emit(Event::Start);
+            combined.await;
+            worker.emit(Event::Exit);
+            Ok(())
+        };
+
+        fut.boxed()
     }
+
+    pub fn stream(self) -> impl Stream<Item = Event>{
+        let mut ctx = WorkerContext::new::<M::Service>(&self.id);
+        self.stream_with_ctx(&mut ctx)
+    }
+
+    pub fn stream_with_ctx(self, ctx: &mut WorkerContext) -> impl Stream<Item = Event>{
+         let backend = self.backend;
+        let event_handler = self.event_handler;
+        ctx.wrap_listener(event_handler);
+        let worker = ctx.clone();
+        let service = ServiceBuilder::new()
+            .layer(Data::new(worker.clone()))
+            .layer(self.middleware.into_inner())
+            .layer(ReadinessLayer::new(worker.is_ready.clone()))
+            .layer(TrackerLayer::new(worker.clone()))
+            .service(self.service);
+        let heartbeat = backend.heartbeat().map(|_| Event::HeartBeat);
+
+        let stream = backend.poll(&worker);
+
+        let jobs = poll_jobs(service, stream);
+        let starter_stream = futures::stream::iter(vec![Event::Start]);
+
+        let wait_for_exit_stream = futures::stream::iter(vec![Event::Stop]);
+
+        let work_stream = futures::stream_select!(heartbeat, jobs, wait_for_exit_stream);
+        starter_stream.chain(work_stream)
+
+    }
+}
+
+fn poll_jobs<Svc, Stm, Req, Ctx>(service: Svc, stream: Stm) -> BoxStream<'static, Event>
+where
+    Svc: Service<Request<Req, Ctx>> + Send + 'static,
+    Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, Error>> + Send + Unpin + 'static,
+    Req: Send + 'static,
+    Svc::Future: Send,
+    Ctx: Send + 'static,
+    Svc::Error: std::error::Error + Sync + Send,
+{
+    let (tx, rx) = mpsc::channel(10);
+    let txx = tx.clone();
+    let stream = stream.filter_map(move |result| {
+        let mut txx = txx.clone();
+
+        async move {
+            match result {
+                Ok(Some(request)) => {
+                    txx.send(Event::Engage(request.parts.task_id.clone()))
+                        .await
+                        .unwrap();
+                    Some(request)
+                }
+                Ok(None) => {
+                    txx.send(Event::Idle).await.unwrap();
+                    None
+                }
+                Err(err) => {
+                    txx.send(Event::Error(Box::new(err))).await.unwrap();
+                    None
+                }
+            }
+        }
+    });
+    let stream = CallAllUnordered::new(service, stream).map(|r| match r {
+        Ok(_) => Event::Success,
+        Err(err) => Event::Error(Box::new(err)),
+    });
+    let stream = futures::stream::select(rx, stream);
+    stream.boxed()
+}
+
+impl<S, P, Middleware, Args, Ctx> Worker<Args, Ctx, S, P, Middleware> {
+    // /// Start a worker
+    // pub fn run<Req, Ctx>(self) -> Runnable
+    // where
+    //     S: Service<Request<Req, Ctx>> + 'static,
+    //     P: Backend<Request<Req, Ctx>, Error = crate::error::Error> + 'static,
+    //     Req: Send + 'static,
+    //     S::Error: Send + 'static + Into<BoxDynError>,
+    //     P::Stream: Unpin + Send + 'static,
+    //     P::Layer: Layer<S>,
+    //     P::Beat: Unpin + Send,
+    //     <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>> + Send,
+    //     <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
+    //     <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
+    //         Send + Into<BoxDynError>,
+    //     Ctx: Send + 'static,
+    // {
+    //     fn type_name_of_val<T>(_t: &T) -> &'static str {
+    //         std::any::type_name::<T>()
+    //     }
+    //     let service = self.service;
+    //     let worker_id = self.id;
+    //     let worker = WorkerContext {
+    //         id: worker_id.clone().into(),
+    //         running: Arc::default(),
+    //         task_count: Arc::default(),
+    //         waker: Arc::default(),
+    //         shutdown: self.shutdown,
+    //         event_handler: self.event_handler.clone(),
+    //         is_ready: Arc::default(),
+    //         service: type_name_of_val(&service),
+    //     };
+
+    //     let backend = self.backend;
+    //     let mut heartbeat = backend.heartbeat();
+    //     let heartbeat = async move { while let Some(_) = heartbeat.next().await {} }.boxed();
+    //     let layer = backend.middleware();
+    //     let stream = backend.poll(&worker);
+    //     let service = ServiceBuilder::new()
+    //         .layer(TrackerLayer::new(worker.clone()))
+    //         .layer(ReadinessLayer::new(worker.is_ready.clone()))
+    //         .layer(Data::new(worker.clone()))
+    //         .layer(layer)
+    //         .service(service);
+
+    //     Runnable {
+    //         poller: Self::poll_jobs(worker.clone(), service, stream),
+    //         heartbeat,
+    //         worker,
+    //         running: false,
+    //     }
+    // }
 }
 
 /// A `Runnable` represents a unit of work that manages a worker's lifecycle and execution flow.
@@ -342,73 +428,24 @@ impl<S, P> Worker<Ready<S, P>> {
 pub struct Runnable {
     poller: BoxStream<'static, ()>,
     heartbeat: BoxFuture<'static, ()>,
-    worker: Worker<Context>,
+    worker: WorkerContext,
     running: bool,
 }
 
-impl Runnable {
-    /// Returns a handle to the worker, allowing control and functionality like stopping
-    pub fn get_handle(&self) -> Worker<Context> {
-        self.worker.clone()
-    }
-}
-
-impl fmt::Debug for Runnable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Runnable")
-            .field("poller", &"<stream>")
-            .field("heartbeat", &"<future>")
-            .field("worker", &self.worker)
-            .field("running", &self.running)
-            .finish()
-    }
-}
-
-impl Future for Runnable {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        let poller = &mut this.poller;
-        let heartbeat = &mut this.heartbeat;
-        let worker = &mut this.worker;
-
-        let poller_future = async { while (poller.next().await).is_some() {} };
-
-        if !this.running {
-            worker.start();
-            this.running = true;
-        }
-        let combined = Box::pin(join(poller_future, heartbeat.as_mut()));
-
-        let mut combined = select(
-            combined,
-            worker.state.clone().map(|_| worker.emit(Event::Stop)),
-        )
-        .boxed();
-        match Pin::new(&mut combined).poll(cx) {
-            Poll::Ready(_) => {
-                worker.emit(Event::Exit);
-                Poll::Ready(())
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
 /// Stores the Workers context
-#[derive(Clone, Default)]
-pub struct Context {
+#[derive(Clone)]
+pub struct WorkerContext {
+    pub(crate) id: Arc<WorkerId>,
     task_count: Arc<AtomicUsize>,
     waker: Arc<Mutex<Option<Waker>>>,
     running: Arc<AtomicBool>,
     shutdown: Option<Shutdown>,
-    event_handler: EventHandler,
+    event_handler: CtxEventHandler,
     is_ready: Arc<AtomicBool>,
-    service: String,
+    pub(crate) service: &'static str,
 }
 
-impl fmt::Debug for Context {
+impl fmt::Debug for WorkerContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WorkerContext")
             .field("shutdown", &["Shutdown handle"])
@@ -422,7 +459,7 @@ impl fmt::Debug for Context {
 pin_project! {
     /// A future tracked by the worker
     pub struct Tracked<F> {
-        ctx: Context,
+        ctx: WorkerContext,
         #[pin]
         task: F,
     }
@@ -444,7 +481,7 @@ impl<F: Future> Future for Tracked<F> {
     }
 }
 
-impl Context {
+impl WorkerContext {
     /// Start a task that is tracked by the worker
     pub fn track<F: Future>(&self, task: F) -> Tracked<F> {
         self.start_task();
@@ -529,12 +566,12 @@ impl Context {
     }
 
     /// Get the type of service
-    pub fn get_service(&self) -> &String {
+    pub fn get_service(&self) -> &str {
         &self.service
     }
 }
 
-impl Future for Context {
+impl Future for WorkerContext {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut TaskCtx<'_>) -> Poll<()> {
@@ -552,11 +589,11 @@ impl Future for Context {
 
 #[derive(Debug, Clone)]
 struct TrackerLayer {
-    ctx: Context,
+    ctx: WorkerContext,
 }
 
 impl TrackerLayer {
-    fn new(ctx: Context) -> Self {
+    fn new(ctx: WorkerContext) -> Self {
         Self { ctx }
     }
 }
@@ -572,8 +609,8 @@ impl<S> Layer<S> for TrackerLayer {
     }
 }
 #[derive(Debug, Clone)]
-struct TrackerService<S> {
-    ctx: Context,
+pub struct TrackerService<S> {
+    ctx: WorkerContext,
     service: S,
 }
 
@@ -617,7 +654,7 @@ impl<S> Layer<S> for ReadinessLayer {
     }
 }
 
-struct ReadinessService<S> {
+pub struct ReadinessService<S> {
     inner: S,
     is_ready: Arc<AtomicBool>,
 }
@@ -651,11 +688,17 @@ where
 mod tests {
     use std::{ops::Deref, sync::atomic::AtomicUsize};
 
+    use tower::layer::util::Stack;
+
     use crate::{
-        builder::{WorkerBuilder, WorkerFactoryFn},
+        builder::{
+            EventListenerExt, LongRunningExt, LongRunningLayer, RecordAttempt, WorkerBuilder,
+            WorkerFactory, WorkerFactoryFn,
+        },
         layers::extensions::Data,
         memory::MemoryStorage,
-        mq::MessageQueue,
+        service_fn::{self, service_fn, ServiceFn},
+        storage::Push,
     };
 
     use super::*;
@@ -686,12 +729,13 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
+        use tower::ServiceExt;
         let in_memory = MemoryStorage::new();
         let mut handle = in_memory.clone();
 
         tokio::spawn(async move {
             for i in 0..ITEMS {
-                handle.enqueue(i).await.unwrap();
+                handle.push(i).await.unwrap();
             }
         });
 
@@ -705,16 +749,74 @@ mod tests {
             }
         }
 
-        async fn task(job: u32, count: Data<Count>, worker: Worker<Context>) {
+        async fn task(job: u32, ctx: WorkerContext) -> Result<(), Error> {
+            // tokio::time::sleep(Duration::from_secs(1)).await;
+            // count.fetch_add(1, Ordering::Relaxed);
+            // if job == ITEMS - 1 {
+            //     worker.stop();
+            // }
+            Ok(())
+        }
+        let svc = service_fn(task);
+        let res = svc.oneshot(5).await;
+        // let worker = WorkerBuilder::new("rango-tango")
+        //     .backend(in_memory)
+        //     .data(Count::default())
+        //     .record_attempts()
+        //     .long_running()
+        //     .on_event(|ctx, ev| {
+        //         println!("CTX {:?}, On Event = {:?}", ctx, ev);
+        //     })
+        //     .build();
+        // worker.run().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_streams() {
+        let in_memory = MemoryStorage::new();
+        let mut handle = in_memory.clone();
+
+        tokio::spawn(async move {
+            for i in 0..ITEMS {
+                handle.push(i).await.unwrap();
+            }
+        });
+
+        #[derive(Clone, Debug, Default)]
+        struct Count(Arc<AtomicUsize>);
+
+        impl Deref for Count {
+            type Target = Arc<AtomicUsize>;
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        async fn task(job: u32, count: Data<Count>, worker: WorkerContext) {
+            tokio::time::sleep(Duration::from_secs(1)).await;
             count.fetch_add(1, Ordering::Relaxed);
             if job == ITEMS - 1 {
                 worker.stop();
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                println!("CTX {:?}", worker);
+                // panic!("boo");
             }
         }
         let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
             .data(Count::default())
-            .backend(in_memory);
-        let worker = worker.build_fn(task);
-        worker.run().await;
+            .record_attempts()
+            .long_running()
+            .on_event(|ctx, ev| {
+                println!("CTX {:?}, On Event = {:?}", ctx, ev);
+            })
+            .build_fn(task);
+        let mut event_stream = worker.stream();
+        while let Some(ev) = event_stream.next().await {
+            println!("On Event = {:?}", ev);
+            if let Event::Stop = ev {
+                break;
+            }
+        }
     }
 }

@@ -80,7 +80,7 @@ use apalis_core::poller::Poller;
 use apalis_core::request::RequestStream;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
-use apalis_core::worker::{Context, Worker};
+use apalis_core::worker::{SimpleWorker, WorkerContext};
 use apalis_core::{error::Error, request::Request, service_fn::FromRequest};
 use chrono::{DateTime, OutOfRangeError, TimeZone, Utc};
 pub use cron::Schedule;
@@ -182,7 +182,7 @@ where
 
     fn into_stream_worker(
         self,
-        worker: &Worker<Context>,
+        worker: &WorkerContext,
     ) -> RequestStream<Request<Req, CronContext<Tz>>> {
         let worker = worker.clone();
         let mut poller = build_stream(&self.timezone, &self.schedule);
@@ -308,7 +308,7 @@ where
 
     type Codec = NoopCodec<Request<Req, CronContext<Tz>>>;
 
-    fn poll(self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll(self, worker: &WorkerContext) -> Poller<Self::Stream, Self::Layer> {
         let stream = self.into_stream_worker(worker);
         Poller::new(stream, futures::future::pending())
     }

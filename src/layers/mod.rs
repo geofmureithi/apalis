@@ -41,25 +41,31 @@ pub use apalis_core::error::ErrorHandlingLayer;
 
 /// A trait that extends `WorkerBuilder` with additional middleware methods
 /// derived from `tower::ServiceBuilder`.
-pub trait WorkerBuilderExt<Req, Ctx, Source, Middleware, Serv> {
+pub trait WorkerBuilderExt<Req, Source, Middleware> {
     /// Optionally adds a new layer `T` into the [`WorkerBuilder`].
     fn option_layer<T>(
         self,
         layer: Option<T>,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::util::Either<T, Identity>, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::Either<T, Identity>, Middleware>>;
 
     /// Adds a [`Layer`] built from a function that accepts a service and returns another service.
     fn layer_fn<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::layer::LayerFn<F>, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::layer::LayerFn<F>, Middleware>>;
 
     /// Limits the max number of in-flight requests.
     #[cfg(feature = "limit")]
     fn concurrency(
         self,
         max: usize,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::limit::ConcurrencyLimitLayer, Middleware>, Serv>;
+    ) -> WorkerBuilder<
+        Req,
+        Source,
+        Srv,
+        Stack<tower::limit::ConcurrencyLimitLayer, Middleware>,
+        Worker,
+    >;
 
     /// Limits requests to at most `num` per the given duration.
     #[cfg(feature = "limit")]
@@ -67,41 +73,47 @@ pub trait WorkerBuilderExt<Req, Ctx, Source, Middleware, Serv> {
         self,
         num: u64,
         per: std::time::Duration,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::limit::RateLimitLayer, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::limit::RateLimitLayer, Middleware>>;
 
     /// Retries failed requests according to the given retry policy.
     #[cfg(feature = "retry")]
     fn retry<P>(
         self,
         policy: P,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::retry::RetryLayer<P>, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::retry::RetryLayer<P>, Middleware>>;
 
     /// Fails requests that take longer than `timeout`.
     #[cfg(feature = "timeout")]
     fn timeout(
         self,
         timeout: std::time::Duration,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::timeout::TimeoutLayer, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::timeout::TimeoutLayer, Middleware>>;
 
     /// Conditionally rejects requests based on `predicate`.
     #[cfg(feature = "filter")]
     fn filter<P>(
         self,
         predicate: P,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::filter::FilterLayer<P>, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::filter::FilterLayer<P>, Middleware>>;
 
     /// Conditionally rejects requests based on an asynchronous `predicate`.
     #[cfg(feature = "filter")]
     fn filter_async<P>(
         self,
         predicate: P,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::filter::AsyncFilterLayer<P>, Middleware>, Serv>;
+    ) -> WorkerBuilder<
+        Req,
+        Source,
+        Srv,
+        Stack<tower::filter::AsyncFilterLayer<P>, Middleware>,
+        Worker,
+    >;
 
     /// Maps one request type to another.
     fn map_request<F, R1, R2>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::util::MapRequestLayer<F>, Middleware>, Serv>
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::MapRequestLayer<F>, Middleware>>
     where
         F: FnMut(R1) -> R2 + Clone;
 
@@ -109,37 +121,37 @@ pub trait WorkerBuilderExt<Req, Ctx, Source, Middleware, Serv> {
     fn map_response<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::util::MapResponseLayer<F>, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::MapResponseLayer<F>, Middleware>>;
 
     /// Maps one error type to another.
     fn map_err<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::util::MapErrLayer<F>, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::MapErrLayer<F>, Middleware>>;
 
     /// Composes a function that transforms futures produced by the service.
     fn map_future<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::util::MapFutureLayer<F>, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::MapFutureLayer<F>, Middleware>>;
 
     /// Applies an asynchronous function after the service, regardless of whether the future succeeds or fails.
     fn then<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::util::ThenLayer<F>, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::ThenLayer<F>, Middleware>>;
 
     /// Executes a new future after this service's future resolves.
     fn and_then<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::util::AndThenLayer<F>, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::AndThenLayer<F>, Middleware>>;
 
     /// Maps the service's result type to a different value, regardless of success or failure.
     fn map_result<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tower::util::MapResultLayer<F>, Middleware>, Serv>;
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::MapResultLayer<F>, Middleware>>;
 
     /// Catch panics in execution and pipe them as errors
     #[cfg(feature = "catch-panic")]
@@ -155,31 +167,28 @@ pub trait WorkerBuilderExt<Req, Ctx, Source, Middleware, Serv> {
             CatchPanicLayer<fn(Box<dyn std::any::Any + Send>) -> apalis_core::error::Error>,
             Middleware,
         >,
-        Serv,
+        Worker,
     >;
     /// Enable tracing via tracing crate
     #[cfg(feature = "tracing")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tracing")))]
-    fn enable_tracing(
-        self,
-    ) -> WorkerBuilder<Req, Ctx, Source, Stack<tracing::TraceLayer, Middleware>, Serv>;
+    fn enable_tracing(self) -> WorkerBuilder<Req, Source, Stack<tracing::TraceLayer, Middleware>>;
 }
 
-impl<Req, Ctx, Middleware, Serv> WorkerBuilderExt<Req, Ctx, (), Middleware, Serv>
-    for WorkerBuilder<Req, Ctx, (), Middleware, Serv>
+impl<Req, Middleware, Source> WorkerBuilderExt<Req, Source, Middleware>
+    for WorkerBuilder<Req, Source, Middleware>
 {
     fn option_layer<T>(
         self,
         layer: Option<T>,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::util::Either<T, Identity>, Middleware>, Serv>
-    {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::Either<T, Identity>, Middleware>> {
         self.chain(|sb| sb.option_layer(layer))
     }
 
     fn layer_fn<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::layer::LayerFn<F>, Middleware>, Serv> {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::layer::LayerFn<F>, Middleware>> {
         self.chain(|sb| sb.layer_fn(f))
     }
 
@@ -187,8 +196,13 @@ impl<Req, Ctx, Middleware, Serv> WorkerBuilderExt<Req, Ctx, (), Middleware, Serv
     fn concurrency(
         self,
         max: usize,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::limit::ConcurrencyLimitLayer, Middleware>, Serv>
-    {
+    ) -> WorkerBuilder<
+        Req,
+        Source,
+        Svc,
+        Stack<tower::limit::ConcurrencyLimitLayer, Middleware>,
+        Worker,
+    > {
         self.chain(|sb| sb.concurrency_limit(max))
     }
 
@@ -197,7 +211,7 @@ impl<Req, Ctx, Middleware, Serv> WorkerBuilderExt<Req, Ctx, (), Middleware, Serv
         self,
         num: u64,
         per: std::time::Duration,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::limit::RateLimitLayer, Middleware>, Serv> {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::limit::RateLimitLayer, Middleware>> {
         self.chain(|sb| sb.rate_limit(num, per))
     }
 
@@ -205,7 +219,7 @@ impl<Req, Ctx, Middleware, Serv> WorkerBuilderExt<Req, Ctx, (), Middleware, Serv
     fn retry<P>(
         self,
         policy: P,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::retry::RetryLayer<P>, Middleware>, Serv> {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::retry::RetryLayer<P>, Middleware>> {
         self.chain(|sb| sb.retry(policy))
     }
 
@@ -213,7 +227,7 @@ impl<Req, Ctx, Middleware, Serv> WorkerBuilderExt<Req, Ctx, (), Middleware, Serv
     fn timeout(
         self,
         timeout: std::time::Duration,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::timeout::TimeoutLayer, Middleware>, Serv> {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::timeout::TimeoutLayer, Middleware>> {
         self.chain(|sb| sb.timeout(timeout))
     }
 
@@ -221,7 +235,7 @@ impl<Req, Ctx, Middleware, Serv> WorkerBuilderExt<Req, Ctx, (), Middleware, Serv
     fn filter<P>(
         self,
         predicate: P,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::filter::FilterLayer<P>, Middleware>, Serv> {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::filter::FilterLayer<P>, Middleware>> {
         self.chain(|sb| sb.filter(predicate))
     }
 
@@ -229,15 +243,20 @@ impl<Req, Ctx, Middleware, Serv> WorkerBuilderExt<Req, Ctx, (), Middleware, Serv
     fn filter_async<P>(
         self,
         predicate: P,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::filter::AsyncFilterLayer<P>, Middleware>, Serv>
-    {
+    ) -> WorkerBuilder<
+        Req,
+        Source,
+        Svc,
+        Stack<tower::filter::AsyncFilterLayer<P>, Middleware>,
+        Worker,
+    > {
         self.chain(|sb| sb.filter_async(predicate))
     }
 
     fn map_request<F, R1, R2>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::util::MapRequestLayer<F>, Middleware>, Serv>
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::MapRequestLayer<F>, Middleware>>
     where
         F: FnMut(R1) -> R2 + Clone,
     {
@@ -247,43 +266,42 @@ impl<Req, Ctx, Middleware, Serv> WorkerBuilderExt<Req, Ctx, (), Middleware, Serv
     fn map_response<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::util::MapResponseLayer<F>, Middleware>, Serv>
-    {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::MapResponseLayer<F>, Middleware>> {
         self.chain(|sb| sb.map_response(f))
     }
 
     fn map_err<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::util::MapErrLayer<F>, Middleware>, Serv> {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::MapErrLayer<F>, Middleware>> {
         self.chain(|sb| sb.map_err(f))
     }
 
     fn map_future<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::util::MapFutureLayer<F>, Middleware>, Serv> {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::MapFutureLayer<F>, Middleware>> {
         self.chain(|sb| sb.map_future(f))
     }
 
     fn then<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::util::ThenLayer<F>, Middleware>, Serv> {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::ThenLayer<F>, Middleware>> {
         self.chain(|sb| sb.then(f))
     }
 
     fn and_then<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::util::AndThenLayer<F>, Middleware>, Serv> {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::AndThenLayer<F>, Middleware>> {
         self.chain(|sb| sb.and_then(f))
     }
 
     fn map_result<F>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tower::util::MapResultLayer<F>, Middleware>, Serv> {
+    ) -> WorkerBuilder<Req, Source, Stack<tower::util::MapResultLayer<F>, Middleware>> {
         self.chain(|sb| sb.map_result(f))
     }
 
@@ -294,13 +312,13 @@ impl<Req, Ctx, Middleware, Serv> WorkerBuilderExt<Req, Ctx, (), Middleware, Serv
         self,
     ) -> WorkerBuilder<
         Req,
-        Ctx,
-        (),
+        Source,
+        Svc,
         Stack<
             CatchPanicLayer<fn(Box<dyn std::any::Any + Send>) -> apalis_core::error::Error>,
             Middleware,
         >,
-        Serv,
+        Worker,
     > {
         self.chain(|svc| svc.layer(CatchPanicLayer::new()))
     }
@@ -308,9 +326,7 @@ impl<Req, Ctx, Middleware, Serv> WorkerBuilderExt<Req, Ctx, (), Middleware, Serv
     /// Enable tracing via tracing crate
     #[cfg(feature = "tracing")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tracing")))]
-    fn enable_tracing(
-        self,
-    ) -> WorkerBuilder<Req, Ctx, (), Stack<tracing::TraceLayer, Middleware>, Serv> {
+    fn enable_tracing(self) -> WorkerBuilder<Req, Source, Stack<tracing::TraceLayer, Middleware>> {
         use tracing::TraceLayer;
 
         self.chain(|svc| svc.layer(TraceLayer::new()))

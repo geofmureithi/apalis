@@ -9,7 +9,7 @@ use apalis_cron::{CronStream, Schedule};
 use chrono::{DateTime, Utc};
 use tracing::{debug, info, Instrument, Level, Span};
 
-type WorkerCtx = Worker<Context>;
+type WorkerCtx = WorkerContext;
 
 #[derive(Default, Debug, Clone)]
 struct Reminder(DateTime<Utc>);

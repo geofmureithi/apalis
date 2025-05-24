@@ -52,7 +52,7 @@ pub enum PanicError {
 async fn send_email(
     email: Email,
     svc: Data<EmailService>,
-    worker: Worker<Context>,
+    worker: WorkerContext,
     cache: Data<ValidEmailCache>,
 ) -> Result<(), ServiceError> {
     info!("Job started in worker {:?}", worker.id());

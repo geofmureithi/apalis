@@ -2,6 +2,7 @@ use std::{any::Any, fmt::Debug, sync::Arc};
 
 use crate::{
     error::Error,
+    request::Parts,
     task::{attempt::Attempt, task_id::TaskId},
 };
 
@@ -17,17 +18,15 @@ use crate::{
 /// - `attempt`: An `Attempt` representing how many attempts were made to complete the task.
 /// - `_priv`: A private marker field to prevent external construction of the `Response`.
 #[derive(Debug, Clone)]
-pub struct Response<Res> {
+pub struct Response<Res, Ctx> {
     /// The result from a task
-    pub inner: Result<Res, Error>,
-    /// The task id
-    pub task_id: TaskId,
-    /// The current attempt
-    pub attempt: Attempt,
+    pub result: Result<Res, Error>,
+    /// The parts of the job
+    pub parts: Parts<Ctx>,
     pub(crate) _priv: (),
 }
 
-impl<Res> Response<Res> {
+impl<Res, Ctx> Response<Res, Ctx> {
     /// Creates a new `Response` instance.
     ///
     /// # Arguments
@@ -37,11 +36,10 @@ impl<Res> Response<Res> {
     ///
     /// # Returns
     /// A new `Response` instance.
-    pub fn new(inner: Result<Res, Error>, task_id: TaskId, attempt: Attempt) -> Self {
+    pub fn new(result: Result<Res, Error>, parts: &Parts<Ctx>) -> Self {
         Response {
-            inner,
-            task_id,
-            attempt,
+            result,
+            parts: parts.clone(),
             _priv: (),
         }
     }
@@ -55,8 +53,8 @@ impl<Res> Response<Res> {
     ///
     /// # Returns
     /// A `Response` instance containing the success value.
-    pub fn success(res: Res, task_id: TaskId, attempt: Attempt) -> Self {
-        Self::new(Ok(res), task_id, attempt)
+    pub fn success(res: Res, parts: &Parts<Ctx>) -> Self {
+        Self::new(Ok(res), parts)
     }
 
     /// Constructs a failed `Response`.
@@ -68,8 +66,8 @@ impl<Res> Response<Res> {
     ///
     /// # Returns
     /// A `Response` instance containing the error.
-    pub fn failure(error: Error, task_id: TaskId, attempt: Attempt) -> Self {
-        Self::new(Err(error), task_id, attempt)
+    pub fn failure(error: Error, parts: &Parts<Ctx>) -> Self {
+        Self::new(Err(error), parts)
     }
 
     /// Checks if the `Response` contains a success (`Ok`).
@@ -88,48 +86,46 @@ impl<Res> Response<Res> {
         self.inner.is_err()
     }
 
-    /// Maps the success value (`Res`) of the `Response` to another type using the provided function.
-    ///
-    /// # Arguments
-    /// - `f`: A function that takes a reference to the success value and returns a new value of type `T`.
-    ///
-    /// # Returns
-    /// A new `Response` with the transformed success value or the same error.
-    ///
-    /// # Type Parameters
-    /// - `F`: A function or closure that takes a reference to a value of type `Res` and returns a value of type `T`.
-    /// - `T`: The new type of the success value after mapping.
-    pub fn map<F, T>(&self, f: F) -> Response<T>
-    where
-        F: FnOnce(&Res) -> T,
-    {
-        Response {
-            inner: self.inner.as_ref().map(f).map_err(|e| e.clone()),
-            task_id: self.task_id.clone(),
-            attempt: self.attempt.clone(),
-            _priv: (),
-        }
-    }
+    // /// Maps the success value (`Res`) of the `Response` to another type using the provided function.
+    // ///
+    // /// # Arguments
+    // /// - `f`: A function that takes a reference to the success value and returns a new value of type `T`.
+    // ///
+    // /// # Returns
+    // /// A new `Response` with the transformed success value or the same error.
+    // ///
+    // /// # Type Parameters
+    // /// - `F`: A function or closure that takes a reference to a value of type `Res` and returns a value of type `T`.
+    // /// - `T`: The new type of the success value after mapping.
+    // pub fn map<F, T>(&self, f: F) -> Response<T>
+    // where
+    //     F: FnOnce(&Res) -> T,
+    // {
+    //     Response {
+    //         inner: self.inner.as_ref().map(f).map_err(|e| e.clone()),
+    //         task_id: self.task_id.clone(),
+    //         attempt: self.attempt.clone(),
+    //         _priv: (),
+    //     }
+    // }
 }
 
 /// Helper for Job Responses
-pub trait IntoResponse {
-    /// The final result of the job
-    type Result;
+pub trait IntoResponse<Ctx> {
     /// converts self into a Result
-    fn into_response(self) -> Self::Result;
+    fn into_response(self, parts: &Parts<Ctx>) -> Response<Self, Ctx>;
 }
 
-impl IntoResponse for bool {
-    type Result = std::result::Result<Self, Error>;
-    fn into_response(self) -> std::result::Result<Self, Error> {
-        match self {
+impl<Ctx> IntoResponse<Ctx> for bool {
+    fn into_response(self, parts: &Parts<Ctx>) -> Response<Self, Ctx> {
+        let result = match self {
             true => Ok(true),
             false => Err(Error::Failed(Arc::new(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Job returned false",
             ))))),
-        }
+        };
+        Response::new(result, parts)
     }
 }
 

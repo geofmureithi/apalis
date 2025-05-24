@@ -1,88 +1,152 @@
 use std::time::Duration;
 
-use futures::Future;
+use futures::{Future, Stream};
 
 use crate::{
     backend::Backend,
     request::{Parts, Request},
     task::task_id::TaskId,
+    worker::WorkerId,
 };
 
-/// Represents a [Storage] that can persist a request.
-pub trait Storage: Backend<Request<Self::Job, Self::Context>> {
-    /// The type of job that can be persisted
-    type Job;
+// // Base trait for associated types
+// pub trait Storage {
+//     type T;
+//
+//     type Context: Default;
+//     type Compact;
+// }
 
-    /// The error produced by the storage
-    type Error;
-
-    /// This is the type that storages store as the metadata related to a job
-    type Context: Default;
-
-    /// The format that the storage persists the jobs usually `Vec<u8>`
+// Modular traits
+pub trait Push<T, Context>: Backend<Request<T, Context>> {
     type Compact;
-
-    /// Pushes a job to a storage
-    fn push(
-        &mut self,
-        job: Self::Job,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
-        self.push_request(Request::new(job))
+    fn push(&mut self, task: T) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send
+    where
+        Context: Default,
+    {
+        self.push_request(Request::new(task))
     }
 
-    /// Pushes a constructed request to a storage
     fn push_request(
         &mut self,
-        req: Request<Self::Job, Self::Context>,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send;
+        req: Request<T, Context>,
+    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
 
-    /// Pushes a constructed request to a storage
     fn push_raw_request(
         &mut self,
-        req: Request<Self::Compact, Self::Context>,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send;
+        req: Request<Self::Compact, Context>,
+    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
+}
 
-    /// Push a job with defaults into the scheduled set
+pub trait Schedule<T, Context>: Push<T, Context> {
+    type Timestamp;
     fn schedule(
         &mut self,
-        job: Self::Job,
-        on: i64,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
-        self.schedule_request(Request::new(job), on)
+        task: T,
+        on: Self::Timestamp,
+    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send
+    where
+        Context: Default,
+    {
+        self.schedule_request(Request::new(task), on)
     }
 
-    /// Push a request into the scheduled set
     fn schedule_request(
         &mut self,
-        request: Request<Self::Job, Self::Context>,
-        on: i64,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send;
+        request: Request<T, Context>,
+        on: Self::Timestamp,
+    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
 
-    /// Return the number of pending jobs from the queue
-    fn len(&mut self) -> impl Future<Output = Result<i64, Self::Error>> + Send;
+    fn schedule_raw_request(
+        &mut self,
+        request: Request<Self::Compact, Context>,
+        on: Self::Timestamp,
+    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
+}
 
-    /// Fetch a job given an id
+pub trait Metric<Output> {
+    type Error;
+    fn metric(&mut self) -> impl Future<Output = Result<Output, Self::Error>> + Send;
+}
+
+pub trait FetchById<T, Context>: Backend<Request<T, Context>> {
+    type TaskId;
+
     fn fetch_by_id(
         &mut self,
-        job_id: &TaskId,
-    ) -> impl Future<Output = Result<Option<Request<Self::Job, Self::Context>>, Self::Error>> + Send;
+        task_id: &Self::TaskId,
+    ) -> impl Future<Output = Result<Option<Request<T, Context>>, Self::Error>> + Send;
+}
 
-    /// Update a job details
+pub trait Update<T, Context>: Backend<Request<T, Context>> {
     fn update(
         &mut self,
-        job: Request<Self::Job, Self::Context>,
+        task: Request<T, Context>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
 
-    /// Reschedule a job
+pub trait Reschedule<T, Context>: Backend<Request<T, Context>> {
     fn reschedule(
         &mut self,
-        job: Request<Self::Job, Self::Context>,
+        task: Request<T, Context>,
         wait: Duration,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
 
-    /// Returns true if there is no jobs in the storage
-    fn is_empty(&mut self) -> impl Future<Output = Result<bool, Self::Error>> + Send;
-
-    /// Vacuum the storage, removes done and killed jobs
+pub trait Vacuum {
+    type Error;
     fn vacuum(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
+}
+
+pub trait ConsumeNext<T, Context>: Backend<Request<T, Context>> {
+    fn consume_next(
+        &mut self,
+    ) -> impl Future<Output = Result<Option<Request<T, Context>>, Self::Error>> + Send;
+}
+
+pub trait ConsumeBatch<T, Context>: Backend<Request<T, Context>> {
+    fn consume_batch(&mut self) -> Self::Stream;
+}
+
+pub trait Fetch<T> {
+    type Id;
+    type Error;
+    fn fetch(
+        &mut self,
+        id: Self::Id,
+    ) -> impl Future<Output = Result<Option<T>, Self::Error>> + Send;
+
+    // fn fetch_batch
+}
+
+pub trait FetchBatch<T> {
+    type Id;
+    type Error;
+    type Stream: Stream<Item = Result<Option<T>, Self::Error>>;
+    fn fetch_batch(&mut self, ids: &[Self::Id]) -> Self::Stream;
+}
+
+pub trait ResumeById<T, Context>: Backend<Request<T, Context>> {
+    type Id;
+
+    fn resume_by_id(
+        &mut self,
+        id: Self::Id,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+}
+
+pub trait ResumeAbandoned<T, Context>: Backend<Request<T, Context>> {
+    fn resume_abandoned(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
+}
+
+pub trait RegisterWorker<T, Context>: Backend<Request<T, Context>> {
+    fn register_worker(
+        &mut self,
+        worker_id: WorkerId,
+    ) -> impl Future<Output = Result<usize, Self::Error>> + Send;
+}
+
+pub trait Notify<Event> {
+    type Error;
+    fn notify(&mut self, ev: Event) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }

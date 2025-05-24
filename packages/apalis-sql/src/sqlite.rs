@@ -12,7 +12,7 @@ use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::worker::{Context, Event, Worker, WorkerId};
+use apalis_core::worker::{Event, SimpleWorker, WorkerContext, WorkerId};
 use apalis_core::{backend::Backend, codec::Codec};
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -117,7 +117,7 @@ impl<T, C> SqliteStorage<T, C> {
     /// Keeps a storage notified that the worker is still alive manually
     pub async fn keep_alive_at(
         &mut self,
-        worker: &Worker<Context>,
+        worker: &WorkerContext,
         last_seen: i64,
     ) -> Result<(), sqlx::Error> {
         let worker_type = self.config.namespace.clone();
@@ -194,7 +194,7 @@ where
 {
     fn stream_jobs(
         &self,
-        worker: &Worker<Context>,
+        worker: &WorkerContext,
         interval: Duration,
         buffer_size: usize,
     ) -> impl Stream<Item = Result<Option<Request<T, SqlContext>>, sqlx::Error>> {
@@ -489,7 +489,7 @@ where
 
     type Codec = JsonCodec<String>;
 
-    fn poll(mut self, worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll(mut self, worker: &WorkerContext) -> Poller<Self::Stream, Self::Layer> {
         let layer = AckLayer::new(self.clone());
         let config = self.config.clone();
         let controller = self.controller.clone();
@@ -627,7 +627,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
             .collect())
     }
 
-    async fn list_workers(&self) -> Result<Vec<Worker<WorkerState>>, Self::Error> {
+    async fn list_workers(&self) -> Result<Vec<SimpleWorker<WorkerState>>, Self::Error> {
         let fetch_query =
             "SELECT id, layers, last_seen FROM Workers WHERE worker_type = ? ORDER BY last_seen DESC LIMIT 20 OFFSET ?";
         let res: Vec<(String, String, i64)> = sqlx::query_as(fetch_query)
@@ -637,7 +637,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
             .await?;
         Ok(res
             .into_iter()
-            .map(|w| Worker::new(WorkerId::new(w.0), WorkerState::new::<Self>(w.1)))
+            .map(|w| SimpleWorker::new(WorkerId::new(w.0), WorkerState::new::<Self>(w.1)))
             .collect())
     }
 }
@@ -693,7 +693,7 @@ mod tests {
 
     async fn consume_one(
         storage: &mut SqliteStorage<Email>,
-        worker: &Worker<Context>,
+        worker: &WorkerContext,
     ) -> Request<Email, SqlContext> {
         let mut stream = storage
             .stream_jobs(worker, std::time::Duration::from_secs(10), 1)
@@ -709,10 +709,10 @@ mod tests {
     async fn register_worker_at(
         storage: &mut SqliteStorage<Email>,
         last_seen: i64,
-    ) -> Worker<Context> {
+    ) -> WorkerContext {
         let worker_id = WorkerId::new("test-worker");
 
-        let worker = Worker::new(worker_id, Default::default());
+        let worker = SimpleWorker::new(worker_id, Default::default());
         storage
             .keep_alive_at(&worker, last_seen)
             .await
@@ -721,7 +721,7 @@ mod tests {
         worker
     }
 
-    async fn register_worker(storage: &mut SqliteStorage<Email>) -> Worker<Context> {
+    async fn register_worker(storage: &mut SqliteStorage<Email>) -> WorkerContext {
         register_worker_at(storage, Utc::now().timestamp()).await
     }
 

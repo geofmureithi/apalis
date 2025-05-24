@@ -168,7 +168,6 @@ where
                     }
                 };
             }
-
             // Unwrap: The check above always sets `this.curr_req` if none.
             this.queue.push(svc.call(this.curr_req.take().unwrap()));
         }
