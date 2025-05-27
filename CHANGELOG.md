@@ -14,6 +14,7 @@ All notable changes to this project are documented in this file.
 - **deps** : update rust crate criterion to 0.6.0 ([#574](https://github.com/geofmureithi/apalis/pull/574))
 - **error-handling** : ease the error type that is returned by a worker function ([#577](https://github.com/geofmureithi/apalis/pull/577))
 - **PostgresStorage**: fix type error when updating jobs ([#539](https://github.com/geofmureithi/apalis/issues/539))
+- **workflows** improve permissions for github workflows ([#578](https://github.com/geofmureithi/apalis/issues/578))
 
 ## [0.7.1](https://github.com/geofmureithi/apalis/releases/tag/v0.7.1)
 
