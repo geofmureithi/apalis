@@ -1,7 +1,7 @@
-use std::{any::Any, fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use crate::{
-    error::Error,
+    error::{BoxDynError, Error},
     task::{attempt::Attempt, task_id::TaskId},
 };
 
@@ -133,21 +133,17 @@ impl IntoResponse for bool {
     }
 }
 
-impl<T: Any, E: std::error::Error + Sync + Send + 'static + Any> IntoResponse
-    for std::result::Result<T, E>
-{
+impl<T, E: Into<BoxDynError>> IntoResponse for std::result::Result<T, E> {
     type Result = Result<T, Error>;
     fn into_response(self) -> Result<T, Error> {
         match self {
             Ok(value) => Ok(value),
             Err(e) => {
-                // Try to downcast the error to see if it is already of type `Error`
-                if let Some(custom_error) =
-                    (&e as &(dyn std::error::Error + 'static)).downcast_ref::<Error>()
-                {
+                let e = e.into();
+                if let Some(custom_error) = e.downcast_ref::<Error>() {
                     return Err(custom_error.clone());
                 }
-                Err(Error::Failed(Arc::new(Box::new(e))))
+                Err(Error::Failed(Arc::new(e)))
             }
         }
     }
