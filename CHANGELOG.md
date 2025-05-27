@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.2](https://github.com/geofmureithi/apalis/releases/tag/v0.7.2)
+
 ### Fixed
 
 - **RedisStorage** the `stats` script is now compatible with dragonfly
