@@ -11,6 +11,7 @@ All notable changes to this project are documented in this file.
 - **SqliteStorage** Event::Idle never trigger ([#571](https://github.com/geofmureithi/apalis/pull/571))
 - **deps** : update rust crate redis to 0.31 ([#555](https://github.com/geofmureithi/apalis/pull/555))
 - **deps** : update rust crate sentry-core to 0.38.0 ([#569](https://github.com/geofmureithi/apalis/pull/569))
+- **deps** : update rust crate criterion to 0.6.0 ([#574](https://github.com/geofmureithi/apalis/pull/574))
 
 
 ## Fixed
