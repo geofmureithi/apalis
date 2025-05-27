@@ -12,10 +12,7 @@ All notable changes to this project are documented in this file.
 - **deps** : update rust crate redis to 0.31 ([#555](https://github.com/geofmureithi/apalis/pull/555))
 - **deps** : update rust crate sentry-core to 0.38.0 ([#569](https://github.com/geofmureithi/apalis/pull/569))
 - **deps** : update rust crate criterion to 0.6.0 ([#574](https://github.com/geofmureithi/apalis/pull/574))
-
-
-## Fixed
-
+- **error-handling** : ease the error type that is returned by a worker function ([#577](https://github.com/geofmureithi/apalis/pull/577))
 - **PostgresStorage**: fix type error when updating jobs ([#539](https://github.com/geofmureithi/apalis/issues/539))
 
 ## [0.7.1](https://github.com/geofmureithi/apalis/releases/tag/v0.7.1)
