@@ -3,6 +3,8 @@ on:
     tags: ['v*']
 
 name: Continuous delivery
+permissions:
+  contents: read
 
 jobs:
   test:

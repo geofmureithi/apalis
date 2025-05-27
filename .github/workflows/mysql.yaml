@@ -9,6 +9,8 @@ on:
       - "packages/apalis-core/**"
 
 name: Mysql CI
+permissions:
+  contents: read
 
 jobs:
   test-mysql:

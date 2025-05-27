@@ -10,6 +10,8 @@ on:
 
 
 name: Sqlite CI
+permissions:
+  contents: read
 
 jobs:
   test-sqlite:

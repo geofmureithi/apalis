@@ -7,6 +7,8 @@ on:
 
 
 name: Redis CI
+permissions:
+  contents: read
 
 jobs:
   test-redis:
