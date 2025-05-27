@@ -9,6 +9,8 @@ on:
       - "packages/apalis-core/**"
 
 name: Postgres CI
+permissions:
+  contents: read
 
 jobs:
   test-sqlite:

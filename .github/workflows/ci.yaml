@@ -5,6 +5,8 @@ on:
   workflow_call:
 
 name: CI
+permissions:
+  contents: read
 
 jobs:
   check:
