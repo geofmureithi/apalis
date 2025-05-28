@@ -893,4 +893,67 @@ mod tests {
         assert_eq!(*ctx.last_error(), Some("{\"Ok\":\"success\"}".to_owned()));
         assert_eq!(job.parts.attempt.current(), 1);
     }
+
+    #[tokio::test]
+    async fn test_list_workers() {
+        let mut storage = setup().await;
+        register_worker(&mut storage).await;
+
+        let workers = storage.list_workers().await.expect("no workers found!");
+        assert_eq!(workers.len(), 1);
+    }
+
+    /// Pushes email jobs and verifies they are listed correctly.
+    #[tokio::test]
+    async fn test_push_and_list_10_jobs() {
+        let mut storage = setup().await;
+
+        // Push 100 email jobs
+        for i in 0..10 {
+            push_email(
+                &mut storage,
+                Email {
+                    subject: format!("Test Subject {i}"),
+                    to: format!("user{i}@example.com"),
+                    text: format!("This is test email number {i}"),
+                },
+            )
+            .await;
+        }
+
+        // Verify the count of jobs
+        let jobs_num = storage
+            .list_jobs(&State::Pending, 1)
+            .await
+            .expect("Failed to get job Count");
+        assert_eq!(jobs_num.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn test_stats() {
+        let mut storage = setup().await;
+        let worker = register_worker(&mut storage).await;
+
+        // Push 100 email jobs
+        for i in 0..10 {
+            push_email(
+                &mut storage,
+                Email {
+                    subject: format!("Test Subject {i}"),
+                    to: format!("user{i}@example.com"),
+                    text: format!("This is test email number {i}"),
+                },
+            )
+            .await;
+        }
+
+        let stats = storage.stats().await.expect("Failed to get stats");
+
+        assert_eq!(stats.pending, 10);
+
+        let job = consume_one(&mut storage, &worker).await;
+        let ctx = job.parts.context;
+        assert_eq!(stats.pending, 10);
+        assert_eq!(*ctx.status(), State::Running);
+    }
 }
