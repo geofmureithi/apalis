@@ -43,11 +43,13 @@ pub type FnFuture<F, O, R, E> = Map<F, fn(O) -> std::result::Result<R, E>>;
 /// Handles extraction
 pub trait FromRequest<Req>: Sized {
     /// Perform the extraction.
-    fn from_request(req: &Req) -> Result<Self, Error>;
+    fn from_request(req: &Req) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
-impl<T: Clone + Send + Sync + 'static, Req, Ctx> FromRequest<Request<Req, Ctx>> for Data<T> {
-    fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
+impl<T: Clone + Send + Sync + 'static, Req: Sync, Ctx: Sync> FromRequest<Request<Req, Ctx>>
+    for Data<T>
+{
+    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
         req.parts.data.get_checked().cloned().map(Data::new)
     }
 }
@@ -55,40 +57,35 @@ impl<T: Clone + Send + Sync + 'static, Req, Ctx> FromRequest<Request<Req, Ctx>> 
 macro_rules! impl_service_fn {
     ($($K:ident),+) => {
         #[allow(unused_parens)]
-        impl<T, F, Req, R, Ctx, $($K),+> Service<Request<Req, Ctx>> for ServiceFn<T, Req, Ctx, ($($K),+)>
+        impl<T, F, Req: Send + 'static, R, Ctx: Send + 'static, $($K),+> Service<Request<Req, Ctx>> for ServiceFn<T, Req, Ctx, ($($K),+)>
         where
-            T: FnMut(Req, $($K),+) -> F,
-            F: Future,
+            T: FnMut(Req, $($K),+) -> F + Send + Clone + 'static,
+            F: Future + Send,
             F::Output: IntoResponse<Result = R>,
-            $($K: FromRequest<Request<Req, Ctx>>),+,
+            $($K: FromRequest<Request<Req, Ctx>> + Send),+,
         {
             type Response = R;
             type Error = Error;
-            type Future = futures::future::Either<futures::future::Ready<Result<R, Error>>, FnFuture<F, F::Output, R, Error>>;
+            type Future = futures::future::BoxFuture<'static, Result<R, Error>>;
 
             fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
                 Poll::Ready(Ok(()))
             }
 
             fn call(&mut self, task: Request<Req, Ctx>) -> Self::Future {
-
+                let mut svc = self.f.clone();
                 #[allow(non_snake_case)]
-                let fut = {
-                    let results: Result<($($K),+), Error> = (|| {
-                        Ok(($($K::from_request(&task)?),+))
-                    })();
-
+                let fut = async move {
+                    let results: Result<($($K),+), Error> = { Ok(($($K::from_request(&task).await?),+)) };
                     match results {
                         Ok(($($K),+)) => {
                             let req = task.args;
-                            (self.f)(req, $($K),+)
+                            (svc)(req, $($K),+).map(F::Output::into_response).await
                         }
-                        Err(e) => return futures::future::Either::Left(futures::future::err(e).into()),
+                        Err(e) => Err(e),
                     }
                 };
-
-
-                futures::future::Either::Right(fut.map(F::Output::into_response))
+                fut.boxed()
             }
         }
     };
@@ -98,7 +95,7 @@ impl<T, F, Req, R, Ctx> Service<Request<Req, Ctx>> for ServiceFn<T, Req, Ctx, ()
 where
     T: FnMut(Req) -> F,
     F: Future,
-    F::Output: IntoResponse<Result = R>,
+    F::Output: IntoResponse<Output = R>,
 {
     type Response = R;
     type Error = Error;

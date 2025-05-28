@@ -78,8 +78,8 @@ impl Attempt {
     }
 }
 
-impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for Attempt {
-    fn from_request(req: &Request<Req, Ctx>) -> Result<Self, crate::error::Error> {
+impl<Req: Sync, Ctx: Sync> FromRequest<Request<Req, Ctx>> for Attempt {
+    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, crate::error::Error> {
         Ok(req.parts.attempt.clone())
     }
 }

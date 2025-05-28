@@ -113,14 +113,14 @@ impl<Res, Ctx> Response<Res, Ctx> {
 /// Helper for Job Responses
 pub trait IntoResponse {
     /// The final result of the job
-    type Result;
+    type Output;
 
     /// converts self into a Result
-    fn into_response(self) -> Result<Self::Result, Error>;
+    fn into_response(self) -> Result<Self::Output, Error>;
 }
 
 impl IntoResponse for bool {
-    type Result = bool;
+    type Output = bool;
     fn into_response(self) -> Result<bool, Error> {
         match self {
             true => Ok(true),
@@ -133,7 +133,7 @@ impl IntoResponse for bool {
 }
 
 impl<T, E: Into<BoxDynError> + Send + 'static> IntoResponse for std::result::Result<T, E> {
-    type Result = T;
+    type Output = T;
     fn into_response(self) -> Result<T, Error> {
         match self {
             Ok(value) => Ok(value),
@@ -151,7 +151,7 @@ impl<T, E: Into<BoxDynError> + Send + 'static> IntoResponse for std::result::Res
 macro_rules! SIMPLE_JOB_RESULT {
     ($type:ty) => {
         impl IntoResponse for $type {
-            type Result = $type;
+            type Output = $type;
             fn into_response(self) -> std::result::Result<$type, Error> {
                 Ok(self)
             }

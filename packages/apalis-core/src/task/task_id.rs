@@ -63,8 +63,8 @@ impl<'de> Deserialize<'de> for TaskId {
     }
 }
 
-impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for TaskId {
-    fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
+impl<Req: Sync, Ctx: Sync> FromRequest<Request<Req, Ctx>> for TaskId {
+    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
         Ok(req.parts.task_id.clone())
     }
 }

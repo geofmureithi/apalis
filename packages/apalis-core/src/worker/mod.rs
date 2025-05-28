@@ -216,8 +216,8 @@ impl WorkerContext {
     }
 }
 
-impl<Req, Ctx> FromRequest<Request<Req, Ctx>> for WorkerContext {
-    fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
+impl<Req: Sync, Ctx: Sync> FromRequest<Request<Req, Ctx>> for WorkerContext {
+    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
         req.parts.data.get_checked().cloned()
     }
 }
