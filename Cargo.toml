@@ -125,6 +125,7 @@ members = [
   "examples/rest-api", 
   "examples/stepped-tasks",
   "examples/retries",
+  "examples/shared-postgres-conn",
 ]
 
 
