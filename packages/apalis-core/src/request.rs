@@ -38,6 +38,8 @@ pub struct Parts<Ctx> {
 
     /// The Context stored by the storage
     pub context: Ctx,
+
+    pub state: State,
 }
 
 impl<T, Ctx> Request<T, Ctx> {
@@ -63,6 +65,7 @@ impl<T, Ctx> Request<T, Ctx> {
                 task_id: Default::default(),
                 attempt: Default::default(),
                 data: Default::default(),
+                state: State::Pending,
             },
         }
     }
@@ -76,6 +79,7 @@ impl<T, Ctx> Request<T, Ctx> {
                 task_id: Default::default(),
                 attempt: Default::default(),
                 data,
+                state: State::Pending,
             },
         }
     }
@@ -99,58 +103,65 @@ impl<T, Ctx> std::ops::DerefMut for Request<T, Ctx> {
     }
 }
 
-// /// Represents the state of a job/task
-// #[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
-// pub enum State {
-//     /// Job is pending
-//     #[serde(alias = "Latest")]
-//     Pending,
-//     /// Job is in the queue but not ready for execution
-//     Scheduled,
-//     /// Job is running
-//     Running,
-//     /// Job was done successfully
-//     Done,
-//     /// Job has failed. Check `last_error`
-//     Failed,
-//     /// Job has been killed
-//     Killed,
-// }
+/// Represents the state of a task
+#[non_exhaustive]
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
+pub enum State {
+    /// Job is pending
+    #[serde(alias = "Latest")]
+    Pending,
+    /// Job is queued for execution, but no worker has picked it up
+    Queued,
+    /// Job is running
+    Running,
+    /// Job was done successfully
+    Done,
+    /// Job has failed. Check `last_error`
+    Failed,
+    /// Job has been killed
+    Killed,
+}
 
-// impl Default for State {
-//     fn default() -> Self {
-//         State::Pending
-//     }
-// }
+impl Default for State {
+    fn default() -> Self {
+        State::Pending
+    }
+}
 
-// impl FromStr for State {
-//     type Err = Error;
+#[derive(Debug, thiserror::Error)]
+pub enum StateError {
+    #[error("Unknown state: {0}")]
+    UnknownState(String),
+}
 
-//     fn from_str(s: &str) -> Result<Self, Self::Err> {
-//         match s {
-//             "Pending" | "Latest" => Ok(State::Pending),
-//             "Running" => Ok(State::Running),
-//             "Done" => Ok(State::Done),
-//             "Failed" => Ok(State::Failed),
-//             "Killed" => Ok(State::Killed),
-//             "Scheduled" => Ok(State::Scheduled),
-//             _ => Err(Error::MissingData("Invalid Job state".to_string())),
-//         }
-//     }
-// }
+impl FromStr for State {
+    type Err = StateError;
 
-// impl fmt::Display for State {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         match &self {
-//             State::Pending => write!(f, "Pending"),
-//             State::Running => write!(f, "Running"),
-//             State::Done => write!(f, "Done"),
-//             State::Failed => write!(f, "Failed"),
-//             State::Killed => write!(f, "Killed"),
-//             State::Scheduled => write!(f, "Scheduled"),
-//         }
-//     }
-// }
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Pending" => Ok(State::Pending),
+            "Queued" => Ok(State::Queued),
+            "Running" => Ok(State::Running),
+            "Done" => Ok(State::Done),
+            "Failed" => Ok(State::Failed),
+            "Killed" => Ok(State::Killed),
+            _ => Err(StateError::UnknownState(s.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            State::Pending => write!(f, "Pending"),
+            State::Queued => write!(f, "Queued"),
+            State::Running => write!(f, "Running"),
+            State::Done => write!(f, "Done"),
+            State::Failed => write!(f, "Failed"),
+            State::Killed => write!(f, "Killed"),
+        }
+    }
+}
 
 /// Represents a stream that is send
 pub type BoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + 'a>>;

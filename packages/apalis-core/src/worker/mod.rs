@@ -695,7 +695,7 @@ mod tests {
             EventListenerExt, LongRunningExt, LongRunningLayer, RecordAttempt, WorkerBuilder,
             WorkerFactory, WorkerFactoryFn,
         },
-        layers::extensions::Data,
+        layers::{extensions::Data, AcknowledgementExt},
         memory::MemoryStorage,
         service_fn::{self, service_fn, ServiceFn},
         storage::Push,
@@ -757,11 +757,18 @@ mod tests {
             }
             Ok(())
         }
+
+        struct MyAcknowledger;
+        struct WebhookService;
+
+
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)
             .data(Count::default())
             .record_attempts()
             .long_running()
+            .ack_with(MyAcknowledger)
+            .ack_with(WebhookService)
             .on_event(|ctx, ev| {
                 println!("CTX {:?}, On Event = {:?}", ctx, ev);
             })

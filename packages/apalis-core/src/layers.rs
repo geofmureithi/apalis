@@ -1,4 +1,5 @@
 use crate::backend::Encoder;
+use crate::builder::{LongRunningLayer, WorkerBuilder};
 use crate::error::{BoxDynError, Error};
 use crate::request::Request;
 use crate::response::Response;
@@ -6,6 +7,7 @@ use futures::channel::mpsc::{SendError, Sender};
 use futures::SinkExt;
 use futures::{future::BoxFuture, Future, FutureExt};
 use serde::Serialize;
+use tower::layer::util::Stack;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::{fmt, sync::Arc};
@@ -311,5 +313,35 @@ where
             todo!()
         };
         fut_with_ack.boxed()
+    }
+}
+
+pub trait AcknowledgementExt<Req, Source, Middleware, Ack>: Sized {
+    fn ack_with(self, ack: Ack) -> WorkerBuilder<Req, Source, Stack<LongRunningLayer, Middleware>>;
+}
+
+trait AcknowledgeTask<Res, Ctx> {
+    type Error;
+    fn ack(&mut self, res: Response<Res, Ctx>) -> Result<(), Self::Error>;
+}
+
+impl<Args, P, M, Ctx, Ack> AcknowledgementExt<Request<Args, Ctx>, P, M, Ack>
+    for WorkerBuilder<Request<Args, Ctx>, P, M>
+where
+    M: Layer<LongRunningLayer>,
+{
+    fn ack_with(
+        self,
+        ack: Ack,
+    ) -> WorkerBuilder<Request<Args, Ctx>, P, Stack<LongRunningLayer, M>> {
+        let this = self.layer(LongRunningLayer);
+        WorkerBuilder {
+            id: this.id,
+            request: this.request,
+            layer: this.layer,
+            source: this.source,
+            shutdown: this.shutdown,
+            event_handler: this.event_handler,
+        }
     }
 }

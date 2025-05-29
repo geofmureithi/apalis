@@ -61,7 +61,7 @@ macro_rules! impl_service_fn {
         where
             T: FnMut(Req, $($K),+) -> F + Send + Clone + 'static,
             F: Future + Send,
-            F::Output: IntoResponse<Result = R>,
+            F::Output: IntoResponse<Output = R>,
             $($K: FromRequest<Request<Req, Ctx>> + Send),+,
         {
             type Response = R;
