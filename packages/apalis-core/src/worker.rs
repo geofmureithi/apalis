@@ -1,11 +1,10 @@
 use crate::backend::Backend;
-
-use crate::builder::EventListener;
-use crate::error::{BoxDynError, Error};
-use crate::layers::extensions::{AddExtension, Data};
-use crate::monitor::shutdown::Shutdown;
+use crate::data::MissingDataError;
+use crate::error::BoxDynError;
+use crate::layers::extensions::Data;
 use crate::request::Request;
 use crate::service_fn::FromRequest;
+use crate::shutdown::Shutdown;
 use crate::task::task_id::TaskId;
 use call_all::CallAllUnordered;
 use futures::channel::mpsc;
@@ -18,20 +17,13 @@ use std::any::type_name;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::task::{Context as TaskCtx, Poll, Waker};
-use std::time::Duration;
 use thiserror::Error;
-use tower::layer::util::Identity;
 use tower::{Layer, Service, ServiceBuilder};
-use traits::WorkerStream;
-
-mod call_all;
-pub mod traits;
 
 /// A worker name wrapper usually used by Worker builder
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -185,6 +177,7 @@ impl WorkerContext {
     pub fn start(&self) {
         self.running.store(true, Ordering::Relaxed);
         self.is_ready.store(true, Ordering::Release);
+        self.emit(Event::Start);
     }
 
     pub(crate) fn wrap_listener<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
@@ -217,19 +210,21 @@ impl WorkerContext {
 }
 
 impl<Req: Sync, Ctx: Sync> FromRequest<Request<Req, Ctx>> for WorkerContext {
-    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
+    type Error = MissingDataError;
+    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Self::Error> {
         req.parts.data.get_checked().cloned()
     }
 }
 
 impl<Args, Ctx, S, B, M> Worker<Args, Ctx, B, S, M>
 where
-    B: Backend<Request<Args, Ctx>, Error = crate::error::Error>,
+    B: Backend<Request<Args, Ctx>>,
     S: Service<Request<Args, Ctx>> + Send + 'static,
     B::Stream: Unpin + Send + 'static,
     B::Beat: Unpin + Send + 'static,
     Args: Send + 'static,
     Ctx: Send + 'static,
+    B::Error: Into<BoxDynError> + Send + 'static,
     // S::Future: Send,
     // S::Error: std::error::Error + Send + Sync + 'static,
     // TrackerLayer, Stack<ReadinessLayer, Stack<ServiceBuilder<M>, Stack<Data<WorkerContext>, Identity>>>
@@ -238,11 +233,11 @@ where
     B::Layer: Layer<M::Service>,
     <B::Layer as Layer<M::Service>>::Service: Service<Request<Args, Ctx>> + Send + 'static,
     <<B::Layer as Layer<M::Service>>::Service as Service<Request<Args, Ctx>>>::Error:
-        std::error::Error + Send + Sync + 'static,
+        Into<BoxDynError> + Send + Sync + 'static,
     <<B::Layer as Layer<M::Service>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
     M::Service: Service<Request<Args, Ctx>> + Send + 'static,
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
-    <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Error: std::error::Error + Send + Sync +'static
+    <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Error: Into<BoxDynError> + Send + Sync +'static
 {
     pub fn run(self) -> BoxFuture<'static, Result<(), ()>> {
         let mut ctx = WorkerContext::new::<M::Service>(&self.id);
@@ -280,7 +275,7 @@ where
         let combined = Box::pin(join(poller_future, heartbeat));
         let w = worker.clone();
         let mut combined =
-            select(combined, worker.clone().map(move |_| w.emit(Event::Stop))).boxed();
+            select(combined, worker.clone()).boxed();
 
         let fut = async move {
             worker.start();
@@ -314,24 +309,20 @@ where
         let stream = backend.poll(&worker);
 
         let jobs = poll_jobs(service, stream);
-        let starter_stream = futures::stream::iter(vec![Event::Start]);
-
-        let wait_for_exit_stream = futures::stream::iter(vec![Event::Stop]);
-
-        let work_stream = futures::stream_select!(heartbeat, jobs, wait_for_exit_stream);
-        starter_stream.chain(work_stream)
+        let work_stream = futures::stream_select!(heartbeat, jobs);
+        work_stream
 
     }
 }
 
-fn poll_jobs<Svc, Stm, Req, Ctx>(service: Svc, stream: Stm) -> BoxStream<'static, Event>
+fn poll_jobs<Svc, Stm, Req, Ctx, E: Into<BoxDynError> + Send + 'static>(service: Svc, stream: Stm) -> BoxStream<'static, Event>
 where
     Svc: Service<Request<Req, Ctx>> + Send + 'static,
-    Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, Error>> + Send + Unpin + 'static,
+    Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, E>> + Send + Unpin + 'static,
     Req: Send + 'static,
     Svc::Future: Send,
     Ctx: Send + 'static,
-    Svc::Error: std::error::Error + Sync + Send,
+    Svc::Error: Into<BoxDynError> + Sync + Send,
 {
     let (tx, rx) = mpsc::channel(10);
     let txx = tx.clone();
@@ -351,7 +342,7 @@ where
                     None
                 }
                 Err(err) => {
-                    txx.send(Event::Error(Box::new(err))).await.unwrap();
+                    txx.send(Event::Error(err.into())).await.unwrap();
                     None
                 }
             }
@@ -359,64 +350,10 @@ where
     });
     let stream = CallAllUnordered::new(service, stream).map(|r| match r {
         Ok(_) => Event::Success,
-        Err(err) => Event::Error(Box::new(err)),
+        Err(err) => Event::Error(err.into()),
     });
     let stream = futures::stream::select(rx, stream);
     stream.boxed()
-}
-
-impl<S, P, Middleware, Args, Ctx> Worker<Args, Ctx, S, P, Middleware> {
-    // /// Start a worker
-    // pub fn run<Req, Ctx>(self) -> Runnable
-    // where
-    //     S: Service<Request<Req, Ctx>> + 'static,
-    //     P: Backend<Request<Req, Ctx>, Error = crate::error::Error> + 'static,
-    //     Req: Send + 'static,
-    //     S::Error: Send + 'static + Into<BoxDynError>,
-    //     P::Stream: Unpin + Send + 'static,
-    //     P::Layer: Layer<S>,
-    //     P::Beat: Unpin + Send,
-    //     <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>> + Send,
-    //     <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
-    //     <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
-    //         Send + Into<BoxDynError>,
-    //     Ctx: Send + 'static,
-    // {
-    //     fn type_name_of_val<T>(_t: &T) -> &'static str {
-    //         std::any::type_name::<T>()
-    //     }
-    //     let service = self.service;
-    //     let worker_id = self.id;
-    //     let worker = WorkerContext {
-    //         id: worker_id.clone().into(),
-    //         running: Arc::default(),
-    //         task_count: Arc::default(),
-    //         waker: Arc::default(),
-    //         shutdown: self.shutdown,
-    //         event_handler: self.event_handler.clone(),
-    //         is_ready: Arc::default(),
-    //         service: type_name_of_val(&service),
-    //     };
-
-    //     let backend = self.backend;
-    //     let mut heartbeat = backend.heartbeat();
-    //     let heartbeat = async move { while let Some(_) = heartbeat.next().await {} }.boxed();
-    //     let layer = backend.middleware();
-    //     let stream = backend.poll(&worker);
-    //     let service = ServiceBuilder::new()
-    //         .layer(TrackerLayer::new(worker.clone()))
-    //         .layer(ReadinessLayer::new(worker.is_ready.clone()))
-    //         .layer(Data::new(worker.clone()))
-    //         .layer(layer)
-    //         .service(service);
-
-    //     Runnable {
-    //         poller: Self::poll_jobs(worker.clone(), service, stream),
-    //         heartbeat,
-    //         worker,
-    //         running: false,
-    //     }
-    // }
 }
 
 /// A `Runnable` represents a unit of work that manages a worker's lifecycle and execution flow.
@@ -494,7 +431,8 @@ impl WorkerContext {
     /// Calling this function triggers shutting down the worker while waiting for any tasks to complete
     pub fn stop(&self) {
         self.running.store(false, Ordering::Relaxed);
-        self.wake()
+        self.wake();
+        self.emit(Event::Stop);
     }
 
     fn start_task(&self) {
@@ -684,9 +622,187 @@ where
     }
 }
 
+mod call_all {
+    use futures::{ready, stream::FuturesUnordered, Stream};
+    use pin_project_lite::pin_project;
+    use std::{
+        fmt,
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+    use tower::Service;
+
+    pin_project! {
+        /// A stream of responses received from the inner service in received order.
+        #[derive(Debug)]
+        pub(super) struct CallAllUnordered<Svc, S>
+        where
+            Svc: Service<S::Item>,
+            S: Stream,
+        {
+            #[pin]
+            inner: CallAll<Svc, S, FuturesUnordered<Svc::Future>>,
+        }
+    }
+
+    impl<Svc, S> CallAllUnordered<Svc, S>
+    where
+        Svc: Service<S::Item>,
+        S: Stream,
+    {
+        /// Create new [`CallAllUnordered`] combinator.
+        ///
+        /// [`Stream`]: https://docs.rs/futures/latest/futures/stream/trait.Stream.html
+        pub(super) fn new(service: Svc, stream: S) -> CallAllUnordered<Svc, S> {
+            CallAllUnordered {
+                inner: CallAll::new(service, stream, FuturesUnordered::new()),
+            }
+        }
+    }
+
+    impl<Svc, S> Stream for CallAllUnordered<Svc, S>
+    where
+        Svc: Service<S::Item>,
+        S: Stream,
+    {
+        type Item = Result<Svc::Response, Svc::Error>;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.project().inner.poll_next(cx)
+        }
+    }
+
+    impl<F: Future> Drive<F> for FuturesUnordered<F> {
+        fn is_empty(&self) -> bool {
+            FuturesUnordered::is_empty(self)
+        }
+
+        fn push(&mut self, future: F) {
+            FuturesUnordered::push(self, future)
+        }
+
+        fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Option<F::Output>> {
+            Stream::poll_next(Pin::new(self), cx)
+        }
+    }
+
+    pin_project! {
+        /// The [`Future`] returned by the [`ServiceExt::call_all`] combinator.
+        pub(crate) struct CallAll<Svc, S, Q>
+        where
+            S: Stream,
+        {
+            service: Option<Svc>,
+            #[pin]
+            stream: S,
+            queue: Q,
+            eof: bool,
+            curr_req: Option<S::Item>
+        }
+    }
+
+    impl<Svc, S, Q> fmt::Debug for CallAll<Svc, S, Q>
+    where
+        Svc: fmt::Debug,
+        S: Stream + fmt::Debug,
+    {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("CallAll")
+                .field("service", &self.service)
+                .field("stream", &self.stream)
+                .field("eof", &self.eof)
+                .finish()
+        }
+    }
+
+    pub(crate) trait Drive<F: Future> {
+        fn is_empty(&self) -> bool;
+
+        fn push(&mut self, future: F);
+
+        fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Option<F::Output>>;
+    }
+
+    impl<Svc, S, Q> CallAll<Svc, S, Q>
+    where
+        Svc: Service<S::Item>,
+        S: Stream,
+        Q: Drive<Svc::Future>,
+    {
+        pub(crate) const fn new(service: Svc, stream: S, queue: Q) -> CallAll<Svc, S, Q> {
+            CallAll {
+                service: Some(service),
+                stream,
+                queue,
+                eof: false,
+                curr_req: None,
+            }
+        }
+    }
+
+    impl<Svc, S, Q> Stream for CallAll<Svc, S, Q>
+    where
+        Svc: Service<S::Item>,
+        S: Stream,
+        Q: Drive<Svc::Future>,
+    {
+        type Item = Result<Svc::Response, Svc::Error>;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            let mut this = self.project();
+
+            loop {
+                // First, see if we have any responses to yield
+                if let Poll::Ready(r) = this.queue.poll(cx) {
+                    if let Some(rsp) = r.transpose()? {
+                        return Poll::Ready(Some(Ok(rsp)));
+                    }
+                }
+
+                // If there are no more requests coming, check if we're done
+                if *this.eof {
+                    if this.queue.is_empty() {
+                        return Poll::Ready(None);
+                    } else {
+                        return Poll::Pending;
+                    }
+                }
+
+                // Then, see that the service is ready for another request
+                let svc = this
+                    .service
+                    .as_mut()
+                    .expect("Using CallAll after extracting inner Service");
+
+                if let Err(e) = ready!(svc.poll_ready(cx)) {
+                    // Set eof to prevent the service from being called again after a `poll_ready` error
+                    *this.eof = true;
+                    return Poll::Ready(Some(Err(e)));
+                }
+
+                // If not done, and we don't have a stored request, gather the next request from the
+                // stream (if there is one), or return `Pending` if the stream is not ready.
+                if this.curr_req.is_none() {
+                    *this.curr_req = match ready!(this.stream.as_mut().poll_next(cx)) {
+                        Some(next_req) => Some(next_req),
+                        None => {
+                            // Mark that there will be no more requests.
+                            *this.eof = true;
+                            continue;
+                        }
+                    };
+                }
+                // Unwrap: The check above always sets `this.curr_req` if none.
+                this.queue.push(svc.call(this.curr_req.take().unwrap()));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{ops::Deref, sync::atomic::AtomicUsize};
+    use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
     use tower::layer::util::Stack;
 
@@ -698,7 +814,7 @@ mod tests {
         layers::{extensions::Data, AcknowledgementExt},
         memory::MemoryStorage,
         service_fn::{self, service_fn, ServiceFn},
-        storage::Push,
+        backend::Push,
     };
 
     use super::*;
@@ -760,7 +876,6 @@ mod tests {
 
         struct MyAcknowledger;
         struct WebhookService;
-
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)

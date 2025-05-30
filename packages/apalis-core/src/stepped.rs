@@ -15,11 +15,11 @@ use tower::{
 };
 
 use crate::{
-    backend::{Decoder, Encoder},
+    codec::{Decoder, Encoder},
     request::Request,
 };
 
-type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, crate::error::Error>;
+type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, StepError>;
 
 type SteppedService<Compact, Ctx> = BoxedService<Request<StepRequest<Compact>, Ctx>, GoTo<Compact>>;
 
@@ -84,7 +84,7 @@ impl<Input, Current, Compact, Codec>
         service: S,
     ) -> StepBuilder<Input, Next, SteppedService<Compact, Ctx>, Codec>
     where
-        S: Service<Request<Current, Ctx>, Response = GoTo<Next>, Error = crate::error::Error>
+        S: Service<Request<Current, Ctx>, Response = GoTo<Next>, Error = StepError>
             + Send
             + 'static,
         S::Future: Send + 'static,
@@ -183,6 +183,12 @@ impl<S: Clone, D> Layer<D> for StepLayer<S> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum StepError {
+    #[error("the type for key `{0}` is not available")]
+    NotFound(String),
+}
+
 // trait Counter {
 //     const VALUE: usize;
 // }
@@ -227,10 +233,10 @@ mod tests {
             Ok(GoTo::Done(()))
         }
 
-        let mut stepper = StepBuilder::new()
-            .step(service_fn(task1))
-            .step(service_fn(task2))
-            .step(service_fn(task3));
+        // let mut stepper = StepBuilder::new()
+        //     .step(service_fn(task1))
+        //     .step(service_fn(task2))
+        //     .step(service_fn(task3));
 
         // let res = stepper
         //     .call(StepRequest {

@@ -37,7 +37,6 @@ pub use tower::timeout::TimeoutLayer;
 #[cfg_attr(docsrs, doc(cfg(feature = "catch-panic")))]
 pub mod catch_panic;
 
-pub use apalis_core::error::ErrorHandlingLayer;
 
 /// A trait that extends `WorkerBuilder` with additional middleware methods
 /// derived from `tower::ServiceBuilder`.

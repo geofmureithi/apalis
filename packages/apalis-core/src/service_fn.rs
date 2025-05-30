@@ -1,4 +1,5 @@
-use crate::error::Error;
+use crate::data::MissingDataError;
+use crate::error::BoxDynError;
 use crate::layers::extensions::Data;
 use crate::request::Request;
 use crate::response::IntoResponse;
@@ -7,6 +8,7 @@ use futures::FutureExt;
 use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::Service;
 
@@ -42,14 +44,16 @@ pub type FnFuture<F, O, R, E> = Map<F, fn(O) -> std::result::Result<R, E>>;
 
 /// Handles extraction
 pub trait FromRequest<Req>: Sized {
+    type Error;
     /// Perform the extraction.
-    fn from_request(req: &Req) -> impl Future<Output = Result<Self, Error>> + Send;
+    fn from_request(req: &Req) -> impl Future<Output = Result<Self, Self::Error>> + Send;
 }
 
 impl<T: Clone + Send + Sync + 'static, Req: Sync, Ctx: Sync> FromRequest<Request<Req, Ctx>>
     for Data<T>
 {
-    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Error> {
+    type Error = MissingDataError;
+    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Self::Error> {
         req.parts.data.get_checked().cloned().map(Data::new)
     }
 }
@@ -62,11 +66,14 @@ macro_rules! impl_service_fn {
             T: FnMut(Req, $($K),+) -> F + Send + Clone + 'static,
             F: Future + Send,
             F::Output: IntoResponse<Output = R>,
-            $($K: FromRequest<Request<Req, Ctx>> + Send),+,
+            $(
+                $K: FromRequest<Request<Req, Ctx>> + Send,
+                < $K as FromRequest<Request<Req, Ctx>> >::Error: std::error::Error + 'static + Send + Sync,
+            )+
         {
             type Response = R;
-            type Error = Error;
-            type Future = futures::future::BoxFuture<'static, Result<R, Error>>;
+            type Error = BoxDynError;
+            type Future = futures::future::BoxFuture<'static, Result<R, BoxDynError>>;
 
             fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
                 Poll::Ready(Ok(()))
@@ -76,7 +83,7 @@ macro_rules! impl_service_fn {
                 let mut svc = self.f.clone();
                 #[allow(non_snake_case)]
                 let fut = async move {
-                    let results: Result<($($K),+), Error> = { Ok(($($K::from_request(&task).await?),+)) };
+                    let results: Result<($($K),+), BoxDynError> = { Ok(($($K::from_request(&task).await.map_err(|e| Box::new(e) as BoxDynError)?),+)) };
                     match results {
                         Ok(($($K),+)) => {
                             let req = task.args;
@@ -98,8 +105,8 @@ where
     F::Output: IntoResponse<Output = R>,
 {
     type Response = R;
-    type Error = Error;
-    type Future = FnFuture<F, F::Output, R, Error>;
+    type Error = BoxDynError;
+    type Future = FnFuture<F, F::Output, R, BoxDynError>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

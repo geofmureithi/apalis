@@ -5,8 +5,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::{BuildHasherDefault, Hasher};
 
-use crate::error::Error;
-
 type AnyMap = HashMap<TypeId, Box<dyn AnyClone + Send + Sync>, BuildHasherDefault<IdHasher>>;
 
 // With TypeIds as keys, there's no need to hash them. They are already hashes
@@ -101,13 +99,11 @@ impl Extensions {
     ///
     /// assert_eq!(ext.get_checked::<i32>(), Ok(&5i32));
     /// ```
-    pub fn get_checked<T: Send + Sync + 'static>(&self) -> Result<&T, Error> {
-        self.get()
-            .ok_or({
-                let type_name = std::any::type_name::<T>();
-                Error::MissingData(
-                format!("Missing the an entry for `{type_name}`. Did you forget to add `.data(<{type_name}>)", ))
-            })
+    pub fn get_checked<T: Send + Sync + 'static>(&self) -> Result<&T, MissingDataError> {
+        self.get().ok_or({
+            let type_name = std::any::type_name::<T>();
+            MissingDataError::NotFound(type_name.to_owned())
+        })
     }
 
     /// Get a mutable reference to a type previously inserted on this `Extensions`.
@@ -232,6 +228,12 @@ impl Extensions {
             }
         }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum MissingDataError {
+    #[error("the type for key `{0}` is not available")]
+    NotFound(String),
 }
 
 impl fmt::Debug for Extensions {

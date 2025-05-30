@@ -1,8 +1,8 @@
-use std::{future::Future, io};
+use std::{future::Future, io, time::Duration};
 
 use futures::Stream;
 
-use crate::worker::WorkerContext;
+use crate::{request::{Parts, Request}, task::task_id::TaskId, worker::{WorkerContext, WorkerId}};
 
 /// A backend represents a task source
 /// Both [`Storage`] and [`MessageQueue`] need to implement it for workers to be able to consume tasks
@@ -10,7 +10,7 @@ use crate::worker::WorkerContext;
 /// [`Storage`]: crate::storage::Storage
 /// [`MessageQueue`]: crate::mq::MessageQueue
 pub trait Backend<Req> {
-    type Error: Send + Sync + std::error::Error + 'static;
+    type Error;
     type Stream: Stream<Item = Result<Option<Req>, Self::Error>>;
     type Beat: Stream<Item = Result<(), Self::Error>>;
     type Layer;
@@ -20,33 +20,124 @@ pub trait Backend<Req> {
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
 }
 
-pub trait Encoder<T> {
-    type Error;
+pub trait Push<T, Context>: Backend<Request<T, Context>> {
     type Compact;
-
-    fn encode(val: &T) -> Result<Self::Compact, Self::Error>;
-}
-
-impl<T> Encoder<T> for () {
-    type Error = io::Error;
-    type Compact = ();
-    fn encode(_val: &T) -> Result<Self::Compact, Self::Error> {
-        Ok(())
+    fn push(&mut self, task: T) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send
+    where
+        Context: Default,
+    {
+        self.push_request(Request::new(task))
     }
+
+    fn push_request(
+        &mut self,
+        req: Request<T, Context>,
+    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
+
+    fn push_raw_request(
+        &mut self,
+        req: Request<Self::Compact, Context>,
+    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
 }
-pub trait Decoder<T> {
+
+pub trait Schedule<T, Context>: Push<T, Context> {
+    type Timestamp;
+    fn schedule(
+        &mut self,
+        task: T,
+        on: Self::Timestamp,
+    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send
+    where
+        Context: Default,
+    {
+        self.schedule_request(Request::new(task), on)
+    }
+
+    fn schedule_request(
+        &mut self,
+        request: Request<T, Context>,
+        on: Self::Timestamp,
+    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
+
+    fn schedule_raw_request(
+        &mut self,
+        request: Request<Self::Compact, Context>,
+        on: Self::Timestamp,
+    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
+}
+
+pub trait Metric<Output> {
     type Error;
-    type Compact;
-
-    fn decode(val: &Self::Compact) -> Result<T, Self::Error>;
+    fn metric(&mut self) -> impl Future<Output = Result<Output, Self::Error>> + Send;
 }
 
-impl<T: Default> Decoder<T> for () {
-    type Error = io::Error;
-    type Compact = ();
-    fn decode(_: &Self::Compact) -> Result<T, Self::Error> {
-        Ok(T::default())
-    }
+pub trait FetchById<T, Context>: Backend<Request<T, Context>> {
+    fn fetch_by_id(
+        &mut self,
+        task_id: &TaskId,
+    ) -> impl Future<Output = Result<Option<Request<T, Context>>, Self::Error>> + Send;
+}
+
+pub trait Update<T, Context>: Backend<Request<T, Context>> {
+    fn update(
+        &mut self,
+        task: Request<T, Context>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+pub trait Reschedule<T, Context>: Backend<Request<T, Context>> {
+    fn reschedule(
+        &mut self,
+        task: Request<T, Context>,
+        wait: Duration,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+pub trait Vacuum {
+    type Error;
+    fn vacuum(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
+}
+
+pub trait ConsumeNext<T, Context>: Backend<Request<T, Context>> {
+    fn consume_next(
+        &mut self,
+    ) -> impl Future<Output = Result<Option<Request<T, Context>>, Self::Error>> + Send;
+}
+
+pub trait ConsumeBatch<T, Context>: Backend<Request<T, Context>> {
+    fn consume_batch(&mut self) -> Self::Stream;
+}
+
+pub trait FetchBatch<T> {
+    type Id;
+    type Error;
+    type Stream: Stream<Item = Result<Option<T>, Self::Error>>;
+    fn fetch_batch(&mut self, ids: &[Self::Id]) -> Self::Stream;
+}
+
+pub trait ResumeById<T, Context>: Backend<Request<T, Context>> {
+    type Id;
+
+    fn resume_by_id(
+        &mut self,
+        id: Self::Id,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+}
+
+pub trait ResumeAbandoned<T, Context>: Backend<Request<T, Context>> {
+    fn resume_abandoned(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
+}
+
+pub trait RegisterWorker<T, Context>: Backend<Request<T, Context>> {
+    fn register_worker(
+        &mut self,
+        worker_id: WorkerId,
+    ) -> impl Future<Output = Result<usize, Self::Error>> + Send;
+}
+
+pub trait Notify<Event> {
+    type Error;
+    fn notify(&mut self, ev: Event) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 pub trait ListWorkers<Req>: Backend<Req> {

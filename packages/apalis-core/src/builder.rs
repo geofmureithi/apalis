@@ -11,15 +11,7 @@ use tower::{
 };
 
 use crate::{
-    backend::Backend,
-    error::Error,
-    layers::extensions::Data,
-    monitor::shutdown::Shutdown,
-    request::Request,
-    service_fn::{service_fn, ServiceFn},
-    storage::Notify,
-    task::{attempt::Attempt, task_id::TaskId},
-    worker::{Event, EventHandler, Worker, WorkerContext, WorkerId},
+    backend::Backend, error::BoxDynError, layers::extensions::Data, request::Request, service_fn::{service_fn, ServiceFn}, shutdown::Shutdown, task::{attempt::Attempt, task_id::TaskId}, worker::{Event, EventHandler, Worker, WorkerContext, WorkerId}
 };
 
 /// Allows building a [`Worker`].
@@ -62,7 +54,7 @@ impl WorkerBuilder<(), (), Identity> {
     /// Consume a stream directly
     #[deprecated(since = "0.6.0", note = "Consider using the `.backend`")]
     pub fn stream<
-        NS: Stream<Item = Result<Option<Request<NJ, Ctx>>, Error>> + Send + 'static,
+        NS: Stream<Item = Result<Option<Request<NJ, Ctx>>, BoxDynError>> + Send + 'static,
         NJ,
         Ctx,
     >(

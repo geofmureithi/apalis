@@ -1,8 +1,5 @@
 use crate::{
-    backend::Backend,
-    request::{Parts, Request, RequestStream},
-    storage::{Push, Schedule},
-    worker::{self, WorkerContext},
+    backend::{Backend, Push, Schedule}, error::BoxDynError, request::{Parts, Request, RequestStream}, worker::{self, WorkerContext}
 };
 use futures::{
     channel::mpsc::{channel, Receiver, Sender},
@@ -94,7 +91,7 @@ impl<T> Stream for MemoryWrapper<T> {
 
 // MemoryStorage as a Backend
 impl<T: Send + 'static + Sync> Backend<Request<T, ()>> for MemoryStorage<T> {
-    type Error = crate::error::Error;
+    type Error = BoxDynError;
     type Stream = RequestStream<Request<T, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;

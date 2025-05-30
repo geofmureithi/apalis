@@ -12,20 +12,16 @@ use futures::{
 };
 use tower::{Layer, Service};
 
-/// Shutdown utilities
-pub mod shutdown;
-
 use crate::{
     backend::Backend,
     error::BoxDynError,
     request::Request,
     worker::{
-        traits::WorkerStream, Event, EventHandler, ReadinessService, TrackerService, Worker,
-        WorkerContext, WorkerId,
+        Event, EventHandler, ReadinessService, TrackerService, Worker, WorkerContext, WorkerId,
     },
 };
 
-use self::shutdown::Shutdown;
+use crate::shutdown::Shutdown;
 
 struct MonitoredWorker {
     ctx: WorkerContext,
@@ -56,7 +52,8 @@ impl Monitor {
         S: Service<Request<Args, Ctx>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P: Backend<Request<Args, Ctx>, Error = crate::error::Error> + Send + 'static,
+        P: Backend<Request<Args, Ctx>> + Send + 'static,
+        P::Error: Into<BoxDynError> + Send + 'static,
         P::Stream: Unpin + Send + 'static,
         // P::Layer: Layer<S> + Send,
         P::Beat: Unpin + Send,
@@ -130,7 +127,7 @@ impl Monitor {
         S: Service<Request<Req, Ctx>> + Send + 'static + Clone,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P: Backend<Request<Req, Ctx>, Error = crate::error::Error> + Send + 'static + Clone,
+        P: Backend<Request<Req, Ctx>> + Send + 'static + Clone,
         P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S> + Send,
         P::Beat: Unpin + Send,
@@ -140,7 +137,7 @@ impl Monitor {
             Send + Sync + Into<BoxDynError>,
         Req: Send + 'static,
         Ctx: Send + 'static,
-        W: WorkerStream<Request<Req, Ctx>, S> + Clone,
+        // W: WorkerStream<Request<Req, Ctx>, S> + Clone,
     {
         for index in 0..count {
             // let mut worker = worker.clone();
@@ -286,7 +283,7 @@ impl Monitor {
 
 #[cfg(test)]
 mod tests {
-    use crate::{storage::Push, test_utils::apalis_test_service_fn};
+    use crate::{backend::Push, test_utils::apalis_test_service_fn};
     use std::{io, time::Duration};
 
     use tokio::time::sleep;
@@ -359,7 +356,7 @@ mod tests {
         // tokio::spawn(async move {
         //     sleep(Duration::from_millis(5000)).await;
         //     // panic!("test");
-            shutdown.start_shutdown();
+        shutdown.start_shutdown();
         // });
 
         let result = monitor.run().await;

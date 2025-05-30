@@ -7,7 +7,7 @@ use std::{fmt, fmt::Debug, pin::Pin, str::FromStr};
 use crate::{
     backend::Backend,
     data::Extensions,
-    error::Error,
+    error::{BoxDynError},
     task::{attempt::Attempt, task_id::TaskId},
     worker::WorkerContext,
 };
@@ -169,13 +169,13 @@ pub type BoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + 'a>>;
 /// Represents a result for a future that yields T
 pub type RequestFuture<T> = BoxFuture<'static, T>;
 /// Represents a stream for T.
-pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, Error>>;
+pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, BoxDynError>>;
 
 impl<T, Ctx> Backend<Request<T, Ctx>> for RequestStream<Request<T, Ctx>> {
-    type Error = crate::error::Error;
+    type Error = BoxDynError;
     type Stream = Self;
     type Layer = Identity;
-    type Beat = BoxStream<'static, Result<(), crate::error::Error>>;
+    type Beat = BoxStream<'static, Result<(), BoxDynError>>;
     type Codec = ();
     fn heartbeat(&self) -> Self::Beat {
         stream::repeat_with(|| Ok(())).boxed()
