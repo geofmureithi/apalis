@@ -29,8 +29,6 @@ pub mod builder;
 pub mod backend;
 /// Includes all possible error types.
 pub mod error;
-/// Represents middleware offered through [`tower`]
-pub mod layers;
 /// Represents monitoring of running workers
 pub mod monitor;
 /// Represents the request to be processed.
@@ -59,6 +57,8 @@ pub mod stepped;
 
 /// Shutdown utilities
 pub mod shutdown;
+
+pub mod ext;
 
 /// Sleep utilities
 #[cfg(feature = "sleep")]

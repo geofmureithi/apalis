@@ -1,6 +1,5 @@
 use crate::data::MissingDataError;
 use crate::error::BoxDynError;
-use crate::layers::extensions::Data;
 use crate::request::Request;
 use crate::response::IntoResponse;
 use futures::future::Map;
@@ -47,15 +46,6 @@ pub trait FromRequest<Req>: Sized {
     type Error;
     /// Perform the extraction.
     fn from_request(req: &Req) -> impl Future<Output = Result<Self, Self::Error>> + Send;
-}
-
-impl<T: Clone + Send + Sync + 'static, Req: Sync, Ctx: Sync> FromRequest<Request<Req, Ctx>>
-    for Data<T>
-{
-    type Error = MissingDataError;
-    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Self::Error> {
-        req.parts.data.get_checked().cloned().map(Data::new)
-    }
 }
 
 macro_rules! impl_service_fn {

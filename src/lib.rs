@@ -73,7 +73,7 @@ pub mod prelude {
         builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
         data::Extensions,
         error::BoxDynError,
-        layers::extensions::{AddExtension, Data},
+        data::{AddExtension, Data},
         memory::{MemoryStorage, MemoryWrapper},
         monitor::Monitor,
         request::{Request, RequestStream},

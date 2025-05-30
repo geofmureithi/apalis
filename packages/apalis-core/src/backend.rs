@@ -1,8 +1,12 @@
-use std::{future::Future, io, time::Duration};
+use std::{future::Future, time::Duration};
 
 use futures::Stream;
 
-use crate::{request::{Parts, Request}, task::task_id::TaskId, worker::{WorkerContext, WorkerId}};
+use crate::{
+    request::{Parts, Request},
+    task::task_id::TaskId,
+    worker::{WorkerContext, WorkerId},
+};
 
 /// A backend represents a task source
 /// Both [`Storage`] and [`MessageQueue`] need to implement it for workers to be able to consume tasks

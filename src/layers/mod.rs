@@ -23,10 +23,10 @@ pub mod limit {
     pub use tower::limit::RateLimitLayer;
 }
 
-use apalis_core::{builder::WorkerBuilder, layers::Identity};
+use apalis_core::builder::WorkerBuilder;
 #[cfg(feature = "catch-panic")]
 use catch_panic::CatchPanicLayer;
-use tower::layer::util::Stack;
+use tower::layer::util::{Identity, Stack};
 /// Timeout middleware for apalis
 #[cfg(feature = "timeout")]
 #[cfg_attr(docsrs, doc(cfg(feature = "timeout")))]
@@ -36,7 +36,6 @@ pub use tower::timeout::TimeoutLayer;
 #[cfg(feature = "catch-panic")]
 #[cfg_attr(docsrs, doc(cfg(feature = "catch-panic")))]
 pub mod catch_panic;
-
 
 /// A trait that extends `WorkerBuilder` with additional middleware methods
 /// derived from `tower::ServiceBuilder`.

@@ -1,8 +1,4 @@
-use std::{
-    marker::PhantomData,
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::{marker::PhantomData, sync::Arc, time::Duration};
 
 use futures::Stream;
 use tower::{
@@ -11,7 +7,14 @@ use tower::{
 };
 
 use crate::{
-    backend::Backend, error::BoxDynError, layers::extensions::Data, request::Request, service_fn::{service_fn, ServiceFn}, shutdown::Shutdown, task::{attempt::Attempt, task_id::TaskId}, worker::{Event, EventHandler, Worker, WorkerContext, WorkerId}
+    backend::Backend,
+    error::BoxDynError,
+    data::Data,
+    request::Request,
+    service_fn::{service_fn, ServiceFn},
+    shutdown::Shutdown,
+    task::task_id::TaskId,
+    worker::{Event, EventHandler, Worker, WorkerContext, WorkerId},
 };
 
 /// Allows building a [`Worker`].
@@ -188,207 +191,7 @@ where
     }
 }
 
-pub struct LongRunningLayer;
 
-impl<S> Layer<S> for LongRunningLayer {
-    type Service = LongRunningService<S>;
-
-    fn layer(&self, service: S) -> Self::Service {
-        LongRunningService { service }
-    }
-}
-
-pub struct LongRunningService<S> {
-    service: S,
-}
-
-impl<S, Request> Service<Request> for LongRunningService<S>
-where
-    S: Service<Request>,
-    Request: std::fmt::Debug,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, request: Request) -> Self::Future {
-        println!("request = {:?}", request);
-        self.service.call(request)
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct LongRunningConfig {
-    pub max_duration: Option<Duration>,
-}
-impl LongRunningConfig {
-    pub fn new(max_duration: Duration) -> Self {
-        Self {
-            max_duration: Some(max_duration),
-        }
-    }
-}
-
-pub trait RecordAttempt<Req, Source, Middleware>: Sized {
-    fn record_attempts(self) -> WorkerBuilder<Req, Source, Middleware>;
-}
-
-impl<Args, P, M, Ctx> RecordAttempt<Request<Args, Ctx>, P, M>
-    for WorkerBuilder<Request<Args, Ctx>, P, M>
-where
-    P: Backend<Request<Args, Ctx>>,
-{
-    fn record_attempts(self) -> WorkerBuilder<Request<Args, Ctx>, P, M> {
-        let this = self;
-        WorkerBuilder {
-            id: this.id,
-            request: this.request,
-            layer: this.layer,
-            source: this.source,
-            shutdown: this.shutdown,
-            event_handler: this.event_handler,
-        }
-    }
-}
-
-pub trait EventListenerExt<Req, Source, Middleware>: Sized {
-    fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
-        self,
-        f: F,
-    ) -> WorkerBuilder<Req, Source, Stack<EventListenerLayer, Middleware>>;
-}
-
-#[derive(Clone)]
-pub struct EventListenerLayer;
-
-impl<S> Layer<S> for EventListenerLayer {
-    type Service = EventListenerService<S>;
-
-    fn layer(&self, service: S) -> Self::Service {
-        EventListenerService { service }
-    }
-}
-
-pub type EventListener = Arc<Box<dyn Fn(WorkerContext, Event) + Send + Sync>>;
-
-#[derive(Clone)]
-pub struct EventListenerService<S> {
-    service: S,
-}
-
-impl<S, Args, Ctx> Service<Request<Args, Ctx>> for EventListenerService<S>
-where
-    S: Service<Request<Args, Ctx>>,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, request: Request<Args, Ctx>) -> Self::Future {
-        // TODO
-        // let ctx: &WorkerContext = request.get_checked().unwrap();
-        self.service.call(request)
-    }
-}
-
-impl<Args, P, M, Ctx> EventListenerExt<Request<Args, Ctx>, P, M>
-    for WorkerBuilder<Request<Args, Ctx>, P, M>
-where
-    P: Backend<Request<Args, Ctx>>,
-    M: Layer<EventListenerLayer>,
-{
-    fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
-        self,
-        f: F,
-    ) -> WorkerBuilder<Request<Args, Ctx>, P, Stack<EventListenerLayer, M>> {
-        let new_fn = self
-            .event_handler
-            .write()
-            .map(|mut res| {
-                let current = res.take();
-                match current {
-                    Some(c) => {
-                        let new: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync + 'static> =
-                            Box::new(move |ctx, ev| {
-                                c(&ctx, &ev);
-                                f(&ctx, &ev);
-                            });
-                        new
-                    }
-                    None => {
-                        let new: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync + 'static> =
-                            Box::new(move |ctx, ev| {
-                                f(&ctx, &ev);
-                            });
-                        new
-                    }
-                }
-            })
-            .unwrap();
-        let _ = self.event_handler.write().map(|mut res| {
-            res.insert(new_fn);
-        });
-        let this = self.layer(EventListenerLayer);
-        WorkerBuilder {
-            id: this.id,
-            request: this.request,
-            layer: this.layer,
-            source: this.source,
-            shutdown: this.shutdown,
-            event_handler: this.event_handler,
-        }
-    }
-}
-
-/// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait LongRunningExt<Req, Source, Middleware>: Sized {
-    fn long_running(self) -> WorkerBuilder<Req, Source, Stack<LongRunningLayer, Middleware>> {
-        self.long_running_with_cfg(Default::default())
-    }
-    fn long_running_with_cfg(
-        self,
-        cfg: LongRunningConfig,
-    ) -> WorkerBuilder<Req, Source, Stack<LongRunningLayer, Middleware>>;
-}
-
-impl<Args, P, M, Ctx> LongRunningExt<Request<Args, Ctx>, P, M>
-    for WorkerBuilder<Request<Args, Ctx>, P, M>
-where
-    M: Layer<LongRunningLayer>,
-{
-    fn long_running_with_cfg(
-        self,
-        cfg: LongRunningConfig,
-    ) -> WorkerBuilder<Request<Args, Ctx>, P, Stack<LongRunningLayer, M>> {
-        let this = self.layer(LongRunningLayer);
-        WorkerBuilder {
-            id: this.id,
-            request: this.request,
-            layer: this.layer,
-            source: this.source,
-            shutdown: this.shutdown,
-            event_handler: this.event_handler,
-        }
-    }
-}
-
-pub struct LongRunningContext {
-    pub task_set: Vec<TaskId>,
-}
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
 pub trait WorkerFactoryFn<Req, F, FnArgs> {

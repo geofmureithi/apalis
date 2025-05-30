@@ -1,7 +1,6 @@
 use crate::backend::Backend;
-use crate::data::MissingDataError;
+use crate::data::{Data, MissingDataError};
 use crate::error::BoxDynError;
-use crate::layers::extensions::Data;
 use crate::request::Request;
 use crate::service_fn::FromRequest;
 use crate::shutdown::Shutdown;
@@ -315,7 +314,10 @@ where
     }
 }
 
-fn poll_jobs<Svc, Stm, Req, Ctx, E: Into<BoxDynError> + Send + 'static>(service: Svc, stream: Stm) -> BoxStream<'static, Event>
+fn poll_jobs<Svc, Stm, Req, Ctx, E: Into<BoxDynError> + Send + 'static>(
+    service: Svc,
+    stream: Stm,
+) -> BoxStream<'static, Event>
 where
     Svc: Service<Request<Req, Ctx>> + Send + 'static,
     Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, E>> + Send + Unpin + 'static,
@@ -354,19 +356,6 @@ where
     });
     let stream = futures::stream::select(rx, stream);
     stream.boxed()
-}
-
-/// A `Runnable` represents a unit of work that manages a worker's lifecycle and execution flow.
-///
-/// The `Runnable` struct is responsible for coordinating the core tasks of a worker, such as polling for jobs,
-/// maintaining heartbeats, and tracking its running state. It integrates various components required for
-/// the worker to operate effectively within an asynchronous runtime.
-#[must_use = "A Runnable must be awaited of no jobs will be consumed"]
-pub struct Runnable {
-    poller: BoxStream<'static, ()>,
-    heartbeat: BoxFuture<'static, ()>,
-    worker: WorkerContext,
-    running: bool,
 }
 
 /// Stores the Workers context
@@ -804,17 +793,15 @@ mod call_all {
 mod tests {
     use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
-    use tower::layer::util::Stack;
-
     use crate::{
-        builder::{
-            EventListenerExt, LongRunningExt, LongRunningLayer, RecordAttempt, WorkerBuilder,
-            WorkerFactory, WorkerFactoryFn,
+        backend::Push,
+        builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
+        ext::{
+            ack::AcknowledgementExt, event_listener::EventListenerExt,
+            long_running::LongRunningExt, record_attempt::RecordAttempt,
         },
-        layers::{extensions::Data, AcknowledgementExt},
         memory::MemoryStorage,
         service_fn::{self, service_fn, ServiceFn},
-        backend::Push,
     };
 
     use super::*;
