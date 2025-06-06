@@ -102,7 +102,7 @@ pub mod task_id {
     use crate::{data::MissingDataError, request::Request, service_fn::FromRequest};
 
     /// A wrapper type that defines a task id.
-    #[derive(Debug, Clone, Eq, Hash, PartialEq)]
+    #[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
     pub struct TaskId(Ulid);
 
     impl TaskId {

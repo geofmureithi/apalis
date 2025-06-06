@@ -3,7 +3,7 @@ use std::{future::Future, time::Duration};
 use futures::Stream;
 
 use crate::{
-    request::{Parts, Request},
+    request::{Parts, Request, RequestStream},
     task::task_id::TaskId,
     worker::{WorkerContext, WorkerId},
 };
@@ -117,6 +117,11 @@ pub trait FetchBatch<T> {
     type Error;
     type Stream: Stream<Item = Result<Option<T>, Self::Error>>;
     fn fetch_batch(&mut self, ids: &[Self::Id]) -> Self::Stream;
+}
+
+pub trait FetchAll<Context> {
+    type Compact;
+    fn fetch_many(&mut self) -> RequestStream<Request<Self::Compact, Context>>;
 }
 
 pub trait ResumeById<T, Context>: Backend<Request<T, Context>> {

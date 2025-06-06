@@ -278,7 +278,6 @@ where
 
         let fut = async move {
             worker.start();
-            worker.emit(Event::Start);
             combined.await;
             worker.emit(Event::Exit);
             Ok(())
@@ -832,7 +831,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
-        let in_memory = MemoryStorage::new();
+        let in_memory = MemoryStorage::default();
         let mut handle = in_memory.clone();
 
         tokio::spawn(async move {
@@ -870,7 +869,7 @@ mod tests {
             .record_attempts()
             .long_running()
             .ack_with(MyAcknowledger)
-            .ack_with(WebhookService)
+            .ack_with(|| WebhookService)
             .on_event(|ctx, ev| {
                 println!("CTX {:?}, On Event = {:?}", ctx, ev);
             })
@@ -880,7 +879,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_streams() {
-        let in_memory = MemoryStorage::new();
+        let in_memory = MemoryStorage::default();
         let mut handle = in_memory.clone();
 
         tokio::spawn(async move {

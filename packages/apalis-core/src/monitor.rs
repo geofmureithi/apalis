@@ -301,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_works_with_workers() {
-        let backend = MemoryStorage::new();
+        let backend = MemoryStorage::default();
         let mut handle = backend.clone();
 
         tokio::spawn(async move {
@@ -328,7 +328,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_monitor_run() {
-        let backend = MemoryStorage::new();
+        let backend = MemoryStorage::default();
         let mut handle = backend.clone();
 
         tokio::spawn(async move {

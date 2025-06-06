@@ -15,11 +15,10 @@ use tower::{
 };
 
 use crate::{
-    codec::{Decoder, Encoder},
-    request::Request,
+    codec::{Decoder, Encoder}, error::BoxDynError, request::Request
 };
 
-type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, StepError>;
+type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
 
 type SteppedService<Compact, Ctx> = BoxedService<Request<StepRequest<Compact>, Ctx>, GoTo<Compact>>;
 
@@ -79,12 +78,12 @@ impl<Input, Compact> StepBuilder<Input, Input, SteppedService<Compact, Ctx>> {
 impl<Input, Current, Compact, Codec>
     StepBuilder<Input, Current, SteppedService<Compact, Ctx>, Codec>
 {
-    pub fn step<S, Next>(
+    pub fn step<S, Next, E: Into<BoxDynError>>(
         mut self,
         service: S,
     ) -> StepBuilder<Input, Next, SteppedService<Compact, Ctx>, Codec>
     where
-        S: Service<Request<Current, Ctx>, Response = GoTo<Next>, Error = StepError>
+        S: Service<Request<Current, Ctx>, Response = GoTo<Next>, Error = E>
             + Send
             + 'static,
         S::Future: Send + 'static,
@@ -114,6 +113,7 @@ impl<Input, Current, Compact, Codec>
                     GoTo::Done(Codec::encode(res).expect("Could not encode the next step"))
                 }
             })
+            .map_err(|e: E| e.into())
             .service(service);
         self.steps.insert(self.steps.len(), BoxedService::new(svc));
         StepBuilder {
@@ -183,12 +183,6 @@ impl<S: Clone, D> Layer<D> for StepLayer<S> {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum StepError {
-    #[error("the type for key `{0}` is not available")]
-    NotFound(String),
-}
-
 // trait Counter {
 //     const VALUE: usize;
 // }
@@ -233,10 +227,10 @@ mod tests {
             Ok(GoTo::Done(()))
         }
 
-        // let mut stepper = StepBuilder::new()
-        //     .step(service_fn(task1))
-        //     .step(service_fn(task2))
-        //     .step(service_fn(task3));
+        let mut stepper = StepBuilder::new()
+            .step(service_fn(task1))
+            .step(service_fn(task2))
+            .step(service_fn(task3));
 
         // let res = stepper
         //     .call(StepRequest {

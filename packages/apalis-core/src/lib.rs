@@ -40,6 +40,8 @@ pub mod service_fn;
 /// Represents the utils for building workers.
 pub mod worker;
 
+pub mod shared;
+
 /// Represents the utils needed to extend a task's context.
 pub mod data;
 
