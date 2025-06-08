@@ -2,12 +2,12 @@ use futures::{future::BoxFuture, stream, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tower::layer::util::Identity;
 
-use std::{fmt, fmt::Debug, pin::Pin, str::FromStr};
+use std::{fmt::{self, Debug}, future::ready, pin::Pin, str::FromStr};
 
 use crate::{
     backend::Backend,
     data::Extensions,
-    error::{BoxDynError},
+    error::BoxDynError,
     task::{attempt::Attempt, task_id::TaskId},
     worker::WorkerContext,
 };
@@ -176,9 +176,8 @@ impl<T, Ctx> Backend<Request<T, Ctx>> for RequestStream<Request<T, Ctx>> {
     type Stream = Self;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), BoxDynError>>;
-    type Codec = ();
     fn heartbeat(&self) -> Self::Beat {
-        stream::repeat_with(|| Ok(())).boxed()
+        stream::once( ready(Ok(()))).boxed()
     }
     fn middleware(&self) -> Self::Layer {
         Identity::new()

@@ -7,14 +7,13 @@ use crate::{
     worker::{self, WorkerContext},
 };
 use futures::{
-    channel::mpsc::{channel, Receiver, Sender},
-    stream::{self, BoxStream},
-    Sink, SinkExt, Stream, StreamExt,
+    channel::mpsc::{channel, Receiver, Sender}, future::pending, stream::{self, BoxStream}, Sink, SinkExt, Stream, StreamExt
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     any::Any,
     collections::{BTreeMap, HashMap},
+    marker::PhantomData,
     pin::Pin,
     sync::{Arc, Mutex, RwLock},
     task::{Context, Poll},
@@ -96,7 +95,6 @@ impl<T> Stream for InMemory<T> {
 
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut map = self.tasks.write().unwrap();
-
         if let Some((task_id, mutex)) = map.pop_first() {
             let args = mutex.into_inner().unwrap();
             Poll::Ready(Some(Request::new_with_parts(
@@ -134,7 +132,7 @@ impl<S: Stream<Item = Request<T, ()>> + Send + 'static, T> Backend<Request<T, ()
     type Stream = RequestStream<Request<T, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
-    type Codec = ();
+    
     fn heartbeat(&self) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
     }
@@ -212,8 +210,34 @@ struct Wrapped {
 pub struct SharedMemoryStorage {
     inner: InMemory<Wrapped>,
 }
+
+pub trait PopFirstWith<K, V> {
+    fn pop_first_with<F>(&mut self, predicate: F) -> Option<(K, V)>
+    where
+        F: FnMut(&K, &V) -> bool;
+}
+
+impl<K, V> PopFirstWith<K, V> for BTreeMap<K, V>
+where
+    K: Ord + Clone,
+{
+    fn pop_first_with<F>(&mut self, mut predicate: F) -> Option<(K, V)>
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        if let Some(key) = self
+            .iter()
+            .find(|(k, v)| predicate(k, v))
+            .map(|(k, _)| k.clone())
+        {
+            self.remove_entry(&key)
+        } else {
+            None
+        }
+    }
+}
 impl SharedMemoryStorage {
-    fn create_channel<T: 'static + DeserializeOwned + Serialize>(
+    fn create_channel<T: 'static + DeserializeOwned + Serialize + Send>(
         &self,
     ) -> (
         Box<dyn Sink<Request<T, ()>, Error = ()> + Send + Unpin + 'static>,
@@ -243,18 +267,10 @@ impl SharedMemoryStorage {
         // Create a stream that filters by type T
         let filtered_stream = {
             let inner = self.inner.clone();
-
-            inner.filter_map(move |req| async move {
-                let expected_namespace = std::any::type_name::<T>().to_string();
-                if req.args.namespace == expected_namespace {
-                    match serde_json::from_value::<T>(req.args.value) {
-                        Ok(value) => Some(Request::new_with_parts(value, req.parts)),
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            })
+            SharedInMemoryStream {
+                inner,
+                req_type: PhantomData,
+            }
         };
 
         // Combine the sender and receiver
@@ -266,7 +282,40 @@ impl SharedMemoryStorage {
     }
 }
 
-impl<T: Serialize + DeserializeOwned + 'static> MakeShared<Request<T, ()>> for SharedMemoryStorage {
+pub struct SharedInMemoryStream<T> {
+    inner: InMemory<Wrapped>,
+    req_type: PhantomData<T>,
+}
+
+impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
+    type Item = Request<T, ()>;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut map = self.inner.tasks.write().unwrap();
+        if let Some((task_id, mutex)) = map.pop_first_with(|_, v| {
+            let v = v.lock().unwrap();
+            &v.namespace == std::any::type_name::<T>()
+        }) {
+            let args = mutex.into_inner().unwrap();
+            let args = match serde_json::from_value::<T>(args.value) {
+                Ok(value) => value,
+                Err(_) => return Poll::Ready(None),
+            };
+            Poll::Ready(Some(Request::new_with_parts(
+                args,
+                Parts {
+                    task_id,
+                    ..Default::default()
+                },
+            )))
+        } else {
+            Poll::Ready(None)
+        }
+    }
+}
+
+impl<T: Serialize + DeserializeOwned + 'static + Send> MakeShared<Request<T, ()>>
+    for SharedMemoryStorage
+{
     type Config = ();
     type MakeError = BoxDynError;
     type Backend = MemoryStorage<MemoryWrapper<T>>;
@@ -303,19 +352,18 @@ mod tests {
 
     use super::*;
 
-    const ITEMS: u32 = 1;
+    const ITEMS: u32 = 100;
 
     #[tokio::test]
     async fn it_works() {
         let mut store = SharedMemoryStorage::default();
-        let mut int_store = store.make_shared().unwrap();
         let mut string_store = store.make_shared().unwrap();
+        let mut int_store = store.make_shared().unwrap();
+        
 
         for i in 0..ITEMS {
-            int_store.push(i).await.unwrap();
-        }
-        for i in 0..ITEMS {
             string_store.push(format!("ITEM: {i}")).await.unwrap();
+            int_store.push(i).await.unwrap();
         }
         #[derive(Clone, Debug, Default)]
         struct Count(Arc<AtomicUsize>);
@@ -328,7 +376,7 @@ mod tests {
         }
 
         async fn task(job: u32, count: Data<Count>, ctx: WorkerContext) -> Result<(), BoxDynError> {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_millis(2)).await;
             if job == ITEMS - 1 {
                 ctx.stop();
                 return Err("Worker stopped!")?;
@@ -336,6 +384,19 @@ mod tests {
             Ok(())
         }
 
+        let string_worker = WorkerBuilder::new("rango-tango-string")
+            .backend(string_store)
+            .on_event(|ctx, ev| {
+                println!("CTX {:?}, On Event = {:?}", ctx.id, ev);
+            })
+            .build_fn(|req: String, ctx: WorkerContext| async move {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+                println!("{req}");
+                if req.ends_with(&(ITEMS - 1).to_string()) {
+                    ctx.stop();
+                }
+            })
+            .run();
 
         let int_worker = WorkerBuilder::new("rango-tango-int")
             .backend(int_store)
@@ -343,19 +404,10 @@ mod tests {
             .on_event(|ctx, ev| {
                 println!("CTX {:?}, On Event = {:?}", ctx.id, ev);
             })
-            .build_fn(task).run().await.unwrap();
+            .build_fn(task)
+            .run();
 
-        // let string_worker = WorkerBuilder::new("rango-tango-string")
-        //     .backend(string_store)
-        //     .data(Count::default())
-        //     .on_event(|ctx, ev| {
-        //         println!("CTX {:?}, On Event = {:?}", ctx.id, ev);
-        //     })
-        //     .build_fn(|req: String, ctx: WorkerContext| async move {
-        //         println!("{req}");
-        //         ctx.stop();
-        //     }).run();
-        //     let _ = futures::future::select(string_worker, int_worker).await;
-        //     let _ = tokio::join!(string_worker.run(), int_worker.run());
+        
+        let _ = futures::future::join(int_worker, string_worker).await;
     }
 }

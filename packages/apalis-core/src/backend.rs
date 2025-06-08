@@ -9,19 +9,19 @@ use crate::{
 };
 
 /// A backend represents a task source
-/// Both [`Storage`] and [`MessageQueue`] need to implement it for workers to be able to consume tasks
-///
-/// [`Storage`]: crate::storage::Storage
-/// [`MessageQueue`]: crate::mq::MessageQueue
 pub trait Backend<Req> {
     type Error;
     type Stream: Stream<Item = Result<Option<Req>, Self::Error>>;
     type Beat: Stream<Item = Result<(), Self::Error>>;
     type Layer;
-    type Codec;
     fn heartbeat(&self) -> Self::Beat;
     fn middleware(&self) -> Self::Layer;
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
+}
+
+pub trait BackendWithCodec<Req>: Backend<Req> {
+    type Codec;
+    type Compact;
 }
 
 pub trait Push<T, Context>: Backend<Request<T, Context>> {
