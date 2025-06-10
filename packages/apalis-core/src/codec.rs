@@ -28,7 +28,7 @@ impl<T: Default> Decoder<T> for () {
 }
 
 /// Encoding for tasks using json
-#[cfg(feature = "json")]
+// #[cfg(feature = "json")]
 pub mod json {
     use std::marker::PhantomData;
 

@@ -62,6 +62,8 @@ pub mod shutdown;
 
 pub mod ext;
 
+pub mod dag;
+
 /// Sleep utilities
 #[cfg(feature = "sleep")]
 pub async fn sleep(duration: std::time::Duration) {

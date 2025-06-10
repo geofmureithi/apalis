@@ -1,17 +1,16 @@
-
 //! Types related to the [`TaskTracker`] collection.
 //!
 //! Extracted from https://github.com/tokio-rs/tokio/blob/master/tokio-util/src/task/task_tracker.rs
 
 use pin_project_lite::pin_project;
+use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::task::{Context, Poll, Waker};
-use std::collections::VecDeque;
 use std::sync::Mutex;
+use std::task::{Context, Poll, Waker};
 
 /// A task tracker used for waiting until tasks exit.
 ///
@@ -327,9 +326,9 @@ impl TaskTracker {
 
     /// Creates a [`TaskTrackerToken`] representing a task tracked by this `TaskTracker`.
     ///
-    /// This token is a lower-level utility than tracking futures directly. Each token is 
-    /// considered to correspond to a task. As long as the token exists, the `TaskTracker` 
-    /// cannot complete. Furthermore, the count returned by the [`len`] method will include 
+    /// This token is a lower-level utility than tracking futures directly. Each token is
+    /// considered to correspond to a task. As long as the token exists, the `TaskTracker`
+    /// cannot complete. Furthermore, the count returned by the [`len`] method will include
     /// the tokens in the count.
     ///
     /// Dropping the token indicates to the `TaskTracker` that the task has exited.

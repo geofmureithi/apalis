@@ -8,8 +8,8 @@ use tower::{
 
 use crate::{
     backend::Backend,
-    error::BoxDynError,
     data::Data,
+    error::BoxDynError,
     request::Request,
     service_fn::{service_fn, ServiceFn},
     shutdown::Shutdown,
@@ -190,8 +190,6 @@ where
         worker
     }
 }
-
-
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
 pub trait WorkerFactoryFn<Req, F, FnArgs> {

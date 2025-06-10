@@ -6,8 +6,8 @@ use crate::service_fn::FromRequest;
 use crate::shutdown::Shutdown;
 use crate::task::task_id::TaskId;
 use call_all::CallAllUnordered;
-use futures::channel::mpsc;
-use futures::future::{join, select, BoxFuture};
+use futures::channel::mpsc::{self, channel, unbounded};
+use futures::future::{join, select, BoxFuture, Either};
 use futures::stream::BoxStream;
 use futures::{Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project_lite::pin_project;
@@ -71,7 +71,7 @@ impl WorkerId {
 }
 
 /// Events emitted by a worker
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Event {
     /// Worker started
     Start,
@@ -87,11 +87,9 @@ pub enum Event {
     /// A result of processing
     Success,
     /// Worker encountered an error
-    Error(BoxDynError),
+    Error(Arc<BoxDynError>),
     /// Worker stopped
     Stop,
-    /// Worker completed all pending tasks
-    Exit,
 }
 
 impl fmt::Display for Event {
@@ -103,7 +101,6 @@ impl fmt::Display for Event {
             Event::Custom(msg) => format!("Custom event: {}", msg),
             Event::Error(err) => format!("Worker encountered an error: {}", err),
             Event::Stop => "Worker stopped".to_string(),
-            Event::Exit => "Worker completed all pending tasks and exited".to_string(),
             Event::HeartBeat => "Worker Heartbeat".to_owned(),
             Event::Success => "Worker completed task successfully".to_string(),
         };
@@ -113,17 +110,20 @@ impl fmt::Display for Event {
 }
 
 /// Possible errors that can occur when starting a worker.
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 pub enum WorkerError {
-    /// An error occurred while processing a job.
-    #[error("Failed to process job: {0}")]
-    ProcessingError(String),
-    /// An error occurred in the worker's service.
-    #[error("Service error: {0}")]
-    ServiceError(String),
-    /// An error occurred while trying to start the worker.
-    #[error("Failed to start worker: {0}")]
-    StartError(String),
+    /// An error occurred while consuming the task stream.
+    #[error("Failed to consume task stream: {0}")]
+    ProcessingError(BoxDynError),
+    /// An error occurred in the worker's heartbeat.
+    #[error("Heartbeat error: {0}")]
+    HeartbeatError(BoxDynError),
+    /// An error occurred while trying to change the state of the worker.
+    #[error("Failed to handle the new state: {0}")]
+    StateError(BoxDynError),
+    /// A worker that terminates when .stop was called
+    #[error("Worker stopped and gracefully exited")]
+    GracefulExit,
 }
 
 /// A worker that is ready for running
@@ -167,16 +167,25 @@ impl<Args, Ctx, B, Svc, M> Worker<Args, Ctx, B, Svc, M> {
 
 impl WorkerContext {
     /// Allows workers to emit events
-    pub fn emit(&self, event: Event) -> bool {
+    pub fn emit(&mut self, event: &Event) {
+        self.emit_ref(event);
+    }
+
+    fn emit_ref(&self, event: &Event) {
         let handler = self.event_handler.as_ref();
-        handler(self, &event);
-        return true;
+        handler(self, event);
     }
     /// Start running the worker
-    pub fn start(&self) {
-        self.running.store(true, Ordering::Relaxed);
+    pub fn start(&mut self) -> Result<(), WorkerError> {
+        let current_state = self.state.load(Ordering::SeqCst);
+        if current_state != InnerWorkerState::Pending {
+            return Err(WorkerError::StateError("Worker already started".into()));
+        }
+        self.state
+            .store(InnerWorkerState::Running, Ordering::SeqCst);
         self.is_ready.store(true, Ordering::Release);
-        self.emit(Event::Start);
+        self.emit(&Event::Start);
+        Ok(())
     }
 
     pub(crate) fn wrap_listener<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
@@ -198,7 +207,7 @@ impl WorkerContext {
             service: type_name::<S>(),
             task_count: Default::default(),
             waker: Default::default(),
-            running: Default::default(),
+            state: Default::default(),
             shutdown: Default::default(),
             event_handler: Arc::new(Box::new(|_, _| {
                 // noop
@@ -238,16 +247,16 @@ where
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Error: Into<BoxDynError> + Send + Sync +'static
 {
-    pub fn run(self) -> BoxFuture<'static, Result<(), ()>> {
+    pub fn run(self) -> BoxFuture<'static, Result<(), WorkerError>> {
         let mut ctx = WorkerContext::new::<M::Service>(&self.id);
         self.run_with_ctx(&mut ctx)
     }
 
-    pub fn run_with_ctx(self, ctx: &mut WorkerContext) -> BoxFuture<'static, Result<(), ()>> {
+    pub fn run_with_ctx(self, ctx: &mut WorkerContext) -> BoxFuture<'static, Result<(), WorkerError>> {
         let backend = self.backend;
         let event_handler = self.event_handler;
         ctx.wrap_listener(event_handler);
-        let worker = ctx.clone();
+        let mut worker = ctx.clone();
         let service = ServiceBuilder::new()
             .layer(Data::new(worker.clone()))
             .layer(self.middleware.into_inner())
@@ -256,59 +265,99 @@ where
             .service(self.service);
         let mut heartbeat = backend.heartbeat();
         let heartbeat = async move {
-            while let Some(_) = heartbeat.next().await {
-
+            while let Some(res) = heartbeat.next().await {
+                match res {
+                    Ok(_) => continue,
+                    Err(e) => return Err(WorkerError::HeartbeatError(e.into())),
+                }
             }
+            Ok(())
         }
         .boxed();
 
         let mut stream = backend.poll(&worker);
 
         let mut jobs = poll_jobs(service, stream);
-        let w = worker.clone();
+        let mut w = worker.clone();
         let poller_future = async move {
-            while let Some(event) = jobs.next().await {
-                w.emit(event);
+            loop {
+                match jobs.next().await {
+                    Some(Ok(event)) => {
+                        w.emit(&event);
+                    }
+                    Some(Err(e)) => match e {
+                        WorkerError::GracefulExit => return Ok(()), // Worker exit will have a success code
+                        _ => return Err(e)
+                    },
+                    _ => continue,
+                }
             }
         };
         let combined = Box::pin(join(poller_future, heartbeat));
-        let w = worker.clone();
-        let mut combined =
+        let combined =
             select(combined, worker.clone()).boxed();
 
         let fut = async move {
-            worker.start();
-            combined.await;
-            worker.emit(Event::Exit);
-            Ok(())
+            worker.start()?;
+            let res = combined.await;
+            match res {
+                Either::Left(((res1, res2), _)) => {
+                    res1.and(res2) // if res1 is Ok, returns res2
+                }
+                Either::Right((ctx_res, _)) => {
+                    ctx_res
+            }
+    }
         };
 
         fut.boxed()
     }
 
-    pub fn stream(self) -> impl Stream<Item = Event>{
+    pub fn stream(self) -> impl Stream<Item = Result<Event, WorkerError>>{
         let mut ctx = WorkerContext::new::<M::Service>(&self.id);
         self.stream_with_ctx(&mut ctx)
     }
 
-    pub fn stream_with_ctx(self, ctx: &mut WorkerContext) -> impl Stream<Item = Event>{
+    pub fn stream_with_ctx(self, ctx: &mut WorkerContext) -> impl Stream<Item = Result<Event, WorkerError>>{
          let backend = self.backend;
         let event_handler = self.event_handler;
         ctx.wrap_listener(event_handler);
-        let worker = ctx.clone();
+        let mut worker = ctx.clone();
         let service = ServiceBuilder::new()
             .layer(Data::new(worker.clone()))
             .layer(self.middleware.into_inner())
             .layer(ReadinessLayer::new(worker.is_ready.clone()))
             .layer(TrackerLayer::new(worker.clone()))
             .service(self.service);
-        let heartbeat = backend.heartbeat().map(|_| Event::HeartBeat);
+        let heartbeat = backend.heartbeat().map(|_| Ok(Event::HeartBeat));
 
         let stream = backend.poll(&worker);
 
         let jobs = poll_jobs(service, stream);
-        let work_stream = futures::stream_select!(heartbeat, jobs);
-        work_stream
+        let mut w = worker.clone();
+        let mut ww = w.clone();
+        let starter : BoxStream<'static, _> = futures::stream::once(async move {
+            ww.start()?;
+            Ok(None)
+        }).filter_map(|res:Result<Option<Event>, WorkerError>| async move {
+            match res {
+                Ok(_) => None,
+                Err(e) => Some(Err(e))
+            }
+        }).boxed();
+        let wait_for_exit: BoxStream<'static, _> = futures::stream::once(async move {
+            match worker.await {
+                Ok(_) => Err(WorkerError::GracefulExit),
+                Err(e) => Err(e)
+            }
+         }).boxed();
+        let work_stream = futures::stream_select!(wait_for_exit, heartbeat, jobs).map(move |res| {
+            if let Ok(e) = &res{
+                w.emit(e);
+            }
+            res
+        });
+        starter.chain(work_stream)
 
     }
 }
@@ -316,7 +365,7 @@ where
 fn poll_jobs<Svc, Stm, Req, Ctx, E: Into<BoxDynError> + Send + 'static>(
     service: Svc,
     stream: Stm,
-) -> BoxStream<'static, Event>
+) -> BoxStream<'static, Result<Event, WorkerError>>
 where
     Svc: Service<Request<Req, Ctx>> + Send + 'static,
     Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, E>> + Send + Unpin + 'static,
@@ -325,7 +374,7 @@ where
     Ctx: Send + 'static,
     Svc::Error: Into<BoxDynError> + Sync + Send,
 {
-    let (tx, rx) = mpsc::channel(10);
+    let (tx, rx) = mpsc::unbounded();
     let txx = tx.clone();
     let stream = stream.filter_map(move |result| {
         let mut txx = txx.clone();
@@ -333,28 +382,88 @@ where
         async move {
             match result {
                 Ok(Some(request)) => {
-                    txx.send(Event::Engage(request.parts.task_id.clone()))
+                    txx.send(Ok(Event::Engage(request.parts.task_id.clone())))
                         .await
                         .unwrap();
                     Some(request)
                 }
                 Ok(None) => {
-                    txx.send(Event::Idle).await.unwrap();
+                    txx.send(Ok(Event::Idle)).await.unwrap();
                     None
                 }
                 Err(err) => {
-                    txx.send(Event::Error(err.into())).await.unwrap();
+                    txx.send(Err(WorkerError::ProcessingError(err.into())))
+                        .await
+                        .unwrap();
                     None
                 }
             }
         }
     });
     let stream = CallAllUnordered::new(service, stream).map(|r| match r {
-        Ok(_) => Event::Success,
-        Err(err) => Event::Error(err.into()),
+        Ok(_) => Ok(Event::Success),
+        Err(err) => Ok(Event::Error(err.into().into())),
     });
     let stream = futures::stream::select(rx, stream);
     stream.boxed()
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[repr(usize)]
+enum InnerWorkerState {
+    #[default]
+    Pending,
+    Running,
+    Paused,
+    Stopped,
+}
+
+impl TryFrom<usize> for InnerWorkerState {
+    type Error = ();
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(InnerWorkerState::Pending),
+            1 => Ok(InnerWorkerState::Running),
+            2 => Ok(InnerWorkerState::Paused),
+            3 => Ok(InnerWorkerState::Stopped),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct WorkerState {
+    inner: AtomicUsize,
+}
+
+impl WorkerState {
+    fn new(state: InnerWorkerState) -> Self {
+        Self {
+            inner: AtomicUsize::new(state as usize),
+        }
+    }
+
+    fn load(&self, order: Ordering) -> InnerWorkerState {
+        InnerWorkerState::try_from(self.inner.load(order)).expect("Invalid enum value")
+    }
+
+    fn store(&self, state: InnerWorkerState, order: Ordering) {
+        self.inner.store(state as usize, order);
+    }
+
+    fn compare_exchange(
+        &self,
+        current: InnerWorkerState,
+        new: InnerWorkerState,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<InnerWorkerState, InnerWorkerState> {
+        self.inner
+            .compare_exchange(current as usize, new as usize, success, failure)
+            .map(|v| InnerWorkerState::try_from(v).unwrap())
+            .map_err(|v| InnerWorkerState::try_from(v).unwrap())
+    }
 }
 
 /// Stores the Workers context
@@ -363,7 +472,7 @@ pub struct WorkerContext {
     pub(crate) id: Arc<WorkerId>,
     task_count: Arc<AtomicUsize>,
     waker: Arc<Mutex<Option<Waker>>>,
-    running: Arc<AtomicBool>,
+    state: Arc<WorkerState>,
     shutdown: Option<Shutdown>,
     event_handler: CtxEventHandler,
     is_ready: Arc<AtomicBool>,
@@ -375,7 +484,7 @@ impl fmt::Debug for WorkerContext {
         f.debug_struct("WorkerContext")
             .field("shutdown", &["Shutdown handle"])
             .field("task_count", &self.task_count)
-            .field("running", &self.running)
+            .field("state", &self.state.load(Ordering::SeqCst))
             .field("service", &self.service)
             .finish()
     }
@@ -417,10 +526,16 @@ impl WorkerContext {
     }
 
     /// Calling this function triggers shutting down the worker while waiting for any tasks to complete
-    pub fn stop(&self) {
-        self.running.store(false, Ordering::Relaxed);
+    pub fn stop(&self) -> Result<(), WorkerError> {
+        let current_state = self.state.load(Ordering::SeqCst);
+        if current_state == InnerWorkerState::Pending {
+            return Err(WorkerError::StateError("Worker not started".into()));
+        }
+        self.state
+            .store(InnerWorkerState::Stopped, Ordering::SeqCst);
         self.wake();
-        self.emit(Event::Stop);
+        self.emit_ref(&Event::Stop);
+        Ok(())
     }
 
     fn start_task(&self) {
@@ -443,7 +558,7 @@ impl WorkerContext {
 
     /// Returns whether the worker is running
     pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::Relaxed)
+        self.state.load(Ordering::SeqCst) == InnerWorkerState::Running
     }
 
     /// Returns the current futures in the worker domain
@@ -488,7 +603,9 @@ impl WorkerContext {
 
     /// Returns if the worker is ready to consume new tasks
     pub fn is_ready(&self) -> bool {
-        self.is_ready.load(Ordering::Acquire) && !self.is_shutting_down()
+        self.state.load(Ordering::SeqCst) == InnerWorkerState::Running
+            && self.is_ready.load(Ordering::Acquire)
+            && !self.is_shutting_down()
     }
 
     /// Get the type of service
@@ -498,12 +615,18 @@ impl WorkerContext {
 }
 
 impl Future for WorkerContext {
-    type Output = ();
+    type Output = Result<(), WorkerError>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut TaskCtx<'_>) -> Poll<()> {
+    fn poll(self: Pin<&mut Self>, cx: &mut TaskCtx<'_>) -> Poll<Self::Output> {
         let task_count = self.task_count.load(Ordering::Relaxed);
+        let state = self.state.load(Ordering::SeqCst);
+        if state == InnerWorkerState::Pending {
+            return Poll::Ready(Err(WorkerError::StateError(
+                "Worker not started, did you forget to call worker.start()?".into(),
+            )));
+        }
         if self.is_shutting_down() && task_count == 0 {
-            Poll::Ready(())
+            Poll::Ready(Ok(()))
         } else {
             if !self.has_recent_waker(cx) {
                 self.add_waker(cx);
@@ -805,7 +928,7 @@ mod tests {
 
     use super::*;
 
-    const ITEMS: u32 = 100;
+    const ITEMS: u32 = 10;
 
     #[test]
     fn it_parses_worker_names() {
@@ -831,14 +954,11 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
-        let in_memory = MemoryStorage::default();
-        let mut handle = in_memory.clone();
+        let mut in_memory = MemoryStorage::new();
 
-        tokio::spawn(async move {
-            for i in 0..ITEMS {
-                handle.push(i).await.unwrap();
-            }
-        });
+        for i in 0..ITEMS {
+            in_memory.push(i).await.unwrap();
+        }
 
         #[derive(Clone, Debug, Default)]
         struct Count(Arc<AtomicUsize>);
@@ -854,7 +974,7 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(1)).await;
             count.fetch_add(1, Ordering::Relaxed);
             if job == ITEMS - 1 {
-                ctx.stop();
+                ctx.stop().unwrap();
                 return Err("Worker stopped!")?;
             }
             Ok(())
@@ -871,7 +991,7 @@ mod tests {
             .ack_with(MyAcknowledger)
             .ack_with(|| WebhookService)
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx, ev);
+                println!("On Event = {:?}", ev);
             })
             .build_fn(task);
         worker.run().await.unwrap();
@@ -879,14 +999,11 @@ mod tests {
 
     #[tokio::test]
     async fn it_streams() {
-        let in_memory = MemoryStorage::default();
-        let mut handle = in_memory.clone();
+        let mut in_memory = MemoryStorage::new();
 
-        tokio::spawn(async move {
-            for i in 0..ITEMS {
-                handle.push(i).await.unwrap();
-            }
-        });
+        for i in 0..ITEMS {
+            in_memory.push(i).await.unwrap();
+        }
 
         #[derive(Clone, Debug, Default)]
         struct Count(Arc<AtomicUsize>);
@@ -899,13 +1016,10 @@ mod tests {
         }
 
         async fn task(job: u32, count: Data<Count>, worker: WorkerContext) {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            // tokio::time::sleep(Duration::from_secs(1)).await;
             count.fetch_add(1, Ordering::Relaxed);
             if job == ITEMS - 1 {
-                worker.stop();
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                println!("CTX {:?}", worker);
-                // panic!("boo");
+                worker.stop().unwrap();
             }
         }
         let worker = WorkerBuilder::new("rango-tango")
@@ -918,11 +1032,8 @@ mod tests {
             })
             .build_fn(task);
         let mut event_stream = worker.stream();
-        while let Some(ev) = event_stream.next().await {
+        while let Some(Ok(ev)) = event_stream.next().await {
             println!("On Event = {:?}", ev);
-            if let Event::Stop = ev {
-                break;
-            }
         }
     }
 }

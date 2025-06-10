@@ -1,4 +1,3 @@
-
 // /// A trait for acknowledging successful processing
 // /// This trait is called even when a task fails.
 // /// This is a way of a [`Backend`] to save the result of a job or message
@@ -158,7 +157,11 @@
 
 use tower::{layer::util::Stack, Layer};
 
-use crate::{builder::WorkerBuilder, error::BoxDynError, request::{Parts, Request}};
+use crate::{
+    builder::WorkerBuilder,
+    error::BoxDynError,
+    request::{Parts, Request},
+};
 
 use super::long_running::LongRunningLayer;
 

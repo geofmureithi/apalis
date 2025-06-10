@@ -70,11 +70,6 @@ pub trait Schedule<T, Context>: Push<T, Context> {
     ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
 }
 
-pub trait Metric<Output> {
-    type Error;
-    fn metric(&mut self) -> impl Future<Output = Result<Output, Self::Error>> + Send;
-}
-
 pub trait FetchById<T, Context>: Backend<Request<T, Context>> {
     fn fetch_by_id(
         &mut self,
@@ -144,10 +139,11 @@ pub trait RegisterWorker<T, Context>: Backend<Request<T, Context>> {
     ) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
-pub trait Notify<Event> {
+pub trait Metric<Output> {
     type Error;
-    fn notify(&mut self, ev: Event) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn metric(&mut self) -> impl Future<Output = Result<Output, Self::Error>> + Send;
 }
+
 
 pub trait ListWorkers<Req>: Backend<Req> {
     type Worker;

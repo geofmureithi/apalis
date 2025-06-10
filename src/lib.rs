@@ -72,8 +72,8 @@ pub mod prelude {
     pub use apalis_core::{
         builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
         data::Extensions,
-        error::BoxDynError,
         data::{AddExtension, Data},
+        error::BoxDynError,
         memory::{MemoryStorage, MemoryWrapper},
         monitor::Monitor,
         request::{Request, RequestStream},

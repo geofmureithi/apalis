@@ -15,7 +15,9 @@ use tower::{
 };
 
 use crate::{
-    codec::{Decoder, Encoder}, error::BoxDynError, request::Request
+    codec::{Decoder, Encoder},
+    error::BoxDynError,
+    request::Request,
 };
 
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
@@ -83,9 +85,7 @@ impl<Input, Current, Compact, Codec>
         service: S,
     ) -> StepBuilder<Input, Next, SteppedService<Compact, Ctx>, Codec>
     where
-        S: Service<Request<Current, Ctx>, Response = GoTo<Next>, Error = E>
-            + Send
-            + 'static,
+        S: Service<Request<Current, Ctx>, Response = GoTo<Next>, Error = E> + Send + 'static,
         S::Future: Send + 'static,
         Codec: Encoder<Next, Compact = Compact> + Decoder<Current, Compact = Compact>,
         <Codec as Decoder<Current>>::Error: Debug,

@@ -3,7 +3,10 @@ use std::sync::Arc;
 use tower::{layer::util::Stack, Layer, Service};
 
 use crate::{
-    backend::Backend, builder::WorkerBuilder, request::Request, worker::{Event, WorkerContext}
+    backend::Backend,
+    builder::WorkerBuilder,
+    request::Request,
+    worker::{Event, WorkerContext},
 };
 
 pub trait EventListenerExt<Req, Source, Middleware>: Sized {
@@ -88,7 +91,7 @@ where
             })
             .unwrap();
         let _ = self.event_handler.write().map(|mut res| {
-            res.insert(new_fn);
+            let _ = res.insert(new_fn);
         });
         let this = self.layer(EventListenerLayer);
         WorkerBuilder {

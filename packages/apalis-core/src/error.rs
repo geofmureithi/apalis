@@ -24,9 +24,19 @@ pub struct AbortError {
 }
 
 /// Execution should be retried after a specific duration
+/// This increases the attempts
 #[derive(Error, Debug)]
 #[error("RetryError: {reason}, source: {source}")]
 pub struct RetryError {
+    reason: String,
+    #[source]
+    source: BoxDynError,
+}
+
+/// Execution should be retried after a specific duration
+#[derive(Error, Debug)]
+#[error("DeferredError: {reason}, source: {source}")]
+pub struct DeferredError {
     reason: String,
     #[source]
     source: BoxDynError,

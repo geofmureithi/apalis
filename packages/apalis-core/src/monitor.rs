@@ -86,18 +86,23 @@ impl Monitor {
 
         let stream = worker.stream_with_ctx(&mut ctx);
         let worker_ctx = ctx.clone();
-        let stream = stream.for_each(move |e| {
-            let ctx = worker_ctx.clone();
-            let handler = handler.clone();
-            async move {
-                match handler.read() {
-                    Ok(inner) => {
-                        if let Some(h) = inner.as_deref() {
-                            h(&ctx, &e);
+        let stream = stream.for_each(move |e| match e {
+            Ok(e) => {
+                let ctx = worker_ctx.clone();
+                let handler = handler.clone();
+                async move {
+                    match handler.read() {
+                        Ok(inner) => {
+                            if let Some(h) = inner.as_deref() {
+                                h(&ctx, &e);
+                            }
                         }
-                    }
-                    Err(_) => todo!(),
-                };
+                        Err(_) => todo!(),
+                    };
+                }
+            }
+            Err(e) => {
+                panic!("WorkerFailed: {e}");
             }
         });
         let worker = MonitoredWorker {
@@ -170,10 +175,11 @@ impl Monitor {
         let shutdown_after = self.shutdown.shutdown_after(signal);
         if let Some(terminator) = self.terminator {
             let _res = futures::future::select(
-                futures::future::join_all(self.workers.into_iter().map(|(_, s)| {
-                    s.ctx.start();
-                    select(s.ctx, s.fut)
-                }))
+                futures::future::join_all(
+                    self.workers
+                        .into_iter()
+                        .map(|(_, worker)| select(worker.ctx, worker.fut)),
+                )
                 .map(|_| shutdown.start_shutdown())
                 .boxed(),
                 async {
@@ -203,21 +209,12 @@ impl Monitor {
         let shutdown = self.shutdown.clone();
         let shutdown_future = self.shutdown.boxed().map(|_| ());
         futures::join!(
-            futures::future::join_all(self.workers.into_iter().map(|(_, s)| {
-                s.ctx.start();
-                select(s.ctx, s.fut)
-            }))
-            .map(|s| {
-                let items: Vec<_> = s
+            futures::future::join_all(
+                self.workers
                     .into_iter()
-                    .map(|s| match s {
-                        futures::future::Either::Left(_) => "ctx",
-                        futures::future::Either::Right(_) => "fut",
-                    })
-                    .collect();
-                println!("{:?}", items);
-                shutdown.start_shutdown()
-            }),
+                    .map(|(_, worker)| { select(worker.ctx, worker.fut) })
+            )
+            .map(|_| { shutdown.start_shutdown() }),
             shutdown_future,
         );
 
@@ -301,14 +298,12 @@ mod tests {
 
     #[tokio::test]
     async fn it_works_with_workers() {
-        let backend = MemoryStorage::default();
-        let mut handle = backend.clone();
+        let mut backend = MemoryStorage::new();
 
-        tokio::spawn(async move {
-            for i in 0..10 {
-                handle.push(i).await.unwrap();
-            }
-        });
+        for i in 0..10 {
+            backend.push(i).await.unwrap();
+        }
+
         let service = tower::service_fn(|request: Request<u32, ()>| async {
             // panic!("called");
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -328,14 +323,10 @@ mod tests {
     }
     #[tokio::test]
     async fn test_monitor_run() {
-        let backend = MemoryStorage::default();
-        let mut handle = backend.clone();
-
-        tokio::spawn(async move {
-            for i in 0..10 {
-                handle.push(i).await.unwrap();
-            }
-        });
+        let mut backend = MemoryStorage::new();
+        for i in 0..10 {
+            backend.push(i).await.unwrap();
+        }
         let service = tower::service_fn(|request: Request<u32, _>| async {
             tokio::time::sleep(Duration::from_millis(1)).await;
             Ok::<_, io::Error>(request)
@@ -346,18 +337,17 @@ mod tests {
         let monitor: Monitor = Monitor::new();
 
         let monitor = monitor.on_event(|wrk, e| {
-            println!("{e:?}");
+            println!("{}, {e:?}", wrk.id);
         });
 
         let monitor = monitor.register(worker);
         assert_eq!(monitor.workers.len(), 1);
         let shutdown = monitor.shutdown.clone();
 
-        // tokio::spawn(async move {
-        //     sleep(Duration::from_millis(5000)).await;
-        //     // panic!("test");
-        shutdown.start_shutdown();
-        // });
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(5000)).await;
+            shutdown.start_shutdown();
+        });
 
         let result = monitor.run().await;
         assert!(result.is_ok());

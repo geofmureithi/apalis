@@ -22,6 +22,7 @@ ulid = { version = "1.1.2", default-features = false, features = ["std"] }
 futures-timer = { version = "3.0.3", optional = true }
 # Needed for the codec
 serde_json = { version = "1"  }
+petgraph = { version = "0.8.2", features = ["serde-1"] }
 
 [dependencies.document-features]
 version = "0.2"
@@ -29,7 +30,7 @@ optional = true
 
 
 [features]
-default = ["test-utils"]
+default = ["test-utils", "json"]
 docsrs = ["document-features"]
 sleep = ["futures-timer"]
 json = []

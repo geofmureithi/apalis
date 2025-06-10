@@ -2,12 +2,15 @@ use crate::{
     backend::{Backend, Push, Schedule},
     error::BoxDynError,
     request::{Parts, Request, RequestStream},
-    shared::MakeShared,
+    shared::{MakeShared, Shared},
     task::task_id::TaskId,
     worker::{self, WorkerContext},
 };
 use futures::{
-    channel::mpsc::{channel, Receiver, Sender}, future::pending, stream::{self, BoxStream}, Sink, SinkExt, Stream, StreamExt
+    channel::mpsc::{channel, unbounded, Receiver, SendError, Sender},
+    future::pending,
+    stream::{self, BoxStream},
+    Sink, SinkExt, Stream, StreamExt,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -21,50 +24,84 @@ use std::{
 };
 use tower::layer::util::Identity;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// An example of the basics of a backend
 pub struct MemoryStorage<S> {
     /// This would be the backend you are targeting, eg a connection poll
     inner: S,
 }
-// impl<T> MemoryStorage<MemoryWrapper<T>> {
-//     /// Create a new in-memory storage
-//     pub fn new() -> Self {
-//         Self {
-//             inner: MemoryWrapper::new(),
-//         }
-//     }
-// }
-
-impl<T: Default> Default for MemoryStorage<InMemory<T>> {
-    fn default() -> Self {
+impl<T: Send + 'static> MemoryStorage<MemoryWrapper<T>> {
+    /// Create a new in-memory storage
+    pub fn new() -> Self {
+        let (sender, receiver) = unbounded();
+        let sender =
+            Box::new(sender) as Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Unpin>;
         Self {
-            inner: Default::default(),
+            inner: MemoryWrapper {
+                sender: Box::new(sender),
+                receiver: receiver.boxed(),
+            },
         }
     }
 }
 
-impl<T: Clone> Clone for MemoryStorage<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct InMemory<T> {
+#[derive(Debug, Clone, Default)]
+pub struct JsonMemory<T> {
     tasks: Arc<RwLock<BTreeMap<TaskId, Mutex<T>>>>,
     buffer: Vec<(TaskId, T)>,
 }
-impl<Args> InMemory<Args> {
+impl<Args> JsonMemory<Args> {
     fn insert(&self, task_id: TaskId, args: Args) {
         self.tasks.write().unwrap().insert(task_id, args.into());
     }
 }
 
-impl<T: Unpin> Sink<(TaskId, T)> for InMemory<T> {
-    type Error = std::io::Error;
+impl JsonMemory<Wrapped> {
+    fn create_channel<T: 'static + DeserializeOwned + Serialize + Send>(
+        &self,
+    ) -> (
+        Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Unpin + 'static>,
+        Pin<Box<dyn Stream<Item = Request<T, ()>> + Send>>,
+    ) {
+        // Create a channel for communication
+        let sender = self.clone();
+
+        // Create a wrapped sender that will insert into the in-memory store
+        let wrapped_sender = {
+            let inner = self.clone();
+
+            sender.with_flat_map(move |request: Request<T, ()>| {
+                let namespace = std::any::type_name::<T>().to_string();
+                let task_id = request.parts.task_id;
+                let value = serde_json::to_value(request.args).unwrap();
+
+                let wrapped = Wrapped { namespace, value };
+                inner.insert(task_id.clone(), wrapped.clone());
+
+                futures::stream::iter(vec![Ok((task_id, wrapped))])
+            })
+        };
+
+        // Create a stream that filters by type T
+        let filtered_stream = {
+            let inner = self.clone();
+            SharedInMemoryStream {
+                inner,
+                req_type: PhantomData,
+            }
+        };
+
+        // Combine the sender and receiver
+        let sender = Box::new(wrapped_sender)
+            as Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Unpin>;
+        let receiver = filtered_stream.boxed();
+
+        (sender, receiver)
+    }
+}
+
+impl<T: Unpin> Sink<(TaskId, T)> for JsonMemory<T> {
+    type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -90,7 +127,7 @@ impl<T: Unpin> Sink<(TaskId, T)> for InMemory<T> {
     }
 }
 
-impl<T> Stream for InMemory<T> {
+impl<T> Stream for JsonMemory<T> {
     type Item = Request<T, ()>;
 
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -112,7 +149,7 @@ impl<T> Stream for InMemory<T> {
 
 /// In-memory queue that implements [Stream]
 pub struct MemoryWrapper<T> {
-    sender: Box<dyn Sink<Request<T, ()>, Error = ()> + Send + Unpin + 'static>,
+    sender: Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Unpin + 'static>,
     receiver: Pin<Box<dyn Stream<Item = Request<T, ()>> + Send>>,
 }
 
@@ -132,7 +169,7 @@ impl<S: Stream<Item = Request<T, ()>> + Send + 'static, T> Backend<Request<T, ()
     type Stream = RequestStream<Request<T, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
-    
+
     fn heartbeat(&self) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
     }
@@ -146,7 +183,7 @@ impl<S: Stream<Item = Request<T, ()>> + Send + 'static, T> Backend<Request<T, ()
     }
 }
 
-impl<Args: Send + 'static> Push<Args, ()> for MemoryStorage<InMemory<Args>> {
+impl<Args: Send + 'static> Push<Args, ()> for MemoryStorage<JsonMemory<Args>> {
     type Compact = Args;
     async fn push_request(&mut self, req: Request<Args, ()>) -> Result<Parts<()>, Self::Error> {
         self.push_raw_request(req).await
@@ -178,7 +215,7 @@ impl<Args: Send + 'static> Push<Args, ()> for MemoryStorage<MemoryWrapper<Args>>
     }
 }
 
-impl<Args: Send + Sync + 'static> Schedule<Args, ()> for MemoryStorage<InMemory<Args>> {
+impl<Args: Send + Sync + 'static> Schedule<Args, ()> for MemoryStorage<JsonMemory<Args>> {
     type Timestamp = Duration;
     async fn schedule_request(
         &mut self,
@@ -206,11 +243,6 @@ struct Wrapped {
     value: serde_json::Value,
 }
 
-#[derive(Default)]
-pub struct SharedMemoryStorage {
-    inner: InMemory<Wrapped>,
-}
-
 pub trait PopFirstWith<K, V> {
     fn pop_first_with<F>(&mut self, predicate: F) -> Option<(K, V)>
     where
@@ -236,54 +268,10 @@ where
         }
     }
 }
-impl SharedMemoryStorage {
-    fn create_channel<T: 'static + DeserializeOwned + Serialize + Send>(
-        &self,
-    ) -> (
-        Box<dyn Sink<Request<T, ()>, Error = ()> + Send + Unpin + 'static>,
-        Pin<Box<dyn Stream<Item = Request<T, ()>> + Send>>,
-    ) {
-        // Create a channel for communication
-        let sender = self.inner.clone();
 
-        // Create a wrapped sender that will insert into the in-memory store
-        let wrapped_sender = {
-            let inner = self.inner.clone();
-
-            sender
-                .sink_map_err(|_| ())
-                .with_flat_map(move |request: Request<T, ()>| {
-                    let namespace = std::any::type_name::<T>().to_string();
-                    let task_id = request.parts.task_id;
-                    let value = serde_json::to_value(request.args).unwrap();
-
-                    let wrapped = Wrapped { namespace, value };
-                    inner.insert(task_id.clone(), wrapped.clone());
-
-                    futures::stream::iter(vec![Ok((task_id, wrapped))])
-                })
-        };
-
-        // Create a stream that filters by type T
-        let filtered_stream = {
-            let inner = self.inner.clone();
-            SharedInMemoryStream {
-                inner,
-                req_type: PhantomData,
-            }
-        };
-
-        // Combine the sender and receiver
-        let sender =
-            Box::new(wrapped_sender) as Box<dyn Sink<Request<T, ()>, Error = ()> + Send + Unpin>;
-        let receiver = filtered_stream.boxed();
-
-        (sender, receiver)
-    }
-}
-
-pub struct SharedInMemoryStream<T> {
-    inner: InMemory<Wrapped>,
+#[derive(Debug)]
+struct SharedInMemoryStream<T> {
+    inner: JsonMemory<Wrapped>,
     req_type: PhantomData<T>,
 }
 
@@ -313,21 +301,20 @@ impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
     }
 }
 
-impl<T: Serialize + DeserializeOwned + 'static + Send> MakeShared<Request<T, ()>>
-    for SharedMemoryStorage
+impl<Req: Send + Serialize + DeserializeOwned + 'static> MakeShared<Req>
+    for Shared<JsonMemory<Wrapped>>
 {
+    type Backend = MemoryStorage<MemoryWrapper<Req>>;
+
     type Config = ();
-    type MakeError = BoxDynError;
-    type Backend = MemoryStorage<MemoryWrapper<T>>;
-    fn make_shared(&mut self) -> Result<Self::Backend, Self::MakeError> {
-        self.make_shared_with_config(Default::default())
-    }
+
+    type MakeError = String;
 
     fn make_shared_with_config(
         &mut self,
         _: Self::Config,
     ) -> Result<Self::Backend, Self::MakeError> {
-        let (sender, receiver) = self.create_channel();
+        let (sender, receiver) = self.inner().create_channel();
         Ok(MemoryStorage {
             inner: MemoryWrapper { sender, receiver },
         })
@@ -356,10 +343,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
-        let mut store = SharedMemoryStorage::default();
+        let mut store = Shared::new(JsonMemory::default());
         let mut string_store = store.make_shared().unwrap();
         let mut int_store = store.make_shared().unwrap();
-        
 
         for i in 0..ITEMS {
             string_store.push(format!("ITEM: {i}")).await.unwrap();
@@ -407,7 +393,6 @@ mod tests {
             .build_fn(task)
             .run();
 
-        
         let _ = futures::future::join(int_worker, string_worker).await;
     }
 }
