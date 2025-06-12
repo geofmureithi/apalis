@@ -1,24 +1,13 @@
-use std::{
-    error::Error as StdError,
-    future::Future,
-    marker::PhantomData,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::{error::Error as StdError, time::Duration};
 use thiserror::Error;
-use tower::Service;
-
-use crate::worker::WorkerError;
 
 /// Convenience type alias
 pub type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
 /// Execution should be aborted
 /// This signifies that the task should not be retried
 #[derive(Error, Debug)]
-#[error("AbortError: {reason}, source: {source}")]
+#[error("AbortError: {source}")]
 pub struct AbortError {
-    reason: String,
     #[source]
     source: BoxDynError,
 }
@@ -26,18 +15,34 @@ pub struct AbortError {
 /// Execution should be retried after a specific duration
 /// This increases the attempts
 #[derive(Error, Debug)]
-#[error("RetryError: {reason}, source: {source}")]
-pub struct RetryError {
-    reason: String,
+#[error("RetryError: {source}")]
+pub struct RetryAfterError {
     #[source]
     source: BoxDynError,
+    duration: Duration
 }
 
 /// Execution should be retried after a specific duration
 #[derive(Error, Debug)]
-#[error("DeferredError: {reason}, source: {source}")]
+#[error("DeferredError: {source}")]
 pub struct DeferredError {
-    reason: String,
     #[source]
     source: BoxDynError,
+}
+
+/// Possible errors that can occur when running a worker.
+#[derive(Error, Debug)]
+pub enum WorkerError {
+    /// An error occurred while consuming the task stream.
+    #[error("Failed to consume task stream: {0}")]
+    ProcessingError(BoxDynError),
+    /// An error occurred in the worker's heartbeat.
+    #[error("Heartbeat error: {0}")]
+    HeartbeatError(BoxDynError),
+    /// An error occurred while trying to change the state of the worker.
+    #[error("Failed to handle the new state: {0}")]
+    StateError(BoxDynError),
+    /// A worker that terminates when .stop was called
+    #[error("Worker stopped and gracefully exited")]
+    GracefulExit,
 }
