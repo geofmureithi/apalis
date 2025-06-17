@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
     Monitor::new()
         .register(worker)
         .on_event(|e| {
-            let worker_id = e.id();
+            let worker_id = e.name();
             match e.inner() {
                 Event::Start => {
                     info!("Worker [{worker_id}] started");

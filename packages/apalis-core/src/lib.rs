@@ -21,18 +21,78 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //! # apalis-core
-//! Utilities for building job and message processing tools.
-/// Represents a task source eg Postgres or Redis
+//! Utilities for building background task processing tools.
+//!
+//! `apalis-core` provides foundational types and traits for building distributed, asynchronous background task processing systems.
+//! It enables defining, scheduling, and monitoring tasks in a modular and extensible way.
+//!
+//! ## Concepts
+//!
+//! ### Request
+//! A [`Request<Args, Context>`] represents a unit of work to be executed by a worker. It contains:
+//! - `args`: the input to the task (e.g., an email to send).
+//! - `parts`: metadata such as the task ID, execution attempts, state, backend context, and extensions.
+//!
+//! You can construct requests using:
+//!
+//! ```rust
+//! use apalis_core::request::Request;
+//! struct BackendContext;
+//! let req = Request::new_with_ctx("send-email", BackendContext);
+//! ```
+//!
+//! ### WorkerBuilder
+//! [`WorkerBuilder`] provides a fluent API to configure workers with middlewares, filters, and error handling strategies.
+//!
+//! ```rust
+//! use apalis_core::worker::WorkerBuilder;
+//!
+//! let worker = WorkerBuilder::new("my-worker")
+//!     .layer(my_middleware)
+//!     .build_fn(handler);
+//! ```
+//! ### Worker
+//! A [`Worker`] represents a task processor. It polls tasks from a [`Backend`], sends them to a [`Service`], and handles retry logic, timeouts, and state transitions.
+//!
+//! Workers can be created manually or using a [`WorkerBuilder`] for more fluent composition.
+//!
+//! ### ServiceFn
+//! A [`ServiceFn`] is an adapter that turns an async function into a task [`Service`]. This is useful for injecting lightweight task handlers.
+//!
+//! Example:
+//! ```rust
+//! use apalis_core::service_fn;
+//!
+//! let handler = service_fn(|req: String, worker: WorkerContext | async move {
+//!     println!("Processing task: {:?}", req);
+//!     Ok(())
+//! });
+//! ```
+//! ### Monitor
+//! A [`Monitor`] supervises multiple [`Worker`]s, supports graceful shutdowns, and coordinates global signals like shutdown or restart
+//!
+//! Example:
+//! ```rust
+//! use apalis_core::{monitor::Monitor, worker::Worker};
+//!
+//! let worker = WorkerBuilder::new("my-worker")
+//!     .layer(my_middleware)
+//!     .build_fn(handler);
+//! Monitor::new().register(worker).run().await;
+//! ```
+//! [`Backend`]: crate::backend::Backend
+//! [`ServiceFn`]: crate::service_fn::ServiceFn
+//! [`Service`]: tower::Service
+//! [`Request<Args, Context>`]: crate::request::Request
+//! [`WorkerBuilder`]: crate::worker::builder::WorkerBuilder
+//! [`Worker`]: crate::worker::Worker
+//! [`Monitor`]: crate::monitor::Monitor
 pub mod backend;
-/// Includes all possible error types.
+/// Includes internal error types.
 pub mod error;
-/// Represents monitoring of running workers
 pub mod monitor;
-/// Represents the request to be processed.
 pub mod request;
-/// Represents a service that is created from a function.
 pub mod service_fn;
-/// Represents the utils for building workers.
 pub mod worker;
-
+/// Represents utilities for building complex workflows
 pub mod workflow;

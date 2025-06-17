@@ -41,8 +41,24 @@ pub enum WorkerError {
     HeartbeatError(BoxDynError),
     /// An error occurred while trying to change the state of the worker.
     #[error("Failed to handle the new state: {0}")]
-    StateError(BoxDynError),
+    StateError(WorkerStateError),
     /// A worker that terminates when .stop was called
     #[error("Worker stopped and gracefully exited")]
     GracefulExit,
+}
+
+#[derive(Error, Debug)]
+pub enum WorkerStateError {
+    #[error("Worker not started, did you forget to call worker.start()")]
+    NotStarted,
+    #[error("Worker already started")]
+    AlreadyStarted,
+    #[error("Worker is not running")]
+    NotRunning,
+    #[error("Worker is not paused")]
+    NotPaused,
+     #[error("Worker is shutting down")]
+    ShuttingDown,
+    #[error("Worker provided with invalid state {0}")]
+    InvalidState(String)
 }
