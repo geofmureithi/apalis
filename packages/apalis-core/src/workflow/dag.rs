@@ -20,8 +20,8 @@ use tower::{Service, ServiceBuilder};
 use crate::{
     backend::codec::{json::JsonCodec, Decoder, Encoder},
     error::BoxDynError,
-    request::task_id::TaskId,
-    request::Request,
+    request::{task_id::TaskId, Request},
+    service_fn::{service_fn, ServiceFn},
 };
 
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
@@ -79,21 +79,21 @@ impl<T> DagRequest<T> {
 
 /// Builder for creating DAG workflows
 // #[derive(Clone)]
-pub struct DagBuilder<Input, Compact, Codec = JsonCodec<String>> {
-    graph: DiGraph<DagService<Compact, ()>, ()>,
+pub struct DagBuilder<Input, Compact, Ctx, Codec = JsonCodec<String>> {
+    graph: DiGraph<DagService<Compact, Ctx>, ()>,
     node_mapping: HashMap<String, NodeIndex>,
     input_type: PhantomData<Input>,
     compact_type: PhantomData<Compact>,
     codec: PhantomData<Codec>,
 }
 
-impl<Input, Compact> Default for DagBuilder<Input, Compact> {
+impl<Input, Compact, Ctx> Default for DagBuilder<Input, Compact, Ctx> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<Input, Compact> DagBuilder<Input, Compact> {
+impl<Input, Compact, Ctx> DagBuilder<Input, Compact, Ctx> {
     pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
@@ -105,18 +105,44 @@ impl<Input, Compact> DagBuilder<Input, Compact> {
     }
 }
 
-impl<Input, Compact, Codec> DagBuilder<Input, Compact, Codec>
+impl<Input, Compact, Ctx, Codec> DagBuilder<Input, Compact, Ctx, Codec>
 where
     Codec: Encoder<Input, Compact = Compact> + Decoder<Input, Compact = Compact> + Clone + 'static,
     <Codec as Decoder<Input>>::Error: Debug,
     <Codec as Encoder<Input>>::Error: Debug,
     Compact: Debug,
 {
-    /// Add a node to the DAG
-    pub fn add_node<S, Output, E: Into<BoxDynError>>(mut self, name: String, service: S) -> Self
+    pub fn add_node<F, Output, Args, FnArgs, E>(self, node_fn: F) -> Self
     where
-        S: Service<Request<HashMap<NodeIndex, Input>, ()>, Response = DagResult<Output>, Error = E>
+        Output: Clone + Send + Sync + 'static,
+        Codec: Encoder<Output, Compact = Compact> + Decoder<Output, Compact = Compact>,
+        <Codec as Decoder<Output>>::Error: Debug,
+        <Codec as Encoder<Output>>::Error: Debug,
+        F: Send,
+        Args: Send,
+        Ctx: Send,
+        FnArgs: Send,
+        ServiceFn<F, Args, Ctx, FnArgs>: Service<Request<HashMap<NodeIndex, Input>, Ctx>, Response = DagResult<Output>, Error = E>
+            + Copy
             + Send
+            + 'static,
+        E: Into<BoxDynError>,
+        <ServiceFn<F, Args, Ctx, FnArgs> as Service<Request<HashMap<NodeIndex, Input>, Ctx>>>::Future: Send + 'static
+    {
+        let name = std::any::type_name::<F>().to_owned();
+        if name.ends_with("{{closure}}") {
+            panic!("closures are not allowed as nodes")
+        }
+        self.add_node_inner::<_, Output, _>(name, service_fn::<F, Args, Ctx, FnArgs>(node_fn))
+    }
+    /// Add a node to the DAG
+    fn add_node_inner<S, Output, E: Into<BoxDynError>>(mut self, name: String, service: S) -> Self
+    where
+        S: Service<
+                Request<HashMap<NodeIndex, Input>, Ctx>,
+                Response = DagResult<Output>,
+                Error = E,
+            > + Send
             + 'static,
         S::Future: Send + 'static,
         Output: Clone + Send + Sync + 'static,
@@ -125,8 +151,8 @@ where
         <Codec as Encoder<Output>>::Error: Debug,
     {
         let dag_service = ServiceBuilder::new()
-            .map_request(|req: Request<DagRequest<Compact>, ()>| {
-                dbg!(&req);
+            .map_request(|req: Request<DagRequest<Compact>, Ctx>| {
+                // dbg!(&req);
                 let decoded_inputs = req
                     .args
                     .inputs
@@ -183,7 +209,23 @@ where
     }
 
     /// Add an edge between two nodes
-    pub fn add_edge(&mut self, from: &str, to: &str) -> Result<(), String> {
+    pub fn add_edge<F1, F2>(&mut self, from: F1, to: F2) -> Result<(), String> {
+        let from = std::any::type_name_of_val(&from);
+        let from_node = self
+            .node_mapping
+            .get(from)
+            .ok_or_else(|| format!("Node '{}' not found", from))?;
+        let to = std::any::type_name_of_val(&to);
+        let to_node = self
+            .node_mapping
+            .get(to)
+            .ok_or_else(|| format!("Node '{}' not found", to))?;
+
+        self.graph.add_edge(*from_node, *to_node, ());
+        Ok(())
+    }
+
+    fn add_edge_inner(&mut self, from: &str, to: &str) -> Result<(), String> {
         let from_node = self
             .node_mapping
             .get(from)
@@ -198,7 +240,7 @@ where
     }
 
     /// Build the DAG executor
-    pub fn build(self) -> Result<DagExecutor<Compact>, String> {
+    pub fn build(self) -> Result<DagExecutor<Compact, Ctx>, String> {
         // Validate DAG (check for cycles)
         let sorted = toposort(&self.graph, None).map_err(|_| "DAG contains cycles")?;
 
@@ -313,8 +355,9 @@ where
                     .is_none()
             })
             .collect();
-
+        dbg!(&leaf_nodes);
         if let Some(&leaf_node) = leaf_nodes.first() {
+            dbg!(&leaf_node);
             // Return results from the first leaf node (you might want to handle this differently)
             Ok(DagResult::Continue {
                 results: HashMap::new(),
@@ -380,9 +423,9 @@ mod tests {
     #[tokio::test]
     async fn test_dag_execution() {
         // Create a simple DAG: A -> B -> C
-        let mut builder = DagBuilder::<String, String>::new();
+        let mut builder = DagBuilder::<String, String, ()>::new();
 
-        builder = builder.add_node(
+        builder = builder.add_node_inner(
             "node_a".to_string(),
             service_fn(|_req: Request<HashMap<NodeIndex, String>, ()>| async {
                 dbg!(_req);
@@ -392,7 +435,7 @@ mod tests {
             }),
         );
 
-        builder = builder.add_node(
+        builder = builder.add_node_inner(
             "node_b".to_string(),
             service_fn(|_req: Request<HashMap<NodeIndex, String>, ()>| async {
                 dbg!(_req);
@@ -402,7 +445,7 @@ mod tests {
             }),
         );
 
-        builder = builder.add_node(
+        builder = builder.add_node_inner(
             "node_c".to_string(),
             service_fn(|_req: Request<HashMap<NodeIndex, String>, ()>| async {
                 dbg!(_req);
@@ -410,8 +453,8 @@ mod tests {
             }),
         );
 
-        builder.add_edge("node_a", "node_b").unwrap();
-        builder.add_edge("node_b", "node_c").unwrap();
+        builder.add_edge_inner("node_a", "node_b").unwrap();
+        builder.add_edge_inner("node_b", "node_c").unwrap();
 
         let mut executor = builder.build().unwrap();
 
@@ -425,6 +468,168 @@ mod tests {
         match result {
             DagResult::Done(final_result) => {
                 assert_eq!(final_result, "\"final_result\"");
+            }
+            _ => panic!("Expected Done result"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_task_dag_execution() {
+        // Create a simple DAG: A -> B -> C
+
+        async fn task_1(
+            _req: HashMap<NodeIndex, String>,
+        ) -> Result<DagResult<String>, BoxDynError> {
+            dbg!(_req);
+            Ok::<_, BoxDynError>(DagResult::Continue {
+                results: [(NodeIndex::new(1), "result_a".to_string())].into(),
+            })
+        }
+
+        async fn task_2(
+            _req: HashMap<NodeIndex, String>,
+        ) -> Result<DagResult<String>, BoxDynError> {
+            dbg!(_req);
+            Ok::<_, BoxDynError>(DagResult::Continue {
+                results: [(NodeIndex::new(2), "result_b".to_string())].into(),
+            })
+        }
+
+        async fn task_3(
+            _req: HashMap<NodeIndex, String>,
+        ) -> Result<DagResult<String>, BoxDynError> {
+            dbg!(_req);
+            Ok::<_, BoxDynError>(DagResult::Continue {
+                results: [(NodeIndex::new(3), "result_c".to_string())].into(),
+            })
+        }
+
+        async fn final_task(
+            _req: HashMap<NodeIndex, String>,
+        ) -> Result<DagResult<String>, BoxDynError> {
+            dbg!(_req);
+            Ok::<_, BoxDynError>(DagResult::Done("final_result".to_string()))
+        }
+
+        let mut builder = DagBuilder::<String, String, ()>::new()
+            .add_node(task_1)
+            .add_node(task_2)
+            .add_node(task_3)
+            .add_node(final_task);
+
+        builder.add_edge(task_1, task_2).unwrap();
+        builder.add_edge(task_1, task_3).unwrap();
+        builder.add_edge(task_2, final_task).unwrap();
+        builder.add_edge(task_3, final_task).unwrap();
+
+        let mut executor = builder.build().unwrap();
+
+        let initial_inputs = [(
+            "node_a".to_string(),
+            JsonCodec::<String>::encode(&"initial_input".to_owned()).unwrap(),
+        )]
+        .into();
+        let result = executor.execute(initial_inputs).await.unwrap();
+
+        match result {
+            DagResult::Done(final_result) => {
+                assert_eq!(final_result, "\"final_result\"");
+            }
+            _ => panic!("Expected Done result"),
+        }
+    }
+    // Approach 2: Parallel Execution with Selective Results
+    #[tokio::test]
+    async fn test_parallel_selective_workflow() {
+        async fn dispatcher(
+            req: HashMap<NodeIndex, String>,
+        ) -> Result<DagResult<String>, BoxDynError> {
+            dbg!("Dispatcher executing", &req);
+            let input = req.values().next().unwrap();
+
+            // Send to multiple nodes but they'll decide whether to process
+            let mut results = HashMap::new();
+            results.insert(NodeIndex::new(1), input.clone()); // to task_2
+            results.insert(NodeIndex::new(2), input.clone()); // to task_3
+
+            Ok(DagResult::Continue { results })
+        }
+
+        async fn task_2_conditional(
+            req: HashMap<NodeIndex, String>,
+        ) -> Result<DagResult<String>, BoxDynError> {
+            dbg!("Task_2 evaluating", &req);
+            let input = req.values().next().unwrap();
+
+            if input.contains("execute_task2") {
+                dbg!("Task_2 executing");
+                Ok(DagResult::Continue {
+                    results: [(NodeIndex::new(3), "processed_by_task2".to_string())].into(),
+                })
+            } else {
+                dbg!("Task_2 skipping");
+                // Return empty results to effectively skip
+                Ok(DagResult::Continue {
+                    results: HashMap::new(),
+                })
+            }
+        }
+
+        async fn task_3_conditional(
+            req: HashMap<NodeIndex, String>,
+        ) -> Result<DagResult<String>, BoxDynError> {
+            dbg!("Task_3 evaluating", &req);
+            let input = req.values().next().unwrap();
+
+            if input.contains("execute_task3") {
+                dbg!("Task_3 executing");
+                Ok(DagResult::Continue {
+                    results: [(NodeIndex::new(3), "processed_by_task3".to_string())].into(),
+                })
+            } else {
+                dbg!("Task_3 skipping");
+                Ok(DagResult::Continue {
+                    results: HashMap::new(),
+                })
+            }
+        }
+
+        async fn collector(
+            req: HashMap<NodeIndex, String>,
+        ) -> Result<DagResult<String>, BoxDynError> {
+            dbg!("Collector executing", &req);
+            let results: Vec<String> = req.values().cloned().collect();
+            let combined_result = if results.is_empty() {
+                "no_processing_occurred".to_string()
+            } else {
+                results.join(" + ")
+            };
+            Ok(DagResult::Done(combined_result))
+        }
+
+        let mut builder = DagBuilder::<String, String, ()>::new()
+            .add_node(dispatcher)
+            .add_node(task_2_conditional)
+            .add_node(task_3_conditional)
+            .add_node(collector);
+
+        builder.add_edge(dispatcher, task_2_conditional).unwrap();
+        builder.add_edge(dispatcher, task_3_conditional).unwrap();
+        builder.add_edge(task_2_conditional, collector).unwrap();
+        builder.add_edge(task_3_conditional, collector).unwrap();
+
+        let mut executor = builder.build().unwrap();
+
+        // Test with task_2 execution
+        let dispatcher_name = std::any::type_name_of_val(&dispatcher);
+        let initial_inputs = [(dispatcher_name.to_string(), JsonCodec::<String>::encode(&"execute_task2".to_owned()).unwrap(),)].into();
+
+        let result = executor.execute(initial_inputs).await.unwrap();
+
+        match result {
+            DagResult::Done(final_result) => {
+                assert!(final_result.contains("task2"));
+                println!("Task 2 was executed: {}", final_result);
             }
             _ => panic!("Expected Done result"),
         }
