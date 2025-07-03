@@ -1,5 +1,5 @@
 ALTER TABLE apalis.jobs
-ADD COLUMN priority INTEGER DEFAULT 0;
+ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 0;
 
 DROP FUNCTION apalis.get_jobs(
         worker_id TEXT,
