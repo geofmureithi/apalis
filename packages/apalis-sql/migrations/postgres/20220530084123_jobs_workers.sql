@@ -79,5 +79,5 @@
             END;
         $$ language plpgsql;
 
-        CREATE TRIGGER notify_workers after insert on apalis.jobs for each statement execute procedure apalis.notify_new_jobs();
+        CREATE OR REPLACE TRIGGER notify_workers after insert on apalis.jobs for each statement execute procedure apalis.notify_new_jobs();
 
