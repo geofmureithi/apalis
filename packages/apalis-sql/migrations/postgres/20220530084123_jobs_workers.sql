@@ -1,4 +1,4 @@
-    CREATE SCHEMA apalis;
+    CREATE SCHEMA IF NOT EXISTS apalis;
     
     CREATE TABLE IF NOT EXISTS apalis.workers (
         id TEXT NOT NULL,
