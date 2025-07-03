@@ -72,7 +72,7 @@
         END;
         $$ LANGUAGE plpgsql volatile;
 
-        CREATE FUNCTION apalis.notify_new_jobs() returns trigger as $$
+        CREATE OR REPLACE FUNCTION apalis.notify_new_jobs() returns trigger as $$
             BEGIN
                  perform pg_notify('apalis::job', 'insert');
                  return new;
