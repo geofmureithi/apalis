@@ -1,5 +1,5 @@
 //! Represents the utilities for running workers.
-//! 
+//!
 //! This module defines the core `Worker` type used to poll tasks from a backend, execute them using
 //! a service, emit lifecycle events, and handle graceful shutdowns. A worker is typically
 //! constructed using a [`WorkerBuilder`](crate::builder::WorkerBuilder), and is intended to be run in
@@ -68,7 +68,6 @@ use futures::stream::BoxStream;
 use futures::{Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project_lite::pin_project;
 use serde::{Deserialize, Serialize};
-use tower::util::CallAllUnordered;
 use std::any::type_name;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
@@ -79,6 +78,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::task::{Context as TaskCtx, Poll, Waker};
 use thiserror::Error;
+use tower::util::CallAllUnordered;
 use tower::{Layer, Service, ServiceBuilder};
 
 pub mod builder;
@@ -412,14 +412,14 @@ mod tests {
     use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
     use crate::{
-        backend::Push,
-        worker::builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
+        backend::memory::MemoryStorage,
+        backend::TaskSink,
+        service_fn::{self, service_fn, ServiceFn},
+        worker::builder::WorkerBuilder,
         worker::ext::{
             ack::AcknowledgementExt, event_listener::EventListenerExt,
             long_running::LongRunningExt, record_attempt::RecordAttempt,
         },
-        backend::memory::MemoryStorage,
-        service_fn::{self, service_fn, ServiceFn},
     };
 
     use super::*;
@@ -428,10 +428,10 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
-        let mut in_memory = MemoryStorage::new();
-
+        let in_memory = MemoryStorage::new();
+        let mut sink = in_memory.sink();
         for i in 0..ITEMS {
-            in_memory.push(i).await.unwrap();
+            sink.push(i).await.unwrap();
         }
 
         #[derive(Clone, Debug, Default)]
@@ -444,7 +444,11 @@ mod tests {
             }
         }
 
-        async fn task(task: u32, count: Data<Count>, ctx: WorkerContext) -> Result<(), BoxDynError> {
+        async fn task(
+            task: u32,
+            count: Data<Count>,
+            ctx: WorkerContext,
+        ) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_secs(1)).await;
             count.fetch_add(1, Ordering::Relaxed);
             if task == ITEMS - 1 {
@@ -467,16 +471,17 @@ mod tests {
             .on_event(|ctx, ev| {
                 println!("On Event = {:?}", ev);
             })
-            .build_fn(task);
+            .build(task);
         worker.run().await.unwrap();
     }
 
     #[tokio::test]
     async fn it_streams() {
-        let mut in_memory = MemoryStorage::new();
+        let in_memory = MemoryStorage::new();
+        let mut sink = in_memory.sink();
 
         for i in 0..ITEMS {
-            in_memory.push(i).await.unwrap();
+            sink.push(i).await.unwrap();
         }
 
         #[derive(Clone, Debug, Default)]
@@ -490,7 +495,7 @@ mod tests {
         }
 
         async fn task(task: u32, count: Data<Count>, worker: WorkerContext) {
-            // tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
             count.fetch_add(1, Ordering::Relaxed);
             if task == ITEMS - 1 {
                 worker.stop().unwrap();
@@ -502,9 +507,9 @@ mod tests {
             .record_attempts()
             .long_running()
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx, ev);
+                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
             })
-            .build_fn(task);
+            .build(task);
         let mut event_stream = worker.stream();
         while let Some(Ok(ev)) = event_stream.next().await {
             println!("On Event = {:?}", ev);

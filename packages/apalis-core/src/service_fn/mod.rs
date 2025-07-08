@@ -25,7 +25,7 @@
 //! async fn handler(id: u32, state: Data<State>) -> String {
 //!     format!("Got id {} with state", id)
 //! }
-//! 
+//!
 //! ```
 //!
 //! # How It Works
@@ -46,6 +46,7 @@
 use crate::error::BoxDynError;
 use crate::request::Request;
 use crate::service_fn::from_request::FromRequest;
+use crate::worker::builder::WorkerFactory;
 use futures::future::Map;
 use futures::FutureExt;
 use std::fmt;
@@ -147,6 +148,23 @@ macro_rules! impl_service_fn {
                 fut.boxed()
             }
         }
+
+        #[allow(unused_parens)]
+        impl<T, Args, Ctx, F, R, Backend, M, $($K),+>
+            WorkerFactory<Args, Ctx, ServiceFn<T, Args, Ctx, ($($K),+)>, Backend, M> for T
+        where
+            T: FnMut(Args, $($K),+) -> F,
+            F: Future,
+            F::Output: IntoResponse<Output = R>,
+            $(
+                $K: FromRequest<Request<Args, Ctx>> + Send,
+                < $K as FromRequest<Request<Args, Ctx>> >::Error: std::error::Error + 'static + Send + Sync,
+            )+
+        {
+            fn service(self, _: &Backend) -> ServiceFn<T, Args, Ctx, ($($K),+)> {
+                service_fn(self)
+            }
+        }
     };
 }
 
@@ -168,6 +186,27 @@ where
         let fut = (self.f)(task.args);
 
         fut.map(F::Output::into_response)
+    }
+}
+
+impl<T, Args, Ctx, F, R, Backend, M>
+    WorkerFactory<Args, Ctx, ServiceFn<T, Args, Ctx, ()>, Backend, M> for T
+where
+    T: FnMut(Args) -> F,
+    F: Future,
+    F::Output: IntoResponse<Output = R>,
+{
+    fn service(self, _: &Backend) -> ServiceFn<T, Args, Ctx, ()> {
+        service_fn(self)
+    }
+}
+
+impl<Args, Ctx, S, Backend, M> WorkerFactory<Args, Ctx, S, Backend, M> for S
+where
+    S: Service<Request<Args, Ctx>>,
+{
+    fn service(self, _: &Backend) -> S {
+        self
     }
 }
 

@@ -338,7 +338,7 @@ impl Monitor {
 
 #[cfg(test)]
 mod tests {
-    use crate::backend::Push;
+    use crate::backend::{Backend, TaskSink};
     use std::{io, time::Duration};
 
     use tokio::time::sleep;
@@ -347,7 +347,7 @@ mod tests {
         backend::memory::MemoryStorage,
         monitor::Monitor,
         request::Request,
-        worker::builder::{WorkerBuilder, WorkerFactory},
+        worker::builder::{WorkerBuilder},
     };
 
     #[tokio::test]
@@ -355,7 +355,7 @@ mod tests {
         let mut backend = MemoryStorage::new();
 
         for i in 0..10 {
-            backend.push(i).await.unwrap();
+            backend.sink().push(i).await.unwrap();
         }
 
         let service = tower::service_fn(|request: Request<u32, ()>| async {
@@ -377,8 +377,9 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_run() {
         let mut backend = MemoryStorage::new();
+        let mut sink = backend.sink();
         for i in 0..10 {
-            backend.push(i).await.unwrap();
+            sink.push(i).await.unwrap();
         }
         let service = tower::service_fn(|request: Request<u32, _>| async {
             tokio::time::sleep(Duration::from_millis(1)).await;

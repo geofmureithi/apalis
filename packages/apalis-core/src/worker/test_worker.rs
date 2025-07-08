@@ -43,7 +43,7 @@ use crate::backend::{Backend, Reschedule};
 use crate::error::BoxDynError;
 use crate::request::task_id::TaskId;
 use crate::request::Request;
-use crate::worker::builder::{WorkerBuilder, WorkerFactory};
+use crate::worker::builder::WorkerBuilder;
 use crate::worker::{Event, ReadinessService, TrackerService, Worker, WorkerError};
 use futures::channel::mpsc::{self, channel, Receiver, Sender, TryRecvError};
 use futures::future::BoxFuture;
@@ -233,12 +233,13 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        backend::memory::MemoryStorage,
-        backend::Push,
+        backend::{memory::MemoryStorage, Backend, TaskSink},
         error::BoxDynError,
         service_fn::service_fn,
-        worker::test_worker::{ExecuteNext, TestWorker},
-        worker::WorkerContext,
+        worker::{
+            test_worker::{ExecuteNext, TestWorker},
+            WorkerContext,
+        },
     };
     use std::time::Duration;
 
@@ -246,8 +247,9 @@ mod tests {
     async fn it_works() {
         let mut backend = MemoryStorage::new();
 
+        let mut sink = backend.sink();
         for i in 0..=10 {
-            backend.push(i).await.unwrap();
+            sink.push(i).await.unwrap();
         }
 
         let service = service_fn(|req: u32, w: WorkerContext| async move {

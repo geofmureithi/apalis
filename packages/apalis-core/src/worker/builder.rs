@@ -85,20 +85,21 @@
 //!     - `.chain(...)`: Composes middleware via `ServiceBuilder`.
 //!     - `.build(service)`: Consumes the builder and a [`Service`] to construct the final [`Worker`].
 //!     - `.build_fn(task_fn)`: Uses a function instead of a full [`Service`].
-use std::marker::PhantomData;
+use std::{future::Future, marker::PhantomData};
 
 use futures::Stream;
 use tower::{
     layer::util::{Identity, Stack},
+    util::BoxService,
     Layer, Service, ServiceBuilder,
 };
 
 use crate::{
-    backend::Backend,
+    backend::{self, Backend},
     error::BoxDynError,
     monitor::shutdown::Shutdown,
     request::{data::Data, Request},
-    service_fn::{service_fn, ServiceFn},
+    service_fn::{into_response::IntoResponse, service_fn, ServiceFn},
     worker::{event::EventHandler, Worker},
 };
 
@@ -224,99 +225,30 @@ impl<Req, M, B> WorkerBuilder<Req, B, M> {
     }
 }
 
-/// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait WorkerFactory<Req, Svc> {
-    type Worker;
-    fn build(self, service: Svc) -> Self::Worker;
-}
-
-pub trait WorkerFactoryWith<Req, Svc, Builder> {
-    type Worker;
-    fn build_with(self, builder: Builder) -> Self::Worker;
-}
-
-pub trait BuildWith<Builder> {
-    type Worker;
-    fn builder_with(self, builder: Builder) -> Self::Worker;
-}
-
-impl<Args, P, M, S, Ctx, Builder> WorkerFactoryWith<Request<Args, Ctx>, S, Builder>
-    for WorkerBuilder<Request<Args, Ctx>, P, M>
-where
-    S: Service<Request<Args, Ctx>>,
-    M: Layer<S>,
-    P: Backend<Request<Args, Ctx>>,
-    Builder: BuildWith<Self, Worker = Worker<Args, Ctx, P, S, M>>,
-{
-    type Worker = Worker<Args, Ctx, P, S, M>;
-    fn build_with(self, builder: Builder) -> Self::Worker {
-        builder.builder_with(self)
+impl<Args, Ctx, B, M> WorkerBuilder<Request<Args, Ctx>, B, M> {
+    pub fn build<W: WorkerFactory<Args, Ctx, Svc, B, M>, Svc>(
+        self,
+        service: W,
+    ) -> Worker<Args, Ctx, B, Svc, M> {
+        service.factory(self)
     }
 }
 
-impl<Args, P, M, S, Ctx> WorkerFactory<Request<Args, Ctx>, S>
-    for WorkerBuilder<Request<Args, Ctx>, P, M>
-where
-    S: Service<Request<Args, Ctx>>,
-    M: Layer<S>,
-    P: Backend<Request<Args, Ctx>>,
-{
-    type Worker = Worker<Args, Ctx, P, S, M>;
-    fn build(self, service: S) -> Self::Worker {
-        let mut worker = Worker::new(self.name, self.source, service, self.layer);
-        worker.event_handler = self
+pub trait WorkerFactory<Args, Ctx, Svc, Backend, M>: Sized {
+    fn service(self, backend: &Backend) -> Svc;
+    fn factory(
+        self,
+        builder: WorkerBuilder<Request<Args, Ctx>, Backend, M>,
+    ) -> Worker<Args, Ctx, Backend, Svc, M> {
+        let svc = self.service(&builder.source);
+        let mut worker = Worker::new(builder.name, builder.source, svc, builder.layer);
+        worker.event_handler = builder
             .event_handler
             .write()
             .map(|mut d| d.take())
             .unwrap()
             .unwrap_or(Box::new(|_, _| {}));
-        worker.shutdown = self.shutdown;
+        worker.shutdown = builder.shutdown;
         worker
-    }
-}
-
-/// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait WorkerFactoryFn<Req, F, FnArgs> {
-    type Worker;
-    /// Builds a [`WorkerFactoryFn`] using [`ServiceFn`]
-    /// that can be used to generate new [`Worker`] using the `build_fn` method
-    /// # Arguments
-    ///
-    /// * `f` - A functional service.
-    ///
-    /// # Examples
-    ///
-    /// A function can take many forms to allow flexibility
-    /// - An async function with a single argument of the item being processed
-    /// - An async function with an argument of the item being processed plus up-to 16 arguments that are extracted from the request [`Data`]
-    ///
-    /// A function can return:
-    /// - ()
-    /// - primitive
-    /// - Result<T, E: Error>
-    /// - impl IntoResponse
-    ///
-    /// ```rust
-    /// # use apalis_core::layers::extensions::Data;
-    /// #[derive(Debug)]
-    /// struct Email;
-    /// #[derive(Debug)]
-    /// struct PgPool;
-    ///
-    /// async fn send_email(email: Email, data: Data<PgPool>) {
-    ///     // Implementation of the task function?
-    /// }
-    /// ```
-    ///
-    fn build_fn(self, f: F) -> Self::Worker;
-}
-
-impl<Args, W, F, Ctx, FnArgs> WorkerFactoryFn<Request<Args, Ctx>, F, FnArgs> for W
-where
-    W: WorkerFactory<Request<Args, Ctx>, ServiceFn<F, Args, Ctx, FnArgs>>,
-{
-    type Worker = W::Worker;
-    fn build_fn(self, f: F) -> W::Worker {
-        self.build(service_fn(f))
     }
 }

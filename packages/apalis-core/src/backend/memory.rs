@@ -1,5 +1,9 @@
 use crate::{
-    backend::{shared::{MakeShared, Shared}, Backend, Push, RequestStream, Schedule},
+    backend::{
+        codec::{json::JsonCodec, CloneOpCodec, Encoder},
+        shared::{MakeShared, Shared},
+        Backend, RequestStream, TaskSink,
+    },
     error::BoxDynError,
     request::{task_id::TaskId, Parts, Request},
     worker::{self, context::WorkerContext},
@@ -11,6 +15,7 @@ use futures::{
     Sink, SinkExt, Stream, StreamExt,
 };
 use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
 use std::{
     any::Any,
     collections::{BTreeMap, HashMap},
@@ -36,25 +41,48 @@ impl<T: Send + 'static> MemoryStorage<MemoryWrapper<T>> {
             Box::new(sender) as Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Unpin>;
         Self {
             inner: MemoryWrapper {
-                sender: Box::new(sender),
+                sender: MemorySink {
+                    inner: Arc::new(Mutex::new(sender)),
+                },
                 receiver: receiver.boxed(),
+            },
+        }
+    }
+
+    pub fn new_with_json() -> MemoryStorage<JsonMemory<T>> {
+        MemoryStorage {
+            inner: JsonMemory {
+                tasks: Default::default(),
+                buffer: Default::default(),
             },
         }
     }
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+struct TaskKey {
+    task_id: TaskId,
+    namespace: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct JsonMemory<T> {
-    tasks: Arc<RwLock<BTreeMap<TaskId, Mutex<T>>>>,
-    buffer: Vec<(TaskId, T)>,
+    tasks: Arc<RwLock<BTreeMap<TaskKey, Mutex<T>>>>,
+    buffer: Vec<Request<T, ()>>,
 }
 impl<Args> JsonMemory<Args> {
     fn insert(&self, task_id: TaskId, args: Args) {
-        self.tasks.write().unwrap().insert(task_id, args.into());
+        self.tasks.write().unwrap().insert(
+            TaskKey {
+                task_id,
+                namespace: std::any::type_name::<Args>().to_owned(),
+            },
+            args.into(),
+        );
     }
 }
 
-impl JsonMemory<Wrapped> {
+impl JsonMemory<Value> {
     fn create_channel<T: 'static + DeserializeOwned + Serialize + Send>(
         &self,
     ) -> (
@@ -70,13 +98,12 @@ impl JsonMemory<Wrapped> {
 
             sender.with_flat_map(move |request: Request<T, ()>| {
                 let namespace = std::any::type_name::<T>().to_string();
-                let task_id = request.parts.task_id;
+                let task_id = request.parts.task_id.clone();
                 let value = serde_json::to_value(request.args).unwrap();
+                inner.insert(task_id, value.clone());
 
-                let wrapped = Wrapped { namespace, value };
-                inner.insert(task_id.clone(), wrapped.clone());
-
-                futures::stream::iter(vec![Ok((task_id, wrapped))])
+                let req = Request::new_with_parts(value, request.parts);
+                futures::stream::iter(vec![Ok(req)])
             })
         };
 
@@ -98,30 +125,39 @@ impl JsonMemory<Wrapped> {
     }
 }
 
-impl<T: Unpin> Sink<(TaskId, T)> for JsonMemory<T> {
+impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<Value> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(self: Pin<&mut Self>, item: (TaskId, T)) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Request<T, ()>) -> Result<(), Self::Error> {
         let this = Pin::get_mut(self);
-        this.buffer.push(item);
+
+        this.buffer
+            .push(item.map(|args| JsonCodec::<Value>::encode(&args).unwrap()));
         Ok(())
     }
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = Pin::get_mut(self);
         let mut tasks = this.tasks.write().unwrap();
-        for (task_id, value) in this.buffer.drain(..) {
-            tasks.insert(task_id, Mutex::new(value));
+        for task in this.buffer.drain(..) {
+            let task_id = task.parts.task_id.clone();
+            tasks.insert(
+                TaskKey {
+                    task_id,
+                    namespace: std::any::type_name::<T>().to_owned(),
+                },
+                Mutex::new(task.args),
+            );
         }
         Poll::Ready(Ok(()))
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.poll_flush(cx)
+        Sink::<Request<T, ()>>::poll_flush(self, cx)
     }
 }
 
@@ -130,12 +166,12 @@ impl<T> Stream for JsonMemory<T> {
 
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut map = self.tasks.write().unwrap();
-        if let Some((task_id, mutex)) = map.pop_first() {
+        if let Some((key, mutex)) = map.pop_first() {
             let args = mutex.into_inner().unwrap();
             Poll::Ready(Some(Request::new_with_parts(
                 args,
                 Parts {
-                    task_id,
+                    task_id: key.task_id,
                     ..Default::default()
                 },
             )))
@@ -145,9 +181,68 @@ impl<T> Stream for JsonMemory<T> {
     }
 }
 
+pub struct MemorySink<T> {
+    inner: Arc<Mutex<Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Unpin + 'static>>>,
+}
+
+impl<T> Clone for MemorySink<T> {
+    fn clone(&self) -> Self {
+        MemorySink {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl<T> Sink<Request<T, ()>> for MemorySink<T> {
+    type Error = SendError;
+
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let mut lock = self.inner.lock().unwrap();
+        Pin::new(&mut *lock).poll_ready_unpin(cx)
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: Request<T, ()>) -> Result<(), Self::Error> {
+        let mut lock = self.inner.lock().unwrap();
+        Pin::new(&mut *lock).start_send_unpin(item)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let mut lock = self.inner.lock().unwrap();
+        Pin::new(&mut *lock).poll_flush_unpin(cx)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let mut lock = self.inner.lock().unwrap();
+        Pin::new(&mut *lock).poll_close_unpin(cx)
+    }
+}
+
+impl<T: Clone + Send> TaskSink<T> for MemorySink<T> {
+    type Codec = CloneOpCodec;
+
+    type Compact = T;
+
+    type Context = ();
+
+    type Timestamp = u64;
+}
+
+impl<T: Serialize + Send + Unpin> TaskSink<T> for JsonMemory<Value>
+// where
+//     JsonMemory<T>: Sink<Request<Value, ()>>,
+{
+    type Codec = JsonCodec<Value>;
+
+    type Compact = Value;
+
+    type Context = ();
+
+    type Timestamp = u64;
+}
+
 /// In-memory queue that implements [Stream]
 pub struct MemoryWrapper<T> {
-    sender: Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Unpin + 'static>,
+    sender: MemorySink<T>,
     receiver: Pin<Box<dyn Stream<Item = Request<T, ()>> + Send>>,
 }
 
@@ -160,13 +255,12 @@ impl<T> Stream for MemoryWrapper<T> {
 }
 
 // MemoryStorage as a Backend
-impl<S: Stream<Item = Request<T, ()>> + Send + 'static, T> Backend<Request<T, ()>>
-    for MemoryStorage<S>
-{
+impl<T: 'static + Clone + Send> Backend<Request<T, ()>> for MemoryStorage<MemoryWrapper<T>> {
     type Error = BoxDynError;
     type Stream = RequestStream<Request<T, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
+    type Sink = MemorySink<T>;
 
     fn heartbeat(&self) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
@@ -175,63 +269,37 @@ impl<S: Stream<Item = Request<T, ()>> + Send + 'static, T> Backend<Request<T, ()
         Identity::new()
     }
 
+    fn sink(&self) -> Self::Sink {
+        self.inner.sender.clone()
+    }
+
     fn poll(self, _worker: &WorkerContext) -> Self::Stream {
         let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         stream
     }
 }
 
-impl<Args: Send + 'static> Push<Args, ()> for MemoryStorage<JsonMemory<Args>> {
-    type Compact = Args;
-    async fn push_request(&mut self, req: Request<Args, ()>) -> Result<Parts<()>, Self::Error> {
-        self.push_raw_request(req).await
+impl<T: 'static + Clone + Send> Backend<Request<T, ()>> for MemoryStorage<JsonMemory<T>> {
+    type Error = BoxDynError;
+    type Stream = RequestStream<Request<T, ()>>;
+    type Layer = Identity;
+    type Beat = BoxStream<'static, Result<(), Self::Error>>;
+    type Sink = JsonMemory<T>;
+
+    fn heartbeat(&self) -> Self::Beat {
+        stream::once(async { Ok(()) }).boxed()
+    }
+    fn middleware(&self) -> Self::Layer {
+        Identity::new()
     }
 
-    async fn push_raw_request(
-        &mut self,
-        req: Request<Self::Compact, ()>,
-    ) -> Result<Parts<()>, Self::Error> {
-        let parts = req.parts.clone();
-        self.inner.insert(req.parts.task_id, req.args);
-        Ok(parts)
-    }
-}
-
-impl<Args: Send + 'static> Push<Args, ()> for MemoryStorage<MemoryWrapper<Args>> {
-    type Compact = Args;
-    async fn push_request(&mut self, req: Request<Args, ()>) -> Result<Parts<()>, Self::Error> {
-        self.push_raw_request(req).await
+    fn sink(&self) -> Self::Sink {
+        self.inner.clone()
     }
 
-    async fn push_raw_request(
-        &mut self,
-        req: Request<Self::Compact, ()>,
-    ) -> Result<Parts<()>, Self::Error> {
-        let parts = req.parts.clone();
-        self.inner.sender.send(req).await.unwrap();
-        Ok(parts)
-    }
-}
-
-impl<Args: Send + Sync + 'static> Schedule<Args, ()> for MemoryStorage<JsonMemory<Args>> {
-    type Timestamp = Duration;
-    async fn schedule_request(
-        &mut self,
-        req: Request<Args, ()>,
-        on: Self::Timestamp,
-    ) -> Result<Parts<()>, Self::Error> {
-        // sleep(on).await;
-        let parts = req.parts.clone();
-        self.inner.insert(req.parts.task_id, req.args);
-        Ok(parts)
-    }
-
-    async fn schedule_raw_request(
-        &mut self,
-        req: Request<Self::Compact, ()>,
-        on: Self::Timestamp,
-    ) -> Result<Parts<()>, Self::Error> {
-        unreachable!("Requests must be typed")
+    fn poll(self, _worker: &WorkerContext) -> Self::Stream {
+        let stream = self.inner.map(|r| Ok(Some(r))).boxed();
+        stream
     }
 }
 
@@ -269,7 +337,7 @@ where
 
 #[derive(Debug)]
 struct SharedInMemoryStream<T> {
-    inner: JsonMemory<Wrapped>,
+    inner: JsonMemory<Value>,
     req_type: PhantomData<T>,
 }
 
@@ -277,19 +345,18 @@ impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
     type Item = Request<T, ()>;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut map = self.inner.tasks.write().unwrap();
-        if let Some((task_id, mutex)) = map.pop_first_with(|_, v| {
-            let v = v.lock().unwrap();
-            &v.namespace == std::any::type_name::<T>()
-        }) {
+        if let Some((key, mutex)) =
+            map.pop_first_with(|k, v| &k.namespace == std::any::type_name::<T>())
+        {
             let args = mutex.into_inner().unwrap();
-            let args = match serde_json::from_value::<T>(args.value) {
+            let args = match serde_json::from_value::<T>(args) {
                 Ok(value) => value,
                 Err(_) => return Poll::Ready(None),
             };
             Poll::Ready(Some(Request::new_with_parts(
                 args,
                 Parts {
-                    task_id,
+                    task_id: key.task_id,
                     ..Default::default()
                 },
             )))
@@ -300,7 +367,7 @@ impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
 }
 
 impl<Req: Send + Serialize + DeserializeOwned + 'static> MakeShared<Req>
-    for Shared<JsonMemory<Wrapped>>
+    for Shared<JsonMemory<Value>>
 {
     type Backend = MemoryStorage<MemoryWrapper<Req>>;
 
@@ -314,7 +381,12 @@ impl<Req: Send + Serialize + DeserializeOwned + 'static> MakeShared<Req>
     ) -> Result<Self::Backend, Self::MakeError> {
         let (sender, receiver) = self.inner().create_channel();
         Ok(MemoryStorage {
-            inner: MemoryWrapper { sender, receiver },
+            inner: MemoryWrapper {
+                sender: MemorySink {
+                    inner: Arc::new(Mutex::new(sender)),
+                },
+                receiver,
+            },
         })
     }
 }
@@ -324,15 +396,15 @@ mod tests {
     use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
     use crate::{
-        backend::Push,
-        worker::builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
+        backend::memory::MemoryStorage,
+        backend::TaskSink,
         request::data::Data,
+        service_fn::{self, service_fn, ServiceFn},
+        worker::builder::WorkerBuilder,
         worker::ext::{
             ack::AcknowledgementExt, event_listener::EventListenerExt,
             long_running::LongRunningExt, record_attempt::RecordAttempt,
         },
-        backend::memory::MemoryStorage,
-        service_fn::{self, service_fn, ServiceFn},
     };
 
     use super::*;
@@ -346,8 +418,13 @@ mod tests {
         let mut int_store = store.make_shared().unwrap();
 
         for i in 0..ITEMS {
-            string_store.push(format!("ITEM: {i}")).await.unwrap();
-            int_store.push(i).await.unwrap();
+            string_store
+                .inner
+                .sender
+                .push(format!("ITEM: {i}"))
+                .await
+                .unwrap();
+            int_store.inner.sender.push(i).await.unwrap();
         }
         #[derive(Clone, Debug, Default)]
         struct Count(Arc<AtomicUsize>);
@@ -373,7 +450,7 @@ mod tests {
             .on_event(|ctx, ev| {
                 println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
             })
-            .build_fn(|req: String, ctx: WorkerContext| async move {
+            .build(|req: String, ctx: WorkerContext| async move {
                 tokio::time::sleep(Duration::from_millis(1)).await;
                 println!("{req}");
                 if req.ends_with(&(ITEMS - 1).to_string()) {
@@ -388,7 +465,7 @@ mod tests {
             .on_event(|ctx, ev| {
                 println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
             })
-            .build_fn(task)
+            .build(task)
             .run();
 
         let _ = futures::future::join(int_worker, string_worker).await;

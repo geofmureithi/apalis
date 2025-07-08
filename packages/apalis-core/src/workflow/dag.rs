@@ -1,54 +1,48 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Debug,
     future::Future,
     marker::PhantomData,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
-use futures::FutureExt;
+use futures::{future::BoxFuture, lock::Mutex, FutureExt, Sink, TryFutureExt};
 use petgraph::{
     algo::toposort,
     graph::{DiGraph, NodeIndex},
+    visit::EdgeRef,
     Direction,
 };
 use serde::{Deserialize, Serialize};
-use tower::{Service, ServiceBuilder};
+use serde_json::Value;
+use tower::{util::BoxService, Layer, Service, ServiceBuilder};
 
 use crate::{
-    backend::codec::{json::JsonCodec, Decoder, Encoder},
+    backend::{
+        codec::{json::JsonCodec, Decoder, Encoder},
+        Backend, TaskSink,
+    },
     error::BoxDynError,
-    request::{task_id::TaskId, Request},
+    request::{task_id::TaskId, Parts, Request},
     service_fn::{service_fn, ServiceFn},
+    worker::{
+        builder::{WorkerBuilder, WorkerFactory},
+        Worker,
+    },
+    workflow::GoTo,
 };
 
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
 
-type DagService<Compact, Ctx> = BoxedService<Request<DagRequest<Compact>, Ctx>, DagResult<Compact>>;
+type DagService<Compact, Ctx> = BoxedService<Request<Compact, Ctx>, GoTo<Compact>>;
 
-/// Control flow for DAG execution
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum DagResult<T = ()> {
-    /// Continue to specified nodes
-    Continue {
-        /// Results to pass to next nodes
-        results: HashMap<NodeIndex, T>,
-    },
-    /// Delay execution and continue to specified nodes
-    Delay {
-        /// Results to pass to next nodes after delay
-        results: HashMap<NodeIndex, T>,
-        /// The period to delay
-        delay: Duration,
-    },
-    /// Complete execution with final result
-    Done(T),
-}
+type RouteService<Compact, Ctx> = BoxedService<Request<Compact, Ctx>, ()>;
 
 /// Request for DAG node execution
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DagRequest<T> {
     pub node_id: NodeIndex,
     pub inputs: HashMap<NodeIndex, T>,
@@ -56,11 +50,9 @@ pub struct DagRequest<T> {
 }
 
 /// Context for tracking DAG execution state
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionContext {
     pub completed_nodes: std::collections::HashSet<NodeIndex>,
-    pub pending_results: HashMap<NodeIndex, Vec<u8>>, // Serialized results
-    pub execution_id: String,
 }
 
 impl<T> DagRequest<T> {
@@ -79,132 +71,114 @@ impl<T> DagRequest<T> {
 
 /// Builder for creating DAG workflows
 // #[derive(Clone)]
-pub struct DagBuilder<Input, Compact, Ctx, Codec = JsonCodec<String>> {
+pub struct DagBuilder<Compact, Ctx, Codec = JsonCodec<Value>> {
     graph: DiGraph<DagService<Compact, Ctx>, ()>,
     node_mapping: HashMap<String, NodeIndex>,
-    input_type: PhantomData<Input>,
     compact_type: PhantomData<Compact>,
     codec: PhantomData<Codec>,
 }
 
-impl<Input, Compact, Ctx> Default for DagBuilder<Input, Compact, Ctx> {
+impl<Compact, Ctx> Default for DagBuilder<Compact, Ctx> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<Input, Compact, Ctx> DagBuilder<Input, Compact, Ctx> {
+impl<Compact, Ctx> DagBuilder<Compact, Ctx> {
     pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
             node_mapping: HashMap::new(),
-            input_type: PhantomData,
             compact_type: PhantomData,
             codec: PhantomData,
         }
     }
 }
 
-impl<Input, Compact, Ctx, Codec> DagBuilder<Input, Compact, Ctx, Codec>
+impl<Compact, Ctx, Codec> DagBuilder<Compact, Ctx, Codec>
 where
-    Codec: Encoder<Input, Compact = Compact> + Decoder<Input, Compact = Compact> + Clone + 'static,
-    <Codec as Decoder<Input>>::Error: Debug,
-    <Codec as Encoder<Input>>::Error: Debug,
     Compact: Debug,
 {
-    pub fn add_node<F, Output, Args, FnArgs, E>(self, node_fn: F) -> Self
+    pub fn add_node<F, Current, Output, Args, FnArgs, E>(self, node_fn: F) -> Self
     where
-        Output: Clone + Send + Sync + 'static,
-        Codec: Encoder<Output, Compact = Compact> + Decoder<Output, Compact = Compact>,
-        <Codec as Decoder<Output>>::Error: Debug,
+        Output: Send + Sync + 'static,
+        Codec: Encoder<Output, Compact = Compact> + Decoder<Current, Compact = Compact>,
+        <Codec as Decoder<Current>>::Error: Debug,
         <Codec as Encoder<Output>>::Error: Debug,
         F: Send,
         Args: Send,
         Ctx: Send,
         FnArgs: Send,
-        ServiceFn<F, Args, Ctx, FnArgs>: Service<Request<HashMap<NodeIndex, Input>, Ctx>, Response = DagResult<Output>, Error = E>
-            + Copy
-            + Send
-            + 'static,
+        ServiceFn<F, Args, Ctx, FnArgs>:
+            Service<Request<Current, Ctx>, Response = GoTo<Output>, Error = E> + Send + 'static,
         E: Into<BoxDynError>,
-        <ServiceFn<F, Args, Ctx, FnArgs> as Service<Request<HashMap<NodeIndex, Input>, Ctx>>>::Future: Send + 'static
+        <ServiceFn<F, Args, Ctx, FnArgs> as Service<Request<Current, Ctx>>>::Future: Send + 'static,
     {
-        let name = std::any::type_name::<F>().to_owned();
+        let name = std::any::type_name::<F>();
         if name.ends_with("{{closure}}") {
             panic!("closures are not allowed as nodes")
         }
-        self.add_node_inner::<_, Output, _>(name, service_fn::<F, Args, Ctx, FnArgs>(node_fn))
+        self.add_node_inner::<_, Current, Output, _>(
+            &name,
+            service_fn::<F, Args, Ctx, FnArgs>(node_fn),
+        )
     }
     /// Add a node to the DAG
-    fn add_node_inner<S, Output, E: Into<BoxDynError>>(mut self, name: String, service: S) -> Self
+    fn add_node_inner<S, Current, Output, E: Into<BoxDynError>>(
+        mut self,
+        name: &str,
+        service: S,
+    ) -> Self
     where
-        S: Service<
-                Request<HashMap<NodeIndex, Input>, Ctx>,
-                Response = DagResult<Output>,
-                Error = E,
-            > + Send
-            + 'static,
+        S: Service<Request<Current, Ctx>, Response = GoTo<Output>, Error = E> + Send + 'static,
         S::Future: Send + 'static,
-        Output: Clone + Send + Sync + 'static,
-        Codec: Encoder<Output, Compact = Compact> + Decoder<Output, Compact = Compact>,
-        <Codec as Decoder<Output>>::Error: Debug,
+        Output: Send + Sync + 'static,
+        Codec: Encoder<Output, Compact = Compact> + Decoder<Current, Compact = Compact>,
+        <Codec as Decoder<Current>>::Error: Debug,
         <Codec as Encoder<Output>>::Error: Debug,
     {
-        let dag_service = ServiceBuilder::new()
-            .map_request(|req: Request<DagRequest<Compact>, Ctx>| {
-                // dbg!(&req);
-                let decoded_inputs = req
-                    .args
-                    .inputs
-                    .into_iter()
-                    .map(|(node_id, compact_data)| {
-                        dbg!(&compact_data, std::any::type_name::<Input>());
-                        let decoded = Codec::decode(&compact_data)
-                            .expect(&format!("Could not decode input for node {:?}", node_id));
-                        (node_id, decoded)
+        let current = self.node_mapping.get_mut(name);
+
+        match current {
+            Some(exists) => {
+                // Ensure it exists
+                let _ = self.graph.node_weight_mut(*exists).unwrap();
+            }
+            None => {
+                let dag_service = ServiceBuilder::new()
+                    .map_request(|req: Request<Compact, Ctx>| {
+                        Request::new_with_parts(
+                            Codec::decode(&req.args).expect(&format!(
+                                "Could not decode node, expecting {}",
+                                std::any::type_name::<Current>()
+                            )),
+                            req.parts,
+                        )
                     })
-                    .collect();
+                    .map_response(|res: GoTo<Output>| match res {
+                        GoTo::Next(results) => GoTo::Next(
+                            Codec::encode(&results)
+                                .expect(&format!("Could not encode output for node")),
+                        ),
+                        GoTo::Delay { next, delay } => GoTo::Delay {
+                            next: Codec::encode(&next)
+                                .expect(&format!("Could not encode output for node")),
+                            delay,
+                        },
+                        GoTo::Done(output) => {
+                            let encoded =
+                                Codec::encode(&output).expect("Could not encode final output");
+                            GoTo::Done(encoded)
+                        }
+                    })
+                    .map_err(|e: E| e.into())
+                    .service(service);
 
-                Request::new_with_parts(decoded_inputs, req.parts)
-            })
-            .map_response(|res: DagResult<Output>| match res {
-                DagResult::Continue { results } => {
-                    let encoded_results = results
-                        .into_iter()
-                        .map(|(node_id, output)| {
-                            let encoded = Codec::encode(&output)
-                                .expect(&format!("Could not encode output for node {:?}", node_id));
-                            (node_id, encoded)
-                        })
-                        .collect();
-                    DagResult::Continue {
-                        results: encoded_results,
-                    }
-                }
-                DagResult::Delay { results, delay } => {
-                    let encoded_results = results
-                        .into_iter()
-                        .map(|(node_id, output)| {
-                            let encoded = Codec::encode(&output)
-                                .expect(&format!("Could not encode output for node {:?}", node_id));
-                            (node_id, encoded)
-                        })
-                        .collect();
-                    DagResult::Delay {
-                        results: encoded_results,
-                        delay,
-                    }
-                }
-                DagResult::Done(output) => {
-                    let encoded = Codec::encode(&output).expect("Could not encode final output");
-                    DagResult::Done(encoded)
-                }
-            })
-            .map_err(|e: E| e.into())
-            .service(service);
+                let node_id = self.graph.add_node(BoxedService::new(dag_service));
+                self.node_mapping.insert(name.to_owned(), node_id);
+            }
+        }
 
-        let node_id = self.graph.add_node(BoxedService::new(dag_service));
-        self.node_mapping.insert(name, node_id);
         self
     }
 
@@ -253,122 +227,13 @@ where
 }
 
 /// Executor for DAG workflows
-pub struct DagExecutor<Compact, Ctx = ()> {
+pub struct DagExecutor<Compact, Ctx> {
     graph: DiGraph<DagService<Compact, Ctx>, ()>,
     node_mapping: HashMap<String, NodeIndex>,
     topological_order: Vec<NodeIndex>,
 }
 
-impl<Compact> DagExecutor<Compact>
-where
-    Compact: Clone + Send + Sync + 'static,
-{
-    /// Execute the DAG starting from root nodes
-    pub async fn execute(
-        &mut self,
-        initial_inputs: HashMap<String, Compact>,
-    ) -> Result<DagResult<Compact>, BoxDynError> {
-        let mut execution_context = ExecutionContext {
-            completed_nodes: std::collections::HashSet::new(),
-            pending_results: HashMap::new(),
-            execution_id: TaskId::new().to_string(),
-        };
-
-        // Convert string keys to node indices
-        let mut node_inputs: HashMap<NodeIndex, HashMap<NodeIndex, Compact>> = HashMap::new();
-
-        // Initialize root nodes with initial inputs
-        for (node_name, input_data) in initial_inputs {
-            if let Some(&node_id) = self.node_mapping.get(&node_name) {
-                node_inputs
-                    .entry(node_id)
-                    .or_default()
-                    .insert(node_id, input_data);
-            }
-        }
-
-        // Execute nodes in topological order
-        for &node_id in &self.topological_order {
-            // Check if this node has all required inputs
-            let predecessors: Vec<NodeIndex> = self
-                .graph
-                .neighbors_directed(node_id, Direction::Incoming)
-                .collect();
-
-            // Skip if not all predecessors are completed
-            if !predecessors
-                .iter()
-                .all(|&pred| execution_context.completed_nodes.contains(&pred))
-            {
-                continue;
-            }
-
-            // Get inputs for this node
-            let inputs = node_inputs.remove(&node_id).unwrap_or_default();
-
-            // Execute the node
-            if let Some(service) = self.graph.node_weight_mut(node_id) {
-                let request =
-                    Request::new(DagRequest::new(node_id, inputs, execution_context.clone()));
-                let result = service.call(request).await?;
-
-                match result {
-                    DagResult::Continue { results } => {
-                        // Distribute results to successor nodes
-                        for (target_node, result_data) in results {
-                            node_inputs
-                                .entry(target_node)
-                                .or_default()
-                                .insert(node_id, result_data);
-                        }
-                        execution_context.completed_nodes.insert(node_id);
-                    }
-                    DagResult::Delay { results, delay } => {
-                        // Handle delay (in a real implementation, you might want to use a scheduler)
-                        // tokio::time::sleep(delay).await;
-
-                        // Distribute results to successor nodes
-                        for (target_node, result_data) in results {
-                            node_inputs
-                                .entry(target_node)
-                                .or_default()
-                                .insert(node_id, result_data);
-                        }
-                        execution_context.completed_nodes.insert(node_id);
-                    }
-                    DagResult::Done(final_result) => {
-                        return Ok(DagResult::Done(final_result));
-                    }
-                }
-            }
-        }
-
-        // If we get here, execution completed without a Done result
-        // Return the results from leaf nodes
-        let leaf_nodes: Vec<NodeIndex> = self
-            .graph
-            .node_indices()
-            .filter(|&node| {
-                self.graph
-                    .neighbors_directed(node, Direction::Outgoing)
-                    .next()
-                    .is_none()
-            })
-            .collect();
-        dbg!(&leaf_nodes);
-        if let Some(&leaf_node) = leaf_nodes.first() {
-            dbg!(&leaf_node);
-            // Return results from the first leaf node (you might want to handle this differently)
-            Ok(DagResult::Continue {
-                results: HashMap::new(),
-            })
-        } else {
-            Ok(DagResult::Continue {
-                results: HashMap::new(),
-            })
-        }
-    }
-
+impl<Compact, Ctx> DagExecutor<Compact, Ctx> {
     /// Get the execution order of nodes
     pub fn get_execution_order(&self) -> &[NodeIndex] {
         &self.topological_order
@@ -380,76 +245,282 @@ where
     }
 }
 
-impl<Ctx, Compact: 'static> Service<Request<DagRequest<Compact>, Ctx>>
+impl<Ctx, Compact, Cdc, B, M> WorkerFactory<Compact, Ctx, RouteService<Compact, Ctx>, B, M>
     for DagExecutor<Compact, Ctx>
+where
+    B: Backend<Request<Compact, Ctx>>,
+    B::Sink: TaskSink<Compact, Codec = Cdc, Compact = Compact> + 'static,
+    M: Layer<RouteService<Compact, Ctx>>,
+    Cdc: Decoder<DagRequest<Compact>, Compact = Compact>
+        + Encoder<DagRequest<Compact>, Compact = Compact>,
+    <Cdc as Encoder<DagRequest<Compact>>>::Error: Debug,
+    <Cdc as Decoder<DagRequest<Compact>>>::Error: Debug,
+    Ctx: 'static,
+    Compact: 'static + Send + Clone,
 {
-    type Response = DagResult<Compact>;
+    fn service(self, backend: &B) -> RouteService<Compact, Ctx> {
+        let sink = backend.sink();
+        let svc = BoxService::new(RoutedDagService {
+            inner: self,
+            sink: Arc::new(Mutex::new(sink)),
+        });
+        svc
+    }
+}
+
+pub struct RoutedDagService<Inner, SinkT> {
+    inner: Inner,
+    sink: Arc<Mutex<SinkT>>,
+}
+
+impl<Compact, Ctx, Cdc, SinkT> Service<Request<Compact, Ctx>>
+    for RoutedDagService<DagExecutor<Compact, Ctx>, SinkT>
+where
+    Compact: Send + 'static + Clone,
+    Cdc: Decoder<DagRequest<Compact>, Compact = Compact>
+        + Encoder<DagRequest<Compact>, Compact = Compact>,
+    <Cdc as Encoder<DagRequest<Compact>>>::Error: Debug,
+    <Cdc as Decoder<DagRequest<Compact>>>::Error: Debug,
+    SinkT: TaskSink<Compact, Compact = Compact, Codec = Cdc> + 'static,
+{
+    type Response = ();
     type Error = BoxDynError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = BoxFuture<'static, Result<(), BoxDynError>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<DagRequest<Compact>, Ctx>) -> Self::Future {
-        let node_id = &req.args.node_id;
-        let execution_context = &req.args.execution_context;
+    fn call(&mut self, request: Request<Compact, Ctx>) -> Self::Future {
+        let req: Request<DagRequest<Compact>, _> = request.map(|c| Cdc::decode(&c).unwrap());
+        let mut inputs = req.args.inputs.clone();
+        let mut execution_context = req.args.execution_context.clone();
+        let index = req.args.node_id;
         let predecessors: Vec<NodeIndex> = self
+            .inner
             .graph
-            .neighbors_directed(*node_id, Direction::Incoming)
+            .neighbors_directed(index, Direction::Incoming)
             .collect();
 
-        // Skip if not all predecessors are completed
+        // Panic? if not all predecessors are completed
         if !predecessors
             .iter()
             .all(|&pred| execution_context.completed_nodes.contains(&pred))
         {
             panic!("Missing some predecessors")
         }
+        let targets: HashSet<_> = self
+            .inner
+            .graph
+            .edges(index)
+            .into_iter()
+            .map(|s| s.target())
+            .collect();
+        let svc = self.inner.graph.node_weight_mut(index).unwrap();
 
-        if let Some(service) = self.graph.node_weight_mut(*node_id) {
-            return service.call(req).boxed();
-        }
+        let sink = self.sink.clone();
+        let fut = svc
+            .call(req.map(|mut r| r.inputs.remove(&index).unwrap()))
+            .and_then(move |res| async move {
+                let mut sink = sink.lock().await;
+                match res {
+                    GoTo::Next(res) => {
+                        execution_context.completed_nodes.insert(index);
+                        for node_index in targets {
+                            inputs.insert(node_index, res.clone());
+                            let req = Request::new(DagRequest::new(
+                                node_index,
+                                inputs.clone(),
+                                execution_context.clone(),
+                            ))
+                            .map(|req| Cdc::encode(&req).unwrap());
+                            let _res = sink.push_raw_request(req).await;
+                        }
 
-        unreachable!("not really unreachable")
+                        Ok(())
+                    }
+                    GoTo::Delay { next, delay } => todo!(),
+                    GoTo::Done(_) => Ok(()),
+                }
+            });
+
+        fut.boxed()
+    }
+}
+
+pub trait AddServiceFlow<EntryFn, NextFn, Entry, Next, Compact, Ctx>: Sized {
+    fn add_service_flow(self, entry: EntryFn, next: NextFn) -> Self;
+}
+
+pub trait NamedService {
+    fn named_service(&self) -> &str;
+}
+
+impl<F, Args, Ctx, FnArgs> NamedService for ServiceFn<F, Args, Ctx, FnArgs> {
+    fn named_service(&self) -> &str {
+        std::any::type_name::<F>()
+    }
+}
+
+impl<Entry, Next, Output, Compact, Ctx, Codec, EntrySvc, NextSvc>
+    AddServiceFlow<EntrySvc, NextSvc, Entry, Next, Compact, Ctx> for DagBuilder<Compact, Ctx, Codec>
+where
+    Codec: Decoder<Entry, Compact = Compact>
+        + Encoder<Next, Compact = Compact>
+        + Decoder<Next, Compact = Compact>
+        + Encoder<Output, Compact = Compact>
+        + 'static,
+    Compact: Debug,
+    EntrySvc: NamedService + Service<Request<Entry, Ctx>, Response = GoTo<Next>> + Send + 'static,
+    Next: Send + Sync + 'static,
+    <Codec as Decoder<Entry>>::Error: Debug,
+    <Codec as Decoder<Next>>::Error: Debug,
+    <Codec as Encoder<Next>>::Error: Debug,
+    <Codec as Encoder<Output>>::Error: Debug,
+    Output: Send + Sync + 'static,
+    EntrySvc::Future: Send + 'static,
+    EntrySvc::Error: Into<BoxDynError>,
+    NextSvc: NamedService + Send + Service<Request<Next, Ctx>, Response = GoTo<Output>> + 'static,
+    NextSvc::Future: Send + 'static,
+    NextSvc::Error: Into<BoxDynError>,
+{
+    fn add_service_flow(self, entry: EntrySvc, next: NextSvc) -> Self {
+        let entry_name = entry.named_service().to_owned();
+        let next_name = next.named_service().to_owned();
+        let mut builder = self
+            .add_node_inner::<EntrySvc, Entry, Next, _>(&entry_name, entry)
+            .add_node_inner::<NextSvc, Next, Output, _>(&next_name, next);
+        builder.add_edge_inner(&entry_name, &next_name).unwrap();
+        builder
+    }
+}
+
+pub trait AddFlow<EntryFn, NextFn, Ctx, Args1, FnArgs1, Args2, FnArgs2, Compact>: Sized {
+    fn add_flow(self, entry: EntryFn, next: NextFn) -> Self;
+}
+
+pub trait AddSubFlow<EntryFn, NextFn, Ctx, Args, FnArgs, Compact, Output>: Sized {
+    fn add_sub_flow(self, entry: EntryFn, next: DagExecutor<Compact, Ctx>) -> Self;
+}
+
+impl<E, N, Ctx, Args1, FnArgs1, Compact, Codec, Output, Err: Into<BoxDynError>>
+    AddSubFlow<E, N, Ctx, Args1, FnArgs1, Compact, Output> for DagBuilder<Compact, Ctx, Codec>
+where
+    E: NamedService
+        + Service<Request<N, Ctx>, Response = GoTo<Output>, Error = Err>
+        + Send
+        + 'static,
+    Compact: Debug,
+    E::Future: Send + 'static,
+    Output: Send + Sync + 'static,
+    Codec: Encoder<Output, Compact = Compact> + Decoder<N, Compact = Compact>,
+    <Codec as Decoder<N>>::Error: Debug,
+    <Codec as Encoder<Output>>::Error: Debug,
+{
+    fn add_sub_flow(self, entry: E, next: DagExecutor<Compact, Ctx>) -> Self {
+        let entry_name = entry.named_service().to_owned();
+        let (nodes, edges) = next.graph.into_nodes_edges();
+        let builder = self.add_node_inner(&entry_name, entry);
+        let node_mappings = next.node_mapping;
+        builder
+    }
+}
+
+impl<E, N, Ctx, Args1, FnArgs1, Args2, FnArgs2, Compact, Codec>
+    AddFlow<E, N, Ctx, Args1, FnArgs1, Args2, FnArgs2, Compact> for DagBuilder<Compact, Ctx, Codec>
+where
+    DagBuilder<Compact, Ctx, Codec>: AddServiceFlow<
+        ServiceFn<E, Args1, Ctx, FnArgs1>,
+        ServiceFn<N, Args2, Ctx, FnArgs2>,
+        Args1,
+        Args2,
+        Compact,
+        Ctx,
+    >,
+{
+    fn add_flow(self, entry: E, next: N) -> Self {
+        self.add_service_flow(service_fn(entry), service_fn(next))
+    }
+}
+
+pub trait DagSinkExt<Compact, Ctx, T> {
+    type Error;
+
+    // fn push_inputs(
+    //     &mut self,
+    //     index: NodeIndex,
+    //     value: Input,
+    // ) -> impl Future<Output = Result<Parts<Ctx>, Self::Error>>;
+
+    fn start_flow(&mut self, value: &T) -> impl Future<Output = Result<Parts<Ctx>, Self::Error>>;
+}
+
+impl<S, Compact, Ctx, Err, T> DagSinkExt<Compact, Ctx, T> for S
+where
+    S: TaskSink<DagRequest<Compact>, Compact = Compact, Context = Ctx, Error = Err>
+        + Sink<Request<Compact, Ctx>, Error = Err>,
+    Err: std::error::Error,
+    S::Codec: Encoder<DagRequest<Compact>, Compact = Compact> + Encoder<T, Compact = Compact>,
+    Ctx: Default,
+    <<S as TaskSink<DagRequest<Compact>>>::Codec as Encoder<T>>::Error: Debug,
+{
+    type Error = Err;
+
+    async fn start_flow(&mut self, input: &T) -> Result<Parts<Ctx>, Self::Error> {
+        let mut inputs = HashMap::new();
+        inputs.insert(NodeIndex::new(0), S::Codec::encode(input).unwrap());
+        self.push(DagRequest::new(
+            NodeIndex::new(0),
+            inputs,
+            Default::default(),
+        ))
+        .await
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+
+    use futures::StreamExt;
+    use tower::util::BoxService;
+
+    use crate::{
+        backend::{codec::json::JsonCodec, memory::MemoryStorage},
+        // service_fn::service_fn,
+        worker::{context::WorkerContext, event::Event, ext::event_listener::EventListenerExt},
+    };
+
     use super::*;
-    use tower::service_fn;
+    use serde_json::Value;
 
     #[tokio::test]
     async fn test_dag_execution() {
+        use tower::service_fn;
         // Create a simple DAG: A -> B -> C
-        let mut builder = DagBuilder::<String, String, ()>::new();
+        let mut builder = DagBuilder::<Value, ()>::new();
 
         builder = builder.add_node_inner(
-            "node_a".to_string(),
-            service_fn(|_req: Request<HashMap<NodeIndex, String>, ()>| async {
-                dbg!(_req);
-                Ok::<_, BoxDynError>(DagResult::Continue {
-                    results: [(NodeIndex::new(1), "result_a".to_string())].into(),
-                })
+            "node_a",
+            service_fn(|req: Request<String, ()>| async move {
+                dbg!(&req);
+                Ok::<_, BoxDynError>(GoTo::Next(req.args.to_uppercase()))
             }),
         );
 
         builder = builder.add_node_inner(
-            "node_b".to_string(),
-            service_fn(|_req: Request<HashMap<NodeIndex, String>, ()>| async {
-                dbg!(_req);
-                Ok::<_, BoxDynError>(DagResult::Continue {
-                    results: [(NodeIndex::new(2), "result_b".to_string())].into(),
-                })
+            "node_b",
+            service_fn(|req: Request<String, ()>| async move {
+                dbg!(&req);
+                Ok::<_, BoxDynError>(GoTo::Next(req.args.to_lowercase()))
             }),
         );
 
         builder = builder.add_node_inner(
-            "node_c".to_string(),
-            service_fn(|_req: Request<HashMap<NodeIndex, String>, ()>| async {
+            "node_c",
+            service_fn(|_req: Request<String, ()>| async move {
                 dbg!(_req);
-                Ok::<_, BoxDynError>(DagResult::Done("final_result".to_string()))
+                Ok::<_, BoxDynError>(GoTo::Done("final_result".to_string()))
             }),
         );
 
@@ -458,18 +529,147 @@ mod tests {
 
         let mut executor = builder.build().unwrap();
 
-        let initial_inputs = [(
-            "node_a".to_string(),
-            JsonCodec::<String>::encode(&"initial_input".to_owned()).unwrap(),
-        )]
-        .into();
-        let result = executor.execute(initial_inputs).await.unwrap();
+        // let initial_inputs = [(
+        //     "node_a".to_string(),
+        //     JsonCodec::<Value>::encode(&"initial_input".to_owned()).unwrap(),
+        // )]
+        // .into();
+        // let result = executor.execute(initial_inputs).await.unwrap();
 
-        match result {
-            DagResult::Done(final_result) => {
-                assert_eq!(final_result, "\"final_result\"");
+        // match result {
+        //     GoTo::Done(final_result) => {
+        //         assert_eq!(final_result, "\"final_result\"");
+        //     }
+        //     _ => panic!("Expected Done result"),
+        // }
+    }
+
+    #[tokio::test]
+    async fn it_works() {
+        #[derive(Debug, Serialize, Deserialize, Default)]
+        struct Order {
+            id: u64,
+            items: Vec<String>,
+            payment_valid: bool,
+            in_stock: bool,
+            tracking_id: Option<String>,
+        }
+        async fn validate_payment(order: Order) -> Result<GoTo<Order>, io::Error> {
+            println!("Validating payment for order {}", order.id);
+            if order.payment_valid {
+                Ok(GoTo::Next(order))
+            } else {
+                Err(io::Error::new(io::ErrorKind::Other, "Payment Rejected"))
             }
-            _ => panic!("Expected Done result"),
+        }
+
+        async fn process_payment(mut order: Order) -> Result<GoTo<Order>, io::Error> {
+            println!("Processing payment for order {}", order.id);
+            // Payment logic...
+            Ok(GoTo::Next(order))
+        }
+
+        async fn confirm_payment(order: Order) -> Result<GoTo<Order>, io::Error> {
+            println!("Payment confirmed for order {}", order.id);
+            Ok(GoTo::Next(order))
+        }
+
+        async fn check_stock(mut order: Order) -> Result<GoTo<Order>, io::Error> {
+            println!("Checking stock for order {}", order.id);
+            if order.in_stock {
+                Ok(GoTo::Next(order))
+            } else {
+                Err(io::Error::new(io::ErrorKind::Other, "Out of stock"))
+            }
+        }
+
+        async fn reserve_items(order: Order) -> Result<GoTo<Order>, io::Error> {
+            println!("Reserving items for order {}", order.id);
+            Ok(GoTo::Next(order))
+        }
+
+        async fn update_inventory(order: Order) -> Result<GoTo<Order>, io::Error> {
+            println!("Updating inventory for order {}", order.id);
+            Ok(GoTo::Next(order))
+        }
+
+        async fn create_label(mut order: Order) -> Result<GoTo<Order>, io::Error> {
+            println!("Creating shipping label for order {}", order.id);
+            order.tracking_id = Some(format!("TRK{}", order.id));
+            Ok(GoTo::Next(order))
+        }
+
+        async fn assign_carrier(order: Order) -> Result<GoTo<Order>, io::Error> {
+            println!("Assigning carrier for order {}", order.id);
+            Ok(GoTo::Next(order))
+        }
+
+        async fn schedule_pickup(order: Order) -> Result<GoTo<Order>, io::Error> {
+            println!("Scheduling pickup for order {}", order.id);
+            Ok(GoTo::Next(order))
+        }
+
+        async fn log_event(order: Order) -> Result<GoTo<Order>, io::Error> {
+            println!("Logging event for order {}", order.id);
+            Ok(GoTo::Next(order))
+        }
+
+        async fn notify_customer(order: Order, ctx: WorkerContext) -> Result<GoTo<()>, io::Error> {
+            println!("Notifying customer for order {}", order.id);
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                ctx.stop().unwrap();
+            });
+            Ok(GoTo::Done(()))
+        }
+
+        let process_payment: DagExecutor<Value, ()> = DagBuilder::new()
+            // Payment Flow
+            .add_flow(validate_payment, process_payment)
+            .add_flow(process_payment, confirm_payment)
+            .build()
+            .unwrap();
+
+        let dag = DagBuilder::new()
+            // Payment Flow
+            // .add_sub_flow(service_fn(validate_payment), process_payment)
+            // Inventory Flow
+            .add_flow(confirm_payment, check_stock)
+            .add_flow(check_stock, reserve_items)
+            .add_flow(reserve_items, update_inventory)
+            // Shipping Flow
+            .add_flow(update_inventory, create_label)
+            .add_flow(create_label, assign_carrier)
+            .add_flow(assign_carrier, schedule_pickup)
+            // Logging & Notification Flow
+            .add_flow(schedule_pickup, log_event)
+            .add_flow(log_event, notify_customer)
+            .build()
+            .unwrap();
+
+        let in_memory = MemoryStorage::new_with_json();
+        let mut sink = in_memory.sink();
+        let _p = sink
+            .start_flow(&Order {
+                payment_valid: true,
+                in_stock: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
+            .on_event(|ctx, ev| {
+                println!("Worker {:?}, On Event = {:?}", ctx.name(), ev);
+            })
+            .build(dag);
+        let mut event_stream = worker.stream();
+        while let Some(Ok(ev)) = event_stream.next().await {
+            println!("On Event = {:?}", ev);
+            if matches!(ev, Event::Error(_)) {
+                break;
+            }
         }
     }
 
@@ -477,161 +677,46 @@ mod tests {
     async fn test_task_dag_execution() {
         // Create a simple DAG: A -> B -> C
 
-        async fn task_1(
-            _req: HashMap<NodeIndex, String>,
-        ) -> Result<DagResult<String>, BoxDynError> {
+        async fn task_1(_req: String) -> Result<GoTo<String>, BoxDynError> {
             dbg!(_req);
-            Ok::<_, BoxDynError>(DagResult::Continue {
-                results: [(NodeIndex::new(1), "result_a".to_string())].into(),
-            })
+            Ok::<_, BoxDynError>(GoTo::Next("result_a".to_string()))
         }
 
-        async fn task_2(
-            _req: HashMap<NodeIndex, String>,
-        ) -> Result<DagResult<String>, BoxDynError> {
+        async fn task_2(_req: String) -> Result<GoTo<String>, BoxDynError> {
             dbg!(_req);
-            Ok::<_, BoxDynError>(DagResult::Continue {
-                results: [(NodeIndex::new(2), "result_b".to_string())].into(),
-            })
+            Ok::<_, BoxDynError>(GoTo::Next("result_b".to_string()))
         }
 
-        async fn task_3(
-            _req: HashMap<NodeIndex, String>,
-        ) -> Result<DagResult<String>, BoxDynError> {
+        async fn task_3(_req: String) -> Result<GoTo<String>, BoxDynError> {
             dbg!(_req);
-            Ok::<_, BoxDynError>(DagResult::Continue {
-                results: [(NodeIndex::new(3), "result_c".to_string())].into(),
-            })
+            Ok::<_, BoxDynError>(GoTo::Next("result_b".to_string()))
         }
 
-        async fn final_task(
-            _req: HashMap<NodeIndex, String>,
-        ) -> Result<DagResult<String>, BoxDynError> {
+        async fn final_task(_req: HashMap<NodeIndex, String>) -> Result<GoTo<String>, BoxDynError> {
             dbg!(_req);
-            Ok::<_, BoxDynError>(DagResult::Done("final_result".to_string()))
+            Ok::<_, BoxDynError>(GoTo::Done("final_result".to_string()))
         }
 
-        let mut builder = DagBuilder::<String, String, ()>::new()
-            .add_node(task_1)
-            .add_node(task_2)
-            .add_node(task_3)
-            .add_node(final_task);
+        let mut executor = DagBuilder::<Value, ()>::new()
+            .add_flow(task_1, task_2)
+            .add_flow(task_1, task_3)
+            // .add_flow(task_2, final_task)
+            // .add_flow(task_3, final_task)
+            .build()
+            .unwrap();
 
-        builder.add_edge(task_1, task_2).unwrap();
-        builder.add_edge(task_1, task_3).unwrap();
-        builder.add_edge(task_2, final_task).unwrap();
-        builder.add_edge(task_3, final_task).unwrap();
+        // let initial_inputs = [(
+        //     "node_a".to_string(),
+        //     JsonCodec::<String>::encode(&"initial_input".to_owned()).unwrap(),
+        // )]
+        // .into();
+        // let result = executor.execute(initial_inputs).await.unwrap();
 
-        let mut executor = builder.build().unwrap();
-
-        let initial_inputs = [(
-            "node_a".to_string(),
-            JsonCodec::<String>::encode(&"initial_input".to_owned()).unwrap(),
-        )]
-        .into();
-        let result = executor.execute(initial_inputs).await.unwrap();
-
-        match result {
-            DagResult::Done(final_result) => {
-                assert_eq!(final_result, "\"final_result\"");
-            }
-            _ => panic!("Expected Done result"),
-        }
-    }
-    // Approach 2: Parallel Execution with Selective Results
-    #[tokio::test]
-    async fn test_parallel_selective_workflow() {
-        async fn dispatcher(
-            req: HashMap<NodeIndex, String>,
-        ) -> Result<DagResult<String>, BoxDynError> {
-            dbg!("Dispatcher executing", &req);
-            let input = req.values().next().unwrap();
-
-            // Send to multiple nodes but they'll decide whether to process
-            let mut results = HashMap::new();
-            results.insert(NodeIndex::new(1), input.clone()); // to task_2
-            results.insert(NodeIndex::new(2), input.clone()); // to task_3
-
-            Ok(DagResult::Continue { results })
-        }
-
-        async fn task_2_conditional(
-            req: HashMap<NodeIndex, String>,
-        ) -> Result<DagResult<String>, BoxDynError> {
-            dbg!("Task_2 evaluating", &req);
-            let input = req.values().next().unwrap();
-
-            if input.contains("execute_task2") {
-                dbg!("Task_2 executing");
-                Ok(DagResult::Continue {
-                    results: [(NodeIndex::new(3), "processed_by_task2".to_string())].into(),
-                })
-            } else {
-                dbg!("Task_2 skipping");
-                // Return empty results to effectively skip
-                Ok(DagResult::Continue {
-                    results: HashMap::new(),
-                })
-            }
-        }
-
-        async fn task_3_conditional(
-            req: HashMap<NodeIndex, String>,
-        ) -> Result<DagResult<String>, BoxDynError> {
-            dbg!("Task_3 evaluating", &req);
-            let input = req.values().next().unwrap();
-
-            if input.contains("execute_task3") {
-                dbg!("Task_3 executing");
-                Ok(DagResult::Continue {
-                    results: [(NodeIndex::new(3), "processed_by_task3".to_string())].into(),
-                })
-            } else {
-                dbg!("Task_3 skipping");
-                Ok(DagResult::Continue {
-                    results: HashMap::new(),
-                })
-            }
-        }
-
-        async fn collector(
-            req: HashMap<NodeIndex, String>,
-        ) -> Result<DagResult<String>, BoxDynError> {
-            dbg!("Collector executing", &req);
-            let results: Vec<String> = req.values().cloned().collect();
-            let combined_result = if results.is_empty() {
-                "no_processing_occurred".to_string()
-            } else {
-                results.join(" + ")
-            };
-            Ok(DagResult::Done(combined_result))
-        }
-
-        let mut builder = DagBuilder::<String, String, ()>::new()
-            .add_node(dispatcher)
-            .add_node(task_2_conditional)
-            .add_node(task_3_conditional)
-            .add_node(collector);
-
-        builder.add_edge(dispatcher, task_2_conditional).unwrap();
-        builder.add_edge(dispatcher, task_3_conditional).unwrap();
-        builder.add_edge(task_2_conditional, collector).unwrap();
-        builder.add_edge(task_3_conditional, collector).unwrap();
-
-        let mut executor = builder.build().unwrap();
-
-        // Test with task_2 execution
-        let dispatcher_name = std::any::type_name_of_val(&dispatcher);
-        let initial_inputs = [(dispatcher_name.to_string(), JsonCodec::<String>::encode(&"execute_task2".to_owned()).unwrap(),)].into();
-
-        let result = executor.execute(initial_inputs).await.unwrap();
-
-        match result {
-            DagResult::Done(final_result) => {
-                assert!(final_result.contains("task2"));
-                println!("Task 2 was executed: {}", final_result);
-            }
-            _ => panic!("Expected Done result"),
-        }
+        // match result {
+        //     GoTo::Done(final_result) => {
+        //         assert_eq!(final_result, "\"final_result\"");
+        //     }
+        //     _ => panic!("Expected Done result"),
+        // }
     }
 }

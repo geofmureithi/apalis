@@ -1,3 +1,10 @@
+use std::marker::PhantomData;
+
+pub trait Codec<T>: Encoder<T> + Decoder<T> {
+    type Error;
+    type Compact;
+}
+
 pub trait Encoder<T> {
     type Error;
     type Compact;
@@ -5,11 +12,14 @@ pub trait Encoder<T> {
     fn encode(val: &T) -> Result<Self::Compact, Self::Error>;
 }
 
-impl<T> Encoder<T> for () {
+#[derive(Debug, Clone, Default)]
+pub struct CloneOpCodec {}
+
+impl<T: Clone> Encoder<T> for CloneOpCodec {
     type Error = String;
-    type Compact = ();
-    fn encode(_val: &T) -> Result<Self::Compact, Self::Error> {
-        Ok(())
+    type Compact = T;
+    fn encode(val: &T) -> Result<Self::Compact, Self::Error> {
+        Ok(val.clone())
     }
 }
 pub trait Decoder<T> {
@@ -19,11 +29,11 @@ pub trait Decoder<T> {
     fn decode(val: &Self::Compact) -> Result<T, Self::Error>;
 }
 
-impl<T: Default> Decoder<T> for () {
+impl<T: Clone> Decoder<T> for CloneOpCodec {
     type Error = String;
-    type Compact = ();
-    fn decode(_: &Self::Compact) -> Result<T, Self::Error> {
-        Ok(T::default())
+    type Compact = T;
+    fn decode(t: &Self::Compact) -> Result<T, Self::Error> {
+        Ok(t.clone())
     }
 }
 

@@ -23,7 +23,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use std::fmt::Debug;
+use std::{fmt::Debug, time::SystemTime};
 
 use crate::request::{attempt::Attempt, extensions::Extensions, state::State, task_id::TaskId};
 
@@ -61,6 +61,9 @@ pub struct Parts<Ctx> {
     pub context: Ctx,
 
     pub state: State,
+
+    /// The time the request is supposed to be executed
+    pub run_at: Option<u64>,
 }
 
 impl<T, Ctx> Request<T, Ctx> {
@@ -87,6 +90,7 @@ impl<T, Ctx> Request<T, Ctx> {
                 attempt: Default::default(),
                 data: Default::default(),
                 state: State::Pending,
+                run_at: None,
             },
         }
     }
@@ -101,6 +105,7 @@ impl<T, Ctx> Request<T, Ctx> {
                 attempt: Default::default(),
                 data,
                 state: State::Pending,
+                run_at: None,
             },
         }
     }
@@ -108,6 +113,51 @@ impl<T, Ctx> Request<T, Ctx> {
     /// Take the parts
     pub fn take_parts(self) -> (T, Parts<Ctx>) {
         (self.args, self.parts)
+    }
+}
+
+impl<Args, Ctx> Request<Args, Ctx> {
+    /// Maps the `args` field using the provided function, consuming the request.
+    pub fn map<F, NewArgs>(self, f: F) -> Request<NewArgs, Ctx>
+    where
+        F: FnOnce(Args) -> NewArgs,
+    {
+        Request {
+            args: f(self.args),
+            parts: self.parts,
+        }
+    }
+
+    /// Maps the `args` field by reference.
+    pub fn map_ref<F, NewArgs>(&self, f: F) -> Request<NewArgs, Ctx>
+    where
+        F: FnOnce(&Args) -> NewArgs,
+        Ctx: Clone, // Needed to clone parts if they contain references
+    {
+        Request {
+            args: f(&self.args),
+            parts: self.parts.clone(),
+        }
+    }
+
+    /// Maps both `args` and `parts` together.
+    pub fn map_all<F, NewArgs, NewCtx>(self, f: F) -> Request<NewArgs, NewCtx>
+    where
+        F: FnOnce(Args, Parts<Ctx>) -> (NewArgs, Parts<NewCtx>),
+    {
+        let (args, parts) = f(self.args, self.parts);
+        Request { args, parts }
+    }
+
+    /// Maps only the `parts` field.
+    pub fn map_parts<F, NewCtx>(self, f: F) -> Request<Args, NewCtx>
+    where
+        F: FnOnce(Parts<Ctx>) -> Parts<NewCtx>,
+    {
+        Request {
+            args: self.args,
+            parts: f(self.parts),
+        }
     }
 }
 

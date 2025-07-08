@@ -1,12 +1,21 @@
 //! Represents a task source that provides internal middleware and can be polled
-//! 
+//!
 //! Also includes helper traits
-use std::{future::Future, time::Duration};
+use std::{fmt::Debug, future::Future, marker::PhantomData, time::Duration};
 
-use futures::{future::ready, stream::{self, BoxStream}, Stream, StreamExt};
+use futures::{
+    future::{pending, ready},
+    stream::{self, BoxStream},
+    FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
+};
 use tower::layer::util::Identity;
 
-use crate::{error::BoxDynError, request::{task_id::TaskId, Parts, Request}, worker::{context::WorkerContext}};
+use crate::{
+    backend::codec::Encoder,
+    error::BoxDynError,
+    request::{task_id::TaskId, Parts, Request},
+    worker::context::WorkerContext,
+};
 
 pub mod codec;
 pub mod memory;
@@ -18,78 +27,99 @@ pub trait Backend<Req> {
     type Stream: Stream<Item = Result<Option<Req>, Self::Error>>;
     type Beat: Stream<Item = Result<(), Self::Error>>;
     type Layer;
+    type Sink;
+
     fn heartbeat(&self) -> Self::Beat;
     fn middleware(&self) -> Self::Layer;
+    fn sink(&self) -> Self::Sink;
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
-}
-
-pub trait BackendWithCodec<Req>: Backend<Req> {
-    type Codec;
-    type Compact;
 }
 /// Represents a stream for T.
 pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, BoxDynError>>;
 
-impl<T, Ctx> Backend<Request<T, Ctx>> for RequestStream<Request<T, Ctx>> {
-    type Error = BoxDynError;
-    type Stream = Self;
-    type Layer = Identity;
-    type Beat = BoxStream<'static, Result<(), BoxDynError>>;
-    fn heartbeat(&self) -> Self::Beat {
-        stream::once(ready(Ok(()))).boxed()
-    }
-    fn middleware(&self) -> Self::Layer {
-        Identity::new()
-    }
-    fn poll(self, _: &WorkerContext) -> Self::Stream {
-        self
-    }
-}
+// impl<S, C> TaskSink<S, C> {
+//     pub async fn push<T, Ctx, Compact>(&mut self, task: T) -> Result<Parts<Ctx>, S::Error>
+//     where
+//         Ctx: Default,
+//         S: Sink<Request<Compact, Ctx>> + Unpin,
+//         C: Encoder<T, Compact = Compact>,
+//         C::Error: Debug,
+//     {
+//         let req = Request::new(C::encode(&task).unwrap());
 
-pub trait Push<T, Context>: Backend<Request<T, Context>> {
-    type Compact;
-    fn push(&mut self, task: T) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send
+//         self.sink.send(req).await?;
+//         Ok(todo!())
+//     }
+// }
+
+pub trait TaskSink<T>: Sink<Request<Self::Compact, Self::Context>> + Unpin + Send {
+    type Codec;
+    type Compact: Send;
+
+    type Context: Default + Send + Clone;
+    type Timestamp;
+
+    fn push(
+        &mut self,
+        task: T,
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send
     where
-        Context: Default,
+        Self::Context: Default,
+        Self::Codec: Encoder<T, Compact = Self::Compact>,
+
     {
         self.push_request(Request::new(task))
     }
 
     fn push_request(
         &mut self,
-        req: Request<T, Context>,
-    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
+        req: Request<T, Self::Context>,
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send
+    where
+        Self::Codec: Encoder<T, Compact = Self::Compact>,
+    {
+        let res = match Self::Codec::encode(&req.args) {
+            Ok(r) => r,
+            Err(_) => todo!(),
+        };
+        let req = Request::new(res);
+        self.push_raw_request(req)
+    }
 
     fn push_raw_request(
         &mut self,
-        req: Request<Self::Compact, Context>,
-    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
-}
+        req: Request<Self::Compact, Self::Context>,
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
+        let parts = req.parts.clone();
+        self.send(req).map_ok(|_| parts)
+    }
 
-pub trait Schedule<T, Context>: Push<T, Context> {
-    type Timestamp;
     fn schedule(
         &mut self,
         task: T,
         on: Self::Timestamp,
-    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send
     where
-        Context: Default,
+        Self::Context: Default,
     {
         self.schedule_request(Request::new(task), on)
     }
 
     fn schedule_request(
         &mut self,
-        request: Request<T, Context>,
+        request: Request<T, Self::Context>,
         on: Self::Timestamp,
-    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
+        Box::pin(async { todo!() })
+    }
 
     fn schedule_raw_request(
         &mut self,
-        request: Request<Self::Compact, Context>,
+        request: Request<Self::Compact, Self::Context>,
         on: Self::Timestamp,
-    ) -> impl Future<Output = Result<Parts<Context>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
+        Box::pin(async { todo!() })
+    }
 }
 
 pub trait FetchById<T, Context>: Backend<Request<T, Context>> {
