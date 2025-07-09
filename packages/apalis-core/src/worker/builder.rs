@@ -234,6 +234,12 @@ impl<Args, Ctx, B, M> WorkerBuilder<Request<Args, Ctx>, B, M> {
     }
 }
 
+pub trait ServiceFactory<Resource, Svc> {
+    fn service(self: Box<Self>, backend: &Resource) -> Svc;
+}
+
+pub type BoxServiceFactory<Resource, Req, Res> = Box<dyn ServiceFactory<Resource, BoxService<Req, Res, BoxDynError>>>;
+
 pub trait WorkerFactory<Args, Ctx, Svc, Backend, M>: Sized {
     fn service(self, backend: &Backend) -> Svc;
     fn factory(
