@@ -314,21 +314,19 @@ where
         match svc {
             Some(svc) => {
                 let sink = self.sink.clone();
-                let fut = svc
-                    .call(req)
-                    .and_then(move |res| async move {
-                        let mut sink = sink.lock().await;
-                        match res {
-                            GoTo::Next(s) => {
-                                let req = Request::new(StepRequest::new(index + 1, s))
-                                    .map(|req| Cdc::encode(&req).unwrap());
-                                let _res = sink.push_raw_request(req).await;
-                                Ok(())
-                            }
-                            GoTo::Delay { next, delay } => todo!(),
-                            GoTo::Done(_) => Ok(()),
+                let fut = svc.call(req).and_then(move |res| async move {
+                    let mut sink = sink.lock().await;
+                    match res {
+                        GoTo::Next(s) => {
+                            let req = Request::new(StepRequest::new(index + 1, s))
+                                .map(|req| Cdc::encode(&req).unwrap());
+                            let _res = sink.push_raw_request(req).await;
+                            Ok(())
                         }
-                    });
+                        GoTo::Delay { next, delay } => todo!(),
+                        GoTo::Done(_) => Ok(()),
+                    }
+                });
 
                 fut.boxed()
             }
@@ -340,7 +338,7 @@ where
     }
 }
 
-pub trait StepSinkExt<Step, Ctx> {
+pub trait StepSinkExt<Step, Ctx, Compact> {
     type Error;
 
     fn push_step(
@@ -357,18 +355,19 @@ pub trait StartStepSinkExt<Start, Ctx, Compact> {
         -> impl Future<Output = Result<Parts<Ctx>, Self::Error>>;
 }
 
-impl<S, T, Compact, Ctx, Err> StepSinkExt<T, Ctx> for S
+impl<S, T, Compact, Ctx, Err> StepSinkExt<T, Ctx, Compact> for S
 where
-    S: TaskSink<StepRequest<T>, Compact = Compact, Context = Ctx, Error = Err>
-        + Sink<Request<Compact, Ctx>>,
+    S: TaskSink<StepRequest<Compact>, Compact = Compact, Context = Ctx, Error = Err>,
     Err: std::error::Error,
-    S::Codec: Encoder<StepRequest<T>, Compact = Compact>,
+    S::Codec: Encoder<StepRequest<Compact>, Compact = Compact> + Encoder<T, Compact = Compact>,
     Ctx: Default,
+    <<S as TaskSink<StepRequest<Compact>>>::Codec as Encoder<T>>::Error: Debug,
 {
     type Error = Err;
 
     async fn push_step(&mut self, id: usize, input: T) -> Result<Parts<Ctx>, Self::Error> {
-        self.push(StepRequest::new(id, input)).await
+        let compact = S::Codec::encode(&input).unwrap();
+        self.push(StepRequest::new(id, compact)).await
     }
 }
 
@@ -391,9 +390,10 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::io;
+    use std::{io, str::FromStr};
 
     use futures::StreamExt;
+    use serde_json::Number;
     use tower::util::BoxService;
 
     use crate::{
@@ -417,7 +417,10 @@ mod tests {
         }
 
         async fn task3(job: usize, wrk: WorkerContext) -> Result<GoTo<()>, io::Error> {
-            wrk.stop().unwrap();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                wrk.stop().unwrap();
+            });
             println!("{job}");
             Ok(GoTo::Done(()))
         }
@@ -427,14 +430,7 @@ mod tests {
             Err("Unable to recover".into())
         }
 
-        let steps: StepBuilder<
-            u32,
-            (),
-            BoxService<Request<serde_json::Value, ()>, GoTo<serde_json::Value>, BoxDynError>,
-            JsonCodec<serde_json::Value>,
-            serde_json::Value,
-            (),
-        > = StepBuilder::new()
+        let steps = StepBuilder::new()
             .step_fn(task1)
             .step_fn(task2)
             .step_fn(task3)
@@ -442,20 +438,26 @@ mod tests {
 
         let in_memory = MemoryStorage::new_with_json();
         let mut sink = in_memory.sink();
-        let _res = sink.push_start(2u32).await.unwrap();
+        let _res = sink.push_start(0u32).await.unwrap();
 
-        let _res = sink.push(Default::default()).await.unwrap();
+        let _res = sink
+            .push(StepRequest::new(
+                0,
+                serde_json::Value::Number(Number::from_str("1").unwrap()),
+            ))
+            .await
+            .unwrap();
 
-        // let _res = sink.push_step(1, "Testing").await.unwrap();
+        let _res = sink.push_step(1, ()).await.unwrap();
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)
-            // .on_event(|ctx, ev| {
-            //     println!("Worker {:?}, On Event = {:?}", ctx.name(), ev);
-            //     if matches!(ev, Event::Error(_)) {
-            //         ctx.stop().unwrap();
-            //     }
-            // })
+            .on_event(|ctx, ev| {
+                println!("Worker {:?}, On Event = {:?}", ctx.name(), ev);
+                if matches!(ev, Event::Error(_)) {
+                    ctx.stop().unwrap();
+                }
+            })
             .build(steps);
         let mut event_stream = worker.stream();
         while let Some(Ok(ev)) = event_stream.next().await {

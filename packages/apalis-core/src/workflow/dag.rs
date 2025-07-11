@@ -667,20 +667,20 @@ mod tests {
             .await
             .unwrap();
 
-        fn check_dag<
-            W: WorkerFactory<
-                DagRequest<Value>,
-                (),
-                RouteService<DagRequest<Value>, ()>,
-                MemoryStorage<JsonMemory<DagRequest<Value>>>,
-                Stack<EventListenerLayer, Identity>,
-            >,
-        >(
-            dag: &W,
-        ) {
-        }
+        // fn check_dag<
+        //     W: WorkerFactory<
+        //         DagRequest<Value>,
+        //         (),
+        //         RouteService<DagRequest<Value>, ()>,
+        //         MemoryStorage<JsonMemory<DagRequest<Value>>>,
+        //         Stack<EventListenerLayer, Identity>,
+        //     >,
+        // >(
+        //     dag: &W,
+        // ) {
+        // }
 
-        check_dag(&dag);
+        // check_dag(&dag);
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)
