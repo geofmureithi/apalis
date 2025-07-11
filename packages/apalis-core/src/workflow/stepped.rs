@@ -58,9 +58,7 @@ pub struct StepBuilder<Input, Current, Svc, Codec, Compact, Ctx> {
     codec: PhantomData<Codec>,
     fallback: Option<
         Box<
-            dyn FnMut(
-                    Request<StepRequest<Compact>, Ctx>,
-                ) -> BoxFuture<'static, Result<(), BoxDynError>>
+            dyn FnMut(Request<Compact, Ctx>) -> BoxFuture<'static, Result<(), BoxDynError>>
                 + Send
                 + Sync
                 + 'static,
@@ -85,14 +83,11 @@ impl<Input, Compact, Ctx, Codec>
 impl<Input, Current, Compact, Ctx, Codec>
     StepBuilder<Input, Current, SteppedService<Compact, Ctx>, Codec, Compact, Ctx>
 {
-    pub fn fallback_fn(
+    pub fn fallback<F: Future<Output = Result<(), E>> + Send + 'static, E: Into<BoxDynError>>(
         mut self,
-        fun: impl FnMut(Request<StepRequest<Compact>, Ctx>) -> BoxFuture<'static, Result<(), BoxDynError>>
-            + Send
-            + Sync
-            + 'static,
+        mut fun: impl FnMut(Request<Compact, Ctx>) -> F + Send + Sync + 'static,
     ) -> Self {
-        self.fallback = Some(Box::new(fun));
+        self.fallback = Some(Box::new(move |r| fun(r).map_err(|e| e.into()).boxed()));
         self
     }
 }
@@ -261,14 +256,11 @@ where
         + 'static
         + Decoder<StepRequest<Compact>, Compact = Compact>
         + Encoder<StepRequest<Compact>, Compact = Compact>,
-    <Cdc as Encoder<StepRequest<Compact>>>::Error: Debug,
-    <Cdc as Decoder<StepRequest<Compact>>>::Error: Debug,
+    <Cdc as Encoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
+    <Cdc as Decoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
     Ctx: 'static,
     Compact: 'static + Send,
-    B::Sink: StartStepSinkExt<Input, Ctx>
-        + TaskSink<Compact, Codec = Cdc, Compact = Compact>
-        + Sync
-        + 'static,
+    B::Sink: TaskSink<Compact, Codec = Cdc, Compact = Compact> + Sync + 'static,
 {
     fn service(self, backend: &B) -> RouteService<Compact, Ctx> {
         let sink = backend.sink();
@@ -301,8 +293,8 @@ where
     Compact: Send + 'static,
     Cdc: Decoder<StepRequest<Compact>, Compact = Compact>
         + Encoder<StepRequest<Compact>, Compact = Compact>,
-    <Cdc as Encoder<StepRequest<Compact>>>::Error: Debug,
-    <Cdc as Decoder<StepRequest<Compact>>>::Error: Debug,
+    <Cdc as Encoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
+    <Cdc as Decoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
     SinkT: TaskSink<Compact, Compact = Compact, Codec = Cdc> + 'static,
 {
     type Response = ();
@@ -314,31 +306,47 @@ where
     }
 
     fn call(&mut self, request: Request<Compact, Ctx>) -> Self::Future {
-        let req: Request<StepRequest<Compact>, _> = request.map(|c| Cdc::decode(&c).unwrap());
-        let index = req.args.index;
-        let svc = self.inner.steps.get_mut(&index);
-        match svc {
-            Some(svc) => {
-                let sink = self.sink.clone();
-                let fut = svc
-                    .call(req.map(|r| r.step))
-                    .and_then(move |res| async move {
-                        let mut sink = sink.lock().await;
-                        match res {
-                            GoTo::Next(s) => {
-                                let req = Request::new(StepRequest::new(index + 1, s))
-                                    .map(|req| Cdc::encode(&req).unwrap());
-                                let _res = sink.push_raw_request(req).await;
-                                Ok(())
-                            }
-                            GoTo::Delay { next, delay } => todo!(),
-                            GoTo::Done(_) => Ok(()),
-                        }
-                    });
+        let decode = Cdc::decode(&request.args);
+        match decode {
+            Ok(decode) => {
+                let req = request.map(|_| decode);
+                let index = req.args.index;
+                let svc = self.inner.steps.get_mut(&index);
+                match svc {
+                    Some(svc) => {
+                        let sink = self.sink.clone();
+                        let fut = svc
+                            .call(req.map(|r| r.step))
+                            .and_then(move |res| async move {
+                                let mut sink = sink.lock().await;
+                                match res {
+                                    GoTo::Next(s) => {
+                                        let req = Request::new(StepRequest::new(index + 1, s))
+                                            .map(|req| Cdc::encode(&req).unwrap());
+                                        let _res = sink.push_raw_request(req).await;
+                                        Ok(())
+                                    }
+                                    GoTo::Delay { next, delay } => todo!(),
+                                    GoTo::Done(_) => Ok(()),
+                                }
+                            });
 
-                fut.boxed()
+                        fut.boxed()
+                    }
+                    None => match &mut self.inner.fallback {
+                        Some(fb) => fb(req.map(|s| s.step)).boxed(),
+                        None => ready(Err(BoxDynError::from(StepError::OutOfBound(index)))).boxed(),
+                    },
+                }
             }
-            None => ready(Err(BoxDynError::from(StepError::OutOfBound(index)))).boxed(),
+            Err(e) => match &mut self.inner.fallback {
+                Some(fb) => fb(request).boxed(),
+                None => ready(Err(BoxDynError::from(StepError::CodecError(
+                    e.into(),
+                    "StepRequest",
+                ))))
+                .boxed(),
+            },
         }
     }
 }
@@ -353,7 +361,7 @@ pub trait StepSinkExt<Step, Ctx> {
     ) -> impl Future<Output = Result<Parts<Ctx>, Self::Error>>;
 }
 
-pub trait StartStepSinkExt<Start, Ctx> {
+pub trait StartStepSinkExt<Start, Ctx, Compact> {
     type Error;
 
     fn push_start(&mut self, value: Start)
@@ -375,18 +383,20 @@ where
     }
 }
 
-impl<S, T, Compact, Ctx, Err> StartStepSinkExt<T, Ctx> for S
+impl<S, Compact, Ctx, Err, Input> StartStepSinkExt<Input, Ctx, Compact> for S
 where
-    S: TaskSink<StepRequest<T>, Compact = Compact, Context = Ctx, Error = Err>
+    S: TaskSink<StepRequest<Compact>, Compact = Compact, Context = Ctx, Error = Err>
         + Sink<Request<Compact, Ctx>>,
     Err: std::error::Error,
-    S::Codec: Encoder<StepRequest<T>, Compact = Compact>,
+    S::Codec: Encoder<StepRequest<Compact>, Compact = Compact> + Encoder<Input, Compact = Compact>,
     Ctx: Default,
+    <<S as TaskSink<StepRequest<Compact>>>::Codec as Encoder<Input>>::Error: Debug,
 {
     type Error = Err;
 
-    async fn push_start(&mut self, input: T) -> Result<Parts<Ctx>, Self::Error> {
-        self.push(StepRequest::new(0, input)).await
+    async fn push_start(&mut self, input: Input) -> Result<Parts<Ctx>, Self::Error> {
+        let compact = S::Codec::encode(&input).unwrap();
+        self.push(StepRequest::new(0, compact)).await
     }
 }
 
@@ -424,22 +434,24 @@ mod tests {
             Ok(GoTo::Done(()))
         }
 
-        async fn fallback<Req>(req: Req) -> Result<(), BoxDynError> {
-            // todo: Try to recover
-            Ok(())
+        async fn recover<Req: Debug>(req: Req) -> Result<(), BoxDynError> {
+            println!("Recovering request: {req:?}");
+            Err("Unable to recover".into())
         }
 
-        let stepper = StepBuilder::new()
+        let steps = StepBuilder::new()
             .step_fn(task1)
             .step_fn(task2)
             .step_fn(task3)
-            .fallback_fn(|s| async move { fallback(s).await }.boxed());
+            .fallback(recover);
 
         let in_memory = MemoryStorage::new_with_json();
         let mut sink = in_memory.sink();
         let _res = sink.push_start(2u32).await.unwrap();
 
-        let _res = sink.push_step(0, "Testing").await.unwrap();
+        let _res = sink.push("Testing").await.unwrap();
+
+        // let _res = sink.push_step(1, "Testing").await.unwrap();
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)
@@ -449,7 +461,7 @@ mod tests {
                     ctx.stop().unwrap();
                 }
             })
-            .build(stepper);
+            .build(steps);
         let mut event_stream = worker.stream();
         while let Some(Ok(ev)) = event_stream.next().await {
             println!("On Event = {:?}", ev);
