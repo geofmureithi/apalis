@@ -165,8 +165,8 @@ use crate::{
 
 use super::long_running::LongRunningLayer;
 
-pub trait AcknowledgementExt<Req, Source, Middleware, Ack>: Sized {
-    fn ack_with(self, ack: Ack) -> WorkerBuilder<Req, Source, Stack<LongRunningLayer, Middleware>>;
+pub trait AcknowledgementExt<Args, Ctx, Source, Middleware, Ack>: Sized {
+    fn ack_with(self, ack: Ack) -> WorkerBuilder<Args, Ctx, Source, Stack<LongRunningLayer, Middleware>>;
 }
 
 trait AcknowledgeTask<Res, Ctx> {
@@ -178,15 +178,15 @@ trait AcknowledgeTask<Res, Ctx> {
     ) -> Result<(), Self::Error>;
 }
 
-impl<Args, P, M, Ctx, Ack> AcknowledgementExt<Request<Args, Ctx>, P, M, Ack>
-    for WorkerBuilder<Request<Args, Ctx>, P, M>
+impl<Args, P, M, Ctx, Ack> AcknowledgementExt<Args, Ctx, P, M, Ack>
+    for WorkerBuilder<Args, Ctx, P, M>
 where
     M: Layer<LongRunningLayer>,
 {
     fn ack_with(
         self,
         ack: Ack,
-    ) -> WorkerBuilder<Request<Args, Ctx>, P, Stack<LongRunningLayer, M>> {
+    ) -> WorkerBuilder<Args, Ctx, P, Stack<LongRunningLayer, M>> {
         let this = self.layer(LongRunningLayer);
         WorkerBuilder {
             name: this.name,

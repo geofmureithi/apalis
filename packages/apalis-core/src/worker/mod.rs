@@ -130,7 +130,7 @@ impl<Args, Ctx, B, Svc, M> Worker<Args, Ctx, B, Svc, M> {
 
 impl<Args, Ctx, S, B, M> Worker<Args, Ctx, B, S, M>
 where
-    B: Backend<Request<Args, Ctx>>,
+    B: Backend<Args, Ctx>,
     S: Service<Request<Args, Ctx>> + Send + 'static,
     B::Stream: Unpin + Send + 'static,
     B::Beat: Unpin + Send + 'static,
@@ -335,9 +335,9 @@ pub struct TrackerService<S> {
     service: S,
 }
 
-impl<S, Req, Ctx> Service<Request<Req, Ctx>> for TrackerService<S>
+impl<S, Req> Service<Req> for TrackerService<S>
 where
-    S: Service<Request<Req, Ctx>>,
+    S: Service<Req>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -347,8 +347,8 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
-        request.parts.attempt.increment();
+    fn call(&mut self, request: Req) -> Self::Future {
+        // request.parts.attempt.increment();
         self.ctx.track(self.service.call(request))
     }
 }

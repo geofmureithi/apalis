@@ -1,15 +1,14 @@
-use crate::{backend::Backend, worker::builder::WorkerBuilder, request::Request};
+use crate::{backend::Backend, request::Request, worker::builder::WorkerBuilder};
 
-pub trait RecordAttempt<Req, Source, Middleware>: Sized {
-    fn record_attempts(self) -> WorkerBuilder<Req, Source, Middleware>;
+pub trait RecordAttempt<Args, Ctx, Source, Middleware>: Sized {
+    fn record_attempts(self) -> WorkerBuilder<Args, Ctx, Source, Middleware>;
 }
 
-impl<Args, P, M, Ctx> RecordAttempt<Request<Args, Ctx>, P, M>
-    for WorkerBuilder<Request<Args, Ctx>, P, M>
+impl<Args, P, M, Ctx> RecordAttempt<Args, Ctx, P, M> for WorkerBuilder<Args, Ctx, P, M>
 where
-    P: Backend<Request<Args, Ctx>>,
+    P: Backend<Args, Ctx>,
 {
-    fn record_attempts(self) -> WorkerBuilder<Request<Args, Ctx>, P, M> {
+    fn record_attempts(self) -> WorkerBuilder<Args, Ctx, P, M> {
         let this = self;
         WorkerBuilder {
             name: this.name,

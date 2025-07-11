@@ -9,11 +9,11 @@ use crate::{
     worker::{Event, WorkerContext},
 };
 
-pub trait EventListenerExt<Req, Source, Middleware>: Sized {
+pub trait EventListenerExt<Args, Ctx, Source, Middleware>: Sized {
     fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
         self,
         f: F,
-    ) -> WorkerBuilder<Req, Source, Stack<EventListenerLayer, Middleware>>;
+    ) -> WorkerBuilder<Args, Ctx, Source, Stack<EventListenerLayer, Middleware>>;
 }
 
 #[derive(Clone)]
@@ -56,16 +56,16 @@ where
     }
 }
 
-impl<Args, P, M, Ctx> EventListenerExt<Request<Args, Ctx>, P, M>
-    for WorkerBuilder<Request<Args, Ctx>, P, M>
+impl<Args, P, M, Ctx> EventListenerExt<Args, Ctx, P, M>
+    for WorkerBuilder<Args, Ctx, P, M>
 where
-    P: Backend<Request<Args, Ctx>>,
+    P: Backend<Args, Ctx>,
     M: Layer<EventListenerLayer>,
 {
     fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
         self,
         f: F,
-    ) -> WorkerBuilder<Request<Args, Ctx>, P, Stack<EventListenerLayer, M>> {
+    ) -> WorkerBuilder<Args, Ctx, P, Stack<EventListenerLayer, M>> {
         let new_fn = self
             .event_handler
             .write()

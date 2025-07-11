@@ -104,29 +104,29 @@ use crate::{
 };
 
 /// Utility for building a [`Worker`]
-pub struct WorkerBuilder<Req, Source, Middleware> {
+pub struct WorkerBuilder<Args, Ctx, Source, Middleware> {
     pub(crate) name: String,
-    pub(crate) request: PhantomData<Req>,
+    pub(crate) request: PhantomData<(Args, Ctx)>,
     pub(crate) layer: ServiceBuilder<Middleware>,
     pub(crate) source: Source,
     pub(crate) event_handler: EventHandler,
     pub(crate) shutdown: Option<Shutdown>,
 }
 
-impl<Req, Source, Middleware> std::fmt::Debug for WorkerBuilder<Req, Source, Middleware> {
+impl<Args, Ctx, Source, Middleware> std::fmt::Debug for WorkerBuilder<Args, Ctx, Source, Middleware> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WorkerBuilder")
             .field("id", &self.name)
-            .field("job", &std::any::type_name::<Req>())
+            .field("job", &std::any::type_name::<(Args, Ctx)>())
             .field("layer", &std::any::type_name::<Middleware>())
             .field("source", &std::any::type_name::<Source>())
             .finish()
     }
 }
 
-impl WorkerBuilder<(), (), Identity> {
+impl WorkerBuilder<(), (), (), Identity> {
     /// Build a new [`WorkerBuilder`] instance with a name for the worker to build
-    pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), Identity> {
+    pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), (), Identity> {
         WorkerBuilder {
             request: PhantomData,
             layer: ServiceBuilder::new(),
@@ -138,7 +138,7 @@ impl WorkerBuilder<(), (), Identity> {
     }
 }
 
-impl WorkerBuilder<(), (), Identity> {
+impl WorkerBuilder<(), (), (), Identity> {
     /// Consume a stream directly
     #[deprecated(since = "0.6.0", note = "Consider using the `.backend`")]
     pub fn stream<
@@ -148,7 +148,7 @@ impl WorkerBuilder<(), (), Identity> {
     >(
         self,
         stream: NS,
-    ) -> WorkerBuilder<Request<NJ, Ctx>, NS, Identity> {
+    ) -> WorkerBuilder<NJ, Ctx, NS, Identity> {
         WorkerBuilder {
             request: PhantomData,
             layer: self.layer,
@@ -160,10 +160,10 @@ impl WorkerBuilder<(), (), Identity> {
     }
 
     /// Set the source to a backend that implements [Backend]
-    pub fn backend<NB: Backend<Request<NJ, Ctx>>, NJ, Ctx>(
+    pub fn backend<NB: Backend<NJ, Ctx>, NJ, Ctx>(
         self,
         backend: NB,
-    ) -> WorkerBuilder<Request<NJ, Ctx>, NB, Identity> {
+    ) -> WorkerBuilder<NJ, Ctx, NB, Identity> {
         WorkerBuilder {
             request: PhantomData,
             layer: self.layer,
@@ -175,13 +175,13 @@ impl WorkerBuilder<(), (), Identity> {
     }
 }
 
-impl<Req, M, B> WorkerBuilder<Req, B, M> {
+impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M> {
     /// Allows of decorating the service that consumes jobs.
     /// Allows adding multiple [`tower`] middleware
     pub fn chain<NewLayer>(
         self,
         f: impl FnOnce(ServiceBuilder<M>) -> ServiceBuilder<NewLayer>,
-    ) -> WorkerBuilder<Req, B, NewLayer> {
+    ) -> WorkerBuilder<Args, Ctx, B, NewLayer> {
         let middleware = f(self.layer);
 
         WorkerBuilder {
@@ -194,7 +194,7 @@ impl<Req, M, B> WorkerBuilder<Req, B, M> {
         }
     }
     /// Allows adding a single layer [tower] middleware
-    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Req, B, Stack<U, M>>
+    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Args, Ctx, B, Stack<U, M>>
     where
         M: Layer<U>,
     {
@@ -210,7 +210,7 @@ impl<Req, M, B> WorkerBuilder<Req, B, M> {
 
     /// Adds data to the context
     /// This will be shared by all requests
-    pub fn data<D>(self, data: D) -> WorkerBuilder<Req, B, Stack<Data<D>, M>>
+    pub fn data<D>(self, data: D) -> WorkerBuilder<Args, Ctx, B, Stack<Data<D>, M>>
     where
         M: Layer<Data<D>>,
     {
@@ -225,7 +225,7 @@ impl<Req, M, B> WorkerBuilder<Req, B, M> {
     }
 }
 
-impl<Args, Ctx, B, M> WorkerBuilder<Request<Args, Ctx>, B, M> {
+impl<Args, Ctx, B, M> WorkerBuilder<Args, Ctx, B, M> {
     pub fn build<W: WorkerFactory<Args, Ctx, Svc, B, M>, Svc>(
         self,
         service: W,
@@ -238,13 +238,14 @@ pub trait ServiceFactory<Resource, Svc> {
     fn service(self: Box<Self>, backend: &Resource) -> Svc;
 }
 
-pub type BoxServiceFactory<Resource, Req, Res> = Box<dyn ServiceFactory<Resource, BoxService<Req, Res, BoxDynError>>>;
+pub type BoxServiceFactory<Resource, Req, Res> =
+    Box<dyn ServiceFactory<Resource, BoxService<Req, Res, BoxDynError>>>;
 
 pub trait WorkerFactory<Args, Ctx, Svc, Backend, M>: Sized {
     fn service(self, backend: &Backend) -> Svc;
     fn factory(
         self,
-        builder: WorkerBuilder<Request<Args, Ctx>, Backend, M>,
+        builder: WorkerBuilder<Args, Ctx, Backend, M>,
     ) -> Worker<Args, Ctx, Backend, Svc, M> {
         let svc = self.service(&builder.source);
         let mut worker = Worker::new(builder.name, builder.source, svc, builder.layer);

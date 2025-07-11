@@ -55,25 +55,25 @@ where
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait LongRunningExt<Req, Source, Middleware>: Sized {
-    fn long_running(self) -> WorkerBuilder<Req, Source, Stack<LongRunningLayer, Middleware>> {
+pub trait LongRunningExt<Args, Ctx, Source, Middleware>: Sized {
+    fn long_running(self) -> WorkerBuilder<Args, Ctx, Source, Stack<LongRunningLayer, Middleware>> {
         self.long_running_with_cfg(Default::default())
     }
     fn long_running_with_cfg(
         self,
         cfg: LongRunningConfig,
-    ) -> WorkerBuilder<Req, Source, Stack<LongRunningLayer, Middleware>>;
+    ) -> WorkerBuilder<Args, Ctx, Source, Stack<LongRunningLayer, Middleware>>;
 }
 
-impl<Args, P, M, Ctx> LongRunningExt<Request<Args, Ctx>, P, M>
-    for WorkerBuilder<Request<Args, Ctx>, P, M>
+impl<Args, P, M, Ctx> LongRunningExt<Args, Ctx, P, M>
+    for WorkerBuilder<Args, Ctx, P, M>
 where
     M: Layer<LongRunningLayer>,
 {
     fn long_running_with_cfg(
         self,
         cfg: LongRunningConfig,
-    ) -> WorkerBuilder<Request<Args, Ctx>, P, Stack<LongRunningLayer, M>> {
+    ) -> WorkerBuilder<Args, Ctx, P, Stack<LongRunningLayer, M>> {
         let this = self.layer(LongRunningLayer);
         WorkerBuilder {
             name: this.name,

@@ -49,7 +49,7 @@ impl<T, C> Clone for RedisMq<T, C> {
     }
 }
 
-impl<Req, C> Backend<Request<Req, RedisMqContext>> for RedisMq<Req, C>
+impl<Req, C> Backend<Req, RedisMqContext> for RedisMq<Req, C>
 where
     Req: Send + DeserializeOwned + 'static,
     C: Codec<Compact = Vec<u8>>,

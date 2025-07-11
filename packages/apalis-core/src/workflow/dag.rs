@@ -245,11 +245,12 @@ impl<Compact, Ctx> DagExecutor<Compact, Ctx> {
     }
 }
 
-impl<Ctx, Compact, Cdc, B, M> WorkerFactory<Compact, Ctx, RouteService<Compact, Ctx>, B, M>
+impl<Ctx, Compact, Cdc, B, M>
+    WorkerFactory<DagRequest<Compact>, Ctx, RouteService<DagRequest<Compact>, Ctx>, B, M>
     for DagExecutor<Compact, Ctx>
 where
-    B: Backend<Request<Compact, Ctx>>,
-    B::Sink: TaskSink<Compact, Codec = Cdc, Compact = Compact> + 'static,
+    B: Backend<DagRequest<Compact>, Ctx>,
+    B::Sink: TaskSink<DagRequest<Compact>, Codec = Cdc, Compact = Compact> + 'static,
     M: Layer<RouteService<Compact, Ctx>>,
     Cdc: Decoder<DagRequest<Compact>, Compact = Compact>
         + Encoder<DagRequest<Compact>, Compact = Compact>,
@@ -258,7 +259,7 @@ where
     Ctx: 'static,
     Compact: 'static + Send + Clone,
 {
-    fn service(self, backend: &B) -> RouteService<Compact, Ctx> {
+    fn service(self, backend: &B) -> RouteService<DagRequest<Compact>, Ctx> {
         let sink = backend.sink();
         let svc = BoxService::new(RoutedDagService {
             inner: self,
@@ -273,7 +274,7 @@ pub struct RoutedDagService<Inner, SinkT> {
     sink: Arc<Mutex<SinkT>>,
 }
 
-impl<Compact, Ctx, Cdc, SinkT> Service<Request<Compact, Ctx>>
+impl<Compact, Ctx, Cdc, SinkT> Service<Request<DagRequest<Compact>, Ctx>>
     for RoutedDagService<DagExecutor<Compact, Ctx>, SinkT>
 where
     Compact: Send + 'static + Clone,
@@ -281,7 +282,7 @@ where
         + Encoder<DagRequest<Compact>, Compact = Compact>,
     <Cdc as Encoder<DagRequest<Compact>>>::Error: Debug,
     <Cdc as Decoder<DagRequest<Compact>>>::Error: Debug,
-    SinkT: TaskSink<Compact, Compact = Compact, Codec = Cdc> + 'static,
+    SinkT: TaskSink<DagRequest<Compact>, Compact = Compact, Codec = Cdc> + 'static,
 {
     type Response = ();
     type Error = BoxDynError;
@@ -291,8 +292,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: Request<Compact, Ctx>) -> Self::Future {
-        let req: Request<DagRequest<Compact>, _> = request.map(|c| Cdc::decode(&c).unwrap());
+    fn call(&mut self, req: Request<DagRequest<Compact>, Ctx>) -> Self::Future {
         let mut inputs = req.args.inputs.clone();
         let mut execution_context = req.args.execution_context.clone();
         let index = req.args.node_id;
@@ -457,8 +457,7 @@ pub trait DagSinkExt<Compact, Ctx, T> {
 
 impl<S, Compact, Ctx, Err, T> DagSinkExt<Compact, Ctx, T> for S
 where
-    S: TaskSink<DagRequest<Compact>, Compact = Compact, Context = Ctx, Error = Err>
-        + Sink<Request<Compact, Ctx>, Error = Err>,
+    S: TaskSink<DagRequest<Compact>, Compact = Compact, Context = Ctx, Error = Err>,
     Err: std::error::Error,
     S::Codec: Encoder<DagRequest<Compact>, Compact = Compact> + Encoder<T, Compact = Compact>,
     Ctx: Default,
@@ -483,12 +482,22 @@ mod tests {
     use std::io;
 
     use futures::StreamExt;
-    use tower::util::BoxService;
+    use tower::{
+        layer::util::{Identity, Stack},
+        util::BoxService,
+    };
 
     use crate::{
-        backend::{codec::json::JsonCodec, memory::MemoryStorage},
+        backend::{
+            codec::json::JsonCodec,
+            memory::{JsonMemory, MemoryStorage},
+        },
         // service_fn::service_fn,
-        worker::{context::WorkerContext, event::Event, ext::event_listener::EventListenerExt},
+        worker::{
+            context::WorkerContext,
+            event::Event,
+            ext::event_listener::{EventListenerExt, EventListenerLayer},
+        },
     };
 
     use super::*;
@@ -657,6 +666,21 @@ mod tests {
             })
             .await
             .unwrap();
+
+        fn check_dag<
+            W: WorkerFactory<
+                DagRequest<Value>,
+                (),
+                RouteService<DagRequest<Value>, ()>,
+                MemoryStorage<JsonMemory<DagRequest<Value>>>,
+                Stack<EventListenerLayer, Identity>,
+            >,
+        >(
+            dag: &W,
+        ) {
+        }
+
+        check_dag(&dag);
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)

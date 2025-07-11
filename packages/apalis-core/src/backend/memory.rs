@@ -67,19 +67,8 @@ struct TaskKey {
 
 #[derive(Debug, Clone, Default)]
 pub struct JsonMemory<T> {
-    tasks: Arc<RwLock<BTreeMap<TaskKey, Mutex<T>>>>,
+    tasks: Arc<RwLock<BTreeMap<TaskKey, Mutex<Value>>>>,
     buffer: Vec<Request<T, ()>>,
-}
-impl<Args> JsonMemory<Args> {
-    fn insert(&self, task_id: TaskId, args: Args) {
-        self.tasks.write().unwrap().insert(
-            TaskKey {
-                task_id,
-                namespace: std::any::type_name::<Args>().to_owned(),
-            },
-            args.into(),
-        );
-    }
 }
 
 impl JsonMemory<Value> {
@@ -97,10 +86,15 @@ impl JsonMemory<Value> {
             let inner = self.clone();
 
             sender.with_flat_map(move |request: Request<T, ()>| {
-                let namespace = std::any::type_name::<T>().to_string();
                 let task_id = request.parts.task_id.clone();
                 let value = serde_json::to_value(request.args).unwrap();
-                inner.insert(task_id, value.clone());
+                inner.tasks.write().unwrap().insert(
+                    TaskKey {
+                        task_id,
+                        namespace: std::any::type_name::<T>().to_owned(),
+                    },
+                    value.clone().into(),
+                );
 
                 let req = Request::new_with_parts(value, request.parts);
                 futures::stream::iter(vec![Ok(req)])
@@ -125,7 +119,7 @@ impl JsonMemory<Value> {
     }
 }
 
-impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<Value> {
+impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<T> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -135,8 +129,7 @@ impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<Value> {
     fn start_send(self: Pin<&mut Self>, item: Request<T, ()>) -> Result<(), Self::Error> {
         let this = Pin::get_mut(self);
 
-        this.buffer
-            .push(item.map(|args| JsonCodec::<Value>::encode(&args).unwrap()));
+        this.buffer.push(item);
         Ok(())
     }
 
@@ -150,7 +143,7 @@ impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<Value> {
                     task_id,
                     namespace: std::any::type_name::<T>().to_owned(),
                 },
-                Mutex::new(task.args),
+                Mutex::new(serde_json::to_value(task.args).unwrap()),
             );
         }
         Poll::Ready(Ok(()))
@@ -161,15 +154,17 @@ impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<Value> {
     }
 }
 
-impl<T> Stream for JsonMemory<T> {
+impl<T: DeserializeOwned> Stream for JsonMemory<T> {
     type Item = Request<T, ()>;
 
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut map = self.tasks.write().unwrap();
-        if let Some((key, mutex)) = map.pop_first() {
+        if let Some((key, mutex)) =
+            map.pop_first_with(|s, _| s.namespace == std::any::type_name::<T>())
+        {
             let args = mutex.into_inner().unwrap();
             Poll::Ready(Some(Request::new_with_parts(
-                args,
+                serde_json::from_value(args).unwrap(),
                 Parts {
                     task_id: key.task_id,
                     ..Default::default()
@@ -217,20 +212,34 @@ impl<T> Sink<Request<T, ()>> for MemorySink<T> {
     }
 }
 
-impl<T: Clone + Send> TaskSink<T> for MemorySink<T> {
+impl<T: Clone + Send + Unpin> TaskSink<T> for MemorySink<T> {
     type Codec = CloneOpCodec;
+
+    type Error = SendError;
 
     type Compact = T;
 
     type Context = ();
 
     type Timestamp = u64;
+
+    async fn push_raw_request(
+        &mut self,
+        req: Request<Self::Compact, Self::Context>,
+    ) -> Result<Parts<Self::Context>, Self::Error> {
+        let p = req.parts.clone();
+        let mut sink = self.inner.lock().unwrap();
+        let res = sink.start_send_unpin(req)?;
+        Ok(p)
+    }
 }
 
-impl<T: Serialize + Send + Unpin> TaskSink<T> for JsonMemory<Value>
+impl<T: Serialize + Send + Unpin> TaskSink<T> for JsonMemory<T>
 // where
 //     JsonMemory<T>: Sink<Request<Value, ()>>,
 {
+    type Error = serde_json::Error;
+
     type Codec = JsonCodec<Value>;
 
     type Compact = Value;
@@ -238,6 +247,22 @@ impl<T: Serialize + Send + Unpin> TaskSink<T> for JsonMemory<Value>
     type Context = ();
 
     type Timestamp = u64;
+    async fn push_raw_request(
+        &mut self,
+        request: Request<Self::Compact, Self::Context>,
+    ) -> Result<Parts<Self::Context>, Self::Error> {
+        let task_id = request.parts.task_id.clone();
+        let value = serde_json::to_value(request.args).unwrap();
+        let parts = request.parts;
+        self.tasks.write().unwrap().insert(
+            TaskKey {
+                task_id,
+                namespace: std::any::type_name::<T>().to_owned(),
+            },
+            value.into(),
+        );
+        Ok(parts)
+    }
 }
 
 /// In-memory queue that implements [Stream]
@@ -255,7 +280,7 @@ impl<T> Stream for MemoryWrapper<T> {
 }
 
 // MemoryStorage as a Backend
-impl<T: 'static + Clone + Send> Backend<Request<T, ()>> for MemoryStorage<MemoryWrapper<T>> {
+impl<T: 'static + Clone + Send> Backend<T, ()> for MemoryStorage<MemoryWrapper<T>> {
     type Error = BoxDynError;
     type Stream = RequestStream<Request<T, ()>>;
     type Layer = Identity;
@@ -279,7 +304,7 @@ impl<T: 'static + Clone + Send> Backend<Request<T, ()>> for MemoryStorage<Memory
     }
 }
 
-impl<T: 'static + Clone + Send> Backend<Request<T, ()>> for MemoryStorage<JsonMemory<T>> {
+impl<T: 'static + Clone + Send + DeserializeOwned> Backend<T, ()> for MemoryStorage<JsonMemory<T>> {
     type Error = BoxDynError;
     type Stream = RequestStream<Request<T, ()>>;
     type Layer = Identity;

@@ -116,7 +116,7 @@ impl Monitor {
         S: Service<Request<Args, Ctx>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P: Backend<Request<Args, Ctx>> + Send + 'static,
+        P: Backend<Args, Ctx> + Send + 'static,
         P::Error: Into<BoxDynError> + Send + 'static,
         P::Stream: Unpin + Send + 'static,
         P::Beat: Unpin + Send,
@@ -185,20 +185,20 @@ impl Monitor {
         since = "0.6.0",
         note = "Consider using the `.register` as workers now offer concurrency by default"
     )]
-    pub fn register_with_count<Req, S, P, Ctx, W>(mut self, count: usize, worker: W) -> Self
+    pub fn register_with_count<Args, S, P, Ctx, W>(mut self, count: usize, worker: W) -> Self
     where
-        S: Service<Request<Req, Ctx>> + Send + 'static + Clone,
+        S: Service<Request<Args, Ctx>> + Send + 'static + Clone,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P: Backend<Request<Req, Ctx>> + Send + 'static + Clone,
+        P: Backend<Args, Ctx> + Send + 'static + Clone,
         P::Stream: Unpin + Send + 'static,
         P::Layer: Layer<S> + Send,
         P::Beat: Unpin + Send,
-        <P::Layer as Layer<S>>::Service: Service<Request<Req, Ctx>> + Send,
-        <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Future: Send,
-        <<P::Layer as Layer<S>>::Service as Service<Request<Req, Ctx>>>::Error:
+        <P::Layer as Layer<S>>::Service: Service<Request<Args, Ctx>> + Send,
+        <<P::Layer as Layer<S>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
+        <<P::Layer as Layer<S>>::Service as Service<Request<Args, Ctx>>>::Error:
             Send + Sync + Into<BoxDynError>,
-        Req: Send + 'static,
+        Args: Send + 'static,
         Ctx: Send + 'static,
         // W: WorkerStream<Request<Req, Ctx>, S> + Clone,
     {

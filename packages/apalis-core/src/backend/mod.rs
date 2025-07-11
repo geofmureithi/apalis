@@ -22,9 +22,9 @@ pub mod memory;
 pub mod shared;
 
 /// A backend represents a task source
-pub trait Backend<Req> {
+pub trait Backend<Args, Ctx> {
     type Error;
-    type Stream: Stream<Item = Result<Option<Req>, Self::Error>>;
+    type Stream: Stream<Item = Result<Option<Request<Args, Ctx>>, Self::Error>>;
     type Beat: Stream<Item = Result<(), Self::Error>>;
     type Layer;
     type Sink;
@@ -52,31 +52,32 @@ pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, BoxDynError>>;
 //     }
 // }
 
-pub trait TaskSink<T>: Sink<Request<Self::Compact, Self::Context>> + Unpin + Send {
+pub trait TaskSink<Args>: Unpin + Send {
     type Codec;
     type Compact: Send;
+
+    type Error;
 
     type Context: Default + Send + Clone;
     type Timestamp;
 
     fn push(
         &mut self,
-        task: T,
+        task: Args,
     ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send
     where
         Self::Context: Default,
-        Self::Codec: Encoder<T, Compact = Self::Compact>,
-
+        Self::Codec: Encoder<Args, Compact = Self::Compact>,
     {
         self.push_request(Request::new(task))
     }
 
     fn push_request(
         &mut self,
-        req: Request<T, Self::Context>,
+        req: Request<Args, Self::Context>,
     ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send
     where
-        Self::Codec: Encoder<T, Compact = Self::Compact>,
+        Self::Codec: Encoder<Args, Compact = Self::Compact>,
     {
         let res = match Self::Codec::encode(&req.args) {
             Ok(r) => r,
@@ -89,14 +90,15 @@ pub trait TaskSink<T>: Sink<Request<Self::Compact, Self::Context>> + Unpin + Sen
     fn push_raw_request(
         &mut self,
         req: Request<Self::Compact, Self::Context>,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
-        let parts = req.parts.clone();
-        self.send(req).map_ok(|_| parts)
-    }
+    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send;
+    // {
+    //     let parts = req.parts.clone();
+    //     self.send(req).map_ok(|_| parts)
+    // }
 
     fn schedule(
         &mut self,
-        task: T,
+        task: Args,
         on: Self::Timestamp,
     ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send
     where
@@ -107,7 +109,7 @@ pub trait TaskSink<T>: Sink<Request<Self::Compact, Self::Context>> + Unpin + Sen
 
     fn schedule_request(
         &mut self,
-        request: Request<T, Self::Context>,
+        request: Request<Args, Self::Context>,
         on: Self::Timestamp,
     ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
         Box::pin(async { todo!() })
@@ -122,21 +124,21 @@ pub trait TaskSink<T>: Sink<Request<Self::Compact, Self::Context>> + Unpin + Sen
     }
 }
 
-pub trait FetchById<T, Context>: Backend<Request<T, Context>> {
+pub trait FetchById<T, Context>: Backend<T, Context> {
     fn fetch_by_id(
         &mut self,
         task_id: &TaskId,
     ) -> impl Future<Output = Result<Option<Request<T, Context>>, Self::Error>> + Send;
 }
 
-pub trait Update<T, Context>: Backend<Request<T, Context>> {
+pub trait Update<T, Context>: Backend<T, Context> {
     fn update(
         &mut self,
         task: Request<T, Context>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-pub trait Reschedule<T, Context>: Backend<Request<T, Context>> {
+pub trait Reschedule<T, Context>: Backend<T, Context> {
     fn reschedule(
         &mut self,
         task: Request<T, Context>,
@@ -149,13 +151,13 @@ pub trait Vacuum {
     fn vacuum(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
-pub trait ConsumeNext<T, Context>: Backend<Request<T, Context>> {
+pub trait ConsumeNext<T, Context>: Backend<T, Context> {
     fn consume_next(
         &mut self,
     ) -> impl Future<Output = Result<Option<Request<T, Context>>, Self::Error>> + Send;
 }
 
-pub trait ConsumeBatch<T, Context>: Backend<Request<T, Context>> {
+pub trait ConsumeBatch<T, Context>: Backend<T, Context> {
     fn consume_batch(&mut self) -> Self::Stream;
 }
 
@@ -171,7 +173,7 @@ pub trait FetchAll<Context> {
     fn fetch_many(&mut self) -> RequestStream<Request<Self::Compact, Context>>;
 }
 
-pub trait ResumeById<T, Context>: Backend<Request<T, Context>> {
+pub trait ResumeById<T, Context>: Backend<T, Context> {
     type Id;
 
     fn resume_by_id(
@@ -180,11 +182,11 @@ pub trait ResumeById<T, Context>: Backend<Request<T, Context>> {
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
-pub trait ResumeAbandoned<T, Context>: Backend<Request<T, Context>> {
+pub trait ResumeAbandoned<T, Context>: Backend<T, Context> {
     fn resume_abandoned(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
-pub trait RegisterWorker<T, Context>: Backend<Request<T, Context>> {
+pub trait RegisterWorker<T, Context>: Backend<T, Context> {
     fn register_worker(
         &mut self,
         worker_id: String,
@@ -196,15 +198,15 @@ pub trait Metric<Output> {
     fn metric(&mut self) -> impl Future<Output = Result<Output, Self::Error>> + Send;
 }
 
-pub trait ListWorkers<Req>: Backend<Req> {
+pub trait ListWorkers<Args, Ctx>: Backend<Args, Ctx> {
     type Worker;
     fn list_workers(&self) -> impl Future<Output = Result<Vec<Self::Worker>, Self::Error>> + Send;
 }
 
-pub trait ListTasks<Req>: Backend<Req> {
+pub trait ListTasks<Args, Ctx>: Backend<Args, Ctx> {
     type Filter;
     fn list_tasks(
         &self,
         filter: &Self::Filter,
-    ) -> impl Future<Output = Result<Vec<Req>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Vec<Request<Args, Ctx>>, Self::Error>> + Send;
 }
