@@ -2,7 +2,7 @@ use std::{fmt::Debug, marker::PhantomData, time::Duration};
 
 use apalis::prelude::*;
 
-use apalis_redis::{self, Config};
+use apalis_redis::{self, RedisConfig};
 
 use apalis_core::{
     codec::json::JsonCodec,
@@ -19,7 +19,7 @@ use tracing::info;
 struct RedisMq<T, C = JsonCodec<Vec<u8>>> {
     conn: Rsmq,
     msg_type: PhantomData<T>,
-    config: Config,
+    config: RedisConfig,
     codec: PhantomData<C>,
 }
 
@@ -212,7 +212,7 @@ async fn main() -> anyhow::Result<()> {
         conn,
         msg_type: PhantomData,
         codec: PhantomData,
-        config: Config::default().set_namespace("email"),
+        config: RedisConfig::default().set_namespace("email"),
     };
     produce_jobs(&mut mq).await?;
 

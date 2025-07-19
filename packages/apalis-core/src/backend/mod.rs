@@ -19,6 +19,7 @@ use crate::{
 
 pub mod codec;
 pub mod memory;
+pub mod pipe;
 pub mod shared;
 
 /// A backend represents a task source
@@ -35,22 +36,7 @@ pub trait Backend<Args, Ctx> {
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
 }
 /// Represents a stream for T.
-pub type RequestStream<T> = BoxStream<'static, Result<Option<T>, BoxDynError>>;
-
-// impl<S, C> TaskSink<S, C> {
-//     pub async fn push<T, Ctx, Compact>(&mut self, task: T) -> Result<Parts<Ctx>, S::Error>
-//     where
-//         Ctx: Default,
-//         S: Sink<Request<Compact, Ctx>> + Unpin,
-//         C: Encoder<T, Compact = Compact>,
-//         C::Error: Debug,
-//     {
-//         let req = Request::new(C::encode(&task).unwrap());
-
-//         self.sink.send(req).await?;
-//         Ok(todo!())
-//     }
-// }
+pub type RequestStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
 
 pub trait TaskSink<Args>: Unpin + Send {
     type Codec;
@@ -91,26 +77,22 @@ pub trait TaskSink<Args>: Unpin + Send {
         &mut self,
         req: Request<Self::Compact, Self::Context>,
     ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send;
-    // {
-    //     let parts = req.parts.clone();
-    //     self.send(req).map_ok(|_| parts)
-    // }
 
     fn schedule(
         &mut self,
         task: Args,
-        on: Self::Timestamp,
+        delay: Duration,
     ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send
     where
         Self::Context: Default,
     {
-        self.schedule_request(Request::new(task), on)
+        self.schedule_request(Request::new(task), delay)
     }
 
     fn schedule_request(
         &mut self,
         request: Request<Args, Self::Context>,
-        on: Self::Timestamp,
+        delay: Duration,
     ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
         Box::pin(async { todo!() })
     }
@@ -118,7 +100,7 @@ pub trait TaskSink<Args>: Unpin + Send {
     fn schedule_raw_request(
         &mut self,
         request: Request<Self::Compact, Self::Context>,
-        on: Self::Timestamp,
+        delay: Duration,
     ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
         Box::pin(async { todo!() })
     }

@@ -35,7 +35,7 @@ pub struct WorkerState {
 }
 
 impl WorkerState {
-    pub(super) fn new(state: InnerWorkerState) -> Self {
+    pub fn new(state: InnerWorkerState) -> Self {
         Self {
             inner: AtomicUsize::new(state as usize),
         }

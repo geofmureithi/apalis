@@ -61,9 +61,6 @@ pub struct Parts<Ctx> {
     pub context: Ctx,
 
     pub state: State,
-
-    /// The time the request is supposed to be executed
-    pub run_at: Option<u64>,
 }
 
 impl<T, Ctx> Request<T, Ctx> {
@@ -90,7 +87,6 @@ impl<T, Ctx> Request<T, Ctx> {
                 attempt: Default::default(),
                 data: Default::default(),
                 state: State::Pending,
-                run_at: None,
             },
         }
     }
@@ -105,7 +101,6 @@ impl<T, Ctx> Request<T, Ctx> {
                 attempt: Default::default(),
                 data,
                 state: State::Pending,
-                run_at: None,
             },
         }
     }
@@ -117,6 +112,16 @@ impl<T, Ctx> Request<T, Ctx> {
 }
 
 impl<Args, Ctx> Request<Args, Ctx> {
+    /// Maps the `args` field using the provided function, consuming the request.
+    pub fn try_map<F, NewArgs, Err>(self, f: F) -> Result<Request<NewArgs, Ctx>, Err>
+    where
+        F: FnOnce(Args) -> Result<NewArgs, Err>,
+    {
+        Ok(Request {
+            args: f(self.args)?,
+            parts: self.parts,
+        })
+    }
     /// Maps the `args` field using the provided function, consuming the request.
     pub fn map<F, NewArgs>(self, f: F) -> Request<NewArgs, Ctx>
     where

@@ -25,29 +25,3 @@ pub enum GoTo<N> {
     /// Complete execution
     Done(N),
 }
-
-// pub struct PollWithPushBackend<B, T, Ctx> {
-//     backend: B,
-//     receiver: Receiver<Request<T, Ctx>>,
-// }
-
-
-
-// impl<T, Ctx, B> Backend<Request<T, Ctx>> for PollWithPushBackend<B, T, Ctx>
-// where
-//     B: Backend<Request<T, Ctx>, Error = BoxDynError>,
-// {
-//     type Error = BoxDynError;
-//     type Stream = Self;
-//     type Layer = B::Layer;
-//     type Beat = BoxStream<'static, Result<(), BoxDynError>>;
-//     fn heartbeat(&self) -> Self::Beat {
-//         self.backend.heartbeat().boxed()
-//     }
-//     fn middleware(&self) -> Self::Layer {
-//         self.backend.middleware()
-//     }
-//     fn poll(self, _: &WorkerContext) -> Self::Stream {
-//         self.backend
-//     }
-// }

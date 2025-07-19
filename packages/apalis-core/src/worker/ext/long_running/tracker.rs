@@ -75,7 +75,7 @@ use std::task::{Context, Poll, Waker};
 ///
 /// [`close`]: Self::close
 /// [`wait`]: Self::wait
-pub struct TaskTracker {
+pub (super) struct TaskTracker {
     inner: Arc<TaskTrackerInner>,
 }
 

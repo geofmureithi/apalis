@@ -15,13 +15,17 @@ readme = "../../README.md"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["async-await"] }
-tower = { version = "0.5", features = ["util"], default-features = false }
+tower = { version = "0.5", features = [
+    "util",
+    "limit",
+], default-features = false }
 pin-project-lite = "0.2.14"
 thiserror = "2.0.0"
 ulid = { version = "1.1.2", default-features = false, features = ["std"] }
 futures-timer = { version = "3.0.3", optional = true }
+tracing = { version = "0.1", default-features = false, optional = true }
 # Needed for the codec
-serde_json = { version = "1"  }
+serde_json = { version = "1" }
 petgraph = { version = "0.8.2", features = ["serde-1"] }
 
 [dependencies.document-features]
@@ -35,6 +39,7 @@ docsrs = ["document-features"]
 sleep = ["futures-timer"]
 json = []
 test-utils = []
+tracing = ["dep:tracing"]
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt::init();
 
-    let config = apalis_redis::Config::default().set_namespace("apalis_redis-dead-pool");
+    let config = apalis_redis::RedisConfig::default().set_namespace("apalis_redis-dead-pool");
 
     let cfg = Config::from_url("redis://127.0.0.1/");
     let pool = cfg.create_pool(Some(Runtime::Tokio1)).unwrap();

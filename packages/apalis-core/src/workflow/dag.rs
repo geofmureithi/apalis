@@ -12,7 +12,7 @@ use std::{
 use futures::{future::BoxFuture, lock::Mutex, FutureExt, Sink, TryFutureExt};
 use petgraph::{
     algo::toposort,
-    graph::{DiGraph, NodeIndex},
+    graph::{DiGraph, EdgeIndex, NodeIndex},
     visit::EdgeRef,
     Direction,
 };
@@ -53,6 +53,7 @@ pub struct DagRequest<T> {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionContext {
     pub completed_nodes: std::collections::HashSet<NodeIndex>,
+    pub prev_results: HashMap<EdgeIndex, TaskId>,
 }
 
 impl<T> DagRequest<T> {
@@ -216,7 +217,8 @@ where
     /// Build the DAG executor
     pub fn build(self) -> Result<DagExecutor<Compact, Ctx>, String> {
         // Validate DAG (check for cycles)
-        let sorted = toposort(&self.graph, None).map_err(|_| "DAG contains cycles")?;
+        let sorted =
+            toposort(&self.graph, None).map_err(|c| format!("DAG contains cycles {c:?}"))?;
 
         Ok(DagExecutor {
             graph: self.graph,
@@ -309,12 +311,13 @@ where
         {
             panic!("Missing some predecessors")
         }
+
         let targets: HashSet<_> = self
             .inner
             .graph
             .edges(index)
             .into_iter()
-            .map(|s| s.target())
+            .map(|s| (s.target(), s.id()))
             .collect();
         let svc = self.inner.graph.node_weight_mut(index).unwrap();
 
@@ -326,7 +329,8 @@ where
                 match res {
                     GoTo::Next(res) => {
                         execution_context.completed_nodes.insert(index);
-                        for node_index in targets {
+
+                        for (node_index, id) in targets {
                             inputs.insert(node_index, res.clone());
                             let req = Request::new(DagRequest::new(
                                 node_index,
@@ -643,16 +647,17 @@ mod tests {
             // Payment Flow
             // .add_sub_flow(service_fn(validate_payment), process_payment)
             // Inventory Flow
-            .add_flow(confirm_payment, check_stock)
-            .add_flow(check_stock, reserve_items)
-            .add_flow(reserve_items, update_inventory)
-            // Shipping Flow
-            .add_flow(update_inventory, create_label)
-            .add_flow(create_label, assign_carrier)
-            .add_flow(assign_carrier, schedule_pickup)
-            // Logging & Notification Flow
-            .add_flow(schedule_pickup, log_event)
-            .add_flow(log_event, notify_customer)
+            .add_flow(reserve_items, create_label)
+            .add_flow(create_label, check_stock)
+            // .add_flow(reserve_items, check_stock)
+            .add_flow(check_stock, validate_payment)
+            // // Shipping Flow
+            // .add_flow(update_inventory, create_label)
+            // .add_flow(create_label, assign_carrier)
+            // .add_flow(assign_carrier, schedule_pickup)
+            // // Logging & Notification Flow
+            // .add_flow(schedule_pickup, log_event)
+            // .add_flow(log_event, notify_customer)
             .build()
             .unwrap();
 
@@ -660,7 +665,7 @@ mod tests {
         let mut sink = in_memory.sink();
         let _p = sink
             .start_flow(&Order {
-                payment_valid: true,
+                payment_valid: false,
                 in_stock: true,
                 ..Default::default()
             })

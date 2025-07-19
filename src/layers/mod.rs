@@ -23,7 +23,7 @@ pub mod limit {
     pub use tower::limit::RateLimitLayer;
 }
 
-use apalis_core::builder::WorkerBuilder;
+use apalis_core::worker::builder::WorkerBuilder;
 #[cfg(feature = "catch-panic")]
 use catch_panic::CatchPanicLayer;
 use tower::layer::util::{Identity, Stack};

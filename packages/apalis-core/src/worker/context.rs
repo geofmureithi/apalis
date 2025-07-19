@@ -76,7 +76,7 @@ pub struct WorkerContext {
     task_count: Arc<AtomicUsize>,
     waker: Arc<Mutex<Option<Waker>>>,
     state: Arc<WorkerState>,
-    shutdown: Option<Shutdown>,
+    pub(crate) shutdown: Option<Shutdown>,
     event_handler: CtxEventHandler,
     pub(super) is_ready: Arc<AtomicBool>,
     pub(super) service: &'static str,
@@ -89,6 +89,7 @@ impl fmt::Debug for WorkerContext {
             .field("task_count", &self.task_count)
             .field("state", &self.state.load(Ordering::SeqCst))
             .field("service", &self.service)
+            .field("is_ready", &self.is_ready)
             .finish()
     }
 }
@@ -147,8 +148,9 @@ impl WorkerContext {
         }
         self.state
             .store(InnerWorkerState::Running, Ordering::SeqCst);
-        self.is_ready.store(true, Ordering::Release);
+        self.is_ready.store(false, Ordering::SeqCst);
         self.emit(&Event::Start);
+        info!("Worker {} started", self.name());
         Ok(())
     }
 
@@ -166,6 +168,7 @@ impl WorkerContext {
             return Err(WorkerError::StateError(WorkerStateError::NotRunning));
         }
         self.state.store(InnerWorkerState::Paused, Ordering::SeqCst);
+        info!("Worker {} paused", self.name());
         Ok(())
     }
 
@@ -179,6 +182,7 @@ impl WorkerContext {
         }
         self.state
             .store(InnerWorkerState::Running, Ordering::SeqCst);
+        info!("Worker {} resumed", self.name());
         Ok(())
     }
 
@@ -192,12 +196,13 @@ impl WorkerContext {
             .store(InnerWorkerState::Stopped, Ordering::SeqCst);
         self.wake();
         self.emit_ref(&Event::Stop);
+        info!("Worker {} stopped", self.name());
         Ok(())
     }
 
     /// Returns if the worker is ready to consume new tasks
     pub fn is_ready(&self) -> bool {
-        self.is_running() && !self.is_shutting_down() && self.is_ready.load(Ordering::Acquire)
+        self.is_running() && !self.is_shutting_down() && self.is_ready.load(Ordering::SeqCst)
     }
 
     /// Get the type of service

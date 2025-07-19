@@ -27,8 +27,9 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let storage = MemoryStorage::new();
+//!     let sink = storage.sink();
 //!     for i in 0..5 {
-//!         storage.push(i).await?;
+//!         sink.push(i).await?;
 //!     }
 //!
 //!     async fn handler(task: u32) {
@@ -58,8 +59,10 @@
 use crate::backend::Backend;
 use crate::error::{BoxDynError, WorkerError};
 use crate::monitor::shutdown::Shutdown;
+use crate::request::attempt::Attempt;
 use crate::request::data::Data;
 use crate::request::Request;
+use crate::worker::call_all::CallAllUnordered;
 use crate::worker::context::{Tracked, WorkerContext};
 use crate::worker::event::Event;
 use futures::channel::mpsc::{self, channel, unbounded};
@@ -76,9 +79,9 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::task::{Context as TaskCtx, Poll, Waker};
+use std::task::{Context, Poll};
+
 use thiserror::Error;
-use tower::util::CallAllUnordered;
 use tower::{Layer, Service, ServiceBuilder};
 
 pub mod builder;
@@ -106,7 +109,7 @@ where
     B: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BasicWorker")
+        f.debug_struct("Worker")
             .field("service", &self.service)
             .field("backend", &self.backend)
             .finish()
@@ -175,7 +178,7 @@ where
         }
         .boxed();
 
-        let mut stream = backend.poll(&worker);
+        let stream = backend.poll(&worker);
 
         let mut tasks = poll_tasks(service, stream);
         let mut w = worker.clone();
@@ -237,7 +240,9 @@ where
         let mut w = worker.clone();
         let mut ww = w.clone();
         let starter : BoxStream<'static, _> = futures::stream::once(async move {
-            ww.start()?;
+            if !ww.is_running() {
+                 ww.start()?;
+            }
             Ok(None)
         }).filter_map(|res:Result<Option<Event>, WorkerError>| async move {
             match res {
@@ -304,7 +309,7 @@ where
         Ok(_) => Ok(Event::Success),
         Err(err) => Ok(Event::Error(err.into().into())),
     });
-    let stream = futures::stream::select(rx, stream);
+    let stream = futures::stream::select(stream, rx);
     stream.boxed()
 }
 
@@ -335,21 +340,47 @@ pub struct TrackerService<S> {
     service: S,
 }
 
-impl<S, Req> Service<Req> for TrackerService<S>
+impl<S, Args, Ctx> Service<Request<Args, Ctx>> for TrackerService<S>
 where
-    S: Service<Req>,
+    S: Service<Request<Args, Ctx>>,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = Tracked<S::Future>;
+    type Future = Tracked<AttemptOnPollFuture<S::Future>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Req) -> Self::Future {
-        // request.parts.attempt.increment();
-        self.ctx.track(self.service.call(request))
+    fn call(&mut self, request: Request<Args, Ctx>) -> Self::Future {
+        let attempt = request.parts.attempt.clone();
+        self.ctx.track(AttemptOnPollFuture {
+            attempt,
+            fut: self.service.call(request),
+            polled: false,
+        })
+    }
+}
+
+pin_project_lite::pin_project! {
+    pub struct AttemptOnPollFuture<Fut> {
+        attempt: Attempt,
+        #[pin]
+        fut: Fut,
+        polled: bool,
+    }
+}
+
+impl<Fut: Future> Future for AttemptOnPollFuture<Fut> {
+    type Output = Fut::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        if *this.polled == false {
+            *this.polled = true;
+            this.attempt.increment();
+        }
+        this.fut.poll_unpin(cx)
     }
 }
 
@@ -393,10 +424,8 @@ where
         let result = self.inner.poll_ready(cx);
         // Update the readiness state based on the result
         match &result {
-            Poll::Ready(Ok(_)) => self.ctx.is_ready.store(true, Ordering::Release),
-            Poll::Pending | Poll::Ready(Err(_)) => {
-                self.ctx.is_ready.store(false, Ordering::Release)
-            }
+            Poll::Ready(Ok(_)) => self.ctx.is_ready.store(true, Ordering::SeqCst),
+            Poll::Pending | Poll::Ready(Err(_)) => self.ctx.is_ready.store(false, Ordering::SeqCst),
         }
 
         result
@@ -411,15 +440,18 @@ where
 mod tests {
     use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
+    use futures::{channel::mpsc::SendError, future::ready};
+
     use crate::{
-        backend::memory::MemoryStorage,
-        backend::TaskSink,
-        service_fn::{self, service_fn, ServiceFn},
-        worker::builder::WorkerBuilder,
-        worker::ext::{
-            ack::AcknowledgementExt, event_listener::EventListenerExt,
-            long_running::LongRunningExt, record_attempt::RecordAttempt,
-        },
+        backend::{memory::MemoryStorage, TaskSink}, request::Parts, service_fn::{self, service_fn, ServiceFn}, worker::{
+            builder::WorkerBuilder,
+            ext::{
+                ack::{Acknowledge, AcknowledgementExt},
+                event_listener::EventListenerExt,
+                long_running::LongRunningExt,
+                circuit_breaker::CircuitBreaker,
+            },
+        }
     };
 
     use super::*;
@@ -458,16 +490,28 @@ mod tests {
             Ok(())
         }
 
+        #[derive(Debug, Clone)]
         struct MyAcknowledger;
-        struct WebhookService;
+
+        impl<Res: Debug, Ctx: Debug> Acknowledge<Res, Ctx> for MyAcknowledger {
+            type Error = SendError;
+            type Future = BoxFuture<'static, Result<(), SendError>>;
+            fn ack(
+                &mut self,
+                res: &Result<Res, BoxDynError>,
+                parts: &Parts<Ctx>,
+            ) -> Self::Future {
+                println!("{res:?}, {parts:?}");
+                ready(Ok(())).boxed()
+            }
+        }
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)
             .data(Count::default())
-            .record_attempts()
+            .break_circuit()
             .long_running()
             .ack_with(MyAcknowledger)
-            .ack_with(|| WebhookService)
             .on_event(|ctx, ev| {
                 println!("On Event = {:?}", ev);
             })
@@ -504,7 +548,7 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)
             .data(Count::default())
-            .record_attempts()
+            .break_circuit()
             .long_running()
             .on_event(|ctx, ev| {
                 println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);

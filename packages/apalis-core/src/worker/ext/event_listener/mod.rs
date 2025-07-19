@@ -64,7 +64,7 @@ where
 {
     fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
         self,
-        f: F,
+        mut f: F,
     ) -> WorkerBuilder<Args, Ctx, P, Stack<EventListenerLayer, M>> {
         let new_fn = self
             .event_handler
@@ -72,7 +72,7 @@ where
             .map(|mut res| {
                 let current = res.take();
                 match current {
-                    Some(c) => {
+                    Some(mut c) => {
                         let new: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync + 'static> =
                             Box::new(move |ctx, ev| {
                                 c(&ctx, &ev);

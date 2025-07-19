@@ -49,7 +49,7 @@
 //!
 //! let worker = WorkerBuilder::new("my-worker")
 //!     .layer(my_middleware)
-//!     .build_fn(handler);
+//!     .build(handler);
 //! ```
 //! ### Worker
 //! A [`Worker`] represents a task processor. It polls tasks from a [`Backend`], sends them to a [`Service`], and handles retry logic, timeouts, and state transitions.
@@ -72,13 +72,16 @@
 //! A [`Monitor`] supervises multiple [`Worker`]s, supports graceful shutdowns, and coordinates global signals like shutdown or restart
 //!
 //! Example:
-//! ```rust
+//! ```rust,norun
 //! use apalis_core::{monitor::Monitor, worker::Worker};
 //!
 //! let worker = WorkerBuilder::new("my-worker")
 //!     .layer(my_middleware)
-//!     .build_fn(handler);
-//! Monitor::new().register(worker).run().await;
+//!     .build(handler);
+//! Monitor::new()
+//!     .register(worker)
+//!     .run()
+//!     .await;
 //! ```
 //! [`Backend`]: crate::backend::Backend
 //! [`ServiceFn`]: crate::service_fn::ServiceFn
@@ -90,9 +93,20 @@
 pub mod backend;
 /// Includes internal error types.
 pub mod error;
+#[macro_use]
+pub(crate) mod macros;
 pub mod monitor;
 pub mod request;
 pub mod service_fn;
 pub mod worker;
 /// Represents utilities for building complex workflows
 pub mod workflow;
+
+#[cfg(feature = "sleep")]
+pub mod timer {
+    pub use futures_timer::Delay;
+    /// shorthand future for sleeping
+    pub async fn sleep(duration: std::time::Duration) {
+        futures_timer::Delay::new(duration).await;
+    }
+}

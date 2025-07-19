@@ -22,7 +22,7 @@ pub struct RetryAfterError {
     duration: Duration
 }
 
-/// Execution should be retried after a specific duration
+/// Execution should be deferred, will be retried instantly
 #[derive(Error, Debug)]
 #[error("DeferredError: {source}")]
 pub struct DeferredError {

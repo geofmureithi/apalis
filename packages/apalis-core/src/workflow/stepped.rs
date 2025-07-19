@@ -1,5 +1,91 @@
+//! # Stepped Workflow
+//!
+//! A stepped workflow is a sequence of tasks (or steps) that are executed one after another.
+//! The output of one step is the input of the next step. This allows for creating complex
+//! workflows where each step is a separate unit of work.
+//!
+//! ## Key Concepts
+//!
+//! - **`Step`**: A single unit of work in a workflow. It is represented as a `tower::Service`
+//!   that takes a `Request<T, Ctx>` and returns a `Result<GoTo<O>, E>`, where `T` is the input
+//!   type, `O` is the output type, `Ctx` is the context type, and `E` is the error type.
+//!
+//! - **`GoTo<T>`**: An enum that determines the next action in the workflow.
+//!   - `GoTo::Next(T)`: Proceed to the next step with the given output `T`.
+//!   - `GoTo::Delay { next: T, delay: Duration }`: Proceed to the next step with output `T` after a specified delay.
+//!   - `GoTo::Done(T)`: The workflow is complete. The final value `T` is produced.
+//!
+//! - **`StepBuilder`**: A builder for constructing a stepped workflow. It allows chaining
+//!   steps together using `step` or `step_fn`.
+//!
+//! - **`StartStepSinkExt::push_start`**: An extension trait for `TaskSink` that allows
+//!   starting a new workflow by pushing the initial input.
+//!
+//! ## Example
+//!
+//! Here's an example of a three-step workflow.
+//!
+//! ```rust,ignore
+//! use apalis_core::{
+//!     prelude::*,
+//!     workflow::{
+//!         stepped::{GoTo, StepBuilder, StartStepSinkExt},
+//!         Workflow,
+//!     },
+//! };
+//! use std::time::Duration;
+//!
+//! // First step: takes a u32, returns a String
+//! async fn step1(input: u32) -> Result<GoTo<String>, std::io::Error> {
+//!     println!("Step 1: Received {}", input);
+//!     Ok(GoTo::Next(input.to_string()))
+//! }
+//!
+//! // Second step: takes a String, returns a String
+//! async fn step2(input: String) -> Result<GoTo<String>, std::io::Error> {
+//!     println!("Step 2: Received {}", input);
+//!     Ok(GoTo::Delay {
+//!         next: format!("Hello, {}!", input),
+//!         delay: Duration::from_secs(1),
+//!     })
+//! }
+//!
+//! // Third step: takes a String, completes the workflow
+//! async fn step3(input: String) -> Result<GoTo<()>, std::io::Error> {
+//!     println!("Step 3: Received {}", input);
+//!     Ok(GoTo::Done(()))
+//! }
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let storage = MemoryStorage::new_with_json();
+//!     let mut sink = storage.sink();
+//!
+//!     // Build the workflow
+//!     let steps = StepBuilder::new()
+//!         .step_fn(step1)
+//!         .step_fn(step2)
+//!         .step_fn(step3);
+//!
+//!     // Start the workflow
+//!     sink.push_start(123u32).await.unwrap();
+//!
+//!     // Build and run the worker
+//!     let worker = WorkerBuilder::new("stepped-worker")
+//!         .backend(storage)
+//!         .build(steps);
+//!
+//!     // Monitor and worker will gracefully shutdown
+//!     Monitor::new()
+//!         .register(worker)
+//!         .run()
+//!         .await
+//!         .unwrap();
+//! }
+//! ```
 use std::{
     collections::HashMap,
+    convert::Infallible,
     fmt::Debug,
     future::{ready, Future},
     marker::PhantomData,
@@ -23,8 +109,8 @@ use crate::{
         Backend, TaskSink,
     },
     error::BoxDynError,
-    request::{Parts, Request},
-    service_fn::{service_fn, ServiceFn},
+    request::{data::MissingDataError, task_id::TaskId, Parts, Request},
+    service_fn::{from_request::FromRequest, service_fn, ServiceFn},
     worker::{
         builder::{WorkerBuilder, WorkerFactory},
         Worker,
@@ -38,19 +124,35 @@ type SteppedService<Compact, Ctx> = BoxedService<Request<Compact, Ctx>, GoTo<Com
 
 type RouteService<Compact, Ctx> = BoxedService<Request<Compact, Ctx>, ()>;
 
-// The request type that carries step information
+/// Represents a request for a specific step in a workflow.
+///
+/// This struct carries the data for a step, its index in the workflow,
+/// and the execution context.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct StepRequest<T> {
+    /// The index of the step in the workflow.
     pub index: usize,
+    /// The data associated with the step.
     pub step: T,
+    /// The execution context of the workflow.
+    pub execution_ctx: ExecutionContext,
 }
 
 impl<T> StepRequest<T> {
-    pub fn new(index: usize, inner: T) -> Self {
-        Self { index, step: inner }
+    /// Creates a new `StepRequest`.
+    pub fn new(index: usize, inner: T, execution_ctx: ExecutionContext) -> Self {
+        Self {
+            index,
+            step: inner,
+            execution_ctx,
+        }
     }
 }
 
+/// A builder for creating stepped workflows.
+///
+/// `StepBuilder` is used to chain together a sequence of services (steps)
+/// to form a workflow.
 pub struct StepBuilder<Input, Current, Svc, Codec, Compact, Ctx> {
     steps: HashMap<usize, Svc>,
     input: PhantomData<Input>,
@@ -69,6 +171,7 @@ pub struct StepBuilder<Input, Current, Svc, Codec, Compact, Ctx> {
 impl<Input, Compact, Ctx, Codec>
     StepBuilder<Input, Input, SteppedService<Compact, Ctx>, Codec, Compact, Ctx>
 {
+    /// Creates a new `StepBuilder`.
     pub fn new() -> StepBuilder<Input, Input, SteppedService<Compact, Ctx>, Codec, Compact, Ctx> {
         StepBuilder {
             steps: HashMap::new(),
@@ -83,6 +186,11 @@ impl<Input, Compact, Ctx, Codec>
 impl<Input, Current, Compact, Ctx, Codec>
     StepBuilder<Input, Current, SteppedService<Compact, Ctx>, Codec, Compact, Ctx>
 {
+    /// Sets a fallback service to be called when a step index is out of bounds.
+    ///
+    /// This is useful for handling cases where a workflow might attempt to proceed
+    /// to a step that doesn't exist, for example, for recovering from errors or
+    /// handling dynamic workflows.
     pub fn fallback<F: Future<Output = Result<(), E>> + Send + 'static, E: Into<BoxDynError>>(
         mut self,
         mut fun: impl FnMut(Request<Compact, Ctx>) -> F + Send + Sync + 'static,
@@ -92,6 +200,7 @@ impl<Input, Current, Compact, Ctx, Codec>
     }
 }
 
+/// A service that wraps a single step in a workflow, handling encoding and decoding.
 pub struct SingleStepService<S, Codec, Current, Next, Compact, Ctx> {
     inner: S,
     _marker: PhantomData<(Codec, Current, Next, Compact, Ctx)>,
@@ -100,6 +209,7 @@ pub struct SingleStepService<S, Codec, Current, Next, Compact, Ctx> {
 impl<S, Codec, Current, Next, Compact, Ctx>
     SingleStepService<S, Codec, Current, Next, Compact, Ctx>
 {
+    /// Creates a new `SingleStepService`.
     pub fn new(inner: S) -> Self {
         Self {
             inner,
@@ -185,6 +295,9 @@ where
     Current: Send + 'static,
     Compact: Send + 'static,
 {
+    /// Adds a new step to the workflow.
+    ///
+    /// Steps are `tower::Service`s that process the job.
     pub fn step<S, Next, E: Into<BoxDynError>>(
         mut self,
         service: S,
@@ -215,6 +328,10 @@ where
             fallback: self.fallback,
         }
     }
+
+    /// Adds a new step to the workflow from a function.
+    ///
+    /// This is a convenience method that wraps a function into a `tower::Service`.
     pub fn step_fn<F, Next, E: Into<BoxDynError>, FnArgs>(
         self,
         step_fn: F,
@@ -238,12 +355,6 @@ where
     }
 }
 
-#[derive(Clone)]
-pub struct StepService<S> {
-    step_service: S,
-    step_index: usize,
-}
-
 impl<Compact, Ctx, B, M, Input, Current, Cdc>
     WorkerFactory<StepRequest<Compact>, Ctx, RouteService<StepRequest<Compact>, Ctx>, B, M>
     for StepBuilder<Input, Current, SteppedService<Compact, Ctx>, Cdc, Compact, Ctx>
@@ -263,6 +374,7 @@ where
     B::Sink: TaskSink<StepRequest<Compact>, Codec = Cdc, Compact = Compact, Context = Ctx>
         + Sync
         + 'static,
+    <<B as Backend<StepRequest<Compact>, Ctx>>::Sink as TaskSink<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync
 {
     fn service(self, backend: &B) -> RouteService<StepRequest<Compact>, Ctx> {
         let sink = backend.sink();
@@ -273,14 +385,18 @@ where
     }
 }
 
+/// Errors that can occur during the execution of a stepped workflow.
 #[derive(Debug, thiserror::Error)]
 pub enum StepError {
+    /// Occurs when a step index is out of bounds.
     #[error("The service at index `{0}` is not available")]
     OutOfBound(usize),
+    /// Occurs when encoding or decoding of a step's data fails.
     #[error("Codec failed for step `{0}` expecting type {1}")]
     CodecError(BoxDynError, &'static str),
 }
 
+/// A service that routes a `StepRequest` to the appropriate step service.
 pub struct RoutedStepService<Inner, SinkT> {
     inner: Inner,
     sink: Arc<Mutex<SinkT>>,
@@ -298,6 +414,7 @@ where
     <Cdc as Encoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
     <Cdc as Decoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
     SinkT: TaskSink<StepRequest<Compact>, Compact = Compact, Codec = Cdc> + 'static,
+    SinkT::Error: std::error::Error + Send + Sync + 'static,
 {
     type Response = ();
     type Error = BoxDynError;
@@ -309,21 +426,29 @@ where
 
     fn call(&mut self, request: Request<StepRequest<Compact>, Ctx>) -> Self::Future {
         let index = request.args.index;
-        let req = request.map(|s| s.step);
+        let task_id = request.parts.task_id.clone();
+        let ctx = request.args.execution_ctx.clone();
+        let mut req = request.map(|s| s.step);
+        req.insert(ctx.clone());
         let svc = self.inner.steps.get_mut(&index);
         match svc {
             Some(svc) => {
                 let sink = self.sink.clone();
                 let fut = svc.call(req).and_then(move |res| async move {
                     let mut sink = sink.lock().await;
+                    let mut ctx = ctx.clone();
+                    ctx.previous_nodes.insert(index, task_id);
                     match res {
-                        GoTo::Next(s) => {
-                            let req = Request::new(StepRequest::new(index + 1, s))
-                                .map(|req| Cdc::encode(&req).unwrap());
-                            let _res = sink.push_raw_request(req).await;
+                        GoTo::Next(next) => {
+                            let req = Request::new(StepRequest::new(index + 1, next, ctx));
+                            let _res = sink.push_request(req).await?;
                             Ok(())
                         }
-                        GoTo::Delay { next, delay } => todo!(),
+                        GoTo::Delay { next, delay } => {
+                            let req = Request::new(StepRequest::new(index + 1, next, ctx));
+                            let _res = sink.schedule_request(req, delay).await?;
+                            Ok(())
+                        }
                         GoTo::Done(_) => Ok(()),
                     }
                 });
@@ -338,9 +463,12 @@ where
     }
 }
 
+/// An extension trait for `TaskSink` that allows pushing an intermediate step.
 pub trait StepSinkExt<Step, Ctx, Compact> {
+    /// The error from the step
     type Error;
 
+    /// Allows pushing an intermediate step to the sink.
     fn push_step(
         &mut self,
         id: usize,
@@ -348,9 +476,12 @@ pub trait StepSinkExt<Step, Ctx, Compact> {
     ) -> impl Future<Output = Result<Parts<Ctx>, Self::Error>>;
 }
 
+/// An extension trait for `TaskSink` that allows starting a workflow.
 pub trait StartStepSinkExt<Start, Ctx, Compact> {
+    /// The error from the start step
     type Error;
 
+    /// Pushes the starting step of a workflow to the sink.
     fn push_start(&mut self, value: Start)
         -> impl Future<Output = Result<Parts<Ctx>, Self::Error>>;
 }
@@ -367,7 +498,8 @@ where
 
     async fn push_step(&mut self, id: usize, input: T) -> Result<Parts<Ctx>, Self::Error> {
         let compact = S::Codec::encode(&input).unwrap();
-        self.push(StepRequest::new(id, compact)).await
+        self.push(StepRequest::new(id, compact, Default::default()))
+            .await
     }
 }
 
@@ -383,8 +515,16 @@ where
 
     async fn push_start(&mut self, input: Input) -> Result<Parts<Ctx>, Self::Error> {
         let compact = S::Codec::encode(&input).unwrap();
-        self.push(StepRequest::new(0, compact)).await
+        self.push(StepRequest::new(0, compact, Default::default()))
+            .await
     }
+}
+
+/// The execution context for a workflow, containing information about previous steps.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ExecutionContext {
+    /// A map of step indices to the `TaskId` of the worker that executed them.
+    previous_nodes: HashMap<usize, TaskId>,
 }
 
 #[cfg(test)]
@@ -407,21 +547,26 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
-        async fn task1(job: u32) -> Result<GoTo<()>, io::Error> {
+        async fn task1(job: u32) -> Result<GoTo<()>, BoxDynError> {
             println!("{job}");
             Ok(GoTo::Next(()))
         }
 
-        async fn task2(_: ()) -> Result<GoTo<usize>, io::Error> {
+        async fn task2(_: ()) -> Result<GoTo<usize>, BoxDynError> {
             Ok(GoTo::Next(1))
         }
 
-        async fn task3(job: usize, wrk: WorkerContext) -> Result<GoTo<()>, io::Error> {
+        async fn task3(
+            job: usize,
+            wrk: WorkerContext,
+            ctx: Data<ExecutionContext>,
+        ) -> Result<GoTo<()>, io::Error> {
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 wrk.stop().unwrap();
             });
             println!("{job}");
+            dbg!(&ctx.previous_nodes);
             Ok(GoTo::Done(()))
         }
 
@@ -432,7 +577,10 @@ mod tests {
 
         let steps = StepBuilder::new()
             .step_fn(task1)
-            .step_fn(task2)
+            .step({
+                let svc = ServiceBuilder::new().service(service_fn(task2));
+                svc
+            })
             .step_fn(task3)
             .fallback(recover);
 
@@ -444,6 +592,7 @@ mod tests {
             .push(StepRequest::new(
                 0,
                 serde_json::Value::Number(Number::from_str("1").unwrap()),
+                Default::default(),
             ))
             .await
             .unwrap();

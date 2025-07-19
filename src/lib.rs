@@ -64,24 +64,24 @@
 //! [`Layer`]: https://docs.rs/tower/latest/tower/trait.Layer.html
 //! [`Stream`]: https://docs.rs/futures/latest/futures/stream/trait.Stream.html
 /// apalis fully supports middleware via [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html)
-pub mod layers;
+// pub mod layers;
 
 /// Common imports
 pub mod prelude {
-    pub use crate::layers::WorkerBuilderExt;
-    pub use apalis_core::{
-        builder::{WorkerBuilder, WorkerFactory, WorkerFactoryFn},
-        data::Extensions,
-        data::{AddExtension, Data},
-        error::BoxDynError,
-        memory::{MemoryStorage, MemoryWrapper},
-        monitor::Monitor,
-        request::{Request, RequestStream},
-        response::IntoResponse,
-        service_fn::{service_fn, FromRequest, ServiceFn},
-        // step::*,
-        task::attempt::Attempt,
-        task::task_id::TaskId,
-        worker::{Event, Worker, WorkerContext, WorkerError, WorkerId},
-    };
+    // pub use crate::layers::WorkerBuilderExt;
+    // pub use apalis_core::{
+    //     worker::builder::{WorkerBuilder, WorkerFactory},
+    //     data::Extensions,
+    //     data::{AddExtension, Data},
+    //     error::BoxDynError,
+    //     memory::{MemoryStorage, MemoryWrapper},
+    //     monitor::Monitor,
+    //     request::{Request, RequestStream},
+    //     response::IntoResponse,
+    //     service_fn::{service_fn, FromRequest, ServiceFn},
+    //     // step::*,
+    //     request::attempt::Attempt,
+    //     request::task_id::TaskId,
+    //     worker::{Event, Worker, WorkerContext, WorkerError, WorkerId},
+    // };
 }

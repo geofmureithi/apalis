@@ -22,12 +22,10 @@ chrono = { version = "0.4.38", default-features = false, features = [
 ] }
 async-stream = "0.3.5"
 async-std = { version = "1.13.0", optional = true }
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros"] }
-apalis-core = { path = "../../packages/apalis-core" }
-apalis = { path = "../../", default-features = false, features = ["retry"] }
-serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
 
 
 [package.metadata.docs.rs]

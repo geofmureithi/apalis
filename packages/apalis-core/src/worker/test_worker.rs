@@ -145,7 +145,7 @@ impl<B, S, Res> TestWorker<B, S, Res> {
             Ev(Result<Event, WorkerError>),
             Res((TaskId, Result<R, BoxDynError>)),
         }
-        let (mut tx, rx) = channel(1);
+        let (tx, rx) = channel(1);
         let sender = tx.clone();
         let service = ServiceBuilder::new()
             .layer_fn(|service| TestEmitService {
