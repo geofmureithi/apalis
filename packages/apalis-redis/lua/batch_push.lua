@@ -1,21 +1,33 @@
--- KEYS[1]: the job data hash
--- KEYS[2]: the active job list
+-- KEYS[1]: the task data hash
+-- KEYS[2]: the active task list
 -- KEYS[3]: the signal list
+-- KEYS[4]: the metadata prefix (e.g. "task_meta")
 
--- ARGV: [job_id1, job_data1, job_id2, job_data2, ..., job_idN, job_dataN]
+-- ARGV: [task_id1, task_data1, task_id2, task_data2, ...]
 
--- Returns: number of jobs newly enqueued
 local newly_enqueued = 0
 
-for i = 1, #ARGV, 2 do
-  local job_id = ARGV[i]
-  local job_data = ARGV[i + 1]
+for i = 1, #ARGV, 4 do
+  local task_id = ARGV[i]
+  local task_data = ARGV[i + 1]
+  local attempts = ARGV[i + 2]
+  local max_attempts = ARGV[i + 3]
 
-  local set = redis.call("hsetnx", KEYS[1], job_id, job_data)
+  if task_id and task_data then
+    local set = redis.call("hsetnx", KEYS[1], task_id, task_data)
 
-  if set == 1 then
-    redis.call("rpush", KEYS[2], job_id)
-    newly_enqueued = newly_enqueued + 1
+    if set == 1 then
+      redis.call("rpush", KEYS[2], task_id)
+
+      local meta_key = KEYS[4] .. ':' .. task_id
+      redis.call("hmset", meta_key,
+        "attempts", tonumber(attempts),
+        "max_attempts", tonumber(max_attempts),
+        "status", "Pending"
+      )
+        redis.call("publish", "tasks:" .. KEYS[2] .. ':available', task_id)
+      newly_enqueued = newly_enqueued + 1
+    end
   end
 end
 

@@ -392,7 +392,7 @@ impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
 }
 
 impl<Args: Send + Serialize + DeserializeOwned + 'static> MakeShared<Args>
-    for Shared<JsonMemory<Value>>
+    for JsonMemory<Value>
 {
     type Backend = MemoryStorage<MemoryWrapper<Args>>;
 
@@ -404,7 +404,7 @@ impl<Args: Send + Serialize + DeserializeOwned + 'static> MakeShared<Args>
         &mut self,
         _: Self::Config,
     ) -> Result<Self::Backend, Self::MakeError> {
-        let (sender, receiver) = self.inner().create_channel();
+        let (sender, receiver) = self.create_channel();
         Ok(MemoryStorage {
             inner: MemoryWrapper {
                 sender: MemorySink {
@@ -440,7 +440,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
-        let mut store = Shared::new(JsonMemory::default());
+        let mut store = JsonMemory::default();
         let string_store = store.make_shared().unwrap();
         let int_store = store.make_shared().unwrap();
         let mut int_sink = int_store.sink();

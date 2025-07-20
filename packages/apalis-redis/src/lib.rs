@@ -35,33 +35,44 @@
 
 use std::{
     any::type_name,
+    collections::HashMap,
     convert::Infallible,
+    future::Future,
+    io,
     marker::PhantomData,
     pin::Pin,
+    str::FromStr,
+    sync::{Arc, LazyLock, Mutex, OnceLock},
     task::{Context, Poll},
     time::{Duration, SystemTime},
+    usize,
 };
 
 use apalis_core::{
     backend::{
-        codec::{json::JsonCodec, Codec, Encoder},
+        codec::{json::JsonCodec, Codec, Decoder, Encoder},
         shared::{MakeShared, Shared},
         Backend, RequestStream, TaskSink,
     },
     error::BoxDynError,
-    request::{Parts, Request},
+    request::{attempt::Attempt, state::State, Parts, Request},
     service_fn::from_request::FromRequest,
     worker::{
         context::WorkerContext,
         ext::ack::{Acknowledge, AcknowledgeLayer},
     },
 };
+use chrono::Utc;
+use event_listener::Event;
 use futures::{
-    future::BoxFuture,
+    future::{select, BoxFuture},
     stream::{self, BoxStream},
     FutureExt, Sink, StreamExt, TryFuture,
 };
-use redis::{aio::ConnectionLike, aio::MultiplexedConnection, ErrorKind};
+use redis::{
+    aio::{ConnectionLike, MultiplexedConnection},
+    AsyncConnectionConfig, Client, ErrorKind, PushInfo, Script, ScriptInvocation, Value,
+};
 // mod expose;
 // mod storage;
 pub use redis::{aio::ConnectionManager, RedisError};
@@ -79,15 +90,14 @@ const DONE_JOBS_SET: &str = "{queue}:done";
 const FAILED_JOBS_SET: &str = "{queue}:failed";
 const INFLIGHT_JOB_SET: &str = "{queue}:inflight";
 const JOB_DATA_HASH: &str = "{queue}:data";
+const JOB_META_HASH: &str = "{queue}:meta";
 const SCHEDULED_JOBS_SET: &str = "{queue}:scheduled";
 const SIGNAL_LIST: &str = "{queue}:signal";
-
-pub type SharedRedisStorage = RedisStorage<SharedTask, MultiplexedConnection>;
 
 /// The context for a redis storage job
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RedisContext {
-    max_attempts: usize,
+    max_attempts: u32,
     lock_by: Option<String>,
     run_at: Option<SystemTime>,
 }
@@ -123,7 +133,7 @@ pub struct RedisConfig {
 impl Default for RedisConfig {
     fn default() -> Self {
         Self {
-            poll_interval: Duration::from_millis(100),
+            poll_interval: Duration::from_millis(1000),
             buffer_size: 10,
             keep_alive: Duration::from_secs(30),
             enqueue_scheduled: Duration::from_secs(30),
@@ -137,9 +147,9 @@ impl Default for RedisConfig {
 pub struct RedisStorage<Args, Conn = ConnectionManager, C = JsonCodec<Vec<u8>>> {
     conn: Conn,
     job_type: PhantomData<Args>,
-    // pub(super) scripts: RedisScript,
     config: RedisConfig,
     codec: PhantomData<C>,
+    poller: Arc<Event>,
 }
 
 impl<T, Conn> RedisStorage<T, Conn, JsonCodec<Vec<u8>>> {
@@ -169,6 +179,7 @@ impl<T, Conn> RedisStorage<T, Conn, JsonCodec<Vec<u8>>> {
             job_type: PhantomData,
             config,
             codec: PhantomData::<K>,
+            poller: Arc::new(Event::new()),
         }
     }
 
@@ -183,16 +194,33 @@ impl<T, Conn> RedisStorage<T, Conn, JsonCodec<Vec<u8>>> {
     }
 }
 
-impl<Args, Conn: Clone, C> Backend<Args, RedisContext> for RedisStorage<Args, Conn, C> {
-    type Stream = RequestStream<Request<Args, RedisContext>>;
+impl<Args, Conn, C> Backend<Args, RedisContext> for RedisStorage<Args, Conn, C>
+where
+    Args: DeserializeOwned + Unpin + Send + Sync + 'static,
+    Conn: Clone + ConnectionLike + Send + Sync + 'static,
+    C: Decoder<Args, Compact = Vec<u8>> + Unpin + Send + 'static,
+    C::Error: Into<BoxDynError>,
+{
+    type Stream = RequestStream<Request<Args, RedisContext>, RedisError>;
 
-    type Error = BoxDynError;
+    type Error = RedisError;
     type Layer = AcknowledgeLayer<RedisAck<Conn>, ()>;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
     type Sink = RedisSink<Args, C, Conn>;
 
     fn heartbeat(&self) -> Self::Beat {
-        stream::once(async { Ok(()) }).boxed()
+        let poll_interval = self.config.poll_interval;
+        let event_listener = self.poller.clone();
+
+        let stream = stream::unfold(
+            (event_listener, poll_interval),
+            |(event_listener, poll_interval)| async move {
+                apalis_core::timer::sleep(poll_interval).await;
+                event_listener.notify(usize::MAX);
+                Some((Ok(()), (event_listener, poll_interval)))
+            },
+        );
+        stream.boxed()
     }
     fn middleware(&self) -> Self::Layer {
         AcknowledgeLayer::new(RedisAck {
@@ -206,34 +234,284 @@ impl<Args, Conn: Clone, C> Backend<Args, RedisContext> for RedisStorage<Args, Co
             pending: Vec::new(),
             config: self.config.clone(),
             conn: self.conn.clone(),
+            invoke_future: None,
         }
     }
 
-    fn poll(self, _worker: &WorkerContext) -> Self::Stream {
-        todo!()
+    fn poll(mut self, worker: &WorkerContext) -> Self::Stream {
+        let worker = worker.clone();
+        let worker_id = worker.name().to_owned();
+        let config = self.config.clone();
+        let mut conn = self.conn.clone();
+        let event_listener = self.poller.clone();
+        let register = futures::stream::once(async move {
+            let register_consumer =
+                redis::Script::new(include_str!("../lua/register_consumer.lua"));
+            let inflight_set = format!("{}:{}", config.inflight_jobs_set(), worker_id);
+            let consumers_set = config.consumers_set();
+
+            let now: i64 = Utc::now().timestamp();
+
+            register_consumer
+                .key(consumers_set)
+                .arg(now)
+                .arg(inflight_set)
+                .invoke_async::<()>(&mut conn)
+                .await?;
+            Ok(None)
+        })
+        .filter_map(
+            |res: Result<Option<Request<Args, RedisContext>>, RedisError>| async move {
+                match res {
+                    Ok(_) => None,
+                    Err(e) => Some(Err(e)),
+                }
+            },
+        );
+        let stream = stream::unfold(
+            (
+                worker,
+                self.config.clone(),
+                self.conn.clone(),
+                event_listener,
+            ),
+            |(worker, config, mut conn, event_listener)| async {
+                let interval = apalis_core::timer::sleep(config.poll_interval).boxed();
+                let pub_sub = event_listener.listen().boxed();
+                select( pub_sub, interval).await; // Pubsub or else interval
+                let data = Self::fetch_next(&worker, &config, &mut conn).await;
+                Some((data, (worker, config, conn, event_listener)))
+            },
+        )
+        .flat_map(|res| match res {
+            Ok(s) => {
+                let stm: Vec<_> = s
+                    .into_iter()
+                    .map(|s| Ok::<_, RedisError>(Some(s)))
+                    .collect();
+                stream::iter(stm)
+            }
+            Err(e) => stream::iter(vec![Err(e)]),
+        });
+        register.chain(stream).boxed()
         // stream
     }
 }
 
-pub struct SharedTask(());
+impl<T, Conn, C> RedisStorage<T, Conn, C>
+where
+    T: DeserializeOwned + Unpin + Send + Sync + 'static,
+    Conn: ConnectionLike + Send + Sync + 'static,
+    C: Decoder<T, Compact = Vec<u8>>,
+    C::Error: Into<BoxDynError>,
+{
+    async fn fetch_next(
+        worker: &WorkerContext,
+        config: &RedisConfig,
+        conn: &mut Conn,
+    ) -> Result<Vec<Request<T, RedisContext>>, RedisError> {
+        let fetch_jobs = redis::Script::new(include_str!("../lua/get_jobs.lua"));
+        let consumers_set = config.consumers_set();
+        let active_jobs_list = config.active_jobs_list();
+        let job_data_hash = config.job_data_hash();
+        let inflight_set = format!("{}:{}", config.inflight_jobs_set(), worker.name());
+        let signal_list = config.signal_list();
 
-impl<Args> MakeShared<Args> for RedisStorage<SharedTask, MultiplexedConnection> {
+        let result = fetch_jobs
+            .key(&consumers_set)
+            .key(&active_jobs_list)
+            .key(&inflight_set)
+            .key(&job_data_hash)
+            .key(&signal_list)
+            .key(&config.job_meta_hash())
+            .arg(config.buffer_size) // No of jobs to fetch
+            .arg(&inflight_set)
+            .invoke_async::<Vec<Value>>(&mut *conn)
+            .await;
+        match result {
+            Ok(jobs) => {
+                let mut processed = vec![];
+                let tasks = deserialize_with_meta(&jobs[0], &jobs[1])?;
+                for task in tasks {
+                    let args: T =
+                        C::decode(task.data).map_err(|e| build_error(&e.into().to_string()))?;
+                    let context = RedisContext {
+                        max_attempts: task.max_attempts,
+                        ..Default::default()
+                    };
+                    let mut parts = Parts::default();
+                    parts.attempt = Attempt::new_with_value(task.attempts as usize);
+                    parts.context = context;
+                    parts.state =
+                        State::from_str(task.status).map_err(|e| build_error(&e.to_string()))?;
+                    let mut request: Request<T, RedisContext> =
+                        Request::new_with_parts(args, parts);
+                    request.parts.context.lock_by = Some(worker.name().clone());
+                    processed.push(request)
+                }
+                Ok(processed)
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+fn build_error(message: &str) -> RedisError {
+    RedisError::from(io::Error::new(io::ErrorKind::InvalidData, message))
+}
+
+#[derive(Debug)]
+struct TaskWithMeta<'a> {
+    pub data: &'a Vec<u8>,
+    pub attempts: u32,
+    pub max_attempts: u32,
+    pub status: &'a str,
+    pub task_id: &'a str,
+}
+
+fn parse_u32(value: &Value, field: &str) -> Result<u32, RedisError> {
+    match value {
+        Value::BulkString(bytes) => {
+            let s = std::str::from_utf8(bytes)
+                .map_err(|_| build_error(&format!("{} not UTF-8", field)))?;
+            s.parse::<u32>()
+                .map_err(|_| build_error(&format!("{} not u32", field)))
+        }
+        _ => Err(build_error(&format!("{} not bulk string", field))),
+    }
+}
+
+fn deserialize_with_meta<'a>(
+    job_data_list: &'a redis::Value,
+    meta_list: &'a redis::Value,
+) -> Result<Vec<TaskWithMeta<'a>>, RedisError> {
+    let job_data_list = match job_data_list {
+        redis::Value::Array(vals) => vals,
+        _ => return Err(build_error("Expected job_data to be array")),
+    };
+
+    let meta_list = match meta_list {
+        redis::Value::Array(vals) => vals,
+        _ => return Err(build_error("Expected metadata to be array")),
+    };
+
+    if job_data_list.len() != meta_list.len() {
+        return Err(build_error("Job data and metadata length mismatch"));
+    }
+
+    let mut result = Vec::with_capacity(job_data_list.len());
+
+    for (data_val, meta_val) in job_data_list.iter().zip(meta_list.iter()) {
+        let data = match data_val {
+            redis::Value::BulkString(bytes) => bytes,
+            _ => return Err(build_error("Invalid job data format")),
+        };
+
+        let meta_fields = match meta_val {
+            redis::Value::Array(fields) if fields.len() == 4 => fields,
+            _ => return Err(build_error("Invalid metadata format")),
+        };
+
+        fn str_from_val<'a>(val: &'a redis::Value, field: &'a str) -> Result<&'a str, RedisError> {
+            match val {
+                redis::Value::BulkString(bytes) => std::str::from_utf8(bytes)
+                    .map_err(|_| build_error(&format!("{} not UTF-8", field))),
+                _ => Err(build_error(&format!("{} not bulk string", field))),
+            }
+        }
+
+        let task_id = str_from_val(&meta_fields[0], "job_id")?;
+        let attempts = parse_u32(&meta_fields[1], "attempts")?;
+        let max_attempts = parse_u32(&meta_fields[2], "max_attempts")?;
+        let status = str_from_val(&meta_fields[3], "status")?;
+
+        result.push(TaskWithMeta {
+            task_id,
+            data,
+            attempts,
+            max_attempts,
+            status,
+        });
+    }
+
+    Ok(result)
+}
+
+pub struct SharedRedisStorage {
+    conn: MultiplexedConnection,
+    registry: Arc<Mutex<HashMap<String, Arc<Event>>>>,
+}
+
+fn parse_channel_info(push: &PushInfo) -> Option<(String, String, String)> {
+    if let Some(Value::BulkString(channel_bytes)) = push.data.get(1) {
+        if let Ok(channel_str) = std::str::from_utf8(channel_bytes) {
+            let parts: Vec<&str> = channel_str.split(':').collect();
+            if parts.len() >= 4 {
+                let namespace = parts[1].to_owned();
+                let action = parts[2].to_owned();
+                let signal = parts[3].to_string();
+                return Some((namespace, action, signal));
+            }
+        }
+    }
+    None
+}
+
+impl SharedRedisStorage {
+    pub async fn new(client: Client) -> Result<Self, RedisError> {
+        let registry: Arc<Mutex<HashMap<String, Arc<Event>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let r2 = registry.clone();
+        let config = AsyncConnectionConfig::new().set_push_sender(move |msg| {
+            let Ok(mut registry) = r2.lock() else {
+                return Err(redis::aio::SendError);
+            };
+            if let Some((namespace, _, signal_kind)) = parse_channel_info(&msg) {
+                if signal_kind == "available" {
+                    registry.get(&namespace).unwrap().notify(usize::MAX);
+                }
+            }
+            Ok(())
+        });
+        let mut conn = client
+            .get_multiplexed_async_connection_with_config(&config)
+            .await?;
+        conn.psubscribe("tasks:*:available").await?;
+        Ok(SharedRedisStorage { conn, registry })
+    }
+}
+
+impl<Args> MakeShared<Args> for SharedRedisStorage {
     type Backend = RedisStorage<Args, MultiplexedConnection>;
 
     type Config = RedisConfig;
 
     type MakeError = String;
 
+    fn make_shared(&mut self) -> Result<Self::Backend, Self::MakeError>
+    where
+        Self::Config: Default,
+    {
+        let config = RedisConfig::default().set_namespace(std::any::type_name::<Args>());
+        Self::make_shared_with_config(self, config)
+    }
+
     fn make_shared_with_config(
         &mut self,
         config: Self::Config,
     ) -> Result<Self::Backend, Self::MakeError> {
+        let poller = Arc::new(Event::new());
+        self.registry
+            .lock()
+            .unwrap()
+            .insert(config.namespace.clone(), poller.clone());
         let conn = self.conn.clone();
         Ok(RedisStorage {
             conn,
             job_type: PhantomData,
             config,
             codec: PhantomData,
+            poller,
         })
     }
 }
@@ -243,6 +521,7 @@ pub struct RedisSink<Args, Codec, Conn = ConnectionManager> {
     config: RedisConfig,
     pending: Vec<Request<Vec<u8>, RedisContext>>,
     conn: Conn,
+    invoke_future: Option<BoxFuture<'static, Result<u32, RedisError>>>,
 }
 
 #[derive(Clone)]
@@ -277,30 +556,54 @@ impl<T: Serialize + Send + Unpin, Cdc: Send + Unpin, Conn: ConnectionLike + Send
         &mut self,
         request: Request<Self::Compact, Self::Context>,
     ) -> Result<Parts<Self::Context>, Self::Error> {
-        let task_id = request.parts.task_id.clone();
+        let task_id = request.parts.task_id.to_string();
 
         let parts: Parts<RedisContext> = request.parts;
-        let job: Vec<u8> = request.args;
 
         let push_job = redis::Script::new(include_str!("../lua/push_job.lua"));
 
-        push_job
-            .key(&self.config.get_namespace())
+        let _ = push_job
+            .key(&self.config.job_data_hash())
             .key(&self.config.active_jobs_list())
             .key(&self.config.signal_list())
-            .arg(task_id.to_string())
-            .arg(job)
-            .invoke_async::<()>(&mut self.conn)
+            .key(&self.config.job_meta_hash())
+            .arg(&task_id)
+            .arg(&request.args)
+            .arg(&parts.context.max_attempts) // max_attempts
+            .invoke_async::<u32>(&mut self.conn)
             .await?;
         Ok(parts)
     }
 }
 
-impl<
-        Args: Unpin + Serialize,
-        Cdc: Unpin + Encoder<Args, Compact = Vec<u8>>,
-        Conn: ConnectionLike + Unpin,
-    > Sink<Request<Args, RedisContext>> for RedisSink<Args, Cdc, Conn>
+static BATCH_PUSH_SCRIPT: LazyLock<Script> =
+    LazyLock::new(|| Script::new(include_str!("../lua/batch_push.lua")));
+async fn push_tasks<Conn: ConnectionLike>(
+    tasks: Vec<Request<Vec<u8>, RedisContext>>,
+    config: RedisConfig,
+    mut conn: Conn,
+) -> Result<u32, RedisError> {
+    let mut batch = BATCH_PUSH_SCRIPT.key(config.job_data_hash());
+    let mut script = batch
+        .key(config.active_jobs_list())
+        .key(config.signal_list())
+        .key(config.job_meta_hash());
+    for request in tasks {
+        let task_id = request.parts.task_id.to_string();
+        let attempts = request.parts.attempt.current() as u32;
+        let max_attempts = request.parts.context.max_attempts;
+        let job = request.args;
+        script = script.arg(task_id).arg(job).arg(attempts).arg(max_attempts);
+    }
+
+    script.invoke_async::<u32>(&mut conn).await
+}
+
+impl<Args, Cdc, Conn> Sink<Request<Args, RedisContext>> for RedisSink<Args, Cdc, Conn>
+where
+    Args: Unpin + Serialize,
+    Cdc: Unpin + Encoder<Args, Compact = Vec<u8>>,
+    Conn: ConnectionLike + Unpin + Send + Clone + 'static,
 {
     type Error = RedisError;
 
@@ -324,26 +627,30 @@ impl<
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = Pin::get_mut(self);
 
-        let tasks: Vec<_> = this.pending.drain(..).collect();
+        // If there's no in-flight Redis future and we have pending items, build the future
+        if this.invoke_future.is_none() && !this.pending.is_empty() {
+            let tasks: Vec<_> = this.pending.drain(..).collect();
+            let fut = push_tasks(tasks, this.config.clone(), this.conn.clone());
 
-        let batch_push = redis::Script::new(include_str!("../lua/batch_push.lua"));
-
-        let mut binding = batch_push.key(this.config.get_namespace());
-        let mut script = binding
-            .key(this.config.active_jobs_list())
-            .key(this.config.signal_list());
-
-        for request in tasks {
-            let task_id = request.parts.task_id.to_string();
-            let job = request.args;
-
-            script = script.arg(task_id).arg(&job);
+            this.invoke_future = Some(Box::pin(fut));
         }
 
-        let req = std::pin::pin!(script.invoke_async::<u32>(&mut this.conn));
+        // If we have a future in flight, poll it
+        if let Some(fut) = &mut this.invoke_future {
+            match fut.as_mut().poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(result) => {
+                    // ✅ Clear the future after it completes
+                    this.invoke_future = None;
 
-        let result = futures::ready!(req.try_poll(cx)).map(|_| ());
-        Poll::Ready(result)
+                    // Propagate the Redis result
+                    Poll::Ready(result.map(|_| ()))
+                }
+            }
+        } else {
+            // No pending work, flush is complete
+            Poll::Ready(Ok(()))
+        }
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -470,6 +777,15 @@ impl RedisConfig {
         JOB_DATA_HASH.replace("{queue}", &self.namespace)
     }
 
+    /// Returns the Redis key for the hash storing job metadata associated with the queue.
+    /// The key is dynamically generated using the namespace of the queue.
+    ///
+    /// # Returns
+    /// A `String` representing the Redis key for the job meta hash.
+    pub fn job_meta_hash(&self) -> String {
+        JOB_META_HASH.replace("{queue}", &self.namespace)
+    }
+
     /// Returns the Redis key for the set of scheduled jobs associated with the queue.
     /// The key is dynamically generated using the namespace of the queue.
     ///
@@ -512,8 +828,8 @@ impl RedisConfig {
 mod tests {
     use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
-    use futures::future::ready;
-    use redis::Client;
+    use futures::{future::ready, SinkExt};
+    use redis::{parse_redis_url, Client, ConnectionInfo, IntoConnectionInfo};
 
     use apalis_core::{
         backend::memory::MemoryStorage,
@@ -529,45 +845,78 @@ mod tests {
 
     use super::*;
 
-    const ITEMS: u32 = 100;
+    const ITEMS: u32 = 10;
 
     #[tokio::test]
-    async fn it_works() {
+    async fn basic_worker() {
         let client = Client::open("redis://127.0.0.1/").unwrap();
-        let conn = client.get_multiplexed_async_connection().await.unwrap();
-        let mut store = SharedRedisStorage::new(conn);
-        let string_store = store.make_shared().unwrap();
-        let int_store = store.make_shared().unwrap();
-        let mut int_sink = int_store.sink();
-        let mut string_sink = string_store.sink();
-
+        let conn = client.get_connection_manager().await.unwrap();
+        let backend = RedisStorage::new(conn);
+        let mut sink = backend.sink();
         for i in 0..ITEMS {
-            string_sink.push(format!("ITEM: {i}")).await.unwrap();
-            int_sink.push(i).await.unwrap();
+            let mut req: Request<u32, RedisContext> = Request::new(i);
+            req.parts.context.max_attempts = i;
+            sink.send(req).await.unwrap();
         }
 
-        async fn task(job: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
-            tokio::time::sleep(Duration::from_millis(2)).await;
-            if job == ITEMS - 1 {
-                ctx.stop();
+        async fn task(task: u32, ctx: RedisContext, wrk: WorkerContext) -> Result<(), BoxDynError> {
+            println!("{task:?}, {ctx:?}");
+            if task == ITEMS - 1 {
+                wrk.stop().unwrap();
                 return Err("Worker stopped!")?;
             }
             Ok(())
         }
 
-        let string_worker = WorkerBuilder::new("rango-tango-string")
-            .backend(string_store)
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(backend)
             .on_event(|ctx, ev| {
                 println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
             })
-            .build(|req: String, ctx: WorkerContext| async move {
-                tokio::time::sleep(Duration::from_millis(2)).await;
-                println!("{req}");
-                if req.ends_with(&(ITEMS - 1).to_string()) {
-                    ctx.stop();
-                }
-            })
-            .run();
+            .build(task);
+        worker.run().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shared_workers() {
+        let client = Client::open("redis://127.0.0.1/?protocol=resp3").unwrap();
+        let mut store = SharedRedisStorage::new(client).await.unwrap();
+
+        let string_store = store
+            .make_shared_with_config(
+                RedisConfig::default()
+                    .set_namespace("strrrrrr")
+                    .set_poll_interval(Duration::from_secs(1))
+                    .set_buffer_size(10),
+            )
+            .unwrap();
+        let int_store = store
+            .make_shared_with_config(
+                RedisConfig::default()
+                    .set_namespace("Intttttt")
+                    .set_poll_interval(Duration::from_secs(2))
+                    .set_buffer_size(10),
+            )
+            .unwrap();
+        let mut int_sink = int_store.sink();
+        let mut string_sink = string_store.sink();
+
+        tokio::spawn(async move {
+            for i in 0..ITEMS {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                string_sink.push(format!("ITEM: {i}")).await.unwrap();
+                int_sink.push(i).await.unwrap();
+            }
+        });
+
+        async fn task(job: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            if job == ITEMS - 1 {
+                ctx.stop().unwrap();
+                return Err("Worker stopped!")?;
+            }
+            Ok(())
+        }
 
         let int_worker = WorkerBuilder::new("rango-tango-int")
             .backend(int_store)
@@ -577,6 +926,19 @@ mod tests {
             .build(task)
             .run();
 
+        let string_worker = WorkerBuilder::new("rango-tango-string")
+            .backend(string_store)
+            .on_event(|ctx, ev| {
+                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+            })
+            .build(|req: String, ctx: WorkerContext| async move {
+                tokio::time::sleep(Duration::from_millis(3)).await;
+                println!("{req}");
+                if req.ends_with(&(ITEMS - 1).to_string()) {
+                    ctx.stop().unwrap();
+                }
+            })
+            .run();
         let _ = futures::future::join(int_worker, string_worker).await;
     }
 }
