@@ -158,15 +158,17 @@ where
     pub fn run_with_ctx(self, ctx: &mut WorkerContext) -> BoxFuture<'static, Result<(), WorkerError>> {
         let backend = self.backend;
         let event_handler = self.event_handler;
+        let inner_layers = backend.middleware();
         ctx.wrap_listener(event_handler);
         let mut worker = ctx.clone();
         let service = ServiceBuilder::new()
             .layer(Data::new(worker.clone()))
+            .layer(inner_layers)
             .layer(self.middleware.into_inner())
             .layer(ReadinessLayer::new(worker.clone()))
             .layer(TrackerLayer::new(worker.clone()))
             .service(self.service);
-        let mut heartbeat = backend.heartbeat();
+        let mut heartbeat = backend.heartbeat(&worker);
         let heartbeat = async move {
             while let Some(res) = heartbeat.next().await {
                 match res {
@@ -226,13 +228,15 @@ where
         let event_handler = self.event_handler;
         ctx.wrap_listener(event_handler);
         let mut worker = ctx.clone();
+        let inner_layers = backend.middleware();
         let service = ServiceBuilder::new()
             .layer(Data::new(worker.clone()))
+            .layer(inner_layers)
             .layer(self.middleware.into_inner())
             .layer(ReadinessLayer::new(worker.clone()))
             .layer(TrackerLayer::new(worker.clone()))
             .service(self.service);
-        let heartbeat = backend.heartbeat().map(|_| Ok(Event::HeartBeat));
+        let heartbeat = backend.heartbeat(&worker).map(|_| Ok(Event::HeartBeat));
 
         let stream = backend.poll(&worker);
 
@@ -443,15 +447,18 @@ mod tests {
     use futures::{channel::mpsc::SendError, future::ready};
 
     use crate::{
-        backend::{memory::MemoryStorage, TaskSink}, request::Parts, service_fn::{self, service_fn, ServiceFn}, worker::{
+        backend::{memory::MemoryStorage, TaskSink},
+        request::Parts,
+        service_fn::{self, service_fn, ServiceFn},
+        worker::{
             builder::WorkerBuilder,
             ext::{
                 ack::{Acknowledge, AcknowledgementExt},
+                circuit_breaker::CircuitBreaker,
                 event_listener::EventListenerExt,
                 long_running::LongRunningExt,
-                circuit_breaker::CircuitBreaker,
             },
-        }
+        },
     };
 
     use super::*;
@@ -493,14 +500,10 @@ mod tests {
         #[derive(Debug, Clone)]
         struct MyAcknowledger;
 
-        impl<Res: Debug, Ctx: Debug> Acknowledge<Res, Ctx> for MyAcknowledger {
+        impl<Ctx: Debug> Acknowledge<(), Ctx> for MyAcknowledger {
             type Error = SendError;
             type Future = BoxFuture<'static, Result<(), SendError>>;
-            fn ack(
-                &mut self,
-                res: &Result<Res, BoxDynError>,
-                parts: &Parts<Ctx>,
-            ) -> Self::Future {
+            fn ack(&mut self, res: &Result<(), BoxDynError>, parts: &Parts<Ctx>) -> Self::Future {
                 println!("{res:?}, {parts:?}");
                 ready(Ok(())).boxed()
             }

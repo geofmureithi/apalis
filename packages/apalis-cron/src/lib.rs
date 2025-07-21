@@ -319,7 +319,7 @@ where
 
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
-    fn heartbeat(&self) -> Self::Beat {
+    fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
     }
     fn middleware(&self) -> Self::Layer {
@@ -330,7 +330,7 @@ where
         ()
     }
 
-    fn poll(self, worker: &WorkerContext) -> Self::Stream {
+    fn poll(self, _: &WorkerContext) -> Self::Stream {
         let stream = self.and_then(|s| async {
             Ok(Some(Request::new_with_ctx(Default::default(), s)))
         });

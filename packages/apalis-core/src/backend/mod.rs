@@ -30,7 +30,7 @@ pub trait Backend<Args, Ctx> {
     type Layer;
     type Sink;
 
-    fn heartbeat(&self) -> Self::Beat;
+    fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat;
     fn middleware(&self) -> Self::Layer;
     fn sink(&self) -> Self::Sink;
     fn poll(self, worker: &WorkerContext) -> Self::Stream;

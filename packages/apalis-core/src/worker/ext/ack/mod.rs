@@ -22,7 +22,7 @@ pub trait AcknowledgementExt<Args, Ctx, Source, Middleware, Ack: Acknowledge<Res
     fn ack_with(
         self,
         ack: Ack,
-    ) -> WorkerBuilder<Args, Ctx, Source, Stack<AcknowledgeLayer<Ack, Res>, Middleware>>;
+    ) -> WorkerBuilder<Args, Ctx, Source, Stack<AcknowledgeLayer<Ack>, Middleware>>;
 }
 
 pub trait Acknowledge<Res, Ctx> {
@@ -32,57 +32,64 @@ pub trait Acknowledge<Res, Ctx> {
     fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Parts<Ctx>) -> Self::Future;
 }
 
-/// Layer that adds acknowledgment functionality to services
-pub struct AcknowledgeLayer<A, Res> {
-    acknowledger: A,
-    _req: PhantomData<Res>,
-}
+impl<Res, Ctx, F, Fut, E> Acknowledge<Res, Ctx> for F
+where
+    F: FnMut(&Result<Res, BoxDynError>, &Parts<Ctx>) -> Fut,
+    Fut: Future<Output = Result<(), E>>,
+{
+    type Error = E;
+    type Future = Fut;
 
-impl<A, Res> AcknowledgeLayer<A, Res> {
-    pub fn new(acknowledger: A) -> Self {
-        Self {
-            acknowledger,
-            _req: PhantomData,
-        }
+    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Parts<Ctx>) -> Self::Future {
+        (self)(res, parts)
     }
 }
 
-impl<S, A, Res> Layer<S> for AcknowledgeLayer<A, Res>
+/// Layer that adds acknowledgment functionality to services
+pub struct AcknowledgeLayer<A> {
+    acknowledger: A,
+}
+
+impl<A> AcknowledgeLayer<A> {
+    pub fn new(acknowledger: A) -> Self {
+        Self { acknowledger }
+    }
+}
+
+impl<S, A> Layer<S> for AcknowledgeLayer<A>
 where
     A: Clone,
 {
-    type Service = AcknowledgeService<S, A, Res>;
+    type Service = AcknowledgeService<S, A>;
 
     fn layer(&self, inner: S) -> Self::Service {
         AcknowledgeService {
             inner,
             acknowledger: self.acknowledger.clone(),
-            _res: PhantomData,
         }
     }
 }
 
 /// Service that wraps another service and acknowledges task completion
-pub struct AcknowledgeService<S, A, Res> {
+pub struct AcknowledgeService<S, A> {
     inner: S,
     acknowledger: A,
-    _res: PhantomData<Res>,
 }
 
-impl<S, A, Args, Ctx> Service<Request<Args, Ctx>> for AcknowledgeService<S, A, S::Response>
+impl<S, A, Args, Ctx, Res> Service<Request<Args, Ctx>> for AcknowledgeService<S, A>
 where
-    S: Service<Request<Args, Ctx>>,
-    A: Acknowledge<S::Response, Ctx> + Clone + Send + 'static,
+    S: Service<Request<Args, Ctx>, Response = Res>,
+    A: Acknowledge<Res, Ctx> + Clone + Send + 'static,
     S::Error: Into<BoxDynError>,
     A::Error: std::error::Error + Send + Sync + 'static,
     S::Future: Send + 'static,
     A::Future: Send + 'static,
     Ctx: Clone + Sync + 'static + Send,
-    S::Response: Send,
+    Res: Send,
 {
-    type Response = S::Response;
+    type Response = Res;
     type Error = BoxDynError;
-    type Future = BoxFuture<'static, Result<S::Response, BoxDynError>>;
+    type Future = BoxFuture<'static, Result<Res, BoxDynError>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx).map_err(|e| e.into())
@@ -107,13 +114,14 @@ where
 impl<Args, P, M, Ctx, Ack, Res> AcknowledgementExt<Args, Ctx, P, M, Ack, Res>
     for WorkerBuilder<Args, Ctx, P, M>
 where
-    M: Layer<AcknowledgeLayer<Ack, Res>>,
+    M: Layer<AcknowledgeLayer<Ack>>,
+    // M::Service: Service<Request<Args, Ctx>, Response = Res>, 
     Ack: Acknowledge<Res, Ctx>,
 {
     fn ack_with(
         self,
         ack: Ack,
-    ) -> WorkerBuilder<Args, Ctx, P, Stack<AcknowledgeLayer<Ack, Res>, M>> {
+    ) -> WorkerBuilder<Args, Ctx, P, Stack<AcknowledgeLayer<Ack>, M>> {
         let this = self.layer(AcknowledgeLayer::new(ack));
         WorkerBuilder {
             name: this.name,

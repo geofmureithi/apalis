@@ -371,10 +371,10 @@ where
     <Cdc as Decoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
     Ctx: 'static,
     Compact: 'static + Send,
-    B::Sink: TaskSink<StepRequest<Compact>, Codec = Cdc, Compact = Compact, Context = Ctx>
-        + Sync
-        + 'static,
-    <<B as Backend<StepRequest<Compact>, Ctx>>::Sink as TaskSink<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync
+    B::Sink:
+        TaskSink<StepRequest<Compact>, Codec = Cdc, Compact = Compact, Context = Ctx> + 'static,
+    <<B as Backend<StepRequest<Compact>, Ctx>>::Sink as TaskSink<StepRequest<Compact>>>::Error:
+        std::error::Error + Send + Sync,
 {
     fn service(self, backend: &B) -> RouteService<StepRequest<Compact>, Ctx> {
         let sink = backend.sink();
@@ -525,6 +525,29 @@ where
 pub struct ExecutionContext {
     /// A map of step indices to the `TaskId` of the worker that executed them.
     previous_nodes: HashMap<usize, TaskId>,
+}
+
+#[doc(hidden)]
+pub fn assert_stepped<B, Input, Current, Svc, Cdc, Compact, Ctx, M>(
+    _: &StepBuilder<Input, Current, Svc, Cdc, Compact, Ctx>,
+) where
+    B: Backend<StepRequest<Compact>, Ctx>,
+    M: Layer<RouteService<Compact, Ctx>>,
+    Input: Send + 'static,
+    Current: Send + 'static,
+    Cdc: Send
+        + 'static
+        + Decoder<StepRequest<Compact>, Compact = Compact>
+        + Encoder<StepRequest<Compact>, Compact = Compact>,
+    <Cdc as Encoder<StepRequest<Compact>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    <Cdc as Decoder<StepRequest<Compact>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    Ctx: 'static,
+    Compact: 'static + Send,
+    B::Sink:
+        TaskSink<StepRequest<Compact>, Codec = Cdc, Compact = Compact, Context = Ctx> + 'static,
+    <<B as Backend<StepRequest<Compact>, Ctx>>::Sink as TaskSink<StepRequest<Compact>>>::Error:
+        Into<BoxDynError> + Send + Sync,
+{
 }
 
 #[cfg(test)]

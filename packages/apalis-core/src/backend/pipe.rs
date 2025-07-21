@@ -63,9 +63,9 @@ where
 
     type Sink = I::Sink;
 
-    fn heartbeat(&self) -> Self::Beat {
+    fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat {
         self.into
-            .heartbeat()
+            .heartbeat(worker)
             .map_err(|e| PipeError {
                 kind: PipeErrorKind::Inner(e.into()),
             })

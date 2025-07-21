@@ -61,6 +61,7 @@ use apalis_core::{
         context::WorkerContext,
         ext::ack::{Acknowledge, AcknowledgeLayer},
     },
+    workflow::GoTo,
 };
 use chrono::Utc;
 use event_listener::Event;
@@ -77,6 +78,7 @@ use redis::{
 // mod storage;
 pub use redis::{aio::ConnectionManager, RedisError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use tower::{layer::util::Identity, ServiceBuilder};
 // pub use storage::connect;
 // pub use storage::Config;
 // pub use storage::RedisContext;
@@ -133,7 +135,7 @@ pub struct RedisConfig {
 impl Default for RedisConfig {
     fn default() -> Self {
         Self {
-            poll_interval: Duration::from_millis(1000),
+            poll_interval: Duration::from_millis(100),
             buffer_size: 10,
             keep_alive: Duration::from_secs(30),
             enqueue_scheduled: Duration::from_secs(30),
@@ -144,6 +146,7 @@ impl Default for RedisConfig {
 }
 
 /// Represents a [Backend] that uses Redis for storage.
+#[doc = "# Feature Support\n"]
 pub struct RedisStorage<Args, Conn = ConnectionManager, C = JsonCodec<Vec<u8>>> {
     conn: Conn,
     job_type: PhantomData<Args>,
@@ -204,20 +207,36 @@ where
     type Stream = RequestStream<Request<Args, RedisContext>, RedisError>;
 
     type Error = RedisError;
-    type Layer = AcknowledgeLayer<RedisAck<Conn>, ()>;
+    type Layer = AcknowledgeLayer<RedisAck<Conn>>;
+
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
     type Sink = RedisSink<Args, C, Conn>;
 
-    fn heartbeat(&self) -> Self::Beat {
-        let poll_interval = self.config.poll_interval;
-        let event_listener = self.poller.clone();
+    fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat {
+        let keep_alive = self.config.keep_alive;
+
+        let config = self.config.clone();
+        let worker_id = worker.name().to_owned();
+        let conn = self.conn.clone();
 
         let stream = stream::unfold(
-            (event_listener, poll_interval),
-            |(event_listener, poll_interval)| async move {
-                apalis_core::timer::sleep(poll_interval).await;
-                event_listener.notify(usize::MAX);
-                Some((Ok(()), (event_listener, poll_interval)))
+            (keep_alive, worker_id, conn, config),
+            |(keep_alive, worker_id, mut conn, config)| async move {
+                apalis_core::timer::sleep(keep_alive).await;
+                let register_consumer =
+                    redis::Script::new(include_str!("../lua/register_consumer.lua"));
+                let inflight_set = format!("{}:{}", config.inflight_jobs_set(), worker_id);
+                let consumers_set = config.consumers_set();
+
+                let now: i64 = Utc::now().timestamp();
+
+                let res = register_consumer
+                    .key(consumers_set)
+                    .arg(now)
+                    .arg(inflight_set)
+                    .invoke_async::<()>(&mut conn)
+                    .await;
+                Some((res, (keep_alive, worker_id, conn, config)))
             },
         );
         stream.boxed()
@@ -278,7 +297,7 @@ where
             |(worker, config, mut conn, event_listener)| async {
                 let interval = apalis_core::timer::sleep(config.poll_interval).boxed();
                 let pub_sub = event_listener.listen().boxed();
-                select( pub_sub, interval).await; // Pubsub or else interval
+                select(pub_sub, interval).await; // Pubsub or else interval
                 let data = Self::fetch_next(&worker, &config, &mut conn).await;
                 Some((data, (worker, config, conn, event_listener)))
             },
@@ -535,6 +554,8 @@ impl<Conn, Res, Ctx> Acknowledge<Res, Ctx> for RedisAck<Conn> {
     type Error = RedisError;
 
     fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Parts<Ctx>) -> Self::Future {
+
+        println!("Result: {}", std::any::type_name::<Res>());
         // TODO
         async { Ok(()) }.boxed()
     }
@@ -632,7 +653,7 @@ where
             let tasks: Vec<_> = this.pending.drain(..).collect();
             let fut = push_tasks(tasks, this.config.clone(), this.conn.clone());
 
-            this.invoke_future = Some(Box::pin(fut));
+            this.invoke_future = Some(fut.boxed());
         }
 
         // If we have a future in flight, poll it
@@ -826,20 +847,27 @@ impl RedisConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
+    use std::{fmt::Debug, ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
     use futures::{future::ready, SinkExt};
     use redis::{parse_redis_url, Client, ConnectionInfo, IntoConnectionInfo};
 
     use apalis_core::{
-        backend::memory::MemoryStorage,
-        backend::TaskSink,
+        backend::{memory::MemoryStorage, TaskSink},
         request::data::Data,
         service_fn::{self, service_fn, ServiceFn},
-        worker::builder::WorkerBuilder,
-        worker::ext::{
-            ack::AcknowledgementExt, circuit_breaker::CircuitBreaker,
-            event_listener::EventListenerExt, long_running::LongRunningExt,
+        worker::{
+            builder::WorkerBuilder,
+            ext::{
+                ack::AcknowledgementExt, circuit_breaker::CircuitBreaker,
+                event_listener::EventListenerExt, long_running::LongRunningExt,
+            },
+        },
+        workflow::{
+            stepped::{
+                assert_stepped, ExecutionContext, StartStepSinkExt, StepBuilder, StepRequest,
+            },
+            GoTo,
         },
     };
 
@@ -887,7 +915,7 @@ mod tests {
                 RedisConfig::default()
                     .set_namespace("strrrrrr")
                     .set_poll_interval(Duration::from_secs(1))
-                    .set_buffer_size(10),
+                    .set_buffer_size(5),
             )
             .unwrap();
         let int_store = store
@@ -895,15 +923,15 @@ mod tests {
                 RedisConfig::default()
                     .set_namespace("Intttttt")
                     .set_poll_interval(Duration::from_secs(2))
-                    .set_buffer_size(10),
+                    .set_buffer_size(5),
             )
             .unwrap();
         let mut int_sink = int_store.sink();
         let mut string_sink = string_store.sink();
 
         tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
             for i in 0..ITEMS {
-                tokio::time::sleep(Duration::from_secs(1)).await;
                 string_sink.push(format!("ITEM: {i}")).await.unwrap();
                 int_sink.push(i).await.unwrap();
             }
@@ -940,5 +968,62 @@ mod tests {
             })
             .run();
         let _ = futures::future::join(int_worker, string_worker).await;
+    }
+
+    #[tokio::test]
+    async fn stepped_workflow() {
+        async fn task1(job: u32) -> Result<GoTo<()>, BoxDynError> {
+            println!("{job}");
+            Ok(GoTo::Next(()))
+        }
+
+        async fn task2(_: ()) -> Result<GoTo<usize>, BoxDynError> {
+            Ok(GoTo::Next(1))
+        }
+
+        async fn task3(
+            job: usize,
+            wrk: WorkerContext,
+            ctx: Data<ExecutionContext>,
+        ) -> Result<GoTo<()>, io::Error> {
+            wrk.stop().unwrap();
+            println!("{job}");
+            dbg!(&ctx);
+            Ok(GoTo::Done(()))
+        }
+
+        async fn recover<Req: Debug>(req: Req) -> Result<(), BoxDynError> {
+            println!("Recovering request: {req:?}");
+            Err("Unable to recover".into())
+        }
+
+        let steps = StepBuilder::new()
+            .step_fn(task1)
+            .step_fn(task2)
+            .step_fn(task3)
+            .fallback(recover);
+
+        // assert_stepped::<RedisStorage<StepRequest<Vec<u8>>>, _, _, _, _, _, _, _>(&steps);
+
+        let client = Client::open("redis://127.0.0.1/").unwrap();
+        let conn = client.get_connection_manager().await.unwrap();
+        let backend = RedisStorage::new(conn);
+        let mut sink = backend.sink();
+        let _res = sink.push_start(0u32).await.unwrap();
+
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(backend)
+            .on_event(|ctx, ev| {
+                use apalis_core::worker::event::Event;
+                println!("Worker {:?}, On Event = {:?}", ctx.name(), ev);
+                if matches!(ev, Event::Error(_)) {
+                    ctx.stop().unwrap();
+                }
+            })
+            .build(steps);
+        let mut event_stream = worker.stream();
+        while let Some(Ok(ev)) = event_stream.next().await {
+            println!("On Event = {:?}", ev);
+        }
     }
 }

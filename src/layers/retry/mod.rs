@@ -25,6 +25,13 @@ impl<B> BackoffRetryPolicy<B> {
     pub fn new(retries: usize, backoff: B) -> Self {
         Self { retries, backoff }
     }
+
+     pub fn retry_if<F>(self, predicate: F) -> RetryIfPolicy<Self, F>
+    where
+        F: Fn(&Error) -> bool + Send + Sync + 'static,
+    {
+        RetryIfPolicy::new(self, predicate)
+    }
 }
 
 impl<T, Res, Ctx, B> Policy<Req<T, Ctx>, Res, Err> for BackoffRetryPolicy<B>
@@ -101,6 +108,12 @@ impl RetryPolicy {
             retries: self.retries,
             backoff,
         }
+    }
+    pub fn retry_if<F>(self, predicate: F) -> RetryIfPolicy<Self, F>
+    where
+        F: Fn(&Error) -> bool + Send + Sync + 'static,
+    {
+        RetryIfPolicy::new(self, predicate)
     }
 }
 
@@ -191,5 +204,45 @@ impl std::error::Error for RetryPolicyError {
             RetryPolicyError::OutOfRetries { inner, .. } => inner.source(),
             RetryPolicyError::ZeroRetries(inner) => inner.source(),
         }
+    }
+}
+
+pub struct RetryIfPolicy<P, F> {
+    inner: P,
+    predicate: F,
+}
+
+impl<P, F> RetryIfPolicy<P, F> {
+    pub fn new(inner: P, predicate: F) -> Self {
+        Self { inner, predicate }
+    }
+}
+impl<T, Res, Ctx, P, F> Policy<Req<T, Ctx>, Res, Err> for RetryIfPolicy<P, F>
+where
+    T: Clone,
+    Ctx: Clone,
+    P: Policy<Req<T, Ctx>, Res, Err>,
+    F: Fn(&Error) -> bool + Send + Sync + 'static,
+{
+    type Future = P::Future;
+
+    fn retry(
+        &mut self,
+        req: &mut Req<T, Ctx>,
+        result: &mut Result<Res, Err>,
+    ) -> Option<Self::Future> {
+        match result {
+            Ok(_) => None,
+            Err(err) => {
+                if !(self.predicate)(err) {
+                    return None;
+                }
+                self.inner.retry(req, result)
+            }
+        }
+    }
+
+    fn clone_request(&mut self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
+        self.inner.clone_request(req)
     }
 }

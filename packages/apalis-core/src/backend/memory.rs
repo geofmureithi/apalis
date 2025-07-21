@@ -287,7 +287,7 @@ impl<T: 'static + Clone + Send> Backend<T, ()> for MemoryStorage<MemoryWrapper<T
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
     type Sink = MemorySink<T>;
 
-    fn heartbeat(&self) -> Self::Beat {
+    fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
     }
     fn middleware(&self) -> Self::Layer {
@@ -311,7 +311,7 @@ impl<T: 'static + Clone + Send + DeserializeOwned> Backend<T, ()> for MemoryStor
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
     type Sink = JsonMemory<T>;
 
-    fn heartbeat(&self) -> Self::Beat {
+    fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
     }
     fn middleware(&self) -> Self::Layer {
