@@ -122,7 +122,7 @@ type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDyn
 
 type SteppedService<Compact, Ctx> = BoxedService<Request<Compact, Ctx>, GoTo<Compact>>;
 
-type RouteService<Compact, Ctx> = BoxedService<Request<Compact, Ctx>, ()>;
+type RouteService<Compact, Ctx> = BoxedService<Request<StepRequest<Compact>, Ctx>, GoTo<Compact>>;
 
 /// Represents a request for a specific step in a workflow.
 ///
@@ -356,7 +356,7 @@ where
 }
 
 impl<Compact, Ctx, B, M, Input, Current, Cdc>
-    WorkerFactory<StepRequest<Compact>, Ctx, RouteService<StepRequest<Compact>, Ctx>, B, M>
+    WorkerFactory<StepRequest<Compact>, Ctx, RouteService<Compact, Ctx>, B, M>
     for StepBuilder<Input, Current, SteppedService<Compact, Ctx>, Cdc, Compact, Ctx>
 where
     B: Backend<StepRequest<Compact>, Ctx>,
@@ -370,13 +370,13 @@ where
     <Cdc as Encoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
     <Cdc as Decoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
     Ctx: 'static,
-    Compact: 'static + Send,
+    Compact: 'static + Send + Clone,
     B::Sink:
         TaskSink<StepRequest<Compact>, Codec = Cdc, Compact = Compact, Context = Ctx> + 'static,
     <<B as Backend<StepRequest<Compact>, Ctx>>::Sink as TaskSink<StepRequest<Compact>>>::Error:
         std::error::Error + Send + Sync,
 {
-    fn service(self, backend: &B) -> RouteService<StepRequest<Compact>, Ctx> {
+    fn service(self, backend: &B) -> RouteService<Compact, Ctx> {
         let sink = backend.sink();
         BoxedService::new(RoutedStepService {
             inner: self,
@@ -408,7 +408,7 @@ impl<Compact, Ctx, Input, Current, Cdc, SinkT> Service<Request<StepRequest<Compa
         SinkT,
     >
 where
-    Compact: Send + 'static,
+    Compact: Send + 'static + Clone,
     Cdc: Decoder<StepRequest<Compact>, Compact = Compact>
         + Encoder<StepRequest<Compact>, Compact = Compact>,
     <Cdc as Encoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
@@ -416,9 +416,9 @@ where
     SinkT: TaskSink<StepRequest<Compact>, Compact = Compact, Codec = Cdc> + 'static,
     SinkT::Error: std::error::Error + Send + Sync + 'static,
 {
-    type Response = ();
+    type Response = GoTo<Compact>;
     type Error = BoxDynError;
-    type Future = BoxFuture<'static, Result<(), BoxDynError>>;
+    type Future = BoxFuture<'static, Result<GoTo<Compact>, BoxDynError>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -438,27 +438,24 @@ where
                     let mut sink = sink.lock().await;
                     let mut ctx = ctx.clone();
                     ctx.previous_nodes.insert(index, task_id);
-                    match res {
+                    match &res {
                         GoTo::Next(next) => {
-                            let req = Request::new(StepRequest::new(index + 1, next, ctx));
+                            let req = Request::new(StepRequest::new(index + 1, next.clone(), ctx));
                             let _res = sink.push_request(req).await?;
-                            Ok(())
                         }
                         GoTo::Delay { next, delay } => {
-                            let req = Request::new(StepRequest::new(index + 1, next, ctx));
-                            let _res = sink.schedule_request(req, delay).await?;
-                            Ok(())
+                            let req = Request::new(StepRequest::new(index + 1, next.clone(), ctx));
+                            let _res = sink.schedule_request(req, *delay).await?;
+                            
                         }
-                        GoTo::Done(_) => Ok(()),
+                        GoTo::Done(_) => {},
                     }
+                    Ok(res)
                 });
 
                 fut.boxed()
             }
-            None => match &mut self.inner.fallback {
-                Some(fb) => fb(req).boxed(),
-                None => ready(Err(BoxDynError::from(StepError::OutOfBound(index)))).boxed(),
-            },
+            None => ready(Err(BoxDynError::from(StepError::OutOfBound(index)))).boxed(),
         }
     }
 }

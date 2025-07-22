@@ -62,7 +62,7 @@ use crate::monitor::shutdown::Shutdown;
 use crate::request::attempt::Attempt;
 use crate::request::data::Data;
 use crate::request::Request;
-use crate::worker::call_all::CallAllUnordered;
+use crate::worker::call_all::{CallAllError, CallAllUnordered};
 use crate::worker::context::{Tracked, WorkerContext};
 use crate::worker::event::Event;
 use futures::channel::mpsc::{self, channel, unbounded};
@@ -150,72 +150,21 @@ where
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Error: Into<BoxDynError> + Send + Sync +'static
 {
-    pub fn run(self) -> BoxFuture<'static, Result<(), WorkerError>> {
+    pub async fn run(self) -> Result<(), WorkerError> {
         let mut ctx = WorkerContext::new::<M::Service>(&self.name);
-        self.run_with_ctx(&mut ctx)
+        self.run_with_ctx(&mut ctx).await
     }
 
-    pub fn run_with_ctx(self, ctx: &mut WorkerContext) -> BoxFuture<'static, Result<(), WorkerError>> {
-        let backend = self.backend;
-        let event_handler = self.event_handler;
-        let inner_layers = backend.middleware();
-        ctx.wrap_listener(event_handler);
-        let mut worker = ctx.clone();
-        let service = ServiceBuilder::new()
-            .layer(Data::new(worker.clone()))
-            .layer(inner_layers)
-            .layer(self.middleware.into_inner())
-            .layer(ReadinessLayer::new(worker.clone()))
-            .layer(TrackerLayer::new(worker.clone()))
-            .service(self.service);
-        let mut heartbeat = backend.heartbeat(&worker);
-        let heartbeat = async move {
-            while let Some(res) = heartbeat.next().await {
-                match res {
-                    Ok(_) => continue,
-                    Err(e) => return Err(WorkerError::HeartbeatError(e.into())),
-                }
-            }
-            Ok(())
-        }
-        .boxed();
-
-        let stream = backend.poll(&worker);
-
-        let mut tasks = poll_tasks(service, stream);
-        let mut w = worker.clone();
-        let poller_future = async move {
-            loop {
-                match tasks.next().await {
-                    Some(Ok(event)) => {
-                        w.emit(&event);
-                    }
-                    Some(Err(e)) => match e {
-                        WorkerError::GracefulExit => return Ok(()), // Worker exit will have a success code
-                        _ => return Err(e)
-                    },
-                    _ => continue,
-                }
-            }
-        };
-        let combined = Box::pin(join(poller_future, heartbeat));
-        let combined =
-            select(combined, worker.clone()).boxed();
-
-        let fut = async move {
-            worker.start()?;
-            let res = combined.await;
+    pub async fn run_with_ctx(self, ctx: &mut WorkerContext) -> Result<(), WorkerError>{
+        let mut stream = self.stream_with_ctx(ctx);
+        while let Some(res) = stream.next().await  {
             match res {
-                Either::Left(((res1, res2), _)) => {
-                    res1.and(res2) // if res1 is Ok, returns res2
-                }
-                Either::Right((ctx_res, _)) => {
-                    ctx_res
+                Ok(_) => continue,
+                Err(WorkerError::GracefulExit) => return Ok(()),
+                Err(e) => return Err(e),
             }
-    }
-        };
-
-        fut.boxed()
+        }
+        Ok(())
     }
 
     pub fn stream(self) -> impl Stream<Item = Result<Event, WorkerError>>{
@@ -283,37 +232,12 @@ where
     Ctx: Send + 'static,
     Svc::Error: Into<BoxDynError> + Sync + Send,
 {
-    let (tx, rx) = mpsc::unbounded();
-    let txx = tx.clone();
-    let stream = stream.filter_map(move |result| {
-        let mut txx = txx.clone();
-
-        async move {
-            match result {
-                Ok(Some(request)) => {
-                    txx.send(Ok(Event::Engage(request.parts.task_id.clone())))
-                        .await
-                        .unwrap();
-                    Some(request)
-                }
-                Ok(None) => {
-                    txx.send(Ok(Event::Idle)).await.unwrap();
-                    None
-                }
-                Err(err) => {
-                    txx.send(Err(WorkerError::ProcessingError(err.into())))
-                        .await
-                        .unwrap();
-                    None
-                }
-            }
-        }
-    });
     let stream = CallAllUnordered::new(service, stream).map(|r| match r {
-        Ok(_) => Ok(Event::Success),
-        Err(err) => Ok(Event::Error(err.into().into())),
+        Ok(Some(_)) => Ok(Event::Success),
+        Ok(None) => Ok(Event::Idle),
+        Err(CallAllError::ServiceError(err)) => Ok(Event::Error(err.into().into())),
+        Err(CallAllError::StreamError(err)) => Err(WorkerError::StreamError(err)),
     });
-    let stream = futures::stream::select(stream, rx);
     stream.boxed()
 }
 

@@ -3,7 +3,7 @@ use std::{
     convert::Infallible,
     fmt::{Debug, Display},
     hash::Hash,
-    str::FromStr,
+    str::FromStr, time::SystemTime,
 };
 
 use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
@@ -23,6 +23,10 @@ impl TaskId {
     /// Get the inner [`Ulid`]
     pub fn inner(&self) -> Ulid {
         self.0
+    }
+
+    pub fn from_system_time(datetime: SystemTime) -> Self {
+        TaskId(Ulid::from_datetime(datetime))
     }
 }
 

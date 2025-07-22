@@ -12,11 +12,8 @@ pub type CtxEventHandler = Arc<Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>
 pub enum Event {
     /// Worker started
     Start,
-    /// Worker got a job
-    Engage(TaskId),
     /// Worker is idle, stream has no new request for now
     Idle,
-
     /// Worker did a heartbeat
     HeartBeat,
     /// A custom event
@@ -33,7 +30,6 @@ impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let event_description = match &self {
             Event::Start => "Worker started".to_string(),
-            Event::Engage(task_id) => format!("Worker engaged with Task ID: {}", task_id),
             Event::Idle => "Worker is idle".to_string(),
             Event::Custom(msg) => format!("Custom event: {}", msg),
             Event::Error(err) => format!("Worker encountered an error: {}", err),

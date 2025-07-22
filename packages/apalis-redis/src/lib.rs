@@ -55,7 +55,7 @@ use apalis_core::{
         Backend, RequestStream, TaskSink,
     },
     error::BoxDynError,
-    request::{attempt::Attempt, state::State, Parts, Request},
+    request::{attempt::Attempt, state::State, task_id::TaskId, Parts, Request},
     service_fn::from_request::FromRequest,
     worker::{
         context::WorkerContext,
@@ -244,6 +244,7 @@ where
     fn middleware(&self) -> Self::Layer {
         AcknowledgeLayer::new(RedisAck {
             conn: self.conn.clone(),
+            config: self.config.clone(),
         })
     }
 
@@ -363,6 +364,10 @@ where
                     parts.context = context;
                     parts.state =
                         State::from_str(task.status).map_err(|e| build_error(&e.to_string()))?;
+                    let task_id =
+                        TaskId::from_str(task.task_id).map_err(|e| build_error(&e.to_string()))?;
+
+                    parts.task_id = task_id;
                     let mut request: Request<T, RedisContext> =
                         Request::new_with_parts(args, parts);
                     request.parts.context.lock_by = Some(worker.name().clone());
@@ -439,7 +444,7 @@ fn deserialize_with_meta<'a>(
             }
         }
 
-        let task_id = str_from_val(&meta_fields[0], "job_id")?;
+        let task_id = str_from_val(&meta_fields[0], "task_id")?;
         let attempts = parse_u32(&meta_fields[1], "attempts")?;
         let max_attempts = parse_u32(&meta_fields[2], "max_attempts")?;
         let status = str_from_val(&meta_fields[3], "status")?;
@@ -546,18 +551,51 @@ pub struct RedisSink<Args, Codec, Conn = ConnectionManager> {
 #[derive(Clone)]
 pub struct RedisAck<Conn = ConnectionManager> {
     conn: Conn,
+    config: RedisConfig,
 }
 
-impl<Conn, Res, Ctx> Acknowledge<Res, Ctx> for RedisAck<Conn> {
+impl<Conn: ConnectionLike + Send + Clone + 'static, Res: Serialize> Acknowledge<Res, RedisContext>
+    for RedisAck<Conn>
+{
     type Future = BoxFuture<'static, Result<(), Self::Error>>;
 
     type Error = RedisError;
 
-    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Parts<Ctx>) -> Self::Future {
+    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Parts<RedisContext>) -> Self::Future {
+        dbg!(&parts);
+        let task_id = parts.task_id.to_string();
+        let attempt = parts.attempt.current();
+        let worker_id = &parts.context.lock_by.as_ref().unwrap();
+        let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
+        let done_jobs_set = self.config.done_jobs_set();
+        let dead_jobs_set = self.config.dead_jobs_set();
+        let job_meta_hash = self.config.job_meta_hash();
+        let status = if res.is_ok() { "ok" } else { "err" };
+        let res = res.as_ref().map_err(|e| e.to_string());
+        let result_data = JsonCodec::<Vec<u8>>::encode(&res)
+            .map_err(|e| build_error("could not encode result"))
+            .unwrap();
+        let timestamp = Utc::now().timestamp();
+        let script = Script::new(include_str!("../lua/ack_job.lua"));
+        let mut conn = self.conn.clone();
 
-        println!("Result: {}", std::any::type_name::<Res>());
-        // TODO
-        async { Ok(()) }.boxed()
+        async move {
+            let mut script = script.key(inflight_set);
+            let _ = script
+                .key(done_jobs_set)
+                .key(dead_jobs_set)
+                .key(job_meta_hash)
+                .arg(task_id)
+                .arg(timestamp)
+                .arg(result_data)
+                .arg(status)
+                .arg(attempt)
+                .invoke_async::<u32>(&mut conn)
+                .boxed()
+                .await?;
+            Ok(())
+        }
+        .boxed()
     }
 }
 
@@ -879,7 +917,10 @@ mod tests {
     async fn basic_worker() {
         let client = Client::open("redis://127.0.0.1/").unwrap();
         let conn = client.get_connection_manager().await.unwrap();
-        let backend = RedisStorage::new(conn);
+        let backend = RedisStorage::new_with_config(
+            conn,
+            RedisConfig::default().set_namespace("redis_basic_worker"),
+        );
         let mut sink = backend.sink();
         for i in 0..ITEMS {
             let mut req: Request<u32, RedisContext> = Request::new(i);
@@ -937,13 +978,13 @@ mod tests {
             }
         });
 
-        async fn task(job: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
+        async fn task(job: u32, ctx: WorkerContext) -> Result<usize, BoxDynError> {
             tokio::time::sleep(Duration::from_millis(2)).await;
             if job == ITEMS - 1 {
                 ctx.stop().unwrap();
                 return Err("Worker stopped!")?;
             }
-            Ok(())
+            Ok(job as usize)
         }
 
         let int_worker = WorkerBuilder::new("rango-tango-int")
@@ -1007,7 +1048,10 @@ mod tests {
 
         let client = Client::open("redis://127.0.0.1/").unwrap();
         let conn = client.get_connection_manager().await.unwrap();
-        let backend = RedisStorage::new(conn);
+        let backend = RedisStorage::new_with_config(
+            conn,
+            RedisConfig::default().set_namespace("redis_workflow"),
+        );
         let mut sink = backend.sink();
         let _res = sink.push_start(0u32).await.unwrap();
 

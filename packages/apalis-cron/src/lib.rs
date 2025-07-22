@@ -150,8 +150,12 @@
 use apalis_core::backend::pipe::{Pipe, PipeExt};
 use apalis_core::backend::{Backend, RequestStream};
 use apalis_core::error::BoxDynError;
+use apalis_core::request::attempt::Attempt;
 use apalis_core::request::data::MissingDataError;
-use apalis_core::request::Request;
+use apalis_core::request::extensions::Extensions;
+use apalis_core::request::state::State;
+use apalis_core::request::task_id::TaskId;
+use apalis_core::request::{Parts, Request};
 use apalis_core::service_fn::from_request::FromRequest;
 use apalis_core::timer::Delay;
 use apalis_core::worker::context::WorkerContext;
@@ -167,7 +171,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tower::layer::util::Identity;
 
 /// Represents a stream from a cron schedule with a timezone
@@ -332,7 +336,17 @@ where
 
     fn poll(self, _: &WorkerContext) -> Self::Stream {
         let stream = self.and_then(|s| async {
-            Ok(Some(Request::new_with_ctx(Default::default(), s)))
+            let timestamp: SystemTime = s.get_timestamp().clone().into();
+            let task_id = TaskId::from_system_time(timestamp);
+            let parts = Parts {
+                task_id,
+                context: s,
+                attempt: Attempt::new(),
+                data: Extensions::new(),
+                state: State::Pending,
+            };
+
+            Ok(Some(Request::new_with_parts(Default::default(), parts)))
         });
         stream.boxed()
     }
@@ -467,6 +481,7 @@ mod tests {
         let stream = CronStream::new_with_timezone(schedule, Utc);
 
         async fn send_reminder(_: (), ctx: CronContext<Utc>) -> Result<(), BoxDynError> {
+            tokio::time::sleep(Duration::from_secs(1)).await;
             println!("Running cronjob for timestamp: {}", ctx.get_timestamp());
             Err("Failed".into())
         }
@@ -476,10 +491,13 @@ mod tests {
             .on_event(move |ctx, ev| {
                 println!("{:?}", ev);
                 let ctx = ctx.clone();
+                dbg!(&ev, &ctx);
                 if matches!(ev, Event::Start) {
                     tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        ctx.stop().unwrap();
+                        if ctx.is_running() {
+                            tokio::time::sleep(Duration::from_millis(900)).await;
+                            ctx.stop().unwrap();
+                        }
                     });
                 }
             })
@@ -493,10 +511,12 @@ mod tests {
         let stream = CronStream::new(schedule);
         let in_memory = MemoryStorage::new_with_json();
 
-        let backend = stream.pipe_to(in_memory.clone());
+        let backend = stream.pipe_to(in_memory);
 
-        async fn send_reminder(job: CronContext) {
-            println!("Running cronjob for timestamp: {:?}", job)
+        async fn send_reminder(job: CronContext, id: TaskId) -> Result<(), BoxDynError> {
+            println!("Running cronjob for timestamp: {:?} with id {}", job, id);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            Err("All failing".into())
         }
 
         let worker = WorkerBuilder::new("rango-tango")
@@ -504,9 +524,9 @@ mod tests {
             .on_event(move |ctx, ev| {
                 println!("{:?}", ev);
                 let ctx = ctx.clone();
-                if matches!(ev, Event::Start) {
+                if matches!(ev, Event::Error(_)) {
                     tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        tokio::time::sleep(Duration::from_secs(3)).await;
                         ctx.stop().unwrap();
                     });
                 }

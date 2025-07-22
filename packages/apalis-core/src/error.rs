@@ -35,7 +35,7 @@ pub struct DeferredError {
 pub enum WorkerError {
     /// An error occurred while consuming the task stream.
     #[error("Failed to consume task stream: {0}")]
-    ProcessingError(BoxDynError),
+    StreamError(BoxDynError),
     /// An error occurred in the worker's heartbeat.
     #[error("Heartbeat error: {0}")]
     HeartbeatError(BoxDynError),

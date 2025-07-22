@@ -1,7 +1,7 @@
-
 use futures::{ready, stream::FuturesUnordered, Stream};
 use pin_project_lite::pin_project;
 use std::{
+    error::Error,
     fmt,
     future::Future,
     pin::Pin,
@@ -9,43 +9,69 @@ use std::{
 };
 use tower::Service;
 
+use crate::error::BoxDynError;
+
 pin_project! {
     /// A stream of responses received from the inner service in received order.
     #[derive(Debug)]
-    pub(super) struct CallAllUnordered<Svc, S>
+    pub(super) struct CallAllUnordered<Svc, S, T, E>
     where
-        Svc: Service<S::Item>,
-        S: Stream,
+        Svc: Service<T>,
+        S: Stream<Item = Result<Option<T>, E>>,
     {
         #[pin]
-        inner: CallAll<Svc, S, FuturesUnordered<Svc::Future>>,
+        inner: CallAll<Svc, S, T, FuturesUnordered<Svc::Future>, E>,
     }
 }
 
-impl<Svc, S> CallAllUnordered<Svc, S>
+impl<Svc, S, T, E> CallAllUnordered<Svc, S, T, E>
 where
-    Svc: Service<S::Item>,
-    S: Stream,
+    Svc: Service<T>,
+    S: Stream<Item = Result<Option<T>, E>>,
 {
     /// Create new [`CallAllUnordered`] combinator.
-    ///
-    /// [`Stream`]: https://docs.rs/futures/latest/futures/stream/trait.Stream.html
-    pub(super) fn new(service: Svc, stream: S) -> CallAllUnordered<Svc, S> {
+    pub(super) fn new(service: Svc, stream: S) -> CallAllUnordered<Svc, S, T, E> {
         CallAllUnordered {
             inner: CallAll::new(service, stream, FuturesUnordered::new()),
         }
     }
 }
 
-impl<Svc, S> Stream for CallAllUnordered<Svc, S>
+impl<Svc, S, T, E> Stream for CallAllUnordered<Svc, S, T, E>
 where
-    Svc: Service<S::Item>,
-    S: Stream,
+    Svc: Service<T>,
+    S: Stream<Item = Result<Option<T>, E>>,
+    E: Into<BoxDynError>
 {
-    type Item = Result<Svc::Response, Svc::Error>;
+    type Item = Result<Option<Svc::Response>, CallAllError<Svc::Error>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.project().inner.poll_next(cx)
+    }
+}
+
+// Error type that combines stream errors and service errors
+#[derive(Debug)]
+pub enum CallAllError<ServiceError> {
+    StreamError(BoxDynError),
+    ServiceError(ServiceError),
+}
+
+impl<SE: fmt::Display> fmt::Display for CallAllError<SE> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CallAllError::StreamError(e) => write!(f, "Stream error: {}", e),
+            CallAllError::ServiceError(e) => write!(f, "Service error: {}", e),
+        }
+    }
+}
+
+impl<SE: Error + 'static> Error for CallAllError<SE> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            CallAllError::StreamError(e) => Some(e.as_ref()),
+            CallAllError::ServiceError(e) => Some(e),
+        }
     }
 }
 
@@ -65,23 +91,23 @@ impl<F: Future> Drive<F> for FuturesUnordered<F> {
 
 pin_project! {
     /// The [`Future`] returned by the [`ServiceExt::call_all`] combinator.
-    pub(crate) struct CallAll<Svc, S, Q>
+    pub(crate) struct CallAll<Svc, S, T, Q, E>
     where
-        S: Stream,
+        S: Stream<Item = Result<Option<T>, E>>,
     {
         service: Option<Svc>,
         #[pin]
         stream: S,
         queue: Q,
         eof: bool,
-        curr_req: Option<S::Item>
+        curr_req: Option<T>
     }
 }
 
-impl<Svc, S, Q> fmt::Debug for CallAll<Svc, S, Q>
+impl<Svc, S, T, Q, E> fmt::Debug for CallAll<Svc, S, T, Q, E>
 where
     Svc: fmt::Debug,
-    S: Stream + fmt::Debug,
+    S: Stream<Item = Result<Option<T>, E>> + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CallAll")
@@ -100,13 +126,13 @@ pub(crate) trait Drive<F: Future> {
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Option<F::Output>>;
 }
 
-impl<Svc, S, Q> CallAll<Svc, S, Q>
+impl<Svc, S, T, Q, E> CallAll<Svc, S, T, Q, E>
 where
-    Svc: Service<S::Item>,
-    S: Stream,
+    Svc: Service<T>,
+    S: Stream<Item = Result<Option<T>, E>>,
     Q: Drive<Svc::Future>,
 {
-    pub(crate) const fn new(service: Svc, stream: S, queue: Q) -> CallAll<Svc, S, Q> {
+    pub(crate) const fn new(service: Svc, stream: S, queue: Q) -> CallAll<Svc, S, T, Q, E> {
         CallAll {
             service: Some(service),
             stream,
@@ -117,13 +143,14 @@ where
     }
 }
 
-impl<Svc, S, Q> Stream for CallAll<Svc, S, Q>
+impl<Svc, S, T, Q, E> Stream for CallAll<Svc, S, T, Q, E>
 where
-    Svc: Service<S::Item>,
-    S: Stream,
+    Svc: Service<T>,
+    S: Stream<Item = Result<Option<T>, E>>,
     Q: Drive<Svc::Future>,
+    E: Into<BoxDynError>
 {
-    type Item = Result<Svc::Response, Svc::Error>;
+    type Item = Result<Option<Svc::Response>, CallAllError<Svc::Error>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -131,8 +158,8 @@ where
         loop {
             // First, see if we have any responses to yield
             if let Poll::Ready(r) = this.queue.poll(cx) {
-                if let Some(rsp) = r.transpose()? {
-                    return Poll::Ready(Some(Ok(rsp)));
+                if let Some(result) = r {
+                    return Poll::Ready(Some(result.map_err(CallAllError::ServiceError).map(Some)));
                 }
             }
 
@@ -154,22 +181,32 @@ where
             if let Err(e) = ready!(svc.poll_ready(cx)) {
                 // Set eof to prevent the service from being called again after a `poll_ready` error
                 *this.eof = true;
-                return Poll::Ready(Some(Err(e)));
+                return Poll::Ready(Some(Err(CallAllError::ServiceError(e))));
             }
 
             // If not done, and we don't have a stored request, gather the next request from the
             // stream (if there is one), or return `Pending` if the stream is not ready.
             if this.curr_req.is_none() {
-                *this.curr_req = match ready!(this.stream.as_mut().poll_next(cx)) {
-                    Some(next_req) => Some(next_req),
+                match ready!(this.stream.as_mut().poll_next(cx)) {
+                    Some(Ok(Some(next_req))) => {
+                        *this.curr_req = Some(next_req);
+                    }
+                    Some(Ok(None)) => {
+                        return Poll::Ready(Some(Ok(None)));
+                    }
+                    Some(Err(e)) => {
+                        // Stream error, propagate it
+                        return Poll::Ready(Some(Err(CallAllError::StreamError(e.into()))));
+                    }
                     None => {
-                        // Mark that there will be no more requests.
+                        // Stream is exhausted, mark EOF
                         *this.eof = true;
                         continue;
                     }
-                };
+                }
             }
-            // Unwrap: The check above always sets `this.curr_req` if none.
+
+            // Unwrap: The check above always sets `this.curr_req` if none and continues if no request.
             this.queue.push(svc.call(this.curr_req.take().unwrap()));
         }
     }

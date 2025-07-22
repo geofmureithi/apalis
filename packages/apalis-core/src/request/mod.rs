@@ -44,7 +44,7 @@ pub struct Request<Args, Ctx> {
 }
 
 /// Component parts of a `Request`
-#[non_exhaustive]
+// #[non_exhaustive]
 #[derive(Serialize, Debug, Deserialize, Clone, Default)]
 pub struct Parts<Ctx> {
     /// The request's id
@@ -60,6 +60,7 @@ pub struct Parts<Ctx> {
     /// The Context stored by the storage
     pub context: Ctx,
 
+    /// The task status
     pub state: State,
 }
 
