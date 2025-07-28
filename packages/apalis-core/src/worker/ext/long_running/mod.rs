@@ -177,26 +177,24 @@ mod tests {
             task: u32,
             runner: LongRunner<()>,
             worker: WorkerContext,
-        ) -> Result<&'static str, BoxDynError> {
-            let (tx, rx) = channel();
+        ) -> Result<(), BoxDynError> {
             tokio::spawn(runner.track(async move {
-                tokio::time::sleep(Duration::from_secs(task as _)).await;
-                tx.send("Completed").unwrap();
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }));
             if task == ITEMS - 1 {
-                tokio::spawn(runner.track(async move {
-                    tokio::time::sleep(Duration::from_secs(3)).await;
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
                     worker.stop().unwrap();
-                }));
+                });
             }
-            Ok(rx.await?)
+            Ok(())
         }
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)
             .long_running()
-            .on_event(|_ctx, ev| {
-                println!("On Event = {:?}", ev);
+            .on_event(|ctx, ev| {
+                println!("On Event = {:?}, {:?}", ev, ctx);
             })
             .build(task);
         worker.run().await.unwrap();

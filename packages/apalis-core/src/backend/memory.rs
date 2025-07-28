@@ -1,7 +1,7 @@
 use crate::{
     backend::{
         codec::{json::JsonCodec, CloneOpCodec, Encoder},
-        shared::{MakeShared, Shared},
+        shared::{MakeShared},
         Backend, RequestStream, TaskSink,
     },
     error::BoxDynError,

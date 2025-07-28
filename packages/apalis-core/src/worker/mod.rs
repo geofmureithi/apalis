@@ -151,7 +151,7 @@ where
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Error: Into<BoxDynError> + Send + Sync +'static
 {
     pub async fn run(self) -> Result<(), WorkerError> {
-        let mut ctx = WorkerContext::new::<M::Service>(&self.name);
+        let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
         self.run_with_ctx(&mut ctx).await
     }
 

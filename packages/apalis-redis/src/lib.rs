@@ -51,7 +51,7 @@ use std::{
 use apalis_core::{
     backend::{
         codec::{json::JsonCodec, Codec, Decoder, Encoder},
-        shared::{MakeShared, Shared},
+        shared::MakeShared,
         Backend, RequestStream, TaskSink,
     },
     error::BoxDynError,
@@ -510,7 +510,7 @@ impl<Args> MakeShared<Args> for SharedRedisStorage {
 
     type Config = RedisConfig;
 
-    type MakeError = String;
+    type MakeError = RedisError;
 
     fn make_shared(&mut self) -> Result<Self::Backend, Self::MakeError>
     where
@@ -562,7 +562,6 @@ impl<Conn: ConnectionLike + Send + Clone + 'static, Res: Serialize> Acknowledge<
     type Error = RedisError;
 
     fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Parts<RedisContext>) -> Self::Future {
-        dbg!(&parts);
         let task_id = parts.task_id.to_string();
         let attempt = parts.attempt.current();
         let worker_id = &parts.context.lock_by.as_ref().unwrap();
@@ -887,7 +886,7 @@ impl RedisConfig {
 mod tests {
     use std::{fmt::Debug, ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
-    use futures::{future::ready, SinkExt};
+    use futures::{future::ready, SinkExt, TryFutureExt};
     use redis::{parse_redis_url, Client, ConnectionInfo, IntoConnectionInfo};
 
     use apalis_core::{
@@ -908,18 +907,19 @@ mod tests {
             GoTo,
         },
     };
+    use tokio::task::JoinError;
 
     use super::*;
 
-    const ITEMS: u32 = 10;
+    const ITEMS: u32 = 10000;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn basic_worker() {
-        let client = Client::open("redis://127.0.0.1/").unwrap();
+        let client = Client::open("redis://127.0.0.1:6666/").unwrap();
         let conn = client.get_connection_manager().await.unwrap();
         let backend = RedisStorage::new_with_config(
             conn,
-            RedisConfig::default().set_namespace("redis_basic_worker"),
+            RedisConfig::default().set_namespace("redis_basic_worker").set_buffer_size(100),
         );
         let mut sink = backend.sink();
         for i in 0..ITEMS {
@@ -929,7 +929,8 @@ mod tests {
         }
 
         async fn task(task: u32, ctx: RedisContext, wrk: WorkerContext) -> Result<(), BoxDynError> {
-            println!("{task:?}, {ctx:?}");
+            let handle = std::thread::current();
+            // println!("{task:?}, {ctx:?}, Thread: {:?}", handle.id());
             if task == ITEMS - 1 {
                 wrk.stop().unwrap();
                 return Err("Worker stopped!")?;
@@ -940,7 +941,14 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(backend)
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                // println!("CTX {:?}, On Event = {:?}", ctx.get_service(), ev);
+            })
+            .chain(|s| {
+                s.map_future(|f| async {
+                    let fut = tokio::spawn(f);
+                    let fut = fut.await?;
+                    fut
+                })
             })
             .build(task);
         worker.run().await.unwrap();

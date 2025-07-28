@@ -40,7 +40,7 @@ futures-lite = "2.3.0"
 async-std = { version = "1.13.0", optional = true }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2.0.0"
-
+pin-project-lite = "0.2.14"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

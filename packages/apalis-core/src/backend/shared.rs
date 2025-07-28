@@ -19,16 +19,3 @@ pub trait MakeShared<Req> {
         config: Self::Config,
     ) -> Result<Self::Backend, Self::MakeError>;
 }
-
-#[derive(Debug, Default)]
-pub struct Shared<S> {
-    inner: S,
-}
-impl<S> Shared<S> {
-    pub fn new(inner: S) -> Self {
-        Self { inner }
-    }
-    pub fn inner(&self) -> &S {
-        &self.inner
-    }
-}
