@@ -113,7 +113,9 @@ pub struct WorkerBuilder<Args, Ctx, Source, Middleware> {
     pub(crate) shutdown: Option<Shutdown>,
 }
 
-impl<Args, Ctx, Source, Middleware> std::fmt::Debug for WorkerBuilder<Args, Ctx, Source, Middleware> {
+impl<Args, Ctx, Source, Middleware> std::fmt::Debug
+    for WorkerBuilder<Args, Ctx, Source, Middleware>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WorkerBuilder")
             .field("id", &self.name)
@@ -234,20 +236,30 @@ impl<Args, Ctx, B, M> WorkerBuilder<Args, Ctx, B, M> {
     }
 }
 
-pub trait ServiceFactory<Resource, Svc> {
-    fn service(self: Box<Self>, backend: &Resource) -> Svc;
+pub trait ServiceFactory<Resource, Svc, Args, Ctx>: Sized {
+    fn service(self, resource: Resource) -> Svc;
 }
 
-pub type BoxServiceFactory<Resource, Req, Res> =
-    Box<dyn ServiceFactory<Resource, BoxService<Req, Res, BoxDynError>>>;
+// pub type BoxServiceFactory<Resource, Req, Res> =
+//     Box<dyn ServiceFactory<Resource, BoxService<Req, Res, BoxDynError>>>;
 
 pub trait WorkerFactory<Args, Ctx, Svc, Backend, M>: Sized {
-    fn service(self, backend: &Backend) -> Svc;
     fn factory(
         self,
         builder: WorkerBuilder<Args, Ctx, Backend, M>,
-    ) -> Worker<Args, Ctx, Backend, Svc, M> {
-        let svc = self.service(&builder.source);
+    ) -> Worker<Args, Ctx, Backend, Svc, M>;
+}
+
+impl<T, Args, Ctx, Svc, B, M> WorkerFactory<Args, Ctx, Svc, B, M> for T
+where
+    T: ServiceFactory<B::Sink, Svc, Args, Ctx>,
+    B: Backend<Args, Ctx>
+{
+    fn factory(
+        self,
+        builder: WorkerBuilder<Args, Ctx, B, M>,
+    ) -> Worker<Args, Ctx, B, Svc, M> {
+        let svc = self.service(builder.source.sink());
         let mut worker = Worker::new(builder.name, builder.source, svc, builder.layer);
         worker.event_handler = builder
             .event_handler

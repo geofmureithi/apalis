@@ -3,6 +3,8 @@ use std::time::Duration;
 // use futures::{channel::mpsc::Receiver, stream::BoxStream, StreamExt};
 use serde::{Deserialize, Serialize};
 
+use crate::workflow::stepped::StepRequest;
+
 // use crate::{backend::Backend, error::BoxDynError, request::Request, worker::context::WorkerContext};
 
 pub mod dag;
@@ -25,4 +27,8 @@ pub enum GoTo<N> {
     },
     /// Complete execution
     Done(N),
+}
+
+pub enum ComplexRequest<Compact> {
+    Step(StepRequest<Compact>)
 }

@@ -57,7 +57,7 @@ pub struct Parts<Ctx> {
     /// The request's attempts
     pub attempt: Attempt,
 
-    /// The Context stored by the backend
+    /// The request specific data stored by the backend
     pub context: Ctx,
 
     /// The task status

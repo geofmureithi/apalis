@@ -112,7 +112,7 @@ use crate::{
     request::{data::MissingDataError, task_id::TaskId, Parts, Request},
     service_fn::{from_request::FromRequest, service_fn, ServiceFn},
     worker::{
-        builder::{WorkerBuilder, WorkerFactory},
+        builder::{ServiceFactory, WorkerBuilder, WorkerFactory},
         Worker,
     },
     workflow::GoTo,
@@ -355,12 +355,10 @@ where
     }
 }
 
-impl<Compact, Ctx, B, M, Input, Current, Cdc>
-    WorkerFactory<StepRequest<Compact>, Ctx, RouteService<Compact, Ctx>, B, M>
+impl<Compact, Ctx, Sink, Input, Current, Cdc>
+    ServiceFactory<Sink, RouteService<Compact, Ctx>, StepRequest<Compact>, Ctx>
     for StepBuilder<Input, Current, SteppedService<Compact, Ctx>, Cdc, Compact, Ctx>
 where
-    B: Backend<StepRequest<Compact>, Ctx>,
-    M: Layer<RouteService<Compact, Ctx>>,
     Input: Send + 'static,
     Current: Send + 'static,
     Cdc: Send
@@ -371,13 +369,10 @@ where
     <Cdc as Decoder<StepRequest<Compact>>>::Error: std::error::Error + Send + Sync + 'static,
     Ctx: 'static,
     Compact: 'static + Send + Clone,
-    B::Sink:
-        TaskSink<StepRequest<Compact>, Codec = Cdc, Compact = Compact, Context = Ctx> + 'static,
-    <<B as Backend<StepRequest<Compact>, Ctx>>::Sink as TaskSink<StepRequest<Compact>>>::Error:
-        std::error::Error + Send + Sync,
+    Sink: TaskSink<StepRequest<Compact>, Codec = Cdc, Compact = Compact, Context = Ctx> + 'static,
+    Sink::Error: std::error::Error + Send + Sync,
 {
-    fn service(self, backend: &B) -> RouteService<Compact, Ctx> {
-        let sink = backend.sink();
+    fn service(self, sink: Sink) -> RouteService<Compact, Ctx> {
         BoxedService::new(RoutedStepService {
             inner: self,
             sink: Arc::new(Mutex::new(sink)),
@@ -446,9 +441,8 @@ where
                         GoTo::Delay { next, delay } => {
                             let req = Request::new(StepRequest::new(index + 1, next.clone(), ctx));
                             let _res = sink.schedule_request(req, *delay).await?;
-                            
                         }
-                        GoTo::Done(_) => {},
+                        GoTo::Done(_) => {}
                     }
                     Ok(res)
                 });

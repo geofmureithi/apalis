@@ -46,7 +46,7 @@
 use crate::error::BoxDynError;
 use crate::request::Request;
 use crate::service_fn::from_request::FromRequest;
-use crate::worker::builder::WorkerFactory;
+use crate::worker::builder::{ServiceFactory, WorkerFactory};
 use futures::future::Map;
 use futures::FutureExt;
 use std::fmt;
@@ -150,8 +150,8 @@ macro_rules! impl_service_fn {
         }
 
         #[allow(unused_parens)]
-        impl<T, Args, Ctx, F, R, Backend, M, $($K),+>
-            WorkerFactory<Args, Ctx, ServiceFn<T, Args, Ctx, ($($K),+)>, Backend, M> for T
+        impl<T, Args, Ctx, F, R, Sink, $($K),+>
+            ServiceFactory<Sink, ServiceFn<T, Args, Ctx, ($($K),+)>, Args, Ctx> for T
         where
             T: FnMut(Args, $($K),+) -> F,
             F: Future,
@@ -161,7 +161,7 @@ macro_rules! impl_service_fn {
                 < $K as FromRequest<Request<Args, Ctx>> >::Error: std::error::Error + 'static + Send + Sync,
             )+
         {
-            fn service(self, _: &Backend) -> ServiceFn<T, Args, Ctx, ($($K),+)> {
+            fn service(self, _: Sink) -> ServiceFn<T, Args, Ctx, ($($K),+)> {
                 service_fn(self)
             }
         }
@@ -189,23 +189,22 @@ where
     }
 }
 
-impl<T, Args, Ctx, F, R, Backend, M>
-    WorkerFactory<Args, Ctx, ServiceFn<T, Args, Ctx, ()>, Backend, M> for T
+impl<T, Args, Ctx, F, R, Sink> ServiceFactory<Sink, ServiceFn<T, Args, Ctx, ()>, Args, Ctx> for T
 where
     T: FnMut(Args) -> F,
     F: Future,
     F::Output: IntoResponse<Output = R>,
 {
-    fn service(self, _: &Backend) -> ServiceFn<T, Args, Ctx, ()> {
+    fn service(self, _: Sink) -> ServiceFn<T, Args, Ctx, ()> {
         service_fn(self)
     }
 }
 
-impl<Args, Ctx, S, Backend, M> WorkerFactory<Args, Ctx, S, Backend, M> for S
+impl<Args, Ctx, S, Sink> ServiceFactory<Sink, S, Args, Ctx> for S
 where
     S: Service<Request<Args, Ctx>>,
 {
-    fn service(self, _: &Backend) -> S {
+    fn service(self, _: Sink) -> S {
         self
     }
 }

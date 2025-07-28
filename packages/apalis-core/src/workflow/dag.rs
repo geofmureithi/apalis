@@ -29,7 +29,7 @@ use crate::{
     request::{task_id::TaskId, Parts, Request},
     service_fn::{service_fn, ServiceFn},
     worker::{
-        builder::{WorkerBuilder, WorkerFactory},
+        builder::{ServiceFactory, WorkerBuilder, WorkerFactory},
         Worker,
     },
     workflow::GoTo,
@@ -247,13 +247,12 @@ impl<Compact, Ctx> DagExecutor<Compact, Ctx> {
     }
 }
 
-impl<Ctx, Compact, Cdc, B, M>
-    WorkerFactory<DagRequest<Compact>, Ctx, RouteService<DagRequest<Compact>, Ctx>, B, M>
+impl<Ctx, Compact, Cdc, Sink>
+    ServiceFactory<Sink, RouteService<DagRequest<Compact>, Ctx>, DagRequest<Compact>, Ctx>
     for DagExecutor<Compact, Ctx>
 where
-    B: Backend<DagRequest<Compact>, Ctx>,
-    B::Sink: TaskSink<DagRequest<Compact>, Codec = Cdc, Compact = Compact> + 'static,
-    M: Layer<RouteService<Compact, Ctx>>,
+    Sink: TaskSink<DagRequest<Compact>, Codec = Cdc, Compact = Compact> + 'static,
+    // M: Layer<RouteService<Compact, Ctx>>,
     Cdc: Decoder<DagRequest<Compact>, Compact = Compact>
         + Encoder<DagRequest<Compact>, Compact = Compact>,
     <Cdc as Encoder<DagRequest<Compact>>>::Error: Debug,
@@ -261,8 +260,7 @@ where
     Ctx: 'static,
     Compact: 'static + Send + Clone,
 {
-    fn service(self, backend: &B) -> RouteService<DagRequest<Compact>, Ctx> {
-        let sink = backend.sink();
+    fn service(self, sink: Sink) -> RouteService<DagRequest<Compact>, Ctx> {
         let svc = BoxService::new(RoutedDagService {
             inner: self,
             sink: Arc::new(Mutex::new(sink)),
