@@ -163,7 +163,7 @@ mod tests {
 
     use super::*;
 
-    const ITEMS: u32 = 2;
+    const ITEMS: u32 = 1_000_000;
 
     #[tokio::test]
     async fn basic_worker() {
@@ -183,7 +183,7 @@ mod tests {
             }));
             if task == ITEMS - 1 {
                 tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                     worker.stop().unwrap();
                 });
             }
@@ -194,7 +194,7 @@ mod tests {
             .backend(in_memory)
             .long_running()
             .on_event(|ctx, ev| {
-                println!("On Event = {:?}, {:?}", ev, ctx);
+                // println!("On Event = {:?}, {:?}", ev, ctx);
             })
             .build(task);
         worker.run().await.unwrap();

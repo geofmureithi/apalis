@@ -115,7 +115,7 @@ use crate::{
         builder::{ServiceFactory, WorkerBuilder, WorkerFactory},
         Worker,
     },
-    workflow::GoTo,
+    workflow::{ComplexBuilder, ComplexThen, GoTo},
 };
 
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
@@ -196,6 +196,14 @@ impl<Input, Current, Compact, Ctx, Codec>
         mut fun: impl FnMut(Request<Compact, Ctx>) -> F + Send + Sync + 'static,
     ) -> Self {
         self.fallback = Some(Box::new(move |r| fun(r).map_err(|e| e.into()).boxed()));
+        self
+    }
+}
+
+impl<Input, Current, Compact, Ctx, Codec, R, Next> ComplexThen<R, Next, Compact, Ctx, Codec>
+    for StepBuilder<Input, Current, SteppedService<Compact, Ctx>, Codec, Compact, Ctx>
+{
+    fn then_run(self, service: Next) -> ComplexBuilder<R, Compact, Ctx, Codec> {
         self
     }
 }

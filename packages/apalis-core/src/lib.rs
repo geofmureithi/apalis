@@ -99,8 +99,6 @@ pub mod monitor;
 pub mod request;
 pub mod service_fn;
 pub mod worker;
-/// Represents utilities for building complex workflows
-pub mod workflow;
 
 #[cfg(feature = "sleep")]
 pub mod timer {

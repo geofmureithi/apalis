@@ -124,7 +124,7 @@ members = [
   "examples/persisted-cron",
   "examples/rest-api", 
   "examples/stepped-tasks",
-  "examples/retries",
+  "examples/retries", "packages/apalis-workflow",
 ]
 
 

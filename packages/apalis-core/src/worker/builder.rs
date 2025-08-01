@@ -236,7 +236,7 @@ impl<Args, Ctx, B, M> WorkerBuilder<Args, Ctx, B, M> {
     }
 }
 
-pub trait ServiceFactory<Resource, Svc, Args, Ctx>: Sized {
+pub trait ServiceFactory<Resource, Svc, Args, Ctx> {
     fn service(self, resource: Resource) -> Svc;
 }
 
