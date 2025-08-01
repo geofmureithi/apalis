@@ -1,6 +1,6 @@
 use std::{fmt, sync::{Arc, RwLock}};
 
-use crate::{error::BoxDynError, request::task_id::TaskId, worker::context::WorkerContext};
+use crate::{error::BoxDynError, worker::context::WorkerContext};
 
 /// An event handler for [`Worker`]
 pub type EventHandler = Arc<RwLock<Option<Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>>>>;

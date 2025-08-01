@@ -1,14 +1,11 @@
 //! Represents a task source that provides internal middleware and can be polled
 //!
 //! Also includes helper traits
-use std::{fmt::Debug, future::Future, marker::PhantomData, time::Duration};
+use std::{future::Future, time::Duration};
 
 use futures_util::{
-    future::{pending, ready},
-    stream::{self, BoxStream},
-    FutureExt, Stream, StreamExt, TryFutureExt,
+    stream::BoxStream, Stream,
 };
-use tower_layer::Identity;
 
 use crate::{
     backend::codec::Encoder,

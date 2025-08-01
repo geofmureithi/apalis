@@ -21,7 +21,7 @@
 //!
 //! This module also defines helper types such as [`Attempt`], [`State`], [`TaskId`], and [`Extensions`] for managing task metadata.
 
-use std::{fmt::Debug, time::SystemTime};
+use std::fmt::Debug;
 
 use crate::request::{attempt::Attempt, extensions::Extensions, state::State, task_id::TaskId};
 

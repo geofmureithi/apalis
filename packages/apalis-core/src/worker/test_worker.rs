@@ -39,25 +39,21 @@
 //!
 //! This module is intended for use in tests and local development.
 //! [`Service`]: tower_service::Service
-use crate::backend::{Backend, Reschedule};
+use crate::backend::Backend;
 use crate::error::BoxDynError;
 use crate::request::task_id::TaskId;
 use crate::request::Request;
 use crate::worker::builder::WorkerBuilder;
-use crate::worker::{Event, ReadinessService, TrackerService, Worker, WorkerError};
-use futures_channel::mpsc::{self, channel, Receiver, Sender, TryRecvError};
+use crate::worker::{Event, ReadinessService, TrackerService, WorkerError};
+use futures_channel::mpsc::{self, channel};
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_util::{FutureExt, SinkExt, StreamExt};
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::task::{Context, Poll};
-use tower_layer::{Identity, Layer};
+use tower_layer::Layer;
 use tower_service::Service;
 
 /// A test worker to allow you to test services.

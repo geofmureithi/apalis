@@ -91,11 +91,11 @@ use futures_util::Stream;
 use tower_layer::{Identity, Layer, Stack};
 
 use crate::{
-    backend::{self, Backend},
+    backend::Backend,
     error::BoxDynError,
     monitor::shutdown::Shutdown,
     request::{data::Data, Request},
-    service_fn::{into_response::IntoResponse, service_fn, ServiceFn},
+    service_fn::into_response::IntoResponse,
     worker::{event::EventHandler, Worker},
 };
 

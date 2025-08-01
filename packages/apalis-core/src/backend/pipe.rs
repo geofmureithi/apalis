@@ -1,16 +1,15 @@
 use crate::backend::codec::Encoder;
-use crate::backend::{self, RequestStream, TaskSink};
+use crate::backend::TaskSink;
 use crate::error::BoxDynError;
 use crate::request::Request;
 use crate::{backend::Backend, worker::context::WorkerContext};
 use futures_sink::Sink;
-use futures_util::stream::{once, select, Select};
+use futures_util::stream::{once, select};
 use futures_util::{stream::BoxStream, StreamExt};
 use futures_util::{SinkExt, Stream, TryStreamExt};
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::{error, fmt};
-use tower_layer::Stack;
+use std::fmt;
 
 /// A generic Pipe that wraps an inner type along with a `RequestStream`.
 pub struct Pipe<S, Into, Args, Ctx> {

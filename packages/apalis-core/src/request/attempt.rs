@@ -2,7 +2,7 @@
 use std::{
     convert::Infallible,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::AtomicUsize,
         Arc,
     },
 };

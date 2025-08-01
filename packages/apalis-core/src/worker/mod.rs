@@ -65,24 +65,18 @@ use crate::request::Request;
 use crate::worker::call_all::{CallAllError, CallAllUnordered};
 use crate::worker::context::{Tracked, WorkerContext};
 use crate::worker::event::Event;
-use futures_channel::mpsc::{self, channel, unbounded};
 use futures_core::stream::BoxStream;
-use futures_util::future::{join, select, BoxFuture, Either};
 use futures_util::{Future, FutureExt, Stream, StreamExt};
-use pin_project_lite::pin_project;
-use std::any::type_name;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::Ordering;
 use std::task::{Context, Poll};
-use tower_layer::{Identity, Layer, Stack};
+use tower_layer::{Layer, Stack};
 use tower_service::Service;
 
-use thiserror::Error;
 
 pub mod builder;
 pub mod call_all;
@@ -176,7 +170,7 @@ where
          let backend = self.backend;
         let event_handler = self.event_handler;
         ctx.wrap_listener(event_handler);
-        let mut worker = ctx.clone();
+        let worker = ctx.clone();
         let inner_layers = backend.middleware();
         struct WorkerServiceBuilder<L> {
             layer: L,

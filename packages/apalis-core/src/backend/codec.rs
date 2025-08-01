@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 
 pub trait Codec<T>: Encoder<T> + Decoder<T> {
     type Error;

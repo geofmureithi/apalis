@@ -61,10 +61,8 @@
 //! This ensures that if any worker hangs or takes too long to finish, the monitor will shut down after 10 seconds.
 
 use std::{
-    any::type_name,
     collections::HashMap,
     fmt::{self, Debug, Formatter},
-    future::ready,
     sync::Arc,
 };
 
@@ -123,7 +121,7 @@ impl Monitor {
     /// let worker = Worker::new();
     /// monitor.register(worker).run().await;
     /// ```
-    pub fn register<Args, S, P, Ctx, M>(mut self, mut worker: Worker<Args, Ctx, P, S, M>) -> Self
+    pub fn register<Args, S, P, Ctx, M>(mut self, worker: Worker<Args, Ctx, P, S, M>) -> Self
     where
         S: Service<Request<Args, Ctx>> + Send + 'static,
         S::Future: Send,

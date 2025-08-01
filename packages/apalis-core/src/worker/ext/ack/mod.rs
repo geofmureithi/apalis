@@ -1,21 +1,17 @@
 use futures_util::future::BoxFuture;
-use pin_project_lite::pin_project;
 use tower_layer::{Layer, Stack};
 use tower_service::Service;
 use std::{
     future::Future,
-    marker::PhantomData,
-    pin::Pin,
     task::{Context, Poll},
 };
 
 use crate::{
-    error::{AbortError, BoxDynError, RetryAfterError},
+    error::BoxDynError,
     request::{state::State, Parts, Request},
     worker::builder::WorkerBuilder,
 };
 
-use super::long_running::LongRunningLayer;
 
 pub trait AcknowledgementExt<Args, Ctx, Source, Middleware, Ack: Acknowledge<Res, Ctx>, Res>:
     Sized

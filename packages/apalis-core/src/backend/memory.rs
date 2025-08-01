@@ -1,27 +1,22 @@
 use crate::{
     backend::{
-        codec::{CloneOpCodec, Encoder},
-        shared::MakeShared,
+        codec::CloneOpCodec,
         Backend, RequestStream, TaskSink,
     },
     error::BoxDynError,
     request::{task_id::TaskId, Parts, Request},
-    worker::{self, context::WorkerContext},
+    worker::context::WorkerContext,
 };
-use futures_channel::mpsc::{channel, unbounded, Receiver, SendError, Sender};
+use futures_channel::mpsc::{unbounded, SendError};
 use futures_sink::Sink;
 use futures_util::{
-    future::pending, stream::{self, BoxStream}, FutureExt, SinkExt, Stream, StreamExt
+    stream::{self, BoxStream}, FutureExt, SinkExt, Stream, StreamExt
 };
 use std::{
-    any::Any,
-    collections::{BTreeMap, HashMap},
-    future::Future,
-    marker::PhantomData,
+    collections::BTreeMap,
     pin::Pin,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
     task::{Context, Poll},
-    time::Duration,
 };
 use tower_layer::Identity;
 
@@ -239,7 +234,7 @@ impl<T: Clone + Send + Unpin> TaskSink<T> for MemorySink<T> {
         req: Request<Self::Compact, Self::Context>,
     ) -> Result<Parts<Self::Context>, Self::Error> {
         let p = req.parts.clone();
-        let mut sink = self.inner.write().unwrap();
+        let sink = self.inner.write().unwrap();
         // let req = sink.send(req).boxed();
         todo!()
         // block_on(req.map(|s| s.map(|_| p)))

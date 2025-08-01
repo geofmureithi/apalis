@@ -206,7 +206,7 @@ impl TaskTracker {
     ///
     /// The `TaskTracker` will start out as open.
     #[must_use]
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             inner: Arc::new(TaskTrackerInner::new()),
         }
@@ -231,7 +231,7 @@ impl TaskTracker {
     ///
     /// [aba]: https://en.wikipedia.org/wiki/ABA_problem
     #[inline]
-    pub fn wait(&self) -> TaskTrackerWaitFuture {
+    pub(super) fn wait(&self) -> TaskTrackerWaitFuture {
         TaskTrackerWaitFuture {
             task_tracker: self.clone(),
             registered: false,
@@ -246,7 +246,7 @@ impl TaskTracker {
     ///
     /// [`wait`]: Self::wait
     #[inline]
-    pub fn close(&self) -> bool {
+    pub(super) fn close(&self) -> bool {
         self.inner.set_closed()
     }
 
@@ -258,28 +258,28 @@ impl TaskTracker {
     ///
     /// [`wait`]: Self::wait
     #[inline]
-    pub fn reopen(&self) -> bool {
+    pub(super) fn reopen(&self) -> bool {
         self.inner.set_open()
     }
 
     /// Returns `true` if this `TaskTracker` is [closed](Self::close).
     #[inline]
     #[must_use]
-    pub fn is_closed(&self) -> bool {
+    pub(super) fn is_closed(&self) -> bool {
         (self.inner.state.load(Ordering::Acquire) & 1) != 0
     }
 
     /// Returns the number of tasks tracked by this `TaskTracker`.
     #[inline]
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         self.inner.state.load(Ordering::Acquire) >> 1
     }
 
     /// Returns `true` if there are no tasks in this `TaskTracker`.
     #[inline]
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.inner.state.load(Ordering::Acquire) <= 1
     }
 
@@ -317,7 +317,7 @@ impl TaskTracker {
     /// [`poll`]: std::future::Future::poll
     /// [`wait`]: Self::wait
     #[inline]
-    pub fn track_future<F: Future>(&self, future: F) -> TrackedFuture<F> {
+    pub(super) fn track_future<F: Future>(&self, future: F) -> TrackedFuture<F> {
         TrackedFuture {
             future,
             token: self.token(),
@@ -335,7 +335,7 @@ impl TaskTracker {
     ///
     /// [`len`]: TaskTracker::len
     #[inline]
-    pub fn token(&self) -> TaskTrackerToken {
+    pub(super) fn token(&self) -> TaskTrackerToken {
         self.inner.add_task();
         TaskTrackerToken {
             task_tracker: self.clone(),
@@ -358,7 +358,7 @@ impl TaskTracker {
     /// ```
     #[inline]
     #[must_use]
-    pub fn ptr_eq(left: &TaskTracker, right: &TaskTracker) -> bool {
+    pub(super) fn ptr_eq(left: &TaskTracker, right: &TaskTracker) -> bool {
         Arc::ptr_eq(&left.inner, &right.inner)
     }
 }

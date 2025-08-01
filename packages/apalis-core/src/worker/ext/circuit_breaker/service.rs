@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -202,7 +201,7 @@ impl<S> CircuitBreakerService<S> {
 }
 
 #[derive(Debug)]
-pub enum CircuitBreakerError {
+pub(super) enum CircuitBreakerError {
     CircuitOpen,
 }
 

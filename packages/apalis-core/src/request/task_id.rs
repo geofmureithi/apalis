@@ -1,6 +1,5 @@
 /// A unique ID that can be used by a backend
 use std::{
-    convert::Infallible,
     fmt::{Debug, Display},
     hash::Hash,
     str::FromStr,
@@ -9,7 +8,6 @@ use std::{
 
 use ulid::Ulid;
 
-use crate::{request::Request, service_fn::from_request::FromRequest};
 
 /// A wrapper type that defines a task id.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
