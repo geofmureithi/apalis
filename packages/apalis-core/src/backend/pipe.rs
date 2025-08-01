@@ -1,5 +1,5 @@
 use crate::backend::codec::Encoder;
-use crate::backend::TaskSink;
+use crate::backend::{BackendWithSink, TaskSink};
 use crate::error::BoxDynError;
 use crate::request::Request;
 use crate::{backend::Backend, worker::context::WorkerContext};
@@ -7,9 +7,9 @@ use futures_sink::Sink;
 use futures_util::stream::{once, select};
 use futures_util::{stream::BoxStream, StreamExt};
 use futures_util::{SinkExt, Stream, TryStreamExt};
+use std::fmt;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::fmt;
 
 /// A generic Pipe that wraps an inner type along with a `RequestStream`.
 pub struct Pipe<S, Into, Args, Ctx> {
@@ -40,17 +40,18 @@ impl<S: fmt::Debug, Into: fmt::Debug, Args, Ctx> fmt::Debug for Pipe<S, Into, Ar
 impl<Args, Ctx, S, I, Compact, Err> Backend<Args, Ctx> for Pipe<S, I, Args, Ctx>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    I: Backend<Args, Ctx>,
+    I: BackendWithSink<Args, Ctx>,
     I::Error: Into<BoxDynError> + Send + Sync + 'static,
     I::Sink: TaskSink<Args, Compact = Compact> + 'static + Sink<Request<Args, Ctx>>,
     I::Beat: Send + 'static,
-    <<I as Backend<Args, Ctx>>::Sink as TaskSink<Args>>::Codec: Encoder<Args, Compact = Compact>,
+    <<I as BackendWithSink<Args, Ctx>>::Sink as TaskSink<Args>>::Codec:
+        Encoder<Args, Compact = Compact>,
 
     I::Stream: Send + 'static,
     Args: Send + 'static,
     Ctx: Send + 'static + Default,
     Err: Into<BoxDynError> + Send + Sync + 'static,
-    <<I as Backend<Args, Ctx>>::Sink as Sink<Request<Args, Ctx>>>::Error:
+    <<I as BackendWithSink<Args, Ctx>>::Sink as Sink<Request<Args, Ctx>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
 {
     type Stream = BoxStream<'static, Result<Option<Request<Args, Ctx>>, PipeError>>;
@@ -60,8 +61,6 @@ where
     type Beat = BoxStream<'static, Result<(), PipeError>>;
 
     type Error = PipeError;
-
-    type Sink = I::Sink;
 
     fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat {
         self.into
@@ -74,10 +73,6 @@ where
 
     fn middleware(&self) -> Self::Layer {
         self.into.middleware()
-    }
-
-    fn sink(&self) -> Self::Sink {
-        self.into.sink()
     }
 
     fn poll(self, worker: &WorkerContext) -> Self::Stream {
@@ -106,6 +101,31 @@ where
     }
 }
 
+impl<S, I, Args, Ctx, Compact, Err> BackendWithSink<Args, Ctx>
+    for Pipe<S, I, Args, Ctx>
+where
+    S: Stream<Item = Result<Args, Err>> + Send + 'static,
+    I: BackendWithSink<Args, Ctx>,
+    I::Error: Into<BoxDynError> + Send + Sync + 'static,
+    I::Sink: TaskSink<Args, Compact = Compact> + 'static + Sink<Request<Args, Ctx>>,
+    I::Beat: Send + 'static,
+    <<I as BackendWithSink<Args, Ctx>>::Sink as TaskSink<Args>>::Codec:
+        Encoder<Args, Compact = Compact>,
+
+    I::Stream: Send + 'static,
+    Args: Send + 'static,
+    Ctx: Send + 'static + Default,
+    Err: Into<BoxDynError> + Send + Sync + 'static,
+    <<I as BackendWithSink<Args, Ctx>>::Sink as Sink<Request<Args, Ctx>>>::Error:
+        Into<BoxDynError> + Send + Sync + 'static,
+{
+    type Sink = I::Sink;
+
+    fn sink(&self) -> Self::Sink {
+        self.into.sink()
+    }
+}
+
 pub trait PipeExt<B, Args, Ctx>
 where
     Self: Sized,
@@ -115,7 +135,7 @@ where
 
 impl<B, Args, Ctx, Err> PipeExt<B, Args, Ctx> for BoxStream<'static, Result<Args, Err>>
 where
-    B: Backend<Args, Ctx>,
+    B: BackendWithSink<Args, Ctx>,
     B::Error: Into<BoxDynError> + Send + Sync + 'static,
     B::Sink: TaskSink<Args, Context = Ctx>,
 {

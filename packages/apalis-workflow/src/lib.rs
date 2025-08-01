@@ -153,6 +153,16 @@ impl<R, Compact, Ctx, Cdc: Send> ComplexBuilder<R, Compact, Ctx, Cdc> {
 //     }
 // }
 
+pub trait WorkflowServiceFactory<Req> {
+    type Response;
+    type Error;
+    type Sink;
+    type Service: Service<Req, Response = GoTo<Self::Response>, Error = Self::Error>;
+    type InitError;
+    type Future: Future<Output = Result<Self::Service, Self::InitError>>;
+    fn new_service(&self, sink: Self::Sink) -> Self::Future;
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

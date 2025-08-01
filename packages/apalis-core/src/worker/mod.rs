@@ -382,12 +382,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
+    use std::{future::ready, ops::Deref, sync::{atomic::AtomicUsize, Arc}, time::Duration};
 
-    use futures::{channel::mpsc::SendError, future::ready};
+    use futures_channel::mpsc::SendError;
+    use futures_core::future::BoxFuture;
 
     use crate::{
-        backend::{memory::MemoryStorage, TaskSink},
+        backend::{memory::MemoryStorage, BackendWithSink, TaskSink},
         request::Parts,
         service_fn::{self, service_fn, ServiceFn},
         worker::{

@@ -227,7 +227,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        backend::{memory::MemoryStorage, Backend, TaskSink},
+        backend::{memory::MemoryStorage, Backend, BackendWithSink, TaskSink},
         error::BoxDynError,
         service_fn::service_fn,
         worker::{

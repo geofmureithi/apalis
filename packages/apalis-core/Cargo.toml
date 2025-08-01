@@ -48,7 +48,7 @@ optional = true
 default = []
 docsrs = ["dep:document-features"]
 sleep = ["dep:futures-timer"]
-serde = ["dep:serde"]
+serde = ["dep:serde", "ulid/serde"]
 json = ["serde", "dep:serde_json"]
 test-utils = []
 tracing = ["dep:tracing"]
@@ -62,3 +62,4 @@ all-features = true
 [dev-dependencies]
 tokio = { version = "1.37.0", features = ["macros", "rt", "sync"] }
 tokio-stream = "0.1.15"
+tower = {version = "0.5", features = ["full"]}

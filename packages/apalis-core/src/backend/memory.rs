@@ -1,8 +1,5 @@
 use crate::{
-    backend::{
-        codec::CloneOpCodec,
-        Backend, RequestStream, TaskSink,
-    },
+    backend::{codec::CloneOpCodec, Backend, BackendWithSink, RequestStream, TaskSink},
     error::BoxDynError,
     request::{task_id::TaskId, Parts, Request},
     worker::context::WorkerContext,
@@ -10,8 +7,11 @@ use crate::{
 use futures_channel::mpsc::{unbounded, SendError};
 use futures_sink::Sink;
 use futures_util::{
-    stream::{self, BoxStream}, FutureExt, SinkExt, Stream, StreamExt
+    stream::{self, BoxStream},
+    FutureExt, SinkExt, Stream, StreamExt,
 };
+#[cfg(feature = "json")]
+use std::sync::Mutex;
 use std::{
     collections::BTreeMap,
     pin::Pin,
@@ -106,7 +106,7 @@ impl JsonMemory<Value> {
             let inner = self.clone();
             SharedInMemoryStream {
                 inner,
-                req_type: PhantomData,
+                req_type: std::marker::PhantomData,
             }
         };
 
@@ -293,17 +293,12 @@ impl<T: 'static + Clone + Send> Backend<T, ()> for MemoryStorage<MemoryWrapper<T
     type Stream = RequestStream<Request<T, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
-    type Sink = MemorySink<T>;
 
     fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
     }
     fn middleware(&self) -> Self::Layer {
         Identity::new()
-    }
-
-    fn sink(&self) -> Self::Sink {
-        self.inner.sender.clone()
     }
 
     fn poll(self, _worker: &WorkerContext) -> Self::Stream {
@@ -312,13 +307,20 @@ impl<T: 'static + Clone + Send> Backend<T, ()> for MemoryStorage<MemoryWrapper<T
     }
 }
 
+impl<T: Clone + Send + Unpin + 'static> BackendWithSink<T, ()> for MemoryStorage<MemoryWrapper<T>> {
+    type Sink = MemorySink<T>;
+
+    fn sink(&self) -> Self::Sink {
+        self.inner.sender.clone()
+    }
+}
+
 #[cfg(feature = "json")]
-impl<T: 'static + Clone + Send + DeserializeOwned> Backend<T, ()> for MemoryStorage<JsonMemory<T>> {
+impl<T: 'static + Send + DeserializeOwned> Backend<T, ()> for MemoryStorage<JsonMemory<T>> {
     type Error = BoxDynError;
     type Stream = RequestStream<Request<T, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
-    type Sink = JsonMemory<T>;
 
     fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
@@ -326,14 +328,19 @@ impl<T: 'static + Clone + Send + DeserializeOwned> Backend<T, ()> for MemoryStor
     fn middleware(&self) -> Self::Layer {
         Identity::new()
     }
-
-    fn sink(&self) -> Self::Sink {
-        self.inner.clone()
-    }
-
     fn poll(self, _worker: &WorkerContext) -> Self::Stream {
         let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         stream
+    }
+}
+
+#[cfg(feature = "json")]
+impl<T: 'static + Send + DeserializeOwned + Unpin + Serialize + Clone> BackendWithSink<T, ()>
+    for MemoryStorage<JsonMemory<T>>
+{
+    type Sink = JsonMemory<T>;
+    fn sink(&self) -> Self::Sink {
+        self.inner.clone()
     }
 }
 
@@ -374,7 +381,7 @@ where
 #[derive(Debug)]
 struct SharedInMemoryStream<T> {
     inner: JsonMemory<Value>,
-    req_type: PhantomData<T>,
+    req_type: std::marker::PhantomData<T>,
 }
 
 #[cfg(feature = "json")]
@@ -404,7 +411,15 @@ impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
 }
 
 #[cfg(feature = "json")]
-impl<Args: Send + Serialize + DeserializeOwned + 'static> MakeShared<Args> for JsonMemory<Value> {
+#[derive(Debug, Default)]
+pub struct SharedJsonMemory {
+    inner: JsonMemory<serde_json::Value>,
+}
+
+#[cfg(feature = "json")]
+impl<Args: Send + Serialize + DeserializeOwned + 'static> crate::backend::shared::MakeShared<Args>
+    for SharedJsonMemory
+{
     type Backend = MemoryStorage<MemoryWrapper<Args>>;
 
     type Config = ();
@@ -415,7 +430,7 @@ impl<Args: Send + Serialize + DeserializeOwned + 'static> MakeShared<Args> for J
         &mut self,
         _: Self::Config,
     ) -> Result<Self::Backend, Self::MakeError> {
-        let (sender, receiver) = self.create_channel();
+        let (sender, receiver) = self.inner.create_channel();
         Ok(MemoryStorage {
             inner: MemoryWrapper {
                 sender: MemorySink {
@@ -434,14 +449,15 @@ mod tests {
     use futures_util::future::ready;
 
     use crate::{
-        backend::memory::MemoryStorage,
-        backend::TaskSink,
+        backend::{memory::MemoryStorage, shared::MakeShared, TaskSink},
         request::data::Data,
         service_fn::{self, service_fn, ServiceFn},
-        worker::builder::WorkerBuilder,
-        worker::ext::{
-            ack::AcknowledgementExt, circuit_breaker::CircuitBreaker,
-            event_listener::EventListenerExt, long_running::LongRunningExt,
+        worker::{
+            builder::WorkerBuilder,
+            ext::{
+                ack::AcknowledgementExt, circuit_breaker::CircuitBreaker,
+                event_listener::EventListenerExt, long_running::LongRunningExt,
+            },
         },
     };
 
@@ -451,7 +467,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
-        let mut store = JsonMemory::default();
+        let mut store = SharedJsonMemory::default();
         let string_store = store.make_shared().unwrap();
         let int_store = store.make_shared().unwrap();
         let mut int_sink = int_store.sink();

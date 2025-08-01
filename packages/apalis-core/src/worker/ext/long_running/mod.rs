@@ -148,10 +148,8 @@ where
 mod tests {
     use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
-    use futures::channel::oneshot::channel;
-
     use crate::{
-        backend::{memory::MemoryStorage, Backend, TaskSink},
+        backend::{memory::MemoryStorage, Backend, BackendWithSink, TaskSink},
         error::BoxDynError,
         request::data::Data,
         service_fn::{self, service_fn, ServiceFn},

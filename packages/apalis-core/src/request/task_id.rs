@@ -1,12 +1,11 @@
 /// A unique ID that can be used by a backend
 use std::{
-    fmt::{Debug, Display},
-    hash::Hash,
-    str::FromStr,
-    time::SystemTime,
+    convert::Infallible, fmt::{Debug, Display}, hash::Hash, str::FromStr, time::SystemTime
 };
 
 use ulid::Ulid;
+
+use crate::{request::Request, service_fn::from_request::FromRequest};
 
 
 /// A wrapper type that defines a task id.
@@ -45,5 +44,12 @@ impl FromStr for TaskId {
 impl Display for TaskId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Display::fmt(&self.0, f)
+    }
+}
+
+impl<Req: Sync, Ctx: Sync> FromRequest<Request<Req, Ctx>> for TaskId {
+    type Error = Infallible;
+    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Self::Error> {
+        Ok(req.parts.task_id.clone())
     }
 }

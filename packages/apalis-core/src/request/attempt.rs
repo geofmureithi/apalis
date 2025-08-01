@@ -1,16 +1,12 @@
 /// A unique tracker for number of attempts
 use std::{
     convert::Infallible,
-    sync::{
-        atomic::AtomicUsize,
-        Arc,
-    },
+    sync::{atomic::AtomicUsize, Arc},
 };
 
 use crate::{request::Request, service_fn::from_request::FromRequest};
 
 /// A wrapper to keep count of the attempts tried by a task
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone)]
 pub struct Attempt(Arc<AtomicUsize>);
 
@@ -46,5 +42,50 @@ impl<Req: Sync, Ctx: Sync> FromRequest<Request<Req, Ctx>> for Attempt {
     type Error = Infallible;
     async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Self::Error> {
         Ok(req.parts.attempt.clone())
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use std::sync::atomic::Ordering;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::*;
+
+    // Custom serialization function
+    fn serialize<S>(attempt: &Attempt, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let value = attempt.0.load(Ordering::SeqCst);
+        serializer.serialize_u64(value as u64)
+    }
+
+    // Custom deserialization function
+    fn deserialize<'de, D>(deserializer: D) -> Result<Attempt, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u64::deserialize(deserializer)?;
+        Ok(Attempt(Arc::new(AtomicUsize::new(value as usize))))
+    }
+
+    impl Serialize for Attempt {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serialize(self, serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Attempt {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserialize(deserializer)
+        }
     }
 }

@@ -3,6 +3,7 @@
 //! Also includes helper traits
 use std::{future::Future, time::Duration};
 
+use futures_sink::Sink;
 use futures_util::{
     stream::BoxStream, Stream,
 };
@@ -25,12 +26,17 @@ pub trait Backend<Args, Ctx> {
     type Stream: Stream<Item = Result<Option<Request<Args, Ctx>>, Self::Error>>;
     type Beat: Stream<Item = Result<(), Self::Error>>;
     type Layer;
-    type Sink;
 
     fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat;
     fn middleware(&self) -> Self::Layer;
-    fn sink(&self) -> Self::Sink;
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
+}
+
+pub trait BackendWithSink<Args, Ctx> : Backend<Args, Ctx> {
+    type Sink: TaskSink<Args> + Sink<Request<Args, Ctx>>;
+
+    #[must_use = "Sinks do nothing unless polled"]
+    fn sink(&self) -> Self::Sink;
 }
 /// Represents a stream for T.
 pub type RequestStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;

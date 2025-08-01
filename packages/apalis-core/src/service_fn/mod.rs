@@ -46,7 +46,8 @@
 use crate::error::BoxDynError;
 use crate::request::Request;
 use crate::service_fn::from_request::FromRequest;
-use crate::worker::builder::{ServiceFactory, WorkerFactory};
+use crate::worker::builder::{WorkerBuilderExt, WorkerServiceBuilder};
+use futures_core::future::BoxFuture;
 use futures_util::future::Map;
 use futures_util::FutureExt;
 use std::fmt;
@@ -150,8 +151,8 @@ macro_rules! impl_service_fn {
         }
 
         #[allow(unused_parens)]
-        impl<T, Args, Ctx, F, R, Sink, $($K),+>
-            ServiceFactory<Sink, ServiceFn<T, Args, Ctx, ($($K),+)>, Args, Ctx> for T
+        impl<T, Args, Ctx, F, R, Backend, $($K),+>
+            WorkerServiceBuilder<Backend, ServiceFn<T, Args, Ctx, ($($K),+)>, Args, Ctx> for T
         where
             T: FnMut(Args, $($K),+) -> F,
             F: Future,
@@ -161,7 +162,7 @@ macro_rules! impl_service_fn {
                 < $K as FromRequest<Request<Args, Ctx>> >::Error: std::error::Error + 'static + Send + Sync,
             )+
         {
-            fn service(self, _: Sink) -> ServiceFn<T, Args, Ctx, ($($K),+)> {
+            fn build(self, _: &Backend) -> ServiceFn<T, Args, Ctx, ($($K),+)> {
                 service_fn(self)
             }
         }
@@ -189,22 +190,23 @@ where
     }
 }
 
-impl<T, Args, Ctx, F, R, Sink> ServiceFactory<Sink, ServiceFn<T, Args, Ctx, ()>, Args, Ctx> for T
+impl<T, Args, Ctx, F, R, Backend>
+    WorkerServiceBuilder<Backend, ServiceFn<T, Args, Ctx, ()>, Args, Ctx> for T
 where
     T: FnMut(Args) -> F,
     F: Future,
     F::Output: IntoResponse<Output = R>,
 {
-    fn service(self, _: Sink) -> ServiceFn<T, Args, Ctx, ()> {
+    fn build(self, _: &Backend) -> ServiceFn<T, Args, Ctx, ()> {
         service_fn(self)
     }
 }
 
-impl<Args, Ctx, S, Sink> ServiceFactory<Sink, S, Args, Ctx> for S
+impl<Args, Ctx, S, Backend> WorkerServiceBuilder<Backend, S, Args, Ctx> for S
 where
     S: Service<Request<Args, Ctx>>,
 {
-    fn service(self, _: Sink) -> S {
+    fn build(self, _: &Backend) -> S {
         self
     }
 }

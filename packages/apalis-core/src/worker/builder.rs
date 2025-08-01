@@ -82,13 +82,12 @@
 //!     - `.backend(...)`: Sets the task source.
 //!     - `.data(...)`: Injects shared application data.
 //!     - `.layer(...)`: Adds custom middleware.
-//!     - `.chain(...)`: Composes middleware via `ServiceBuilder`.
 //!     - `.build(service)`: Consumes the builder and a [`Service`] to construct the final [`Worker`].
-//!     - `.build_fn(task_fn)`: Uses a function instead of a full [`Service`].
 use std::{future::Future, marker::PhantomData};
 
 use futures_util::Stream;
 use tower_layer::{Identity, Layer, Stack};
+use tower_service::Service;
 
 use crate::{
     backend::Backend,
@@ -137,25 +136,6 @@ impl WorkerBuilder<(), (), (), Identity> {
 }
 
 impl WorkerBuilder<(), (), (), Identity> {
-    /// Consume a stream directly
-    #[deprecated(since = "0.6.0", note = "Consider using the `.backend`")]
-    pub fn stream<
-        NS: Stream<Item = Result<Option<Request<NJ, Ctx>>, BoxDynError>> + Send + 'static,
-        NJ,
-        Ctx,
-    >(
-        self,
-        stream: NS,
-    ) -> WorkerBuilder<NJ, Ctx, NS, Identity> {
-        WorkerBuilder {
-            request: PhantomData,
-            layer: self.layer,
-            source: stream,
-            name: self.name,
-            shutdown: self.shutdown,
-            event_handler: self.event_handler,
-        }
-    }
 
     /// Set the source to a backend that implements [Backend]
     pub fn backend<NB: Backend<NJ, Ctx>, NJ, Ctx>(
@@ -199,7 +179,7 @@ impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M> {
         WorkerBuilder {
             request: self.request,
             source: self.source,
-            layer: Stack::new( layer, self.layer), // TODO: Decide order here
+            layer: Stack::new(layer, self.layer), // TODO: Decide order here
             name: self.name,
             shutdown: self.shutdown,
             event_handler: self.event_handler,
@@ -224,39 +204,41 @@ impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M> {
 }
 
 impl<Args, Ctx, B, M> WorkerBuilder<Args, Ctx, B, M> {
-    pub fn build<W: WorkerFactory<Args, Ctx, Svc, B, M>, Svc>(
+    pub fn build<W: WorkerBuilderExt<Args, Ctx, Svc, B, M>, Svc>(
         self,
         service: W,
     ) -> Worker<Args, Ctx, B, Svc, M> {
-        service.factory(self)
+        service.with_builder(self)
     }
 }
 
-pub trait ServiceFactory<Resource, Svc, Args, Ctx> {
-    fn service(self, resource: Resource) -> Svc;
+pub trait WorkerServiceBuilder<Backend, Svc, Args, Ctx> {
+    fn build(self, backend: &Backend) -> Svc;
 }
 
-pub trait WorkerFactory<Args, Ctx, Svc, Backend, M>: Sized {
-    fn factory(
+pub trait WorkerBuilderExt<Args, Ctx, Svc, Backend, M>: Sized {
+    fn with_builder(
         self,
         builder: WorkerBuilder<Args, Ctx, Backend, M>,
     ) -> Worker<Args, Ctx, Backend, Svc, M>;
 }
 
-impl<T, Args, Ctx, Svc, B, M> WorkerFactory<Args, Ctx, Svc, B, M> for T
+impl<T, Args, Ctx, Svc, B, M> WorkerBuilderExt<Args, Ctx, Svc, B, M> for T
 where
-    T: ServiceFactory<B::Sink, Svc, Args, Ctx>,
+    T: WorkerServiceBuilder<B, Svc, Args, Ctx>,
     B: Backend<Args, Ctx>,
 {
-    fn factory(self, builder: WorkerBuilder<Args, Ctx, B, M>) -> Worker<Args, Ctx, B, Svc, M> {
-        let svc = self.service(builder.source.sink());
+    fn with_builder(self, builder: WorkerBuilder<Args, Ctx, B, M>) -> Worker<Args, Ctx, B, Svc, M> {
+        let svc = self.build(&builder.source);
         let mut worker = Worker::new(builder.name, builder.source, svc, builder.layer);
         worker.event_handler = builder
             .event_handler
             .write()
             .map(|mut d| d.take())
             .unwrap()
-            .unwrap_or(Box::new(|_, _| {}));
+            .unwrap_or(Box::new(|ctx, e| {
+                trace!("Worker [{}] received event {e}", ctx.name());
+            }));
         worker.shutdown = builder.shutdown;
         worker
     }

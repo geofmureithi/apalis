@@ -376,11 +376,12 @@ impl Monitor {
 #[cfg(test)]
 mod tests {
     use crate::{
-        backend::{Backend, TaskSink}, request::task_id::TaskId, worker::{context::WorkerContext, ext::event_listener::EventListenerExt}
+        backend::{Backend, BackendWithSink, TaskSink}, request::task_id::TaskId, worker::{context::WorkerContext, ext::event_listener::EventListenerExt}
     };
     use std::{io, time::Duration};
 
     use tokio::time::sleep;
+    use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
         backend::memory::MemoryStorage, monitor::Monitor, request::Request,
@@ -464,8 +465,8 @@ mod tests {
         let monitor = monitor.register_with_count(5, move |index| {
             WorkerBuilder::new(format!("worker-{}", index))
                 .backend(backend.clone())
-                .chain(|s| s.concurrency_limit(1))
-                .build(move |request, id: TaskId, w: WorkerContext| async move {
+                .layer(ConcurrencyLimitLayer::new(1))
+                .build(move |request: i32, id: TaskId, w: WorkerContext| async move {
                     println!("{id:?}, {}", w.name());
                     tokio::time::sleep(Duration::from_secs(index as u64)).await;
                     Ok::<_, io::Error>(request)
