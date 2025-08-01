@@ -87,7 +87,7 @@
 //!     - `.build_fn(task_fn)`: Uses a function instead of a full [`Service`].
 use std::{future::Future, marker::PhantomData};
 
-use futures::Stream;
+use futures_util::Stream;
 use tower::{
     layer::util::{Identity, Stack},
     util::BoxService,

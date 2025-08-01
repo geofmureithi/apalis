@@ -1,4 +1,4 @@
-use futures::{ready, stream::FuturesUnordered, Stream};
+use futures_util::{ready, stream::FuturesUnordered, Stream};
 use pin_project_lite::pin_project;
 use std::{
     error::Error,

@@ -8,9 +8,9 @@ use crate::{
     request::{task_id::TaskId, Parts, Request},
     worker::{self, context::WorkerContext},
 };
-use futures::{
-    channel::mpsc::{channel, unbounded, Receiver, SendError, Sender},
-    executor::block_on,
+use futures_channel::mpsc::{channel, unbounded, Receiver, SendError, Sender};
+use futures_util::{
+
     future::pending,
     stream::{self, BoxStream},
     FutureExt, Sink, SinkExt, Stream, StreamExt,
@@ -243,7 +243,8 @@ impl<T: Clone + Send + Unpin> TaskSink<T> for MemorySink<T> {
         let p = req.parts.clone();
         let mut sink = self.inner.write().unwrap();
         let req = sink.send(req).boxed();
-        block_on(req.map(|s| s.map(|_| p)))
+        todo!()
+        // block_on(req.map(|s| s.map(|_| p)))
     }
 }
 

@@ -7,7 +7,7 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-use futures::Future;
+use futures_core::Future;
 
 /// A shutdown token that stops execution
 #[derive(Clone, Debug)]

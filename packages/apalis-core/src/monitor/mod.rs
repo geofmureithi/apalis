@@ -68,7 +68,7 @@ use std::{
     sync::Arc,
 };
 
-use futures::{
+use futures_util::{
     future::{select, BoxFuture},
     Future, FutureExt, StreamExt,
 };

@@ -3,7 +3,7 @@
 //! Also includes helper traits
 use std::{fmt::Debug, future::Future, marker::PhantomData, time::Duration};
 
-use futures::{
+use futures_util::{
     future::{pending, ready},
     stream::{self, BoxStream},
     FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,

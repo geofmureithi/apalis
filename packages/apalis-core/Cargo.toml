@@ -14,7 +14,10 @@ readme = "../../README.md"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"], optional = true }
-futures = { version = "0.3.30", features = ["async-await"] }
+futures-util = { version = "0.3.30" }
+futures-core = { version = "0.3.30" }
+futures-channel = { version = "0.3.30" }
+
 tower = { version = "0.5", features = [
     "util",
     "limit",

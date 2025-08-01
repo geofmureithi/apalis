@@ -1,6 +1,6 @@
 use std::{future::Future, ops::Deref, time::Duration};
 
-use futures::{future::BoxFuture, FutureExt};
+use futures_util::{future::BoxFuture, FutureExt};
 use tower::{layer::util::Stack, Layer, Service};
 
 use crate::{
