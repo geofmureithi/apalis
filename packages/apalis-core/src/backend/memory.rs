@@ -1,7 +1,7 @@
 use crate::{
     backend::{
-        codec::{json::JsonCodec, CloneOpCodec, Encoder},
-        shared::{MakeShared},
+        codec::{CloneOpCodec, Encoder},
+        shared::MakeShared,
         Backend, RequestStream, TaskSink,
     },
     error::BoxDynError,
@@ -9,10 +9,12 @@ use crate::{
     worker::{self, context::WorkerContext},
 };
 use futures::{
-    channel::mpsc::{channel, unbounded, Receiver, SendError, Sender}, executor::block_on, future::pending, stream::{self, BoxStream}, FutureExt, Sink, SinkExt, Stream, StreamExt
+    channel::mpsc::{channel, unbounded, Receiver, SendError, Sender},
+    executor::block_on,
+    future::pending,
+    stream::{self, BoxStream},
+    FutureExt, Sink, SinkExt, Stream, StreamExt,
 };
-use serde::{de::DeserializeOwned, Serialize};
-use serde_json::Value;
 use std::{
     any::Any,
     collections::{BTreeMap, HashMap},
@@ -25,6 +27,10 @@ use std::{
 };
 use tower::layer::util::Identity;
 
+#[cfg(feature = "serde")]
+use serde::{de::DeserializeOwned, Serialize};
+#[cfg(feature = "json")]
+use serde_json::Value;
 #[derive(Debug, Clone)]
 /// An example of the basics of a backend
 pub struct MemoryStorage<S> {
@@ -35,8 +41,8 @@ impl<T: Send + 'static> MemoryStorage<MemoryWrapper<T>> {
     /// Create a new in-memory storage
     pub fn new() -> Self {
         let (sender, receiver) = unbounded();
-        let sender =
-            Box::new(sender) as Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Sync + Unpin>;
+        let sender = Box::new(sender)
+            as Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Sync + Unpin>;
         Self {
             inner: MemoryWrapper {
                 sender: MemorySink {
@@ -47,6 +53,7 @@ impl<T: Send + 'static> MemoryStorage<MemoryWrapper<T>> {
         }
     }
 
+    #[cfg(feature = "json")]
     pub fn new_with_json() -> MemoryStorage<JsonMemory<T>> {
         MemoryStorage {
             inner: JsonMemory {
@@ -63,12 +70,14 @@ struct TaskKey {
     namespace: String,
 }
 
+#[cfg(feature = "json")]
 #[derive(Debug, Clone, Default)]
 pub struct JsonMemory<T> {
     tasks: Arc<RwLock<BTreeMap<TaskKey, Mutex<Value>>>>,
     buffer: Vec<Request<T, ()>>,
 }
 
+#[cfg(feature = "json")]
 impl JsonMemory<Value> {
     fn create_channel<T: 'static + DeserializeOwned + Serialize + Send>(
         &self,
@@ -117,6 +126,8 @@ impl JsonMemory<Value> {
     }
 }
 
+#[cfg(feature = "json")]
+
 impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<T> {
     type Error = SendError;
 
@@ -151,6 +162,8 @@ impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<T> {
         Sink::<Request<T, ()>>::poll_flush(self, cx)
     }
 }
+
+#[cfg(feature = "json")]
 
 impl<T: DeserializeOwned> Stream for JsonMemory<T> {
     type Item = Request<T, ()>;
@@ -234,13 +247,14 @@ impl<T: Clone + Send + Unpin> TaskSink<T> for MemorySink<T> {
     }
 }
 
+#[cfg(feature = "json")]
 impl<T: Serialize + Send + Unpin> TaskSink<T> for JsonMemory<T>
 // where
 //     JsonMemory<T>: Sink<Request<Value, ()>>,
 {
     type Error = serde_json::Error;
 
-    type Codec = JsonCodec<Value>;
+    type Codec = super::codec::json::JsonCodec<Value>;
 
     type Compact = Value;
 
@@ -304,6 +318,7 @@ impl<T: 'static + Clone + Send> Backend<T, ()> for MemoryStorage<MemoryWrapper<T
     }
 }
 
+#[cfg(feature = "json")]
 impl<T: 'static + Clone + Send + DeserializeOwned> Backend<T, ()> for MemoryStorage<JsonMemory<T>> {
     type Error = BoxDynError;
     type Stream = RequestStream<Request<T, ()>>;
@@ -328,6 +343,7 @@ impl<T: 'static + Clone + Send + DeserializeOwned> Backend<T, ()> for MemoryStor
     }
 }
 
+#[cfg(feature = "json")]
 #[derive(Debug, Clone, Default)]
 struct Wrapped {
     namespace: String,
@@ -360,12 +376,14 @@ where
     }
 }
 
+#[cfg(feature = "json")]
 #[derive(Debug)]
 struct SharedInMemoryStream<T> {
     inner: JsonMemory<Value>,
     req_type: PhantomData<T>,
 }
 
+#[cfg(feature = "json")]
 impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
     type Item = Request<T, ()>;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -391,9 +409,8 @@ impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
     }
 }
 
-impl<Args: Send + Serialize + DeserializeOwned + 'static> MakeShared<Args>
-    for JsonMemory<Value>
-{
+#[cfg(feature = "json")]
+impl<Args: Send + Serialize + DeserializeOwned + 'static> MakeShared<Args> for JsonMemory<Value> {
     type Backend = MemoryStorage<MemoryWrapper<Args>>;
 
     type Config = ();
@@ -447,10 +464,7 @@ mod tests {
         let mut string_sink = string_store.sink();
 
         for i in 0..ITEMS {
-            string_sink
-                .push(format!("ITEM: {i}"))
-                .await
-                .unwrap();
+            string_sink.push(format!("ITEM: {i}")).await.unwrap();
             int_sink.push(i).await.unwrap();
         }
         #[derive(Clone, Debug, Default)]

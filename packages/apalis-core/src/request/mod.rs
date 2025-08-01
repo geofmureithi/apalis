@@ -21,8 +21,6 @@
 //!
 //! This module also defines helper types such as [`Attempt`], [`State`], [`TaskId`], and [`Extensions`] for managing task metadata.
 
-use serde::{Deserialize, Serialize};
-
 use std::{fmt::Debug, time::SystemTime};
 
 use crate::request::{attempt::Attempt, extensions::Extensions, state::State, task_id::TaskId};
@@ -34,8 +32,8 @@ pub mod state;
 pub mod task_id;
 
 /// Represents a task which can be serialized and executed
-
-#[derive(Serialize, Debug, Deserialize, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default)]
 pub struct Request<Args, Ctx> {
     /// The inner request part
     pub args: Args,
@@ -44,14 +42,14 @@ pub struct Request<Args, Ctx> {
 }
 
 /// Component parts of a `Request`
-// #[non_exhaustive]
-#[derive(Serialize, Debug, Deserialize, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default)]
 pub struct Parts<Ctx> {
     /// The request's id
     pub task_id: TaskId,
 
     /// The request's extensions
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub data: Extensions,
 
     /// The request's attempts

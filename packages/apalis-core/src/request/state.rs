@@ -1,14 +1,13 @@
 use core::fmt;
 use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
 
 /// Represents the state of a task
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
-#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
 pub enum State {
     /// Task is pending
-    #[serde(alias = "Latest")]
     Pending,
     /// Task is queued for execution, but no worker has picked it up
     Queued,

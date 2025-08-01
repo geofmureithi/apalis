@@ -13,7 +13,7 @@ readme = "../../README.md"
 
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"], optional = true }
 futures = { version = "0.3.30", features = ["async-await"] }
 tower = { version = "0.5", features = [
     "util",
@@ -25,7 +25,7 @@ ulid = { version = "1.1.2", default-features = false, features = ["std"] }
 futures-timer = { version = "3.0.3", optional = true }
 tracing = { version = "0.1", default-features = false, optional = true }
 # Needed for the codec
-serde_json = { version = "1" }
+serde_json = { version = "1", optional = true }
 
 
 [dependencies.document-features]
@@ -34,10 +34,11 @@ optional = true
 
 
 [features]
-default = ["test-utils", "json"]
-docsrs = ["document-features"]
-sleep = ["futures-timer"]
-json = []
+default = []
+docsrs = ["dep:document-features"]
+sleep = ["dep:futures-timer"]
+serde = ["dep:serde"]
+json = ["serde", "dep:serde_json"]
 test-utils = []
 tracing = ["dep:tracing"]
 

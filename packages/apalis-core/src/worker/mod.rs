@@ -70,7 +70,6 @@ use futures::future::{join, select, BoxFuture, Either};
 use futures::stream::BoxStream;
 use futures::{Future, FutureExt, SinkExt, Stream, StreamExt};
 use pin_project_lite::pin_project;
-use serde::{Deserialize, Serialize};
 use std::any::type_name;
 use std::fmt::Debug;
 use std::fmt::{self, Display};

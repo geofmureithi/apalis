@@ -38,7 +38,7 @@ impl<T: Clone> Decoder<T> for CloneOpCodec {
 }
 
 /// Encoding for tasks using json
-// #[cfg(feature = "json")]
+#[cfg(feature = "json")]
 pub mod json {
     use std::marker::PhantomData;
 
