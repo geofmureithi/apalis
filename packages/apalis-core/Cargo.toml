@@ -13,11 +13,21 @@ readme = "../../README.md"
 
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"], optional = true }
-futures-util = { version = "0.3.30" }
-futures-core = { version = "0.3.30" }
-futures-channel = { version = "0.3.30" }
-
+serde = { version = "1.0", features = [
+    "derive",
+], optional = true, default-features = false }
+futures-util = { version = "0.3.30", features = [
+    "sink",
+    "async-await",
+    "async-await-macro",
+    "std"
+], default-features = false }
+futures-core = { version = "0.3.30", default-features = false }
+futures-channel = { version = "0.3.30", features = [
+    "sink",
+    "std",
+], default-features = false }
+futures-sink = { version = "0.3.30", default-features = false }
 tower = { version = "0.5", features = [
     "util",
     "limit",

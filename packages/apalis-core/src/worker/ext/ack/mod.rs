@@ -1,4 +1,4 @@
-use futures::future::BoxFuture;
+use futures_util::future::BoxFuture;
 use pin_project_lite::pin_project;
 use std::{
     future::Future,

@@ -68,7 +68,7 @@ use crate::worker::event::Event;
 use futures_channel::mpsc::{self, channel, unbounded};
 use futures_core::stream::BoxStream;
 use futures_util::future::{join, select, BoxFuture, Either};
-use futures_util::{Future, FutureExt, SinkExt, Stream, StreamExt};
+use futures_util::{Future, FutureExt, Stream, StreamExt};
 use pin_project_lite::pin_project;
 use std::any::type_name;
 use std::fmt::Debug;
@@ -191,7 +191,7 @@ where
         let tasks = poll_tasks(service, stream);
         let mut w = worker.clone();
         let mut ww = w.clone();
-        let starter : BoxStream<'static, _> = futures::stream::once(async move {
+        let starter : BoxStream<'static, _> = futures_util::stream::once(async move {
             if !ww.is_running() {
                  ww.start()?;
             }
@@ -202,13 +202,13 @@ where
                 Err(e) => Some(Err(e))
             }
         }).boxed();
-        let wait_for_exit: BoxStream<'static, _> = futures::stream::once(async move {
+        let wait_for_exit: BoxStream<'static, _> = futures_util::stream::once(async move {
             match worker.await {
                 Ok(_) => Err(WorkerError::GracefulExit),
                 Err(e) => Err(e)
             }
          }).boxed();
-        let work_stream = futures::stream_select!(wait_for_exit, heartbeat, tasks).map(move |res| {
+        let work_stream = futures_util::stream_select!(wait_for_exit, heartbeat, tasks).map(move |res| {
             if let Ok(e) = &res{
                 w.emit(e);
             }

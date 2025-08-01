@@ -159,7 +159,7 @@ impl<B, S, Res> TestWorker<B, S, Res> {
             .stream()
             .map(|r| Item::Ev(r));
         let task_stream = rx.map(|s| Item::Res(s));
-        let stream = futures::stream::select(task_stream, stream)
+        let stream = futures_util::stream::select(task_stream, stream)
             .filter_map(move |s| {
                 let mut tx = sender.clone();
                 async move {

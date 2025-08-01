@@ -9,11 +9,9 @@ use crate::{
     worker::{self, context::WorkerContext},
 };
 use futures_channel::mpsc::{channel, unbounded, Receiver, SendError, Sender};
+use futures_sink::Sink;
 use futures_util::{
-
-    future::pending,
-    stream::{self, BoxStream},
-    FutureExt, Sink, SinkExt, Stream, StreamExt,
+    future::pending, stream::{self, BoxStream}, FutureExt, SinkExt, Stream, StreamExt
 };
 use std::{
     any::Any,
@@ -104,7 +102,7 @@ impl JsonMemory<Value> {
                 );
 
                 let req = Request::new_with_parts(value, request.parts);
-                futures::stream::iter(vec![Ok(req)])
+                futures_util::stream::iter(vec![Ok(req)])
             })
         };
 
@@ -242,7 +240,7 @@ impl<T: Clone + Send + Unpin> TaskSink<T> for MemorySink<T> {
     ) -> Result<Parts<Self::Context>, Self::Error> {
         let p = req.parts.clone();
         let mut sink = self.inner.write().unwrap();
-        let req = sink.send(req).boxed();
+        // let req = sink.send(req).boxed();
         todo!()
         // block_on(req.map(|s| s.map(|_| p)))
     }
@@ -438,7 +436,7 @@ impl<Args: Send + Serialize + DeserializeOwned + 'static> MakeShared<Args> for J
 mod tests {
     use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
-    use futures::future::ready;
+    use futures_util::future::ready;
 
     use crate::{
         backend::memory::MemoryStorage,
@@ -510,6 +508,6 @@ mod tests {
             .build(task)
             .run();
 
-        let _ = futures::future::join(int_worker, string_worker).await;
+        let _ = futures_util::future::join(int_worker, string_worker).await;
     }
 }

@@ -3,9 +3,10 @@ use crate::backend::{self, RequestStream, TaskSink};
 use crate::error::BoxDynError;
 use crate::request::Request;
 use crate::{backend::Backend, worker::context::WorkerContext};
+use futures_sink::Sink;
 use futures_util::stream::{once, select, Select};
 use futures_util::{stream::BoxStream, StreamExt};
-use futures_util::{Sink, SinkExt, Stream, TryStreamExt};
+use futures_util::{SinkExt, Stream, TryStreamExt};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::{error, fmt};
@@ -157,7 +158,7 @@ impl From<PipeErrorKind> for PipeError {
 mod tests {
     use std::{io, time::Duration};
 
-    use futures::stream;
+    use futures_util::stream;
     use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{

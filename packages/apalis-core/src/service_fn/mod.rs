@@ -126,7 +126,7 @@ macro_rules! impl_service_fn {
         {
             type Response = R;
             type Error = BoxDynError;
-            type Future = futures::future::BoxFuture<'static, Result<R, BoxDynError>>;
+            type Future = futures_util::future::BoxFuture<'static, Result<R, BoxDynError>>;
 
             fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
                 Poll::Ready(Ok(()))

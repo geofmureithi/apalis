@@ -263,8 +263,8 @@ impl Monitor {
         let shutdown = self.shutdown.clone();
         let shutdown_after = self.shutdown.shutdown_after(signal);
         if let Some(terminator) = self.terminator {
-            let _res = futures::future::select(
-                futures::future::join_all(
+            let _res = futures_util::future::select(
+                futures_util::future::join_all(
                     self.workers
                         .into_iter()
                         .map(|(_, worker)| select(worker.ctx, worker.fut)),
@@ -280,7 +280,7 @@ impl Monitor {
             .await;
         } else {
             let runner = self.run();
-            let res = futures::join!(shutdown_after, runner); // If no terminator is provided, we wait for both the shutdown call and all workers to complete
+            let res = futures_util::join!(shutdown_after, runner); // If no terminator is provided, we wait for both the shutdown call and all workers to complete
             match res {
                 (Ok(_), Ok(_)) => {
                     // All good
@@ -305,8 +305,8 @@ impl Monitor {
     pub async fn run(self) -> std::io::Result<()> {
         let shutdown = self.shutdown.clone();
         let shutdown_future = self.shutdown.boxed().map(|_| ());
-        futures::join!(
-            futures::future::join_all(self.workers.into_iter().map(|(_, mut worker)| {
+        futures_util::join!(
+            futures_util::future::join_all(self.workers.into_iter().map(|(_, mut worker)| {
                 worker.ctx.start().expect("Worker should be able to start");
                 select(worker.ctx, worker.fut)
             }))

@@ -6,7 +6,7 @@ use std::{fmt::Debug, future::Future, marker::PhantomData, time::Duration};
 use futures_util::{
     future::{pending, ready},
     stream::{self, BoxStream},
-    FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
+    FutureExt, Stream, StreamExt, TryFutureExt,
 };
 use tower::layer::util::Identity;
 
