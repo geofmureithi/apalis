@@ -1,7 +1,8 @@
 use std::{future::Future, ops::Deref, time::Duration};
 
 use futures_util::{future::BoxFuture, FutureExt};
-use tower::{layer::util::Stack, Layer, Service};
+use tower_layer::{Layer, Stack};
+use tower_service::Service;
 
 use crate::{
     request::{data::MissingDataError, Request},

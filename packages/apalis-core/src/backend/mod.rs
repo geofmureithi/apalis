@@ -8,7 +8,7 @@ use futures_util::{
     stream::{self, BoxStream},
     FutureExt, Stream, StreamExt, TryFutureExt,
 };
-use tower::layer::util::Identity;
+use tower_layer::Identity;
 
 use crate::{
     backend::codec::Encoder,

@@ -5,7 +5,9 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
-use tower::{Layer, Service};
+
+use tower_layer::Layer;
+use tower_service::Service;
 
 use crate::error::BoxDynError;
 

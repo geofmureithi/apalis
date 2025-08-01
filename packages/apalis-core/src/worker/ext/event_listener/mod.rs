@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
-use tower::{layer::util::Stack, Layer, Service};
+use tower_layer::{Layer, Stack};
+use tower_service::Service;
 
 use crate::{
     backend::Backend,
-    worker::builder::WorkerBuilder,
     request::Request,
+    worker::builder::WorkerBuilder,
     worker::{Event, WorkerContext},
 };
 
@@ -56,8 +57,7 @@ where
     }
 }
 
-impl<Args, P, M, Ctx> EventListenerExt<Args, Ctx, P, M>
-    for WorkerBuilder<Args, Ctx, P, M>
+impl<Args, P, M, Ctx> EventListenerExt<Args, Ctx, P, M> for WorkerBuilder<Args, Ctx, P, M>
 where
     P: Backend<Args, Ctx>,
     M: Layer<EventListenerLayer>,
@@ -93,14 +93,6 @@ where
         let _ = self.event_handler.write().map(|mut res| {
             let _ = res.insert(new_fn);
         });
-        let this = self.layer(EventListenerLayer);
-        WorkerBuilder {
-            name: this.name,
-            request: this.request,
-            layer: this.layer,
-            source: this.source,
-            shutdown: this.shutdown,
-            event_handler: this.event_handler,
-        }
+        self.layer(EventListenerLayer)
     }
 }

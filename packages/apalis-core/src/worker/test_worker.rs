@@ -38,7 +38,7 @@
 //! - [`ExecuteNext`] — Trait for advancing the test worker to process the next task.
 //!
 //! This module is intended for use in tests and local development.
-//! [`Service`]: tower::Service
+//! [`Service`]: tower_service::Service
 use crate::backend::{Backend, Reschedule};
 use crate::error::BoxDynError;
 use crate::request::task_id::TaskId;
@@ -57,8 +57,8 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tower::util::BoxService;
-use tower::{Layer, Service, ServiceBuilder};
+use tower_layer::{Identity, Layer};
+use tower_service::Service;
 
 /// A test worker to allow you to test services.
 /// Important for testing backends and tasks
@@ -147,12 +147,10 @@ impl<B, S, Res> TestWorker<B, S, Res> {
         }
         let (tx, rx) = channel(1);
         let sender = tx.clone();
-        let service = ServiceBuilder::new()
-            .layer_fn(|service| TestEmitService {
-                service,
-                tx: tx.clone(),
-            })
-            .service(service);
+        let service = TestEmitService {
+            service,
+            tx: tx.clone(),
+        };
         let stream = WorkerBuilder::new("test-worker")
             .backend(backend)
             .build(service)

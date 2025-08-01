@@ -72,7 +72,8 @@ use futures_util::{
     future::{select, BoxFuture},
     Future, FutureExt, StreamExt,
 };
-use tower::{Layer, Service};
+use tower_layer::Layer;
+use tower_service::Service;
 
 use crate::{
     backend::Backend,

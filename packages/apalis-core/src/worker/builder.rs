@@ -41,7 +41,7 @@
 //! ```
 //! # // this (and other) doctest is ignored because we don't have a way
 //! # // to say that it should only be run with cfg(feature = "...")
-//! # use tower::Service;
+//! # use tower_service::Service;
 //! # use tower::builder::ServiceBuilder;
 //! # #[cfg(all(feature = "buffer", feature = "limit"))]
 //! # async fn wrap<S>(svc: S) where S: Service<(), Error = &'static str> + 'static + Send, S::Future: Send {
@@ -60,7 +60,7 @@
 //! in-flight.
 //!
 //! ```
-//! # use tower::Service;
+//! # use tower_service::Service;
 //! # use tower::builder::ServiceBuilder;
 //! # #[cfg(all(feature = "buffer", feature = "limit"))]
 //! # async fn wrap<S>(svc: S) where S: Service<(), Error = &'static str> + 'static + Send, S::Future: Send {
@@ -88,11 +88,7 @@
 use std::{future::Future, marker::PhantomData};
 
 use futures_util::Stream;
-use tower::{
-    layer::util::{Identity, Stack},
-    util::BoxService,
-    Layer, Service, ServiceBuilder,
-};
+use tower_layer::{Identity, Layer, Stack};
 
 use crate::{
     backend::{self, Backend},
@@ -107,7 +103,7 @@ use crate::{
 pub struct WorkerBuilder<Args, Ctx, Source, Middleware> {
     pub(crate) name: String,
     pub(crate) request: PhantomData<(Args, Ctx)>,
-    pub(crate) layer: ServiceBuilder<Middleware>,
+    pub(crate) layer: Middleware,
     pub(crate) source: Source,
     pub(crate) event_handler: EventHandler,
     pub(crate) shutdown: Option<Shutdown>,
@@ -131,7 +127,7 @@ impl WorkerBuilder<(), (), (), Identity> {
     pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), (), Identity> {
         WorkerBuilder {
             request: PhantomData,
-            layer: ServiceBuilder::new(),
+            layer: Identity::new(),
             source: (),
             name: name.as_ref().to_owned(),
             event_handler: EventHandler::default(),
@@ -182,7 +178,7 @@ impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M> {
     /// Allows adding multiple [`tower`] middleware
     pub fn chain<NewLayer>(
         self,
-        f: impl FnOnce(ServiceBuilder<M>) -> ServiceBuilder<NewLayer>,
+        f: impl FnOnce(M) -> NewLayer,
     ) -> WorkerBuilder<Args, Ctx, B, NewLayer> {
         let middleware = f(self.layer);
 
@@ -203,7 +199,7 @@ impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M> {
         WorkerBuilder {
             request: self.request,
             source: self.source,
-            layer: self.layer.layer(layer),
+            layer: Stack::new( layer, self.layer), // TODO: Decide order here
             name: self.name,
             shutdown: self.shutdown,
             event_handler: self.event_handler,
@@ -219,7 +215,7 @@ impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M> {
         WorkerBuilder {
             request: self.request,
             source: self.source,
-            layer: self.layer.layer(Data::new(data)),
+            layer: Stack::new(Data::new(data), self.layer),
             name: self.name,
             shutdown: self.shutdown,
             event_handler: self.event_handler,
@@ -240,9 +236,6 @@ pub trait ServiceFactory<Resource, Svc, Args, Ctx> {
     fn service(self, resource: Resource) -> Svc;
 }
 
-// pub type BoxServiceFactory<Resource, Req, Res> =
-//     Box<dyn ServiceFactory<Resource, BoxService<Req, Res, BoxDynError>>>;
-
 pub trait WorkerFactory<Args, Ctx, Svc, Backend, M>: Sized {
     fn factory(
         self,
@@ -253,12 +246,9 @@ pub trait WorkerFactory<Args, Ctx, Svc, Backend, M>: Sized {
 impl<T, Args, Ctx, Svc, B, M> WorkerFactory<Args, Ctx, Svc, B, M> for T
 where
     T: ServiceFactory<B::Sink, Svc, Args, Ctx>,
-    B: Backend<Args, Ctx>
+    B: Backend<Args, Ctx>,
 {
-    fn factory(
-        self,
-        builder: WorkerBuilder<Args, Ctx, B, M>,
-    ) -> Worker<Args, Ctx, B, Svc, M> {
+    fn factory(self, builder: WorkerBuilder<Args, Ctx, B, M>) -> Worker<Args, Ctx, B, Svc, M> {
         let svc = self.service(builder.source.sink());
         let mut worker = Worker::new(builder.name, builder.source, svc, builder.layer);
         worker.event_handler = builder

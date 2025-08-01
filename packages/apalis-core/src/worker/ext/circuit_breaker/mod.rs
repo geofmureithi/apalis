@@ -1,4 +1,4 @@
-use tower::{layer::util::Stack, Layer};
+use tower_layer::{Layer, Stack};
 
 use crate::{
     backend::Backend,

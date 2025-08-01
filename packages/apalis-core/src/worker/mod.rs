@@ -16,7 +16,7 @@
 //! A `Worker`:
 //! 1. **Starts** by initializing context and heartbeat.
 //! 2. **Polls** the backend for new tasks.
-//! 3. **Executes** tasks through the provided `tower::Service` stack.
+//! 3. **Executes** tasks through the provided `tower_service::Service` stack.
 //! 4. **Emits events** like `Idle`, `Engage`, `Success`, `Error`, and `HeartBeat`.
 //! 5. **Gracefully shuts down** on signal or explicit stop request.
 //!
@@ -79,9 +79,10 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::task::{Context, Poll};
+use tower_layer::{Identity, Layer, Stack};
+use tower_service::Service;
 
 use thiserror::Error;
-use tower::{Layer, Service, ServiceBuilder};
 
 pub mod builder;
 pub mod call_all;
@@ -96,7 +97,7 @@ pub struct Worker<Args, Ctx, Backend, Svc, Middleware> {
     pub(crate) name: String,
     pub(crate) backend: Backend,
     pub(crate) service: Svc,
-    pub(crate) middleware: ServiceBuilder<Middleware>,
+    pub(crate) middleware: Middleware,
     pub(crate) req: PhantomData<Request<Args, Ctx>>,
     pub(crate) shutdown: Option<Shutdown>,
     pub(crate) event_handler: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>,
@@ -117,7 +118,7 @@ where
 
 impl<Args, Ctx, B, Svc, M> Worker<Args, Ctx, B, Svc, M> {
     /// Build a worker that is ready for execution
-    pub fn new(name: String, backend: B, service: Svc, layers: ServiceBuilder<M>) -> Self {
+    pub fn new(name: String, backend: B, service: Svc, layers: M) -> Self {
         Worker {
             name,
             backend,
@@ -177,10 +178,32 @@ where
         ctx.wrap_listener(event_handler);
         let mut worker = ctx.clone();
         let inner_layers = backend.middleware();
-        let service = ServiceBuilder::new()
-            .layer(Data::new(worker.clone()))
+        struct WorkerServiceBuilder<L> {
+            layer: L,
+        }
+
+        impl<L> WorkerServiceBuilder<L> {
+            fn layer<T>(self, layer: T) -> WorkerServiceBuilder<Stack<T, L>> {
+                WorkerServiceBuilder {
+                    layer: Stack::new(layer, self.layer),
+                }
+            }
+            fn into_inner(self) -> L {
+                self.layer
+            }
+            fn service<S>(&self, service: S) -> L::Service
+            where
+                L: Layer<S>,
+            {
+                self.layer.layer(service)
+            }
+        }
+        let svc = WorkerServiceBuilder {
+            layer: Data::new(worker.clone())
+        };
+        let service = svc
             .layer(inner_layers)
-            .layer(self.middleware.into_inner())
+            .layer(self.middleware)
             .layer(ReadinessLayer::new(worker.clone()))
             .layer(TrackerLayer::new(worker.clone()))
             .service(self.service);

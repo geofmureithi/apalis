@@ -23,7 +23,7 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tower::layer::util::Identity;
+use tower_layer::Identity;
 
 #[cfg(feature = "serde")]
 use serde::{de::DeserializeOwned, Serialize};

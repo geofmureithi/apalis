@@ -41,7 +41,7 @@
 //! [`IntoResponse`]: crate::service_fn::into_response::IntoResponse
 //! [`service_fn`]: crate::service_fn::service_fn
 //! [`ServiceFn`]: crate::service_fn::ServiceFn
-//! [`Service`]: tower::Service
+//! [`Service`]: tower_service::Service
 //! [`Request<Args, Context>`]: crate::request::Request
 use crate::error::BoxDynError;
 use crate::request::Request;
@@ -53,7 +53,7 @@ use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::task::{Context, Poll};
-use tower::Service;
+use tower_service::Service;
 pub mod from_request;
 pub mod into_response;
 use crate::service_fn::into_response::IntoResponse;

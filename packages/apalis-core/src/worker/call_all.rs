@@ -7,7 +7,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tower::Service;
+use tower_service::Service;
 
 use crate::error::BoxDynError;
 

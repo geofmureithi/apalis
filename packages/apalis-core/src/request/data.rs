@@ -1,6 +1,6 @@
 use std::{ops::Deref, task::{Context, Poll}};
 
-use tower::Service;
+use tower_service::Service;
 
 use crate::{request::Request, service_fn::from_request::FromRequest};
 
@@ -48,7 +48,7 @@ impl<T> Deref for Data<T> {
     }
 }
 
-impl<S, T> tower::Layer<S> for Data<T>
+impl<S, T> tower_layer::Layer<S> for Data<T>
 where
     T: Clone + Send + Sync + 'static,
 {

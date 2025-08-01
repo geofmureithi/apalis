@@ -10,7 +10,7 @@ use futures_util::{SinkExt, Stream, TryStreamExt};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::{error, fmt};
-use tower::layer::util::Stack;
+use tower_layer::Stack;
 
 /// A generic Pipe that wraps an inner type along with a `RequestStream`.
 pub struct Pipe<S, Into, Args, Ctx> {

@@ -28,10 +28,8 @@ futures-channel = { version = "0.3.30", features = [
     "std",
 ], default-features = false }
 futures-sink = { version = "0.3.30", default-features = false }
-tower = { version = "0.5", features = [
-    "util",
-    "limit",
-], default-features = false }
+tower-service = "0.3.3"
+tower-layer = "0.3.3"
 pin-project-lite = "0.2.14"
 thiserror = "2.0.0"
 ulid = { version = "1.1.2", default-features = false, features = ["std"] }

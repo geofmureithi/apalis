@@ -85,7 +85,7 @@
 //! ```
 //! [`Backend`]: crate::backend::Backend
 //! [`ServiceFn`]: crate::service_fn::ServiceFn
-//! [`Service`]: tower::Service
+//! [`Service`]: tower_service::Service
 //! [`Request<Args, Context>`]: crate::request::Request
 //! [`WorkerBuilder`]: crate::worker::builder::WorkerBuilder
 //! [`Worker`]: crate::worker::Worker
