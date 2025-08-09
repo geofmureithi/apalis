@@ -6,7 +6,7 @@ use std::str::FromStr;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 #[derive(Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
-pub enum State {
+pub enum Status {
     /// Task is pending
     Pending,
     /// Task is queued for execution, but no worker has picked it up
@@ -21,43 +21,43 @@ pub enum State {
     Killed,
 }
 
-impl Default for State {
+impl Default for Status {
     fn default() -> Self {
-        State::Pending
+        Status::Pending
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum StateError {
+pub enum StatusError {
     #[error("Unknown state: {0}")]
     UnknownState(String),
 }
 
-impl FromStr for State {
-    type Err = StateError;
+impl FromStr for Status {
+    type Err = StatusError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "Pending" => Ok(State::Pending),
-            "Queued" => Ok(State::Queued),
-            "Running" => Ok(State::Running),
-            "Done" => Ok(State::Done),
-            "Failed" => Ok(State::Failed),
-            "Killed" => Ok(State::Killed),
-            _ => Err(StateError::UnknownState(s.to_owned())),
+            "Pending" => Ok(Status::Pending),
+            "Queued" => Ok(Status::Queued),
+            "Running" => Ok(Status::Running),
+            "Done" => Ok(Status::Done),
+            "Failed" => Ok(Status::Failed),
+            "Killed" => Ok(Status::Killed),
+            _ => Err(StatusError::UnknownState(s.to_owned())),
         }
     }
 }
 
-impl fmt::Display for State {
+impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
-            State::Pending => write!(f, "Pending"),
-            State::Queued => write!(f, "Queued"),
-            State::Running => write!(f, "Running"),
-            State::Done => write!(f, "Done"),
-            State::Failed => write!(f, "Failed"),
-            State::Killed => write!(f, "Killed"),
+            Status::Pending => write!(f, "Pending"),
+            Status::Queued => write!(f, "Queued"),
+            Status::Running => write!(f, "Running"),
+            Status::Done => write!(f, "Done"),
+            Status::Failed => write!(f, "Failed"),
+            Status::Killed => write!(f, "Killed"),
         }
     }
 }

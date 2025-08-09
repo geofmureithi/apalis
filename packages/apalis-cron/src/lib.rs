@@ -153,7 +153,7 @@ use apalis_core::error::BoxDynError;
 use apalis_core::request::attempt::Attempt;
 use apalis_core::request::data::MissingDataError;
 use apalis_core::request::extensions::Extensions;
-use apalis_core::request::state::State;
+use apalis_core::request::state::Status;
 use apalis_core::request::task_id::TaskId;
 use apalis_core::request::{Parts, Request};
 use apalis_core::service_fn::from_request::FromRequest;
@@ -343,7 +343,7 @@ where
                 context: s,
                 attempt: Attempt::new(),
                 data: Extensions::new(),
-                state: State::Pending,
+                status: Status::Pending,
             };
 
             Ok(Some(Request::new_with_parts(Default::default(), parts)))

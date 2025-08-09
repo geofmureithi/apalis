@@ -55,7 +55,7 @@ use apalis_core::{
         Backend, RequestStream, TaskSink,
     },
     error::BoxDynError,
-    request::{attempt::Attempt, state::State, task_id::TaskId, Parts, Request},
+    request::{attempt::Attempt, state::Status, task_id::TaskId, Parts, Request},
     service_fn::from_request::FromRequest,
     worker::{
         context::WorkerContext,
@@ -362,8 +362,8 @@ where
                     let mut parts = Parts::default();
                     parts.attempt = Attempt::new_with_value(task.attempts as usize);
                     parts.context = context;
-                    parts.state =
-                        State::from_str(task.status).map_err(|e| build_error(&e.to_string()))?;
+                    parts.status =
+                        Status::from_str(task.status).map_err(|e| build_error(&e.to_string()))?;
                     let task_id =
                         TaskId::from_str(task.task_id).map_err(|e| build_error(&e.to_string()))?;
 
@@ -505,14 +505,13 @@ impl SharedRedisStorage {
     }
 }
 
-impl<Args> MakeShared<Args> for SharedRedisStorage {
-    type Backend = RedisStorage<Args, MultiplexedConnection>;
+impl<Args> MakeShared<Args, RedisStorage<Args, MultiplexedConnection>> for SharedRedisStorage {
 
     type Config = RedisConfig;
 
     type MakeError = RedisError;
 
-    fn make_shared(&mut self) -> Result<Self::Backend, Self::MakeError>
+    fn make_shared(&mut self) -> Result<RedisStorage<Args, MultiplexedConnection>, Self::MakeError>
     where
         Self::Config: Default,
     {
@@ -523,7 +522,7 @@ impl<Args> MakeShared<Args> for SharedRedisStorage {
     fn make_shared_with_config(
         &mut self,
         config: Self::Config,
-    ) -> Result<Self::Backend, Self::MakeError> {
+    ) -> Result<RedisStorage<Args, MultiplexedConnection>, Self::MakeError> {
         let poller = Arc::new(Event::new());
         self.registry
             .lock()

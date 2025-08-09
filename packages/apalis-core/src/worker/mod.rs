@@ -77,7 +77,6 @@ use std::task::{Context, Poll};
 use tower_layer::{Layer, Stack};
 use tower_service::Service;
 
-
 pub mod builder;
 pub mod call_all;
 pub mod context;
@@ -162,7 +161,7 @@ where
     }
 
     pub fn stream(self) -> impl Stream<Item = Result<Event, WorkerError>>{
-        let mut ctx = WorkerContext::new::<M::Service>(&self.name);
+        let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
         self.stream_with_ctx(&mut ctx)
     }
 
@@ -201,7 +200,10 @@ where
             .layer(ReadinessLayer::new(worker.clone()))
             .layer(TrackerLayer::new(worker.clone()))
             .service(self.service);
-        let heartbeat = backend.heartbeat(&worker).map(|_| Ok(Event::HeartBeat));
+        let heartbeat = backend.heartbeat(&worker).map(|res| match res {
+            Ok(_) => Ok(Event::HeartBeat),
+            Err(e) => Err(WorkerError::HeartbeatError(e.into()))
+        });
 
         let stream = backend.poll(&worker);
 
@@ -293,6 +295,8 @@ where
     type Future = Tracked<AttemptOnPollFuture<S::Future>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        println!("Tracker called {:?}", self.ctx.is_ready);
+
         self.service.poll_ready(cx)
     }
 
@@ -364,6 +368,7 @@ where
     type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        println!("Readiness called {:?}", self.ctx.is_ready);
         // Delegate poll_ready to the inner service
         let result = self.inner.poll_ready(cx);
         // Update the readiness state based on the result
@@ -382,7 +387,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{future::ready, ops::Deref, sync::{atomic::AtomicUsize, Arc}, time::Duration};
+    use std::{
+        future::ready,
+        ops::Deref,
+        sync::{atomic::AtomicUsize, Arc},
+        time::Duration,
+    };
 
     use futures_channel::mpsc::SendError;
     use futures_core::future::BoxFuture;

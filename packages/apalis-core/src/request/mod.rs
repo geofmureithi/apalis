@@ -23,7 +23,7 @@
 
 use std::fmt::Debug;
 
-use crate::request::{attempt::Attempt, extensions::Extensions, state::State, task_id::TaskId};
+use crate::request::{attempt::Attempt, extensions::Extensions, state::Status, task_id::TaskId};
 
 pub mod attempt;
 pub mod data;
@@ -59,7 +59,7 @@ pub struct Parts<Ctx> {
     pub context: Ctx,
 
     /// The task status
-    pub state: State,
+    pub status: Status,
 }
 
 impl<T, Ctx> Request<T, Ctx> {
@@ -85,7 +85,7 @@ impl<T, Ctx> Request<T, Ctx> {
                 task_id: Default::default(),
                 attempt: Default::default(),
                 data: Default::default(),
-                state: State::Pending,
+                status: Status::Pending,
             },
         }
     }
@@ -99,7 +99,7 @@ impl<T, Ctx> Request<T, Ctx> {
                 task_id: Default::default(),
                 attempt: Default::default(),
                 data,
-                state: State::Pending,
+                status: Status::Pending,
             },
         }
     }

@@ -8,7 +8,7 @@ use std::{
 
 use crate::{
     error::BoxDynError,
-    request::{state::State, Parts, Request},
+    request::{state::Status, Parts, Request},
     worker::builder::WorkerBuilder,
 };
 
@@ -93,15 +93,11 @@ where
     }
 
     fn call(&mut self, req: Request<Args, Ctx>) -> Self::Future {
-        let mut parts = req.parts.clone();
+        let parts = req.parts.clone();
         let future = self.inner.call(req);
         let mut acknowledger = self.acknowledger.clone();
         Box::pin(async move {
             let res = future.await.map_err(|e| e.into());
-            parts.state = match &res {
-                Ok(_) => State::Done,
-                Err(_) => State::Failed,
-            };
             acknowledger.ack(&res, &parts).await?;
             res
         })

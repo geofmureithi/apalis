@@ -63,19 +63,23 @@
 use std::{
     collections::HashMap,
     fmt::{self, Debug, Formatter},
+    future::IntoFuture,
+    pin::Pin,
     sync::Arc,
+    task::{Context, Poll},
 };
 
 use futures_util::{
     future::{select, BoxFuture},
     Future, FutureExt, StreamExt,
 };
+use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::{
     backend::Backend,
-    error::BoxDynError,
+    error::{BoxDynError, WorkerError},
     monitor::shutdown::Shutdown,
     request::Request,
     worker::{
@@ -87,14 +91,55 @@ use crate::{
 
 pub mod shutdown;
 
-struct MonitoredWorker {
-    ctx: WorkerContext,
-    fut: BoxFuture<'static, ()>,
+pin_project! {
+    pub struct MonitoredWorker {
+        factory: Box<dyn Fn(usize) -> (WorkerContext, BoxFuture<'static, Result<(), Event>>)>,
+        #[pin]
+        current: Option<(WorkerContext, BoxFuture<'static, Result<(), Event>>)>,
+        attempt: usize,
+        should_restart: Box<dyn Fn(&WorkerError, usize) -> bool + 'static + Send>,
+    }
+}
+
+impl Future for MonitoredWorker {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        let mut this = self.project();
+
+        if this.current.is_none() {
+            let mut worker = (this.factory)(*this.attempt);
+            let _ = worker.0.start();
+            this.current.set(Some(worker));
+            return Poll::Pending;
+        }
+
+        let mut current = this.current.as_mut().as_pin_mut().unwrap();
+
+        let poll_result = catch_unwind(AssertUnwindSafe(|| current.1.as_mut().poll(cx)));
+
+        match poll_result {
+            Ok(Poll::Pending) => Poll::Pending,
+            Ok(Poll::Ready(Ok(()))) => Poll::Ready(()),
+            Ok(Poll::Ready(Err(_))) | Err(_) => {
+                *this.attempt += 1;
+                if !(this.should_restart)(&WorkerError::GracefulExit, *this.attempt) {
+                    return Poll::Ready(());
+                }
+                let mut worker = (this.factory)(*this.attempt);
+                let _ = worker.0.start(); // no unwrap if you don't want panic
+                this.current.replace(worker);
+
+                Poll::Pending
+            }
+        }
+    }
 }
 
 /// A monitor for coordinating and managing a collection of workers.
 pub struct Monitor {
-    workers: HashMap<Arc<String>, MonitoredWorker>,
+    workers: Vec<MonitoredWorker>,
     terminator: Option<BoxFuture<'static, ()>>,
     shutdown: Shutdown,
     event_handler: EventHandler,
@@ -110,18 +155,13 @@ impl Debug for Monitor {
 }
 
 impl Monitor {
-    /// Registers a single instance of a [Worker]
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use apalis_core::monitor::Monitor;
-    ///
-    /// let monitor = Monitor::new();
-    /// let worker = Worker::new();
-    /// monitor.register(worker).run().await;
-    /// ```
-    pub fn register<Args, S, P, Ctx, M>(mut self, worker: Worker<Args, Ctx, P, S, M>) -> Self
+    fn run_worker<Args, S, P, Ctx, M>(
+        index: usize,
+        handler: EventHandler,
+        mut ctx: WorkerContext,
+        worker: Worker<Args, Ctx, P, S, M>,
+        should_restart: impl Fn(&WorkerError, usize) -> bool + 'static + Send,
+    ) -> BoxFuture<'static, Result<(), Event>>
     where
         S: Service<Request<Args, Ctx>> + Send + 'static,
         S::Future: Send,
@@ -146,15 +186,9 @@ impl Monitor {
             Request<Args, Ctx>,
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
     {
-        let id = Arc::new(worker.name.clone());
-        let mut ctx = WorkerContext::new::<M::Service>(&id);
-        ctx.shutdown = Some(self.shutdown.clone());
-
-        let handler = self.event_handler.clone();
-
         let stream = worker.stream_with_ctx(&mut ctx);
         let worker_ctx = ctx.clone();
-        let stream = stream.for_each(move |e| match e {
+        let mut stream = stream.then(move |e| match e {
             Ok(e) => {
                 let ctx = worker_ctx.clone();
                 let handler = handler.clone();
@@ -162,11 +196,12 @@ impl Monitor {
                     match handler.read() {
                         Ok(inner) => {
                             if let Some(h) = inner.as_deref() {
-                                h(&ctx, &e);
+                                // h(&ctx, &e);
                             }
                         }
                         Err(_) => todo!(),
                     };
+                    Ok(())
                 }
                 .boxed()
             }
@@ -174,41 +209,51 @@ impl Monitor {
                 let ctx = worker_ctx.clone();
                 let handler = handler.clone();
                 ctx.stop().unwrap();
+                let restart = should_restart(&e, index);
+                let event = Event::Error(Arc::new(Box::new(e)));
+
                 async move {
                     match handler.read() {
                         Ok(inner) => {
                             if let Some(h) = inner.as_deref() {
-                                h(&ctx, &Event::Error(Arc::new(Box::new(e))));
+                                // h(&ctx, &event);
                             }
                         }
                         Err(_) => todo!(),
                     };
+                    if restart {
+                        return Err(event);
+                    }
+                    Ok(())
                 }
                 .boxed()
             }
         });
-        let worker = MonitoredWorker {
-            ctx,
-            fut: stream.boxed(),
-        };
-        self.workers.insert(id, worker);
-        self
+        async move {
+            loop {
+                match stream.next().await {
+                    Some(Err(e)) => return Err(e),
+                    None => return Ok(()),
+                    _ => (),
+                }
+            }
+        }
+        .boxed()
     }
-
-    /// Registers multiple workers with the monitor.
+    /// Registers a single instance of a [Worker]
     ///
-    /// # Arguments
+    /// # Examples
     ///
-    /// * `count` - The number of workers to register.
-    /// * `worker` - A Worker that is ready for running.
+    /// ```
+    /// use apalis_core::monitor::Monitor;
     ///
-    /// # Returns
-    ///
-    /// The monitor instance, with all workers added to the collection.
-    pub fn register_with_count<Args, S, P, Ctx, M>(
+    /// let monitor = Monitor::new();
+    /// let worker = Worker::new();
+    /// monitor.register(worker).run().await;
+    /// ```
+    pub fn register<Args, S, P, Ctx, M>(
         mut self,
-        count: usize,
-        worker_fn: impl Fn(usize) -> Worker<Args, Ctx, P, S, M>,
+        factory: impl Fn(usize) -> Worker<Args, Ctx, P, S, M> + 'static,
     ) -> Self
     where
         S: Service<Request<Args, Ctx>> + Send + 'static,
@@ -234,12 +279,47 @@ impl Monitor {
             Request<Args, Ctx>,
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
     {
-        for index in 0..count {
-            let worker = worker_fn(index);
-            self = self.register(worker);
-        }
+        let worker = factory(0);
+
+        let shutdown = Some(self.shutdown.clone());
+        let handler = self.event_handler.clone();
+        // let h = handler.clone();
+        // ctx.wrap_listener(move |ctx, event| {
+        //     match h.read() {
+        //         Ok(inner) => {
+        //             if let Some(h) = inner.as_deref() {
+        //                 h(&ctx, &event);
+        //             }
+        //         }
+        //         Err(_) => todo!(),
+        //     };
+        // });
+
+        let worker = MonitoredWorker {
+            current: None,
+            factory: Box::new(move |index| {
+                let new_worker = factory(index);
+                let id = Arc::new(worker.name.clone());
+                let mut ctx = WorkerContext::new::<M::Service>(&id);
+                ctx.shutdown = shutdown.clone();
+                (
+                    ctx.clone(),
+                    Self::run_worker(
+                        index,
+                        handler.clone(),
+                        ctx.clone(),
+                        new_worker,
+                        |_, index| index < 1,
+                    ),
+                )
+            }),
+            attempt: 0,
+            should_restart: Box::new(|_, index| index < 1),
+        };
+        self.workers.push(worker);
         self
     }
+
     /// Runs the monitor and all its registered workers until they have all completed or a shutdown signal is received.
     ///
     /// # Arguments
@@ -263,13 +343,7 @@ impl Monitor {
         let shutdown_after = self.shutdown.shutdown_after(signal);
         if let Some(terminator) = self.terminator {
             let _res = futures_util::future::select(
-                futures_util::future::join_all(
-                    self.workers
-                        .into_iter()
-                        .map(|(_, worker)| select(worker.ctx, worker.fut)),
-                )
-                .map(|_| shutdown.start_shutdown())
-                .boxed(),
+                futures_util::future::join_all(self.workers).map(|_| shutdown.start_shutdown()),
                 async {
                     let _res = shutdown_after.await;
                     terminator.await;
@@ -305,11 +379,7 @@ impl Monitor {
         let shutdown = self.shutdown.clone();
         let shutdown_future = self.shutdown.boxed().map(|_| ());
         futures_util::join!(
-            futures_util::future::join_all(self.workers.into_iter().map(|(_, mut worker)| {
-                worker.ctx.start().expect("Worker should be able to start");
-                select(worker.ctx, worker.fut)
-            }))
-            .map(|_| shutdown.start_shutdown()),
+            futures_util::future::join_all(self.workers).map(|_| shutdown.start_shutdown()),
             shutdown_future,
         );
 
@@ -331,7 +401,7 @@ impl Default for Monitor {
             shutdown: Shutdown::new(),
             terminator: None,
             event_handler: Arc::default(),
-            workers: HashMap::new(),
+            workers: Vec::new(),
         }
     }
 }
@@ -376,8 +446,11 @@ impl Monitor {
 #[cfg(test)]
 mod tests {
     use crate::{
-        backend::{Backend, BackendWithSink, TaskSink}, request::task_id::TaskId, worker::{context::WorkerContext, ext::event_listener::EventListenerExt}
+        backend::{Backend, BackendWithSink, TaskSink},
+        request::task_id::TaskId,
+        worker::{context::WorkerContext, ext::event_listener::EventListenerExt},
     };
+    use core::panic;
     use std::{io, time::Duration};
 
     use tokio::time::sleep;
@@ -390,7 +463,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_works_with_workers() {
-        let mut backend = MemoryStorage::new();
+        let mut backend = MemoryStorage::new_with_json();
 
         for i in 0..10 {
             backend.sink().push(i).await.unwrap();
@@ -400,11 +473,12 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(1)).await;
             Ok::<_, io::Error>(request)
         });
-        let worker = WorkerBuilder::new("rango-tango")
-            .backend(backend)
-            .build(service);
         let monitor: Monitor = Monitor::new();
-        let monitor = monitor.register(worker);
+        let monitor = monitor.register(move |index| {
+            WorkerBuilder::new(format!("rango-tango-{index}"))
+                .backend(backend.clone())
+                .build(service.clone())
+        });
         let shutdown = monitor.shutdown.clone();
         tokio::spawn(async move {
             sleep(Duration::from_millis(1500)).await;
@@ -414,28 +488,30 @@ mod tests {
     }
     #[tokio::test]
     async fn test_monitor_run() {
-        let mut backend = MemoryStorage::new();
+        let mut backend = MemoryStorage::new_with_json();
         let mut sink = backend.sink();
-        for i in 0..10 {
-            sink.push(i).await.unwrap();
-        }
 
-        let worker = WorkerBuilder::new("rango-tango")
-            .backend(backend)
-            .on_event(|wrk, e| {
-                println!("{}, {e:?}", wrk.name());
-            })
-            .build(|request| async move {
-                tokio::time::sleep(Duration::from_millis(1000)).await;
-                Ok::<_, io::Error>(request)
-            });
-        let monitor: Monitor = Monitor::new();
-
-        let monitor = monitor.on_event(|wrk, e| {
-            println!("{}, {e:?}", wrk.name());
+        tokio::spawn(async move {
+            for i in 0..10 {
+                sink.push(i).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(i)).await;
+            }
         });
 
-        let monitor = monitor.register(worker);
+        let monitor: Monitor = Monitor::new()
+            .register(move |index| {
+                WorkerBuilder::new(format!("rango-tango-{index}"))
+                    .backend(backend.clone())
+                    .on_event(|wrk, e| {
+                        println!("{}, {e:?}", wrk.name());
+                    })
+                    .build(move |r| async move { if r % 5 == 0 {
+                        panic!("Brrr")
+                    } })
+            })
+            .on_event(|wrk, e| {
+                println!("{}, {e:?}", wrk.name());
+            });
         assert_eq!(monitor.workers.len(), 1);
         let shutdown = monitor.shutdown.clone();
 
@@ -462,15 +538,17 @@ mod tests {
             println!("{:?}, {e:?}", wrk.name());
         });
 
-        let monitor = monitor.register_with_count(5, move |index| {
+        let monitor = monitor.register(move |index| {
             WorkerBuilder::new(format!("worker-{}", index))
                 .backend(backend.clone())
                 .layer(ConcurrencyLimitLayer::new(1))
-                .build(move |request: i32, id: TaskId, w: WorkerContext| async move {
-                    println!("{id:?}, {}", w.name());
-                    tokio::time::sleep(Duration::from_secs(index as u64)).await;
-                    Ok::<_, io::Error>(request)
-                })
+                .build(
+                    move |request: i32, id: TaskId, w: WorkerContext| async move {
+                        println!("{id:?}, {}", w.name());
+                        tokio::time::sleep(Duration::from_secs(index as u64)).await;
+                        Ok::<_, io::Error>(request)
+                    },
+                )
         });
         assert_eq!(monitor.workers.len(), 5);
         let shutdown = monitor.shutdown.clone();

@@ -1,7 +1,5 @@
 use apalis_core::request::Parts;
-use apalis_core::task::attempt::Attempt;
-use apalis_core::task::task_id::TaskId;
-use apalis_core::{request::Request, worker::WorkerId};
+use apalis_core::request::Request;
 
 use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Type};
@@ -28,6 +26,7 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
     sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
+        use apalis_core::request::{attempt::Attempt, task_id::TaskId};
         use chrono::DateTime;
         use sqlx::Row;
         use std::str::FromStr;
@@ -69,16 +68,7 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
         })?);
 
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
-        context.set_lock_by(
-            lock_by
-                .as_deref()
-                .map(WorkerId::from_str)
-                .transpose()
-                .map_err(|_| sqlx::Error::ColumnDecode {
-                    index: "lock_by".to_string(),
-                    source: "Could not parse lock_by as a WorkerId".into(),
-                })?,
-        );
+        context.set_lock_by(lock_by);
 
         let priority: i32 = row.try_get("priority").unwrap_or_default();
         context.set_priority(priority);
@@ -97,6 +87,7 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
     sqlx::FromRow<'r, sqlx::postgres::PgRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        use apalis_core::request::{attempt::Attempt, task_id::TaskId};
         use chrono::Utc;
         use sqlx::Row;
         use std::str::FromStr;
@@ -130,23 +121,8 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
         let last_error = row.try_get("last_error").unwrap_or_default();
         context.set_last_error(last_error);
 
-        let status: String = row.try_get("status")?;
-        context.set_status(status.parse().map_err(|e| sqlx::Error::ColumnDecode {
-            index: "job".to_string(),
-            source: Box::new(e),
-        })?);
-
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
-        context.set_lock_by(
-            lock_by
-                .as_deref()
-                .map(WorkerId::from_str)
-                .transpose()
-                .map_err(|_| sqlx::Error::ColumnDecode {
-                    index: "lock_by".to_string(),
-                    source: "Could not parse lock_by as a WorkerId".into(),
-                })?,
-        );
+        context.set_lock_by(lock_by);
 
         let priority: i32 = row.try_get("priority").unwrap_or_default();
         context.set_priority(priority);
@@ -165,6 +141,7 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
     for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
+        use apalis_core::request::{attempt::Attempt, task_id::TaskId};
         use sqlx::Row;
         use std::str::FromStr;
         let job: T = row.try_get("job")?;
@@ -204,16 +181,7 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
         })?);
 
         let lock_by: Option<String> = row.try_get("lock_by").unwrap_or_default();
-        context.set_lock_by(
-            lock_by
-                .as_deref()
-                .map(WorkerId::from_str)
-                .transpose()
-                .map_err(|_| sqlx::Error::ColumnDecode {
-                    index: "lock_by".to_string(),
-                    source: "Could not parse lock_by as a WorkerId".into(),
-                })?,
-        );
+        context.set_lock_by(lock_by);
 
         let priority: i32 = row.try_get("priority").unwrap_or_default();
         context.set_priority(priority);

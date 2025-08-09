@@ -5,13 +5,12 @@ use crate::{
     worker::context::WorkerContext,
 };
 use futures_channel::mpsc::{unbounded, SendError};
+use futures_core::ready;
 use futures_sink::Sink;
 use futures_util::{
     stream::{self, BoxStream},
     FutureExt, SinkExt, Stream, StreamExt,
 };
-#[cfg(feature = "json")]
-use std::sync::Mutex;
 use std::{
     collections::BTreeMap,
     pin::Pin,
@@ -39,7 +38,7 @@ impl<T: Send + 'static> MemoryStorage<MemoryWrapper<T>> {
         Self {
             inner: MemoryWrapper {
                 sender: MemorySink {
-                    inner: Arc::new(RwLock::new(sender)),
+                    inner: Arc::new(futures_util::lock::Mutex::new(sender)),
                 },
                 receiver: receiver.boxed(),
             },
@@ -66,7 +65,7 @@ struct TaskKey {
 #[cfg(feature = "json")]
 #[derive(Debug, Clone, Default)]
 pub struct JsonMemory<T> {
-    tasks: Arc<RwLock<BTreeMap<TaskKey, Mutex<Value>>>>,
+    tasks: Arc<RwLock<BTreeMap<TaskKey, std::sync::Mutex<Value>>>>,
     buffer: Vec<Request<T, ()>>,
 }
 
@@ -145,7 +144,7 @@ impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<T> {
                     task_id,
                     namespace: std::any::type_name::<T>().to_owned(),
                 },
-                Mutex::new(serde_json::to_value(task.args).unwrap()),
+                std::sync::Mutex::new(serde_json::to_value(task.args).unwrap()),
             );
         }
         Poll::Ready(Ok(()))
@@ -182,7 +181,7 @@ impl<T: DeserializeOwned> Stream for JsonMemory<T> {
 
 pub struct MemorySink<T> {
     inner: Arc<
-        RwLock<Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Sync + Unpin + 'static>>,
+        futures_util::lock::Mutex<Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Sync + Unpin + 'static>>,
     >,
 }
 
@@ -198,22 +197,22 @@ impl<T> Sink<Request<T, ()>> for MemorySink<T> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut lock = self.inner.write().unwrap();
+        let mut lock = ready!(self.inner.lock().poll_unpin(cx));
         Pin::new(&mut *lock).poll_ready_unpin(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: Request<T, ()>) -> Result<(), Self::Error> {
-        let mut lock = self.inner.write().unwrap();
+        let mut lock = self.inner.try_lock().unwrap();
         Pin::new(&mut *lock).start_send_unpin(item)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut lock = self.inner.write().unwrap();
+        let mut lock = ready!(self.inner.lock().poll_unpin(cx));
         Pin::new(&mut *lock).poll_flush_unpin(cx)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let mut lock = self.inner.write().unwrap();
+        let mut lock = ready!(self.inner.lock().poll_unpin(cx));
         Pin::new(&mut *lock).poll_close_unpin(cx)
     }
 }
@@ -234,18 +233,14 @@ impl<T: Clone + Send + Unpin> TaskSink<T> for MemorySink<T> {
         req: Request<Self::Compact, Self::Context>,
     ) -> Result<Parts<Self::Context>, Self::Error> {
         let p = req.parts.clone();
-        let sink = self.inner.write().unwrap();
-        // let req = sink.send(req).boxed();
-        todo!()
-        // block_on(req.map(|s| s.map(|_| p)))
+        let mut sink = self.inner.lock().await;
+        sink.send(req).await?;
+        Ok(p)
     }
 }
 
 #[cfg(feature = "json")]
-impl<T: Serialize + Send + Unpin> TaskSink<T> for JsonMemory<T>
-// where
-//     JsonMemory<T>: Sink<Request<Value, ()>>,
-{
+impl<T: Serialize + Send + Unpin> TaskSink<T> for JsonMemory<T> {
     type Error = serde_json::Error;
 
     type Codec = super::codec::json::JsonCodec<Value>;
@@ -434,7 +429,7 @@ impl<Args: Send + Serialize + DeserializeOwned + 'static> crate::backend::shared
         Ok(MemoryStorage {
             inner: MemoryWrapper {
                 sender: MemorySink {
-                    inner: Arc::new(RwLock::new(sender)),
+                    inner: Arc::new(futures_util::lock::Mutex::new(sender)),
                 },
                 receiver,
             },
@@ -490,7 +485,7 @@ mod tests {
         async fn task(job: u32, count: Data<Count>, ctx: WorkerContext) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_millis(2)).await;
             if job == ITEMS - 1 {
-                ctx.stop();
+                ctx.stop()?;
                 return Err("Worker stopped!")?;
             }
             Ok(())
@@ -505,7 +500,7 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(2)).await;
                 println!("{req}");
                 if req.ends_with(&(ITEMS - 1).to_string()) {
-                    ctx.stop();
+                    ctx.stop().unwrap();
                 }
             })
             .run();

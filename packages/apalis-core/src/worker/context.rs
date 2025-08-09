@@ -154,6 +154,15 @@ impl WorkerContext {
         Ok(())
     }
 
+    /// Restart running the worker
+    pub(crate) fn restart(&mut self) -> Result<(), WorkerError> {
+        self.state
+            .store(InnerWorkerState::Pending, Ordering::SeqCst);
+        self.is_ready.store(false, Ordering::SeqCst);
+        info!("Worker {} restarted", self.name());
+        Ok(())
+    }
+
     /// Start a task that is tracked by the worker
     pub fn track<F: Future>(&self, task: F) -> Tracked<F> {
         self.start_task();
@@ -213,6 +222,11 @@ impl WorkerContext {
     /// Returns whether the worker is running
     pub fn is_running(&self) -> bool {
         self.state.load(Ordering::SeqCst) == InnerWorkerState::Running
+    }
+
+    /// Returns whether the worker is pending
+    pub fn is_pending(&self) -> bool {
+        self.state.load(Ordering::SeqCst) == InnerWorkerState::Pending
     }
 
     /// Returns whether the worker is paused

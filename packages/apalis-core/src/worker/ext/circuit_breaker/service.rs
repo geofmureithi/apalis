@@ -184,8 +184,6 @@ impl<S> CircuitBreakerService<S> {
             Err(_) => return false, // If poisoned, reject request
         };
 
-        dbg!(&stats);
-
         match stats.state {
             CircuitState::Closed => true,
             CircuitState::Open => {

@@ -1,7 +1,6 @@
-use apalis_core::request::Request;
-use apalis_core::service_fn::FromRequest;
-use apalis_core::worker::WorkerId;
-use apalis_core::{error::Error, request::State};
+use std::convert::Infallible;
+
+use apalis_core::{request::{state::Status, Request}, service_fn::from_request::FromRequest};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -9,12 +8,11 @@ use serde::{Deserialize, Serialize};
 /// Used to provide a context for a job with an sql backend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlContext {
-    status: State,
     run_at: DateTime<Utc>,
     max_attempts: i32,
     last_error: Option<String>,
     lock_at: Option<i64>,
-    lock_by: Option<WorkerId>,
+    lock_by: Option<String>,
     done_at: Option<i64>,
     priority: i32,
 }
@@ -29,7 +27,6 @@ impl SqlContext {
     /// Build a new context with defaults
     pub fn new() -> Self {
         SqlContext {
-            status: State::Pending,
             run_at: Utc::now(),
             lock_at: None,
             done_at: None,
@@ -80,23 +77,14 @@ impl SqlContext {
         self.lock_at = lock_at;
     }
 
-    /// Get the job status
-    pub fn status(&self) -> &State {
-        &self.status
-    }
-
-    /// Set the job status
-    pub fn set_status(&mut self, status: State) {
-        self.status = status;
-    }
 
     /// Get the time a job was locked
-    pub fn lock_by(&self) -> &Option<WorkerId> {
+    pub fn lock_by(&self) -> &Option<String> {
         &self.lock_by
     }
 
     /// Set `lock_by`
-    pub fn set_lock_by(&mut self, lock_by: Option<WorkerId>) {
+    pub fn set_lock_by(&mut self, lock_by: Option<String>) {
         self.lock_by = lock_by;
     }
 
@@ -121,8 +109,9 @@ impl SqlContext {
     }
 }
 
-impl<Req> FromRequest<Request<Req, SqlContext>> for SqlContext {
-    fn from_request(req: &Request<Req, SqlContext>) -> Result<Self, Error> {
+impl<Req: Sync> FromRequest<Request<Req, SqlContext>> for SqlContext {
+    type Error = Infallible;
+    async fn from_request(req: &Request<Req, SqlContext>) -> Result<Self, Infallible> {
         Ok(req.parts.context.clone())
     }
 }

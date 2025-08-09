@@ -26,8 +26,6 @@
 
 use std::{num::TryFromIntError, time::Duration};
 
-use apalis_core::{error::Error, request::State, response::Response};
-
 /// The context of the sql job
 pub mod context;
 /// Util for fetching rows
@@ -49,6 +47,7 @@ pub mod sqlite;
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;
 
+use apalis_core::{error::BoxDynError, request::state::Status};
 use context::SqlContext;
 // Re-exports
 pub use sqlx;
@@ -78,7 +77,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             keep_alive: Duration::from_secs(30),
-            buffer_size: 10,
+            buffer_size: 5,
             poll_interval: Duration::from_millis(100),
             reenqueue_orphaned_after: Duration::from_secs(300), // 5 minutes
             namespace: String::from("apalis::sql"),
@@ -179,16 +178,17 @@ impl Config {
     }
 }
 
+/// TODO: Apply
 /// Calculates the status from a result
-pub fn calculate_status<Res>(ctx: &SqlContext, res: &Response<Res>) -> State {
-    match &res.inner {
-        Ok(_) => State::Done,
+pub fn calculate_status<Res>(ctx: &SqlContext, res: &Result<Res, BoxDynError>) -> Status {
+    match &res {
+        Ok(_) => Status::Done,
         Err(e) => match &e {
-            Error::Abort(_) => State::Killed,
-            Error::Failed(_) if ctx.max_attempts() as usize <= res.attempt.current() => {
-                State::Killed
-            }
-            _ => State::Failed,
+            // Error::Abort(_) => State::Killed,
+            // e | if ctx.max_attempts() as usize <= res.attempt.current() => {
+            //      State::Killed
+            // }
+            _ => Status::Failed,
         },
     }
 }

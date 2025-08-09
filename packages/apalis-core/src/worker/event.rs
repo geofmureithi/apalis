@@ -1,6 +1,10 @@
-use std::{fmt, sync::{Arc, RwLock}};
+use std::{
+    any::Any,
+    fmt,
+    sync::{Arc, RwLock},
+};
 
-use crate::{error::BoxDynError, worker::context::WorkerContext};
+use crate::{error::BoxDynError, request::task_id::TaskId, worker::context::WorkerContext};
 
 /// An event handler for [`Worker`]
 pub type EventHandler = Arc<RwLock<Option<Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>>>>;
@@ -8,7 +12,7 @@ pub type EventHandler = Arc<RwLock<Option<Box<dyn Fn(&WorkerContext, &Event) + S
 pub type CtxEventHandler = Arc<Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>>;
 
 /// Events emitted by a worker
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Event {
     /// Worker started
     Start,
@@ -17,7 +21,7 @@ pub enum Event {
     /// Worker did a heartbeat
     HeartBeat,
     /// A custom event
-    Custom(String),
+    Custom(Box<dyn Any + 'static + Send + Sync>),
     /// A result of processing
     Success,
     /// Worker encountered an error
@@ -31,7 +35,7 @@ impl fmt::Display for Event {
         let event_description = match &self {
             Event::Start => "Worker started".to_string(),
             Event::Idle => "Worker is idle".to_string(),
-            Event::Custom(msg) => format!("Custom event: {}", msg),
+            Event::Custom(_) => format!("Custom event"),
             Event::Error(err) => format!("Worker encountered an error: {}", err),
             Event::Stop => "Worker stopped".to_string(),
             Event::HeartBeat => "Worker Heartbeat".to_owned(),
