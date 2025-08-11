@@ -99,13 +99,3 @@ impl<Args> MakeShared<Args> for SharedPostgresStorage {
         })
     }
 }
-
-pub trait Fetcher<Codec> {
-    fn create(pool: PgPool, cfg: Config, ctx: WorkerContext) -> Self;
-}
-
-impl<Args, D> Fetcher<D> for PgFetcher<Args, D> {
-    fn create(pool: PgPool, config: Config, wrk: WorkerContext) -> Self {
-        Self::new(pool, config, wrk)
-    }
-}
