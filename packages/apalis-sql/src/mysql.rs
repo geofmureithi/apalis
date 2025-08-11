@@ -6,7 +6,7 @@ use apalis_core::notify::Notify;
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
-use apalis_core::request::{Parts, Request, RequestStream, State};
+use apalis_core::task::{Metadata, Task, RequestStream, State};
 use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
@@ -141,7 +141,7 @@ where
         worker: &WorkerContext,
         interval: Duration,
         buffer_size: usize,
-    ) -> impl Stream<Item = Result<Option<Request<T, SqlContext>>, sqlx::Error>> {
+    ) -> impl Stream<Item = Result<Option<Task<T, SqlContext>>, sqlx::Error>> {
         let pool = self.pool.clone();
         let worker = worker.clone();
         let worker_id = worker.id().to_string();
@@ -186,11 +186,11 @@ where
 
                     for job in jobs {
                         yield {
-                            let (req, ctx) = job.req.take_parts();
+                            let (req, ctx) = job.req.take();
                             let req = C::decode(req)
                                 .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-                            let mut req: Request<T, SqlContext> = Request::new_with_parts(req, ctx);
-                            req.parts.namespace = Some(Namespace(self.config.namespace.clone()));
+                            let mut req: Task<T, SqlContext> = Task::new_with_parts(req, ctx);
+                            req.meta.namespace = Some(Namespace(self.config.namespace.clone()));
                             Some(req)
                         }
                     }
@@ -240,9 +240,9 @@ where
 
     async fn push_request(
         &mut self,
-        job: Request<Self::Job, SqlContext>,
-    ) -> Result<Parts<SqlContext>, sqlx::Error> {
-        let (args, parts) = job.take_parts();
+        job: Task<Self::Job, SqlContext>,
+    ) -> Result<Metadata<SqlContext>, sqlx::Error> {
+        let (args, parts) = job.take();
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL, ?)";
         let pool = self.pool.clone();
@@ -263,9 +263,9 @@ where
 
     async fn push_raw_request(
         &mut self,
-        job: Request<Self::Compact, SqlContext>,
-    ) -> Result<Parts<SqlContext>, sqlx::Error> {
-        let (args, parts) = job.take_parts();
+        job: Task<Self::Compact, SqlContext>,
+    ) -> Result<Metadata<SqlContext>, sqlx::Error> {
+        let (args, parts) = job.take();
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL, ?)";
         let pool = self.pool.clone();
@@ -286,9 +286,9 @@ where
 
     async fn schedule_request(
         &mut self,
-        req: Request<Self::Job, SqlContext>,
+        req: Task<Self::Job, SqlContext>,
         on: i64,
-    ) -> Result<Parts<Self::Context>, sqlx::Error> {
+    ) -> Result<Metadata<Self::Context>, sqlx::Error> {
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, ?, NULL, NULL, NULL, NULL, ?)";
         let pool = self.pool.clone();
@@ -301,20 +301,20 @@ where
         let job_type = self.config.namespace.clone();
         sqlx::query(query)
             .bind(args)
-            .bind(req.parts.task_id.to_string())
+            .bind(req.meta.task_id.to_string())
             .bind(job_type)
-            .bind(req.parts.context.max_attempts())
+            .bind(req.meta.context.max_attempts())
             .bind(on)
-            .bind(req.parts.context.priority())
+            .bind(req.meta.context.priority())
             .execute(&pool)
             .await?;
-        Ok(req.parts)
+        Ok(req.meta)
     }
 
     async fn fetch_by_id(
         &mut self,
         job_id: &TaskId,
-    ) -> Result<Option<Request<Self::Job, SqlContext>>, sqlx::Error> {
+    ) -> Result<Option<Task<Self::Job, SqlContext>>, sqlx::Error> {
         let pool = self.pool.clone();
 
         let fetch_query = "SELECT * FROM jobs WHERE id = ?";
@@ -325,11 +325,11 @@ where
         match res {
             None => Ok(None),
             Some(job) => Ok(Some({
-                let (req, parts) = job.req.take_parts();
+                let (req, parts) = job.req.take();
                 let req = C::decode(req)
                     .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-                let mut req = Request::new_with_parts(req, parts);
-                req.parts.namespace = Some(Namespace(self.config.namespace.clone()));
+                let mut req = Task::new_with_parts(req, parts);
+                req.meta.namespace = Some(Namespace(self.config.namespace.clone()));
                 req
             })),
         }
@@ -345,11 +345,11 @@ where
 
     async fn reschedule(
         &mut self,
-        job: Request<T, SqlContext>,
+        job: Task<T, SqlContext>,
         wait: Duration,
     ) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let job_id = job.parts.task_id.clone();
+        let job_id = job.meta.task_id.clone();
 
         let wait: i64 = wait
             .as_secs()
@@ -367,17 +367,17 @@ where
         Ok(())
     }
 
-    async fn update(&mut self, job: Request<Self::Job, SqlContext>) -> Result<(), sqlx::Error> {
+    async fn update(&mut self, job: Task<Self::Job, SqlContext>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let ctx = job.parts.context;
+        let ctx = job.meta.context;
         let status = ctx.status().to_string();
-        let attempts = job.parts.attempt;
+        let attempts = job.meta.attempt;
         let done_at = *ctx.done_at();
         let lock_by = ctx.lock_by().clone();
         let lock_at = *ctx.lock_at();
         let last_error = ctx.last_error().clone();
         let priority = *ctx.priority();
-        let job_id = job.parts.task_id;
+        let job_id = job.meta.task_id;
         let mut tx = pool.acquire().await?;
         let query =
                 "UPDATE jobs SET status = ?, attempts = ?, done_at = ?, lock_by = ?, lock_at = ?, last_error = ?, priority = ? WHERE id = ?";
@@ -432,13 +432,13 @@ pub enum MysqlPollError {
     ReenqueueOrphanedError(sqlx::Error),
 }
 
-impl<Req, C> Backend<Request<Req, SqlContext>> for MysqlStorage<Req, C>
+impl<Req, C> Backend<Task<Req, SqlContext>> for MysqlStorage<Req, C>
 where
     Req: Serialize + DeserializeOwned + Sync + Send + 'static,
     C: Codec<Compact = Value> + Send + 'static + Sync,
     C::Error: std::error::Error + 'static + Send + Sync,
 {
-    type Stream = BackendStream<RequestStream<Request<Req, SqlContext>>>;
+    type Stream = BackendStream<RequestStream<Task<Req, SqlContext>>>;
 
     type Layer = AckLayer<MysqlStorage<Req, C>, Req, SqlContext, C>;
 
@@ -631,7 +631,7 @@ impl<T, C: Codec> MysqlStorage<T, C> {
 impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExpose<J>
     for MysqlStorage<J>
 {
-    type Request = Request<J, Parts<SqlContext>>;
+    type Request = Task<J, Metadata<SqlContext>>;
     type Error = SqlError;
     async fn stats(&self) -> Result<Stat, Self::Error> {
         let fetch_query = "SELECT
@@ -673,9 +673,9 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
         Ok(res
             .into_iter()
             .map(|j| {
-                let (req, ctx) = j.req.take_parts();
+                let (req, ctx) = j.req.take();
                 let req: J = MysqlCodec::decode(req).unwrap();
-                Request::new_with_ctx(req, ctx)
+                Task::new_with_ctx(req, ctx)
             })
             .collect())
     }
@@ -751,7 +751,7 @@ mod tests {
     async fn consume_one(
         storage: &mut MysqlStorage<Email>,
         worker: &WorkerContext,
-    ) -> Request<Email, SqlContext> {
+    ) -> Task<Email, SqlContext> {
         let mut stream = storage
             .clone()
             .stream_jobs(worker, std::time::Duration::from_secs(10), 1);
@@ -798,7 +798,7 @@ mod tests {
     async fn get_job(
         storage: &mut MysqlStorage<Email>,
         job_id: &TaskId,
-    ) -> Request<Email, SqlContext> {
+    ) -> Task<Email, SqlContext> {
         // add a slight delay to allow background actions like ack to complete
         apalis_core::sleep(Duration::from_secs(1)).await;
         storage
@@ -816,7 +816,7 @@ mod tests {
         let worker = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker).await;
-        let ctx = job.parts.context;
+        let ctx = job.meta.context;
         // TODO: Fix assertions
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
@@ -833,7 +833,7 @@ mod tests {
 
         let job = consume_one(&mut storage, &worker).await;
 
-        let job_id = &job.parts.task_id;
+        let job_id = &job.meta.task_id;
 
         storage
             .kill(worker.id(), job_id)
@@ -841,7 +841,7 @@ mod tests {
             .expect("failed to kill job");
 
         let job = get_job(&mut storage, job_id).await;
-        let ctx = job.parts.context;
+        let ctx = job.meta.context;
         // TODO: Fix assertions
         assert_eq!(*ctx.status(), State::Killed);
         assert!(ctx.done_at().is_some());
@@ -872,7 +872,7 @@ mod tests {
 
         // fetch job
         let job = consume_one(&mut storage, &worker).await;
-        let ctx = job.parts.context;
+        let ctx = job.meta.context;
 
         assert_eq!(*ctx.status(), State::Running);
 
@@ -883,7 +883,7 @@ mod tests {
 
         // then, the job status has changed to Pending
         let job = storage
-            .fetch_by_id(&job.parts.task_id)
+            .fetch_by_id(&job.meta.task_id)
             .await
             .unwrap()
             .unwrap();
@@ -900,7 +900,7 @@ mod tests {
     async fn test_storage_heartbeat_reenqueuorphaned_pulse_last_seen_4min() {
         let mut storage = setup().await;
 
-        let service = apalis_test_service_fn(|_: Request<Email, _>| async move {
+        let service = apalis_test_service_fn(|_: Task<Email, _>| async move {
             apalis_core::sleep(Duration::from_millis(500)).await;
             Ok::<_, io::Error>("success")
         });

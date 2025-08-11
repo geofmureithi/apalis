@@ -150,12 +150,12 @@
 use apalis_core::backend::pipe::{Pipe, PipeExt};
 use apalis_core::backend::{Backend, RequestStream};
 use apalis_core::error::BoxDynError;
-use apalis_core::request::attempt::Attempt;
-use apalis_core::request::data::MissingDataError;
-use apalis_core::request::extensions::Extensions;
-use apalis_core::request::state::Status;
-use apalis_core::request::task_id::TaskId;
-use apalis_core::request::{Parts, Request};
+use apalis_core::task::attempt::Attempt;
+use apalis_core::task::data::MissingDataError;
+use apalis_core::task::extensions::Extensions;
+use apalis_core::task::state::Status;
+use apalis_core::task::task_id::TaskId;
+use apalis_core::task::{Metadata, Task};
 use apalis_core::service_fn::from_request::FromRequest;
 use apalis_core::timer::Delay;
 use apalis_core::worker::context::WorkerContext;
@@ -298,13 +298,13 @@ impl<Tz: TimeZone> CronContext<Tz> {
     }
 }
 
-impl<Req: Sync, Tz: TimeZone> FromRequest<Request<Req, CronContext<Tz>>> for CronContext<Tz>
+impl<Req: Sync, Tz: TimeZone> FromRequest<Task<Req, CronContext<Tz>>> for CronContext<Tz>
 where
     Tz::Offset: Sync,
 {
     type Error = Infallible;
-    async fn from_request(req: &Request<Req, CronContext<Tz>>) -> Result<Self, Infallible> {
-        Ok(req.parts.context.clone())
+    async fn from_request(req: &Task<Req, CronContext<Tz>>) -> Result<Self, Infallible> {
+        Ok(req.meta.context.clone())
     }
 }
 
@@ -315,7 +315,7 @@ where
     Tz::Offset: Send + Sync + Unpin + Display,
 {
     type Error = CronStreamError<Tz>;
-    type Stream = RequestStream<Request<Args, CronContext<Tz>>, CronStreamError<Tz>>;
+    type Stream = RequestStream<Task<Args, CronContext<Tz>>, CronStreamError<Tz>>;
 
     type Layer = Identity;
 
@@ -338,7 +338,7 @@ where
         let stream = self.and_then(|s| async {
             let timestamp: SystemTime = s.get_timestamp().clone().into();
             let task_id = TaskId::from_system_time(timestamp);
-            let parts = Parts {
+            let parts = Metadata {
                 task_id,
                 context: s,
                 attempt: Attempt::new(),
@@ -346,7 +346,7 @@ where
                 status: Status::Pending,
             };
 
-            Ok(Some(Request::new_with_parts(Default::default(), parts)))
+            Ok(Some(Task::new_with_parts(Default::default(), parts)))
         });
         stream.boxed()
     }

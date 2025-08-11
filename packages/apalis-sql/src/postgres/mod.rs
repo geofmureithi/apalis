@@ -16,7 +16,7 @@ use apalis_core::{
         Backend, BackendWithSink, TaskSink,
     },
     error::{BoxDynError, WorkerError},
-    request::{attempt::Attempt, state::Status, task_id::TaskId, Parts, Request},
+    task::{attempt::Attempt, status::Status, task_id::TaskId, Metadata, Task},
     utils::Identity,
     worker::{
         context::WorkerContext,
@@ -35,12 +35,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
 
-use crate::{
-    calculate_status,
-    context::SqlContext,
-    postgres::{fetcher::PgFetcher, shared::Fetcher},
-    Config,
-};
+use crate::{calculate_status, context::SqlContext, postgres::fetcher::PgFetcher, Config};
 
 mod shared;
 
@@ -129,7 +124,7 @@ where
 pub struct PgSink<Args, Codec = JsonCodec<Value>> {
     _marker: PhantomData<(Args, Codec)>,
     pool: PgPool,
-    buffer: Vec<Request<Value, SqlContext>>,
+    buffer: Vec<Task<Value, SqlContext>>,
     config: Config,
     flush_future: Option<Pin<Box<dyn Future<Output = Result<(), sqlx::Error>> + Send>>>,
 }
@@ -146,7 +141,7 @@ impl<Args> PgSink<Args> {
     }
 }
 
-impl<Args, E> Sink<Request<Args, SqlContext>> for PgSink<Args, E>
+impl<Args, E> Sink<Task<Args, SqlContext>> for PgSink<Args, E>
 where
     Args: Unpin + Send + Sync + 'static,
     E: Encoder<Args, Compact = Value> + Unpin,
@@ -159,10 +154,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(
-        self: Pin<&mut Self>,
-        item: Request<Args, SqlContext>,
-    ) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Task<Args, SqlContext>) -> Result<(), Self::Error> {
         // Add the item to the buffer
         self.get_mut()
             .buffer
@@ -197,11 +189,11 @@ where
                 let mut max_attempts_vec = Vec::new();
 
                 for request in buffer {
-                    ids.push(request.parts.task_id.to_string());
+                    ids.push(request.meta.task_id.to_string());
                     job_data.push(request.args);
-                    run_ats.push(request.parts.context.run_at().clone());
-                    priorities.push(*request.parts.context.priority());
-                    max_attempts_vec.push(request.parts.context.max_attempts());
+                    run_ats.push(request.meta.context.run_at().clone());
+                    priorities.push(*request.meta.context.priority());
+                    max_attempts_vec.push(request.meta.context.max_attempts());
                 }
 
                 sqlx::query!(
@@ -285,7 +277,11 @@ pub struct PgAck {
 impl<Res: Serialize> Acknowledge<Res, SqlContext> for PgAck {
     type Error = sqlx::Error;
     type Future = BoxFuture<'static, Result<(), Self::Error>>;
-    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Parts<SqlContext>) -> Self::Future {
+    fn ack(
+        &mut self,
+        res: &Result<Res, BoxDynError>,
+        parts: &Metadata<SqlContext>,
+    ) -> Self::Future {
         let task_id = parts.task_id.clone();
         let worker_id = parts
             .context
@@ -355,12 +351,12 @@ pub struct PgTask {
 impl PgTask {
     fn try_into_req<D: Decoder<Args, Compact = Value>, Args>(
         self,
-    ) -> Result<Request<Args, SqlContext>, sqlx::Error>
+    ) -> Result<Task<Args, SqlContext>, sqlx::Error>
     where
         D::Error: std::error::Error + Send + Sync + 'static,
     {
         let args = D::decode(&self.job).map_err(|e| sqlx::Error::Decode(e.into()))?;
-        let parts = Parts {
+        let parts = Metadata {
             attempt: Attempt::new_with_value(
                 self.attempts
                     .ok_or(sqlx::Error::ColumnNotFound("attempts".to_owned()))?
@@ -388,7 +384,7 @@ impl PgTask {
 
             ..Default::default()
         };
-        Ok(Request::new_with_parts(args, parts))
+        Ok(Task::new_with_parts(args, parts))
     }
 }
 
@@ -403,7 +399,7 @@ mod fetcher {
 
     use apalis_core::{
         backend::codec::{json::JsonCodec, Decoder},
-        request::Request,
+        task::Task,
         timer::Delay,
         worker::context::WorkerContext,
     };
@@ -423,7 +419,7 @@ mod fetcher {
         pool: PgPool,
         config: Config,
         worker: WorkerContext,
-    ) -> Result<Vec<Request<T, SqlContext>>, sqlx::Error>
+    ) -> Result<Vec<Task<T, SqlContext>>, sqlx::Error>
     where
         D::Error: std::error::Error + Send + Sync + 'static,
     {
@@ -448,8 +444,8 @@ mod fetcher {
     enum StreamState<T> {
         Ready,
         Delay(Delay),
-        Fetch(BoxFuture<'static, Result<Vec<Request<T, SqlContext>>, sqlx::Error>>),
-        Buffered(VecDeque<Request<T, SqlContext>>),
+        Fetch(BoxFuture<'static, Result<Vec<Task<T, SqlContext>>, sqlx::Error>>),
+        Buffered(VecDeque<Task<T, SqlContext>>),
         Empty,
     }
 
@@ -490,7 +486,7 @@ mod fetcher {
     where
         D::Error: std::error::Error + Send + Sync + 'static,
     {
-        type Item = Result<Option<Request<Args, SqlContext>>, sqlx::Error>;
+        type Item = Result<Option<Task<Args, SqlContext>>, sqlx::Error>;
 
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             let mut this = self.get_mut();
@@ -598,7 +594,11 @@ mod tests {
 
         let mut sink = backend.sink();
 
-        sink.push(Default::default()).await.unwrap();
+        let task = Task::builder(Default::default())
+            .run_after(Duration::from_secs(5))
+            .build();
+
+        sink.send(task).await.unwrap();
 
         async fn send_reminder(
             _: HashMap<String, String>,

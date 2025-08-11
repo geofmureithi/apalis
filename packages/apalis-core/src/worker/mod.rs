@@ -59,9 +59,9 @@
 use crate::backend::Backend;
 use crate::error::{BoxDynError, WorkerError};
 use crate::monitor::shutdown::Shutdown;
-use crate::request::attempt::Attempt;
-use crate::request::data::Data;
-use crate::request::Request;
+use crate::task::attempt::Attempt;
+use crate::task::data::Data;
+use crate::task::Task;
 use crate::worker::call_all::{CallAllError, CallAllUnordered};
 use crate::worker::context::{Tracked, WorkerContext};
 use crate::worker::event::Event;
@@ -91,7 +91,7 @@ pub struct Worker<Args, Ctx, Backend, Svc, Middleware> {
     pub(crate) backend: Backend,
     pub(crate) service: Svc,
     pub(crate) middleware: Middleware,
-    pub(crate) req: PhantomData<Request<Args, Ctx>>,
+    pub(crate) req: PhantomData<Task<Args, Ctx>>,
     pub(crate) shutdown: Option<Shutdown>,
     pub(crate) event_handler: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>,
 }
@@ -127,7 +127,7 @@ impl<Args, Ctx, B, Svc, M> Worker<Args, Ctx, B, Svc, M> {
 impl<Args, Ctx, S, B, M> Worker<Args, Ctx, B, S, M>
 where
     B: Backend<Args, Ctx>,
-    S: Service<Request<Args, Ctx>> + Send + 'static,
+    S: Service<Task<Args, Ctx>> + Send + 'static,
     B::Stream: Unpin + Send + 'static,
     B::Beat: Unpin + Send + 'static,
     Args: Send + 'static,
@@ -135,13 +135,13 @@ where
     B::Error: Into<BoxDynError> + Send + 'static,
     M: Layer<ReadinessService<TrackerService<S>>>,
     B::Layer: Layer<M::Service>,
-    <B::Layer as Layer<M::Service>>::Service: Service<Request<Args, Ctx>> + Send + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Request<Args, Ctx>>>::Error:
+    <B::Layer as Layer<M::Service>>::Service: Service<Task<Args, Ctx>> + Send + 'static,
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
-    M::Service: Service<Request<Args, Ctx>> + Send + 'static,
-    <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
-    <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Request<Args, Ctx>>>::Error: Into<BoxDynError> + Send + Sync +'static
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx>>>::Future: Send,
+    M::Service: Service<Task<Args, Ctx>> + Send + 'static,
+    <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Task<Args, Ctx>>>::Future: Send,
+    <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<Task<Args, Ctx>>>::Error: Into<BoxDynError> + Send + Sync +'static
 {
     pub async fn run(self) -> Result<(), WorkerError> {
         let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
@@ -243,8 +243,8 @@ fn poll_tasks<Svc, Stm, Req, Ctx, E: Into<BoxDynError> + Send + 'static>(
     stream: Stm,
 ) -> BoxStream<'static, Result<Event, WorkerError>>
 where
-    Svc: Service<Request<Req, Ctx>> + Send + 'static,
-    Stm: Stream<Item = Result<Option<Request<Req, Ctx>>, E>> + Send + Unpin + 'static,
+    Svc: Service<Task<Req, Ctx>> + Send + 'static,
+    Stm: Stream<Item = Result<Option<Task<Req, Ctx>>, E>> + Send + Unpin + 'static,
     Req: Send + 'static,
     Svc::Future: Send,
     Ctx: Send + 'static,
@@ -286,9 +286,9 @@ pub struct TrackerService<S> {
     service: S,
 }
 
-impl<S, Args, Ctx> Service<Request<Args, Ctx>> for TrackerService<S>
+impl<S, Args, Ctx> Service<Task<Args, Ctx>> for TrackerService<S>
 where
-    S: Service<Request<Args, Ctx>>,
+    S: Service<Task<Args, Ctx>>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -300,8 +300,8 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<Args, Ctx>) -> Self::Future {
-        let attempt = request.parts.attempt.clone();
+    fn call(&mut self, request: Task<Args, Ctx>) -> Self::Future {
+        let attempt = request.meta.attempt.clone();
         self.ctx.track(AttemptOnPollFuture {
             attempt,
             fut: self.service.call(request),
@@ -399,7 +399,7 @@ mod tests {
 
     use crate::{
         backend::{memory::MemoryStorage, BackendWithSink, TaskSink},
-        request::Parts,
+        task::Metadata,
         service_fn::{self, service_fn, ServiceFn},
         worker::{
             builder::WorkerBuilder,
@@ -454,7 +454,7 @@ mod tests {
         impl<Ctx: Debug> Acknowledge<(), Ctx> for MyAcknowledger {
             type Error = SendError;
             type Future = BoxFuture<'static, Result<(), SendError>>;
-            fn ack(&mut self, res: &Result<(), BoxDynError>, parts: &Parts<Ctx>) -> Self::Future {
+            fn ack(&mut self, res: &Result<(), BoxDynError>, parts: &Metadata<Ctx>) -> Self::Future {
                 println!("{res:?}, {parts:?}");
                 ready(Ok(())).boxed()
             }

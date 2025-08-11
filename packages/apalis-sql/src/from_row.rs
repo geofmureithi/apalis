@@ -1,5 +1,5 @@
-use apalis_core::request::Parts;
-use apalis_core::request::Request;
+use apalis_core::task::Metadata;
+use apalis_core::task::Task;
 
 use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Type};
@@ -9,13 +9,13 @@ use crate::context::SqlContext;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlRequest<T> {
     /// The inner request
-    pub req: Request<T, SqlContext>,
+    pub req: Task<T, SqlContext>,
     pub(crate) _priv: (),
 }
 
 impl<T> SqlRequest<T> {
     /// Creates a new SqlRequest.
-    pub fn new(req: Request<T, SqlContext>) -> Self {
+    pub fn new(req: Task<T, SqlContext>) -> Self {
         SqlRequest { req, _priv: () }
     }
 }
@@ -26,7 +26,7 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
     sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
-        use apalis_core::request::{attempt::Attempt, task_id::TaskId};
+        use apalis_core::task::{attempt::Attempt, task_id::TaskId};
         use chrono::DateTime;
         use sqlx::Row;
         use std::str::FromStr;
@@ -37,7 +37,7 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut parts = Parts::<SqlContext>::default();
+        let mut parts = Metadata::<SqlContext>::default();
         parts.task_id = task_id;
 
         let attempt: i32 = row.try_get("attempts").unwrap_or(0);
@@ -75,7 +75,7 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
 
         parts.context = context;
         Ok(SqlRequest {
-            req: Request::new_with_parts(job, parts),
+            req: Task::new_with_parts(job, parts),
             _priv: (),
         })
     }
@@ -87,7 +87,7 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
     sqlx::FromRow<'r, sqlx::postgres::PgRow> for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
-        use apalis_core::request::{attempt::Attempt, task_id::TaskId};
+        use apalis_core::task::{attempt::Attempt, task_id::TaskId};
         use chrono::Utc;
         use sqlx::Row;
         use std::str::FromStr;
@@ -98,7 +98,7 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut parts = Parts::<SqlContext>::default();
+        let mut parts = Metadata::<SqlContext>::default();
         parts.task_id = task_id;
 
         let attempt: i32 = row.try_get("attempts").unwrap_or(0);
@@ -129,7 +129,7 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
 
         parts.context = context;
         Ok(SqlRequest {
-            req: Request::new_with_parts(job, parts),
+            req: Task::new_with_parts(job, parts),
             _priv: (),
         })
     }
@@ -141,7 +141,7 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
     for SqlRequest<T>
 {
     fn from_row(row: &'r sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
-        use apalis_core::request::{attempt::Attempt, task_id::TaskId};
+        use apalis_core::task::{attempt::Attempt, task_id::TaskId};
         use sqlx::Row;
         use std::str::FromStr;
         let job: T = row.try_get("job")?;
@@ -150,7 +150,7 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut parts = Parts::<SqlContext>::default();
+        let mut parts = Metadata::<SqlContext>::default();
         parts.task_id = task_id;
 
         let attempt: i32 = row.try_get("attempts").unwrap_or(0);
@@ -188,7 +188,7 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
 
         parts.context = context;
         Ok(SqlRequest {
-            req: Request::new_with_parts(job, parts),
+            req: Task::new_with_parts(job, parts),
             _priv: (),
         })
     }

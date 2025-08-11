@@ -44,7 +44,7 @@
 //! [`Service`]: tower_service::Service
 //! [`Request<Args, Context>`]: crate::request::Request
 use crate::error::BoxDynError;
-use crate::request::Request;
+use crate::task::Task;
 use crate::service_fn::from_request::FromRequest;
 use crate::worker::builder::{WorkerBuilderExt, WorkerServiceBuilder};
 use futures_core::future::BoxFuture;
@@ -73,7 +73,7 @@ pub fn service_fn<F, Args, Ctx, FnArgs>(f: F) -> ServiceFn<F, Args, Ctx, FnArgs>
 /// See [`service_fn`] for more details.
 pub struct ServiceFn<F, Args, Ctx, FnArgs> {
     f: F,
-    req: PhantomData<Request<Args, Ctx>>,
+    req: PhantomData<Task<Args, Ctx>>,
     fn_args: PhantomData<FnArgs>,
 }
 
@@ -115,14 +115,14 @@ pub type FnFuture<F, O, R, E> = Map<F, fn(O) -> std::result::Result<R, E>>;
 macro_rules! impl_service_fn {
     ($($K:ident),+) => {
         #[allow(unused_parens)]
-        impl<T, F, Args: Send + 'static, R, Ctx: Send + 'static, $($K),+> Service<Request<Args, Ctx>> for ServiceFn<T, Args, Ctx, ($($K),+)>
+        impl<T, F, Args: Send + 'static, R, Ctx: Send + 'static, $($K),+> Service<Task<Args, Ctx>> for ServiceFn<T, Args, Ctx, ($($K),+)>
         where
             T: FnMut(Args, $($K),+) -> F + Send + Clone + 'static,
             F: Future + Send,
             F::Output: IntoResponse<Output = R>,
             $(
-                $K: FromRequest<Request<Args, Ctx>> + Send,
-                < $K as FromRequest<Request<Args, Ctx>> >::Error: std::error::Error + 'static + Send + Sync,
+                $K: FromRequest<Task<Args, Ctx>> + Send,
+                < $K as FromRequest<Task<Args, Ctx>> >::Error: std::error::Error + 'static + Send + Sync,
             )+
         {
             type Response = R;
@@ -133,7 +133,7 @@ macro_rules! impl_service_fn {
                 Poll::Ready(Ok(()))
             }
 
-            fn call(&mut self, task: Request<Args, Ctx>) -> Self::Future {
+            fn call(&mut self, task: Task<Args, Ctx>) -> Self::Future {
                 let mut svc = self.f.clone();
                 #[allow(non_snake_case)]
                 let fut = async move {
@@ -158,8 +158,8 @@ macro_rules! impl_service_fn {
             F: Future,
             F::Output: IntoResponse<Output = R>,
             $(
-                $K: FromRequest<Request<Args, Ctx>> + Send,
-                < $K as FromRequest<Request<Args, Ctx>> >::Error: std::error::Error + 'static + Send + Sync,
+                $K: FromRequest<Task<Args, Ctx>> + Send,
+                < $K as FromRequest<Task<Args, Ctx>> >::Error: std::error::Error + 'static + Send + Sync,
             )+
         {
             fn build(self, _: &Backend) -> ServiceFn<T, Args, Ctx, ($($K),+)> {
@@ -169,7 +169,7 @@ macro_rules! impl_service_fn {
     };
 }
 
-impl<T, F, Args, R, Ctx> Service<Request<Args, Ctx>> for ServiceFn<T, Args, Ctx, ()>
+impl<T, F, Args, R, Ctx> Service<Task<Args, Ctx>> for ServiceFn<T, Args, Ctx, ()>
 where
     T: FnMut(Args) -> F,
     F: Future,
@@ -183,7 +183,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, task: Request<Args, Ctx>) -> Self::Future {
+    fn call(&mut self, task: Task<Args, Ctx>) -> Self::Future {
         let fut = (self.f)(task.args);
 
         fut.map(F::Output::into_response)
@@ -204,7 +204,7 @@ where
 
 impl<Args, Ctx, S, Backend> WorkerServiceBuilder<Backend, S, Args, Ctx> for S
 where
-    S: Service<Request<Args, Ctx>>,
+    S: Service<Task<Args, Ctx>>,
 {
     fn build(self, _: &Backend) -> S {
         self

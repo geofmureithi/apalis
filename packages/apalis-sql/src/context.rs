@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use apalis_core::{request::{state::Status, Request}, service_fn::from_request::FromRequest};
+use apalis_core::{task::{status::Status, Task}, service_fn::from_request::FromRequest};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -109,9 +109,9 @@ impl SqlContext {
     }
 }
 
-impl<Req: Sync> FromRequest<Request<Req, SqlContext>> for SqlContext {
+impl<Req: Sync> FromRequest<Task<Req, SqlContext>> for SqlContext {
     type Error = Infallible;
-    async fn from_request(req: &Request<Req, SqlContext>) -> Result<Self, Infallible> {
-        Ok(req.parts.context.clone())
+    async fn from_request(req: &Task<Req, SqlContext>) -> Result<Self, Infallible> {
+        Ok(req.meta.context.clone())
     }
 }

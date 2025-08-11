@@ -61,7 +61,7 @@ use std::{
 use crate::{
     error::{WorkerError, WorkerStateError},
     monitor::shutdown::Shutdown,
-    request::{data::MissingDataError, Request},
+    task::{data::MissingDataError, Task},
     service_fn::from_request::FromRequest,
     worker::{
         event::{CtxEventHandler, Event},
@@ -336,9 +336,9 @@ impl Future for WorkerContext {
     }
 }
 
-impl<Req: Sync, Ctx: Sync> FromRequest<Request<Req, Ctx>> for WorkerContext {
+impl<Req: Sync, Ctx: Sync> FromRequest<Task<Req, Ctx>> for WorkerContext {
     type Error = MissingDataError;
-    async fn from_request(req: &Request<Req, Ctx>) -> Result<Self, Self::Error> {
-        req.parts.data.get_checked().cloned()
+    async fn from_request(req: &Task<Req, Ctx>) -> Result<Self, Self::Error> {
+        req.meta.data.get_checked().cloned()
     }
 }

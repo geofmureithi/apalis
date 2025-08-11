@@ -1,7 +1,7 @@
 use crate::{
     backend::{codec::CloneOpCodec, Backend, BackendWithSink, RequestStream, TaskSink},
     error::BoxDynError,
-    request::{task_id::TaskId, Parts, Request},
+    task::{task_id::TaskId, Metadata, Task},
     worker::context::WorkerContext,
 };
 use futures_channel::mpsc::{unbounded, SendError};
@@ -34,7 +34,7 @@ impl<T: Send + 'static> MemoryStorage<MemoryWrapper<T>> {
     pub fn new() -> Self {
         let (sender, receiver) = unbounded();
         let sender = Box::new(sender)
-            as Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Sync + Unpin>;
+            as Box<dyn Sink<Task<T, ()>, Error = SendError> + Send + Sync + Unpin>;
         Self {
             inner: MemoryWrapper {
                 sender: MemorySink {
@@ -66,7 +66,7 @@ struct TaskKey {
 #[derive(Debug, Clone, Default)]
 pub struct JsonMemory<T> {
     tasks: Arc<RwLock<BTreeMap<TaskKey, std::sync::Mutex<Value>>>>,
-    buffer: Vec<Request<T, ()>>,
+    buffer: Vec<Task<T, ()>>,
 }
 
 #[cfg(feature = "json")]
@@ -74,8 +74,8 @@ impl JsonMemory<Value> {
     fn create_channel<T: 'static + DeserializeOwned + Serialize + Send>(
         &self,
     ) -> (
-        Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Sync + Unpin + 'static>,
-        Pin<Box<dyn Stream<Item = Request<T, ()>> + Send>>,
+        Box<dyn Sink<Task<T, ()>, Error = SendError> + Send + Sync + Unpin + 'static>,
+        Pin<Box<dyn Stream<Item = Task<T, ()>> + Send>>,
     ) {
         // Create a channel for communication
         let sender = self.clone();
@@ -84,8 +84,8 @@ impl JsonMemory<Value> {
         let wrapped_sender = {
             let inner = self.clone();
 
-            sender.with_flat_map(move |request: Request<T, ()>| {
-                let task_id = request.parts.task_id.clone();
+            sender.with_flat_map(move |request: Task<T, ()>| {
+                let task_id = request.meta.task_id.clone();
                 let value = serde_json::to_value(request.args).unwrap();
                 inner.tasks.write().unwrap().insert(
                     TaskKey {
@@ -95,7 +95,7 @@ impl JsonMemory<Value> {
                     value.clone().into(),
                 );
 
-                let req = Request::new_with_parts(value, request.parts);
+                let req = Task::new_with_parts(value, request.meta);
                 futures_util::stream::iter(vec![Ok(req)])
             })
         };
@@ -111,7 +111,7 @@ impl JsonMemory<Value> {
 
         // Combine the sender and receiver
         let sender = Box::new(wrapped_sender)
-            as Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Sync + Unpin>;
+            as Box<dyn Sink<Task<T, ()>, Error = SendError> + Send + Sync + Unpin>;
         let receiver = filtered_stream.boxed();
 
         (sender, receiver)
@@ -120,14 +120,14 @@ impl JsonMemory<Value> {
 
 #[cfg(feature = "json")]
 
-impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<T> {
+impl<T: Unpin + Serialize> Sink<Task<T, ()>> for JsonMemory<T> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Request<T, ()>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Task<T, ()>) -> Result<(), Self::Error> {
         let this = Pin::get_mut(self);
 
         this.buffer.push(item);
@@ -138,7 +138,7 @@ impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<T> {
         let this = Pin::get_mut(self);
         let mut tasks = this.tasks.write().unwrap();
         for task in this.buffer.drain(..) {
-            let task_id = task.parts.task_id.clone();
+            let task_id = task.meta.task_id.clone();
             tasks.insert(
                 TaskKey {
                     task_id,
@@ -151,14 +151,14 @@ impl<T: Unpin + Serialize> Sink<Request<T, ()>> for JsonMemory<T> {
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Sink::<Request<T, ()>>::poll_flush(self, cx)
+        Sink::<Task<T, ()>>::poll_flush(self, cx)
     }
 }
 
 #[cfg(feature = "json")]
 
 impl<T: DeserializeOwned> Stream for JsonMemory<T> {
-    type Item = Request<T, ()>;
+    type Item = Task<T, ()>;
 
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut map = self.tasks.write().unwrap();
@@ -166,9 +166,9 @@ impl<T: DeserializeOwned> Stream for JsonMemory<T> {
             map.pop_first_with(|s, _| s.namespace == std::any::type_name::<T>())
         {
             let args = mutex.into_inner().unwrap();
-            Poll::Ready(Some(Request::new_with_parts(
+            Poll::Ready(Some(Task::new_with_parts(
                 serde_json::from_value(args).unwrap(),
-                Parts {
+                Metadata {
                     task_id: key.task_id,
                     ..Default::default()
                 },
@@ -182,7 +182,7 @@ impl<T: DeserializeOwned> Stream for JsonMemory<T> {
 pub struct MemorySink<T> {
     inner: Arc<
         futures_util::lock::Mutex<
-            Box<dyn Sink<Request<T, ()>, Error = SendError> + Send + Sync + Unpin + 'static>,
+            Box<dyn Sink<Task<T, ()>, Error = SendError> + Send + Sync + Unpin + 'static>,
         >,
     >,
 }
@@ -195,7 +195,7 @@ impl<T> Clone for MemorySink<T> {
     }
 }
 
-impl<T> Sink<Request<T, ()>> for MemorySink<T> {
+impl<T> Sink<Task<T, ()>> for MemorySink<T> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -203,7 +203,7 @@ impl<T> Sink<Request<T, ()>> for MemorySink<T> {
         Pin::new(&mut *lock).poll_ready_unpin(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Request<T, ()>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Task<T, ()>) -> Result<(), Self::Error> {
         let mut lock = self.inner.try_lock().unwrap();
         Pin::new(&mut *lock).start_send_unpin(item)
     }
@@ -222,11 +222,11 @@ impl<T> Sink<Request<T, ()>> for MemorySink<T> {
 /// In-memory queue that implements [Stream]
 pub struct MemoryWrapper<T> {
     sender: MemorySink<T>,
-    receiver: Pin<Box<dyn Stream<Item = Request<T, ()>> + Send>>,
+    receiver: Pin<Box<dyn Stream<Item = Task<T, ()>> + Send>>,
 }
 
 impl<T> Stream for MemoryWrapper<T> {
-    type Item = Request<T, ()>;
+    type Item = Task<T, ()>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.as_mut().receiver.poll_next_unpin(cx)
@@ -236,7 +236,7 @@ impl<T> Stream for MemoryWrapper<T> {
 // MemoryStorage as a Backend
 impl<T: 'static + Clone + Send> Backend<T, ()> for MemoryStorage<MemoryWrapper<T>> {
     type Error = BoxDynError;
-    type Stream = RequestStream<Request<T, ()>>;
+    type Stream = RequestStream<Task<T, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -264,7 +264,7 @@ impl<T: Clone + Send + Unpin + 'static> BackendWithSink<T, ()> for MemoryStorage
 #[cfg(feature = "json")]
 impl<T: 'static + Send + DeserializeOwned> Backend<T, ()> for MemoryStorage<JsonMemory<T>> {
     type Error = BoxDynError;
-    type Stream = RequestStream<Request<T, ()>>;
+    type Stream = RequestStream<Task<T, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -332,7 +332,7 @@ struct SharedInMemoryStream<T> {
 
 #[cfg(feature = "json")]
 impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
-    type Item = Request<T, ()>;
+    type Item = Task<T, ()>;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut map = self.inner.tasks.write().unwrap();
         if let Some((key, mutex)) =
@@ -343,9 +343,9 @@ impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
                 Ok(value) => value,
                 Err(_) => return Poll::Ready(None),
             };
-            Poll::Ready(Some(Request::new_with_parts(
+            Poll::Ready(Some(Task::new_with_parts(
                 args,
-                Parts {
+                Metadata {
                     task_id: key.task_id,
                     ..Default::default()
                 },
@@ -396,7 +396,7 @@ mod tests {
 
     use crate::{
         backend::{memory::MemoryStorage, shared::MakeShared, TaskSink},
-        request::data::Data,
+        task::data::Data,
         service_fn::{self, service_fn, ServiceFn},
         worker::{
             builder::WorkerBuilder,

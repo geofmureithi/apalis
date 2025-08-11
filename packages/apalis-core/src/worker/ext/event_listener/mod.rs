@@ -5,7 +5,7 @@ use tower_service::Service;
 
 use crate::{
     backend::Backend,
-    request::Request,
+    task::Task,
     worker::builder::WorkerBuilder,
     worker::{Event, WorkerContext},
 };
@@ -35,9 +35,9 @@ pub struct EventListenerService<S> {
     service: S,
 }
 
-impl<S, Args, Ctx> Service<Request<Args, Ctx>> for EventListenerService<S>
+impl<S, Args, Ctx> Service<Task<Args, Ctx>> for EventListenerService<S>
 where
-    S: Service<Request<Args, Ctx>>,
+    S: Service<Task<Args, Ctx>>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -50,7 +50,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<Args, Ctx>) -> Self::Future {
+    fn call(&mut self, request: Task<Args, Ctx>) -> Self::Future {
         // TODO
         // let ctx: &WorkerContext = request.get_checked().unwrap();
         self.service.call(request)

@@ -1,7 +1,7 @@
 use crate::backend::codec::Encoder;
 use crate::backend::{BackendWithSink, TaskSink};
 use crate::error::BoxDynError;
-use crate::request::Request;
+use crate::task::Task;
 use crate::{backend::Backend, worker::context::WorkerContext};
 use futures_sink::Sink;
 use futures_util::stream::{once, select};
@@ -42,17 +42,17 @@ where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
     I: BackendWithSink<Args, Ctx>,
     I::Error: Into<BoxDynError> + Send + Sync + 'static,
-    I::Sink: 'static + Sink<Request<Args, Ctx>> + Unpin + Send,
+    I::Sink: 'static + Sink<Task<Args, Ctx>> + Unpin + Send,
     I::Beat: Send + 'static,
 
     I::Stream: Send + 'static,
     Args: Send + 'static,
     Ctx: Send + 'static + Default,
     Err: Into<BoxDynError> + Send + Sync + 'static,
-    <<I as BackendWithSink<Args, Ctx>>::Sink as Sink<Request<Args, Ctx>>>::Error:
+    <<I as BackendWithSink<Args, Ctx>>::Sink as Sink<Task<Args, Ctx>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
 {
-    type Stream = BoxStream<'static, Result<Option<Request<Args, Ctx>>, PipeError>>;
+    type Stream = BoxStream<'static, Result<Option<Task<Args, Ctx>>, PipeError>>;
 
     type Layer = I::Layer;
 
@@ -78,7 +78,7 @@ where
 
         let mut sink_stream = self
             .from
-            .map_ok(|s| Request::new(s))
+            .map_ok(|s| Task::new(s))
             .map_err(|e| e.into())
             .boxed();
 
@@ -104,13 +104,13 @@ where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
     I: BackendWithSink<Args, Ctx>,
     I::Error: Into<BoxDynError> + Send + Sync + 'static,
-    I::Sink: Unpin + Send + 'static + Sink<Request<Args, Ctx>>,
+    I::Sink: Unpin + Send + 'static + Sink<Task<Args, Ctx>>,
     I::Beat: Send + 'static,
     I::Stream: Send + 'static,
     Args: Send + 'static,
     Ctx: Send + 'static + Default,
     Err: Into<BoxDynError> + Send + Sync + 'static,
-    <<I as BackendWithSink<Args, Ctx>>::Sink as Sink<Request<Args, Ctx>>>::Error:
+    <<I as BackendWithSink<Args, Ctx>>::Sink as Sink<Task<Args, Ctx>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
 {
     type Sink = I::Sink;
@@ -131,7 +131,7 @@ impl<B, Args, Ctx, Err> PipeExt<B, Args, Ctx> for BoxStream<'static, Result<Args
 where
     B: BackendWithSink<Args, Ctx>,
     B::Error: Into<BoxDynError> + Send + Sync + 'static,
-    B::Sink: Sink<Request<Args, Ctx>>,
+    B::Sink: Sink<Task<Args, Ctx>>,
 {
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx> {
         Pipe::new(self, backend)

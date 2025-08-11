@@ -55,7 +55,7 @@ use apalis_core::{
         Backend, RequestStream, TaskSink,
     },
     error::BoxDynError,
-    request::{attempt::Attempt, state::Status, task_id::TaskId, Parts, Request},
+    task::{attempt::Attempt, state::Status, task_id::TaskId, Metadata, Task},
     service_fn::from_request::FromRequest,
     worker::{
         context::WorkerContext,
@@ -114,10 +114,10 @@ impl Default for RedisContext {
     }
 }
 
-impl<Req: Sync> FromRequest<Request<Req, RedisContext>> for RedisContext {
+impl<Req: Sync> FromRequest<Task<Req, RedisContext>> for RedisContext {
     type Error = Infallible;
-    async fn from_request(req: &Request<Req, RedisContext>) -> Result<Self, Self::Error> {
-        Ok(req.parts.context.clone())
+    async fn from_request(req: &Task<Req, RedisContext>) -> Result<Self, Self::Error> {
+        Ok(req.meta.context.clone())
     }
 }
 
@@ -204,7 +204,7 @@ where
     C: Decoder<Args, Compact = Vec<u8>> + Unpin + Send + 'static,
     C::Error: Into<BoxDynError>,
 {
-    type Stream = RequestStream<Request<Args, RedisContext>, RedisError>;
+    type Stream = RequestStream<Task<Args, RedisContext>, RedisError>;
 
     type Error = RedisError;
     type Layer = AcknowledgeLayer<RedisAck<Conn>>;
@@ -281,7 +281,7 @@ where
             Ok(None)
         })
         .filter_map(
-            |res: Result<Option<Request<Args, RedisContext>>, RedisError>| async move {
+            |res: Result<Option<Task<Args, RedisContext>>, RedisError>| async move {
                 match res {
                     Ok(_) => None,
                     Err(e) => Some(Err(e)),
@@ -329,7 +329,7 @@ where
         worker: &WorkerContext,
         config: &RedisConfig,
         conn: &mut Conn,
-    ) -> Result<Vec<Request<T, RedisContext>>, RedisError> {
+    ) -> Result<Vec<Task<T, RedisContext>>, RedisError> {
         let fetch_jobs = redis::Script::new(include_str!("../lua/get_jobs.lua"));
         let consumers_set = config.consumers_set();
         let active_jobs_list = config.active_jobs_list();
@@ -359,7 +359,7 @@ where
                         max_attempts: task.max_attempts,
                         ..Default::default()
                     };
-                    let mut parts = Parts::default();
+                    let mut parts = Metadata::default();
                     parts.attempt = Attempt::new_with_value(task.attempts as usize);
                     parts.context = context;
                     parts.status =
@@ -368,9 +368,9 @@ where
                         TaskId::from_str(task.task_id).map_err(|e| build_error(&e.to_string()))?;
 
                     parts.task_id = task_id;
-                    let mut request: Request<T, RedisContext> =
-                        Request::new_with_parts(args, parts);
-                    request.parts.context.lock_by = Some(worker.name().clone());
+                    let mut request: Task<T, RedisContext> =
+                        Task::new_with_parts(args, parts);
+                    request.meta.context.lock_by = Some(worker.name().clone());
                     processed.push(request)
                 }
                 Ok(processed)
@@ -542,7 +542,7 @@ impl<Args> MakeShared<Args, RedisStorage<Args, MultiplexedConnection>> for Share
 pub struct RedisSink<Args, Codec, Conn = ConnectionManager> {
     _args: PhantomData<(Args, Codec)>,
     config: RedisConfig,
-    pending: Vec<Request<Vec<u8>, RedisContext>>,
+    pending: Vec<Task<Vec<u8>, RedisContext>>,
     conn: Conn,
     invoke_future: Option<BoxFuture<'static, Result<u32, RedisError>>>,
 }
@@ -560,7 +560,7 @@ impl<Conn: ConnectionLike + Send + Clone + 'static, Res: Serialize> Acknowledge<
 
     type Error = RedisError;
 
-    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Parts<RedisContext>) -> Self::Future {
+    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Metadata<RedisContext>) -> Self::Future {
         let task_id = parts.task_id.to_string();
         let attempt = parts.attempt.current();
         let worker_id = &parts.context.lock_by.as_ref().unwrap();
@@ -610,13 +610,13 @@ impl<T: Serialize + Send + Unpin, Cdc: Send + Unpin, Conn: ConnectionLike + Send
 
     async fn push_request(
         &mut self,
-        request: Request<T, Self::Context>,
-    ) -> Result<Parts<Self::Context>, Self::Error> {
-        let task_id = request.parts.task_id.to_string();
+        request: Task<T, Self::Context>,
+    ) -> Result<Metadata<Self::Context>, Self::Error> {
+        let task_id = request.meta.task_id.to_string();
 
         // let compact = Cdc:: TODO: remove serialize
 
-        let parts: Parts<RedisContext> = request.parts;
+        let parts: Metadata<RedisContext> = request.meta;
 
         let push_job = redis::Script::new(include_str!("../lua/push_job.lua"));
 
@@ -637,7 +637,7 @@ impl<T: Serialize + Send + Unpin, Cdc: Send + Unpin, Conn: ConnectionLike + Send
 static BATCH_PUSH_SCRIPT: LazyLock<Script> =
     LazyLock::new(|| Script::new(include_str!("../lua/batch_push.lua")));
 async fn push_tasks<Conn: ConnectionLike>(
-    tasks: Vec<Request<Vec<u8>, RedisContext>>,
+    tasks: Vec<Task<Vec<u8>, RedisContext>>,
     config: RedisConfig,
     mut conn: Conn,
 ) -> Result<u32, RedisError> {
@@ -647,9 +647,9 @@ async fn push_tasks<Conn: ConnectionLike>(
         .key(config.signal_list())
         .key(config.job_meta_hash());
     for request in tasks {
-        let task_id = request.parts.task_id.to_string();
-        let attempts = request.parts.attempt.current() as u32;
-        let max_attempts = request.parts.context.max_attempts;
+        let task_id = request.meta.task_id.to_string();
+        let attempts = request.meta.attempt.current() as u32;
+        let max_attempts = request.meta.context.max_attempts;
         let job = request.args;
         script = script.arg(task_id).arg(job).arg(attempts).arg(max_attempts);
     }
@@ -657,7 +657,7 @@ async fn push_tasks<Conn: ConnectionLike>(
     script.invoke_async::<u32>(&mut conn).await
 }
 
-impl<Args, Cdc, Conn> Sink<Request<Args, RedisContext>> for RedisSink<Args, Cdc, Conn>
+impl<Args, Cdc, Conn> Sink<Task<Args, RedisContext>> for RedisSink<Args, Cdc, Conn>
 where
     Args: Unpin + Serialize,
     Cdc: Unpin + Encoder<Args, Compact = Vec<u8>>,
@@ -672,7 +672,7 @@ where
 
     fn start_send(
         self: Pin<&mut Self>,
-        item: Request<Args, RedisContext>,
+        item: Task<Args, RedisContext>,
     ) -> Result<(), Self::Error> {
         let this = Pin::get_mut(self);
         let req = item
@@ -712,7 +712,7 @@ where
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Sink::<Request<Args, RedisContext>>::poll_flush(self, cx)
+        Sink::<Task<Args, RedisContext>>::poll_flush(self, cx)
     }
 }
 
@@ -891,7 +891,7 @@ mod tests {
 
     use apalis_core::{
         backend::{memory::MemoryStorage, TaskSink},
-        request::data::Data,
+        task::data::Data,
         service_fn::{self, service_fn, ServiceFn},
         worker::{
             builder::WorkerBuilder,
@@ -923,8 +923,8 @@ mod tests {
         );
         let mut sink = backend.sink();
         for i in 0..ITEMS {
-            let mut req: Request<u32, RedisContext> = Request::new(i);
-            req.parts.context.max_attempts = i;
+            let mut req: Task<u32, RedisContext> = Task::new(i);
+            req.meta.context.max_attempts = i;
             sink.send(req).await.unwrap();
         }
 

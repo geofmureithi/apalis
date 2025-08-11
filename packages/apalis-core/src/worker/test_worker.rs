@@ -41,8 +41,8 @@
 //! [`Service`]: tower_service::Service
 use crate::backend::Backend;
 use crate::error::BoxDynError;
-use crate::request::task_id::TaskId;
-use crate::request::Request;
+use crate::task::task_id::TaskId;
+use crate::task::Task;
 use crate::worker::builder::WorkerBuilder;
 use crate::worker::{Event, ReadinessService, TrackerService, WorkerError};
 use futures_channel::mpsc::{self, channel};
@@ -98,7 +98,7 @@ pub trait ExecuteNext<Args, Ctx> {
 
 impl<B, S, Args, Ctx, Res> ExecuteNext<Args, Ctx> for TestWorker<B, S, Res>
 where
-    S: Service<Request<Args, Ctx>, Response = Res> + Send + 'static,
+    S: Service<Task<Args, Ctx>, Response = Res> + Send + 'static,
     B: Send,
     Res: Send,
 {
@@ -113,7 +113,7 @@ impl<B, S, Res> TestWorker<B, S, Res> {
     pub fn new<Args, Ctx>(backend: B, service: S) -> Self
     where
         B: Backend<Args, Ctx> + 'static,
-        S: Service<Request<Args, Ctx>, Response = Res> + Send + 'static,
+        S: Service<Task<Args, Ctx>, Response = Res> + Send + 'static,
         B::Stream: Unpin + Send + 'static,
         B::Beat: Unpin + Send + 'static,
         Args: Send + 'static,
@@ -126,13 +126,13 @@ impl<B, S, Res> TestWorker<B, S, Res> {
         Res: 'static,
         <<B as Backend<Args, Ctx>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res>>>,
-        >>::Service: Service<Request<Args, Ctx>>,
+        >>::Service: Service<Task<Args, Ctx>>,
         <<<B as Backend<Args, Ctx>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res>>>,
-        >>::Service as Service<Request<Args, Ctx>>>::Error: Into<BoxDynError> + Sync + Send,
+        >>::Service as Service<Task<Args, Ctx>>>::Error: Into<BoxDynError> + Sync + Send,
         <<<B as Backend<Args, Ctx>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res>>>,
-        >>::Service as Service<Request<Args, Ctx>>>::Future: Send,
+        >>::Service as Service<Task<Args, Ctx>>>::Future: Send,
         <<B as Backend<Args, Ctx>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res>>>,
         >>::Service: std::marker::Send + 'static,
@@ -183,9 +183,9 @@ pub struct TestEmitService<S, Response> {
     service: S,
 }
 
-impl<S, Args, Ctx, Res> Service<Request<Args, Ctx>> for TestEmitService<S, Res>
+impl<S, Args, Ctx, Res> Service<Task<Args, Ctx>> for TestEmitService<S, Res>
 where
-    S: Service<Request<Args, Ctx>, Response = Res> + Send + 'static,
+    S: Service<Task<Args, Ctx>, Response = Res> + Send + 'static,
     S::Future: Send + 'static,
     Args: Send + 'static,
     Ctx: Send + 'static,
@@ -202,8 +202,8 @@ where
             .map_err(|e| e.into().to_string())
     }
 
-    fn call(&mut self, req: Request<Args, Ctx>) -> Self::Future {
-        let task_id = req.parts.task_id.clone();
+    fn call(&mut self, req: Task<Args, Ctx>) -> Self::Future {
+        let task_id = req.meta.task_id.clone();
         let mut tx = Clone::clone(&self.tx);
         let fut = self.service.call(req);
         Box::pin(async move {

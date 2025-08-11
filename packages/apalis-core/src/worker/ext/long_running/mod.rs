@@ -5,7 +5,7 @@ use tower_layer::{Layer, Stack};
 use tower_service::Service;
 
 use crate::{
-    request::{data::MissingDataError, Request},
+    task::{data::MissingDataError, Task},
     service_fn::from_request::FromRequest,
     worker::{
         builder::WorkerBuilder,
@@ -42,10 +42,10 @@ impl<Ctx> LongRunner<Ctx> {
 }
 
 /// CTX: FromRequest<Request<Args, Ctx>>
-impl<Args: Sync, Ctx: Sync + Clone> FromRequest<Request<Args, Ctx>> for LongRunner<Ctx> {
+impl<Args: Sync, Ctx: Sync + Clone> FromRequest<Task<Args, Ctx>> for LongRunner<Ctx> {
     type Error = MissingDataError;
-    async fn from_request(req: &Request<Args, Ctx>) -> Result<Self, Self::Error> {
-        let ctx = req.parts.context.clone();
+    async fn from_request(req: &Task<Args, Ctx>) -> Result<Self, Self::Error> {
+        let ctx = req.meta.context.clone();
         let tracker: &TaskTracker = req.get_checked()?;
         let wrk: &WorkerContext = req.get_checked()?;
         Ok(LongRunner {
@@ -78,9 +78,9 @@ pub struct LongRunningService<S> {
     service: S,
 }
 
-impl<S, Args, Ctx> Service<Request<Args, Ctx>> for LongRunningService<S>
+impl<S, Args, Ctx> Service<Task<Args, Ctx>> for LongRunningService<S>
 where
-    S: Service<Request<Args, Ctx>>,
+    S: Service<Task<Args, Ctx>>,
     S::Future: Send + 'static,
     S::Response: Send,
     S::Error: Send,
@@ -96,7 +96,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, mut request: Request<Args, Ctx>) -> Self::Future {
+    fn call(&mut self, mut request: Task<Args, Ctx>) -> Self::Future {
         let tracker = TaskTracker::new();
         request.insert(tracker.clone());
 
@@ -151,7 +151,7 @@ mod tests {
     use crate::{
         backend::{memory::MemoryStorage, Backend, BackendWithSink, TaskSink},
         error::BoxDynError,
-        request::data::Data,
+        task::data::Data,
         service_fn::{self, service_fn, ServiceFn},
         worker::{
             builder::WorkerBuilder,

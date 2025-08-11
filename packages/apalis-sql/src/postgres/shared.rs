@@ -7,7 +7,7 @@ use std::{
 
 use apalis_core::{
     backend::{codec::json::JsonCodec, shared::MakeShared},
-    request::task_id::TaskId,
+    task::task_id::TaskId,
     worker::context::WorkerContext,
 };
 use futures::{

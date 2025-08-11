@@ -47,7 +47,7 @@ pub mod sqlite;
 #[cfg_attr(docsrs, doc(cfg(feature = "mysql")))]
 pub mod mysql;
 
-use apalis_core::{error::BoxDynError, request::state::Status};
+use apalis_core::{error::BoxDynError, task::status::Status};
 use context::SqlContext;
 // Re-exports
 pub use sqlx;

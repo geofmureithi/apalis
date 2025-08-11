@@ -8,7 +8,7 @@ use std::{
 
 use crate::{
     error::BoxDynError,
-    request::{state::Status, Parts, Request},
+    task::{status::Status, Metadata, Task},
     worker::builder::WorkerBuilder,
 };
 
@@ -26,18 +26,18 @@ pub trait Acknowledge<Res, Ctx> {
     type Error;
     type Future: Future<Output = Result<(), Self::Error>>;
 
-    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Parts<Ctx>) -> Self::Future;
+    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Metadata<Ctx>) -> Self::Future;
 }
 
 impl<Res, Ctx, F, Fut, E> Acknowledge<Res, Ctx> for F
 where
-    F: FnMut(&Result<Res, BoxDynError>, &Parts<Ctx>) -> Fut,
+    F: FnMut(&Result<Res, BoxDynError>, &Metadata<Ctx>) -> Fut,
     Fut: Future<Output = Result<(), E>>,
 {
     type Error = E;
     type Future = Fut;
 
-    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Parts<Ctx>) -> Self::Future {
+    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Metadata<Ctx>) -> Self::Future {
         (self)(res, parts)
     }
 }
@@ -73,9 +73,9 @@ pub struct AcknowledgeService<S, A> {
     acknowledger: A,
 }
 
-impl<S, A, Args, Ctx, Res> Service<Request<Args, Ctx>> for AcknowledgeService<S, A>
+impl<S, A, Args, Ctx, Res> Service<Task<Args, Ctx>> for AcknowledgeService<S, A>
 where
-    S: Service<Request<Args, Ctx>, Response = Res>,
+    S: Service<Task<Args, Ctx>, Response = Res>,
     A: Acknowledge<Res, Ctx> + Clone + Send + 'static,
     S::Error: Into<BoxDynError>,
     A::Error: std::error::Error + Send + Sync + 'static,
@@ -92,8 +92,8 @@ where
         self.inner.poll_ready(cx).map_err(|e| e.into())
     }
 
-    fn call(&mut self, req: Request<Args, Ctx>) -> Self::Future {
-        let parts = req.parts.clone();
+    fn call(&mut self, req: Task<Args, Ctx>) -> Self::Future {
+        let parts = req.meta.clone();
         let future = self.inner.call(req);
         let mut acknowledger = self.acknowledger.clone();
         Box::pin(async move {

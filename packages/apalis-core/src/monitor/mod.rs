@@ -81,7 +81,7 @@ use crate::{
     backend::Backend,
     error::{BoxDynError, WorkerError},
     monitor::shutdown::Shutdown,
-    request::Request,
+    task::Task,
     worker::{
         context::WorkerContext,
         event::{Event, EventHandler},
@@ -163,7 +163,7 @@ impl Monitor {
         should_restart: impl Fn(&WorkerError, usize) -> bool + 'static + Send,
     ) -> BoxFuture<'static, Result<(), Event>>
     where
-        S: Service<Request<Args, Ctx>> + Send + 'static,
+        S: Service<Task<Args, Ctx>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Args, Ctx> + Send + 'static,
@@ -174,16 +174,16 @@ impl Monitor {
         Ctx: Send + 'static,
         M: Layer<ReadinessService<TrackerService<S>>> + 'static,
         P::Layer: Layer<M::Service>,
-        <P::Layer as Layer<M::Service>>::Service: Service<Request<Args, Ctx>> + Send + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Request<Args, Ctx>>>::Error:
+        <P::Layer as Layer<M::Service>>::Service: Service<Task<Args, Ctx>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
-        M::Service: Service<Request<Args, Ctx>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx>>>::Future: Send,
+        M::Service: Service<Task<Args, Ctx>> + Send + 'static,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Request<Args, Ctx>,
+            Task<Args, Ctx>,
         >>::Future: Send,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Request<Args, Ctx>,
+            Task<Args, Ctx>,
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
     {
         let stream = worker.stream_with_ctx(&mut ctx);
@@ -256,7 +256,7 @@ impl Monitor {
         factory: impl Fn(usize) -> Worker<Args, Ctx, P, S, M> + 'static,
     ) -> Self
     where
-        S: Service<Request<Args, Ctx>> + Send + 'static,
+        S: Service<Task<Args, Ctx>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Args, Ctx> + Send + 'static,
@@ -267,16 +267,16 @@ impl Monitor {
         Ctx: Send + 'static,
         M: Layer<ReadinessService<TrackerService<S>>> + 'static,
         P::Layer: Layer<M::Service>,
-        <P::Layer as Layer<M::Service>>::Service: Service<Request<Args, Ctx>> + Send + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Request<Args, Ctx>>>::Error:
+        <P::Layer as Layer<M::Service>>::Service: Service<Task<Args, Ctx>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Request<Args, Ctx>>>::Future: Send,
-        M::Service: Service<Request<Args, Ctx>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx>>>::Future: Send,
+        M::Service: Service<Task<Args, Ctx>> + Send + 'static,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Request<Args, Ctx>,
+            Task<Args, Ctx>,
         >>::Future: Send,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Request<Args, Ctx>,
+            Task<Args, Ctx>,
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
     {
         let worker = factory(0);
@@ -447,7 +447,7 @@ impl Monitor {
 mod tests {
     use crate::{
         backend::{Backend, BackendWithSink, TaskSink},
-        request::task_id::TaskId,
+        task::task_id::TaskId,
         worker::{context::WorkerContext, ext::event_listener::EventListenerExt},
     };
     use core::panic;
@@ -457,7 +457,7 @@ mod tests {
     use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
-        backend::memory::MemoryStorage, monitor::Monitor, request::Request,
+        backend::memory::MemoryStorage, monitor::Monitor, task::Task,
         worker::builder::WorkerBuilder,
     };
 
@@ -469,7 +469,7 @@ mod tests {
             backend.sink().push(i).await.unwrap();
         }
 
-        let service = tower::service_fn(|request: Request<u32, ()>| async {
+        let service = tower::service_fn(|request: Task<u32, ()>| async {
             tokio::time::sleep(Duration::from_secs(1)).await;
             Ok::<_, io::Error>(request)
         });

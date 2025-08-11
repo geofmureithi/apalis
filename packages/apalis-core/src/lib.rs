@@ -96,7 +96,7 @@ pub mod error;
 #[macro_use]
 pub(crate) mod macros;
 pub mod monitor;
-pub mod request;
+pub mod task;
 pub mod service_fn;
 pub mod worker;
 

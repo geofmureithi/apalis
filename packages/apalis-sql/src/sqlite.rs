@@ -7,7 +7,7 @@ use apalis_core::layers::{Ack, AckLayer};
 use apalis_core::poller::controller::Controller;
 use apalis_core::poller::stream::BackendStream;
 use apalis_core::poller::Poller;
-use apalis_core::request::{Parts, Request, RequestStream, State};
+use apalis_core::task::{Metadata, Task, RequestStream, State};
 use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
@@ -197,7 +197,7 @@ where
         worker: &WorkerContext,
         interval: Duration,
         buffer_size: usize,
-    ) -> impl Stream<Item = Result<Option<Request<T, SqlContext>>, sqlx::Error>> {
+    ) -> impl Stream<Item = Result<Option<Task<T, SqlContext>>, sqlx::Error>> {
         let pool = self.pool.clone();
         let worker = worker.clone();
         let config = self.config.clone();
@@ -223,13 +223,13 @@ where
                 for id in ids {
                     let res = fetch_next(&pool, worker_id, id.0, &config).await?;
                     yield match res {
-                        None => None::<Request<T, SqlContext>>,
+                        None => None::<Task<T, SqlContext>>,
                         Some(job) => {
-                            let (req, parts) = job.req.take_parts();
+                            let (req, parts) = job.req.take();
                             let args = C::decode(req)
                                 .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-                            let mut req = Request::new_with_parts(args, parts);
-                            req.parts.namespace = Some(namespace.clone());
+                            let mut req = Task::new_with_parts(args, parts);
+                            req.meta.namespace = Some(namespace.clone());
                             Some(req)
                         }
                     }
@@ -255,10 +255,10 @@ where
 
     async fn push_request(
         &mut self,
-        job: Request<Self::Job, SqlContext>,
-    ) -> Result<Parts<SqlContext>, Self::Error> {
+        job: Task<Self::Job, SqlContext>,
+    ) -> Result<Metadata<SqlContext>, Self::Error> {
         let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, strftime('%s','now'), NULL, NULL, NULL, NULL, ?5)";
-        let (task, parts) = job.take_parts();
+        let (task, parts) = job.take();
         let raw = C::encode(&task)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
@@ -275,10 +275,10 @@ where
 
     async fn push_raw_request(
         &mut self,
-        job: Request<Self::Compact, SqlContext>,
-    ) -> Result<Parts<SqlContext>, Self::Error> {
+        job: Task<Self::Compact, SqlContext>,
+    ) -> Result<Metadata<SqlContext>, Self::Error> {
         let query = "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, strftime('%s','now'), NULL, NULL, NULL, NULL, ?5)";
-        let (task, parts) = job.take_parts();
+        let (task, parts) = job.take();
         let raw = C::encode(&task)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
@@ -295,12 +295,12 @@ where
 
     async fn schedule_request(
         &mut self,
-        req: Request<Self::Job, SqlContext>,
+        req: Task<Self::Job, SqlContext>,
         on: i64,
-    ) -> Result<Parts<SqlContext>, Self::Error> {
+    ) -> Result<Metadata<SqlContext>, Self::Error> {
         let query =
             "INSERT INTO Jobs VALUES (?1, ?2, ?3, 'Pending', 0, ?4, ?5, NULL, NULL, NULL, NULL, ?6)";
-        let id = &req.parts.task_id;
+        let id = &req.meta.task_id;
         let job = C::encode(&req.args)
             .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
         let job_type = self.config.namespace.clone();
@@ -308,18 +308,18 @@ where
             .bind(job)
             .bind(id.to_string())
             .bind(job_type)
-            .bind(req.parts.context.max_attempts())
+            .bind(req.meta.context.max_attempts())
             .bind(on)
-            .bind(req.parts.context.priority())
+            .bind(req.meta.context.priority())
             .execute(&self.pool)
             .await?;
-        Ok(req.parts)
+        Ok(req.meta)
     }
 
     async fn fetch_by_id(
         &mut self,
         job_id: &TaskId,
-    ) -> Result<Option<Request<Self::Job, SqlContext>>, Self::Error> {
+    ) -> Result<Option<Task<Self::Job, SqlContext>>, Self::Error> {
         let fetch_query = "SELECT * FROM Jobs WHERE id = ?1";
         let res: Option<SqlRequest<String>> = sqlx::query_as(fetch_query)
             .bind(job_id.to_string())
@@ -328,12 +328,12 @@ where
         match res {
             None => Ok(None),
             Some(job) => Ok(Some({
-                let (req, parts) = job.req.take_parts();
+                let (req, parts) = job.req.take();
                 let args = C::decode(req)
                     .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
-                let mut req: Request<T, SqlContext> = Request::new_with_parts(args, parts);
-                req.parts.namespace = Some(Namespace(self.config.namespace.clone()));
+                let mut req: Task<T, SqlContext> = Task::new_with_parts(args, parts);
+                req.meta.namespace = Some(Namespace(self.config.namespace.clone()));
                 req
             })),
         }
@@ -347,10 +347,10 @@ where
 
     async fn reschedule(
         &mut self,
-        job: Request<T, SqlContext>,
+        job: Task<T, SqlContext>,
         wait: Duration,
     ) -> Result<(), Self::Error> {
-        let task_id = job.parts.task_id;
+        let task_id = job.meta.task_id;
 
         let wait: i64 = wait
             .as_secs()
@@ -370,16 +370,16 @@ where
         Ok(())
     }
 
-    async fn update(&mut self, job: Request<Self::Job, SqlContext>) -> Result<(), Self::Error> {
-        let ctx = job.parts.context;
+    async fn update(&mut self, job: Task<Self::Job, SqlContext>) -> Result<(), Self::Error> {
+        let ctx = job.meta.context;
         let status = ctx.status().to_string();
-        let attempts = job.parts.attempt;
+        let attempts = job.meta.attempt;
         let done_at = *ctx.done_at();
         let lock_by = ctx.lock_by().clone();
         let lock_at = *ctx.lock_at();
         let last_error = ctx.last_error().clone();
         let priority = *ctx.priority();
-        let job_id = job.parts.task_id;
+        let job_id = job.meta.task_id;
         let query =
                 "UPDATE Jobs SET status = ?1, attempts = ?2, done_at = ?3, lock_by = ?4, lock_at = ?5, last_error = ?6, priority = ?7 WHERE id = ?8";
         sqlx::query(query)
@@ -478,13 +478,13 @@ pub enum SqlitePollError {
     ReenqueueOrphanedError(sqlx::Error),
 }
 
-impl<T, C> Backend<Request<T, SqlContext>> for SqliteStorage<T, C>
+impl<T, C> Backend<Task<T, SqlContext>> for SqliteStorage<T, C>
 where
     C: Codec<Compact = String> + Send + 'static + Sync,
     C::Error: std::error::Error + 'static + Send + Sync,
     T: Serialize + DeserializeOwned + Sync + Send + Unpin + 'static,
 {
-    type Stream = BackendStream<RequestStream<Request<T, SqlContext>>>;
+    type Stream = BackendStream<RequestStream<Task<T, SqlContext>>>;
     type Layer = AckLayer<SqliteStorage<T, C>, T, SqlContext, C>;
 
     type Codec = JsonCodec<String>;
@@ -579,7 +579,7 @@ impl<T: Sync + Send, C: Send, Res: Serialize + Sync> Ack<T, Res, C> for SqliteSt
 impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExpose<J>
     for SqliteStorage<J, JsonCodec<String>>
 {
-    type Request = Request<J, Parts<SqlContext>>;
+    type Request = Task<J, Metadata<SqlContext>>;
     type Error = SqlError;
     async fn stats(&self) -> Result<Stat, Self::Error> {
         let fetch_query = "SELECT
@@ -620,9 +620,9 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
         Ok(res
             .into_iter()
             .map(|j| {
-                let (req, ctx) = j.req.take_parts();
+                let (req, ctx) = j.req.take();
                 let req = JsonCodec::<String>::decode(req).unwrap();
-                Request::new_with_ctx(req, ctx)
+                Task::new_with_ctx(req, ctx)
             })
             .collect())
     }
@@ -648,7 +648,7 @@ mod tests {
     use crate::sql_storage_tests;
 
     use super::*;
-    use apalis_core::request::State;
+    use apalis_core::task::State;
     use chrono::Utc;
     use email_service::example_good_email;
     use email_service::Email;
@@ -694,7 +694,7 @@ mod tests {
     async fn consume_one(
         storage: &mut SqliteStorage<Email>,
         worker: &WorkerContext,
-    ) -> Request<Email, SqlContext> {
+    ) -> Task<Email, SqlContext> {
         let mut stream = storage
             .stream_jobs(worker, std::time::Duration::from_secs(10), 1)
             .boxed();
@@ -732,7 +732,7 @@ mod tests {
     async fn get_job(
         storage: &mut SqliteStorage<Email>,
         job_id: &TaskId,
-    ) -> Request<Email, SqlContext> {
+    ) -> Task<Email, SqlContext> {
         storage
             .fetch_by_id(job_id)
             .await
@@ -750,7 +750,7 @@ mod tests {
         assert_eq!(len, 1);
 
         let job = consume_one(&mut storage, &worker).await;
-        let ctx = job.parts.context;
+        let ctx = job.meta.context;
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
@@ -763,19 +763,19 @@ mod tests {
 
         push_email(&mut storage, example_good_email()).await;
         let job = consume_one(&mut storage, &worker).await;
-        let job_id = &job.parts.task_id;
-        let ctx = &job.parts.context;
+        let job_id = &job.meta.task_id;
+        let ctx = &job.meta.context;
         let res = 1usize;
         storage
             .ack(
                 ctx,
-                &Response::success(res, job_id.clone(), job.parts.attempt.clone()),
+                &Response::success(res, job_id.clone(), job.meta.attempt.clone()),
             )
             .await
             .expect("failed to acknowledge the job");
 
         let job = get_job(&mut storage, job_id).await;
-        let ctx = job.parts.context;
+        let ctx = job.meta.context;
         assert_eq!(*ctx.status(), State::Done);
         assert!(ctx.done_at().is_some());
     }
@@ -789,7 +789,7 @@ mod tests {
         let worker = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker).await;
-        let job_id = &job.parts.task_id;
+        let job_id = &job.meta.task_id;
 
         storage
             .kill(&worker.id(), job_id)
@@ -797,7 +797,7 @@ mod tests {
             .expect("failed to kill job");
 
         let job = get_job(&mut storage, job_id).await;
-        let ctx = job.parts.context;
+        let ctx = job.meta.context;
         assert_eq!(*ctx.status(), State::Killed);
         assert!(ctx.done_at().is_some());
     }
@@ -814,40 +814,40 @@ mod tests {
         let worker = register_worker_at(&mut storage, six_minutes_ago.timestamp()).await;
 
         let job = consume_one(&mut storage, &worker).await;
-        let job_id = &job.parts.task_id;
+        let job_id = &job.meta.task_id;
         storage
             .reenqueue_orphaned(1, five_minutes_ago)
             .await
             .expect("failed to heartbeat");
         let job = get_job(&mut storage, job_id).await;
-        let ctx = &job.parts.context;
+        let ctx = &job.meta.context;
         assert_eq!(*ctx.status(), State::Pending);
         assert!(ctx.done_at().is_none());
         assert!(ctx.lock_by().is_none());
         assert!(ctx.lock_at().is_none());
         assert_eq!(*ctx.last_error(), Some("Job was abandoned".to_owned()));
-        assert_eq!(job.parts.attempt.current(), 1);
+        assert_eq!(job.meta.attempt.current(), 1);
 
         let job = consume_one(&mut storage, &worker).await;
-        let ctx = &job.parts.context;
+        let ctx = &job.meta.context;
         // Simulate worker
-        job.parts.attempt.increment();
+        job.meta.attempt.increment();
         storage
             .ack(
                 ctx,
-                &Response::new(Ok("success".to_owned()), job_id.clone(), job.parts.attempt),
+                &Response::new(Ok("success".to_owned()), job_id.clone(), job.meta.attempt),
             )
             .await
             .unwrap();
         //end simulate worker
 
         let job = get_job(&mut storage, &job_id).await;
-        let ctx = &job.parts.context;
+        let ctx = &job.meta.context;
         assert_eq!(*ctx.status(), State::Done);
         assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
         assert_eq!(*ctx.last_error(), Some("{\"Ok\":\"success\"}".to_owned()));
-        assert_eq!(job.parts.attempt.current(), 2);
+        assert_eq!(job.meta.attempt.current(), 2);
     }
 
     #[tokio::test]
@@ -861,32 +861,32 @@ mod tests {
         let worker = register_worker_at(&mut storage, four_minutes_ago.timestamp()).await;
 
         let job = consume_one(&mut storage, &worker).await;
-        let job_id = job.parts.task_id;
+        let job_id = job.meta.task_id;
         storage
             .reenqueue_orphaned(1, six_minutes_ago)
             .await
             .expect("failed to heartbeat");
 
         let job = get_job(&mut storage, &job_id).await;
-        let ctx = &job.parts.context;
+        let ctx = &job.meta.context;
 
         // Simulate worker
-        job.parts.attempt.increment();
+        job.meta.attempt.increment();
         storage
             .ack(
                 ctx,
-                &Response::new(Ok("success".to_owned()), job_id.clone(), job.parts.attempt),
+                &Response::new(Ok("success".to_owned()), job_id.clone(), job.meta.attempt),
             )
             .await
             .unwrap();
         //end simulate worker
 
         let job = get_job(&mut storage, &job_id).await;
-        let ctx = &job.parts.context;
+        let ctx = &job.meta.context;
         assert_eq!(*ctx.status(), State::Done);
         assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
         assert!(ctx.lock_at().is_some());
         assert_eq!(*ctx.last_error(), Some("{\"Ok\":\"success\"}".to_owned()));
-        assert_eq!(job.parts.attempt.current(), 1);
+        assert_eq!(job.meta.attempt.current(), 1);
     }
 }
