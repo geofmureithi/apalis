@@ -1,12 +1,14 @@
 //! Represents a task source that provides internal middleware and can be polled
 //!
 //! Also includes helper traits
-use std::{future::Future, time::Duration};
+use std::{
+    future::Future,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use futures_sink::Sink;
-use futures_util::{
-    stream::BoxStream, Stream,
-};
+use futures_util::{stream::BoxStream, Stream};
 
 use crate::{
     backend::codec::Encoder,
@@ -32,8 +34,8 @@ pub trait Backend<Args, Ctx> {
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
 }
 
-pub trait BackendWithSink<Args, Ctx> : Backend<Args, Ctx> {
-    type Sink: TaskSink<Args> + Sink<Request<Args, Ctx>>;
+pub trait BackendWithSink<Args, Ctx>: Backend<Args, Ctx> {
+    type Sink: Sink<Request<Args, Ctx>>;
 
     #[must_use = "Sinks do nothing unless polled"]
     fn sink(&self) -> Self::Sink;
@@ -41,71 +43,21 @@ pub trait BackendWithSink<Args, Ctx> : Backend<Args, Ctx> {
 /// Represents a stream for T.
 pub type RequestStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
 
-pub trait TaskSink<Args>: Unpin + Send {
-    type Codec;
-    type Compact: Send;
-
+pub trait TaskSink<Args, Context> {
     type Error;
+    fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
 
-    type Context: Default + Send + Clone;
-    type Timestamp;
-
-    fn push(
-        &mut self,
-        task: Args,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send
-    where
-        Self::Context: Default,
-        Self::Codec: Encoder<Args, Compact = Self::Compact>,
-    {
-        self.push_request(Request::new(task))
-    }
-
-    fn push_request(
-        &mut self,
-        req: Request<Args, Self::Context>,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send
-    where
-        Self::Codec: Encoder<Args, Compact = Self::Compact>,
-    {
-        let res = match Self::Codec::encode(&req.args) {
-            Ok(r) => r,
-            Err(_) => todo!(),
-        };
-        let req = Request::new(res);
-        self.push_raw_request(req)
-    }
-
-    fn push_raw_request(
-        &mut self,
-        req: Request<Self::Compact, Self::Context>,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send;
-
-    fn schedule(
-        &mut self,
-        task: Args,
-        delay: Duration,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send
-    where
-        Self::Context: Default,
-    {
-        self.schedule_request(Request::new(task), delay)
-    }
-
-    fn schedule_request(
-        &mut self,
-        request: Request<Args, Self::Context>,
-        delay: Duration,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
-        Box::pin(async { todo!() })
-    }
-
-    fn schedule_raw_request(
-        &mut self,
-        request: Request<Self::Compact, Self::Context>,
-        delay: Duration,
-    ) -> impl Future<Output = Result<Parts<Self::Context>, Self::Error>> + Send {
-        Box::pin(async { todo!() })
+impl<Args, Ctx: Default, S> TaskSink<Args, Ctx> for S
+where
+    S: Sink<Request<Args, Ctx>> + Unpin + Send,
+    Args: Send,
+    Ctx: Send,
+{
+    type Error = S::Error;
+    async fn push(&mut self, task: Args) -> Result<(), Self::Error> {
+        use futures_util::SinkExt;
+        self.send(Request::new(task)).await
     }
 }
 

@@ -60,6 +60,9 @@ pub struct Parts<Ctx> {
 
     /// The task status
     pub status: Status,
+
+    // /// The time a task should be run
+    // pub run_at: u64
 }
 
 impl<T, Ctx> Request<T, Ctx> {

@@ -93,7 +93,7 @@ async fn register(
 impl<Args, D> Backend<Args, SqlContext> for PostgresStorage<Args, PgFetcher<Args, D>>
 where
     Args: Send + 'static + Unpin,
-    D: Decoder<Args, Compact = Value> + 'static, 
+    D: Decoder<Args, Compact = Value> + 'static,
     D::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = sqlx::Error;
@@ -166,7 +166,7 @@ where
         // Add the item to the buffer
         self.get_mut()
             .buffer
-            .push(item.try_map(|s| E::encode(&s).map_err(|e| sqlx::Error::Decode(e.into())))?);
+            .push(item.try_map(|s| E::encode(&s).map_err(|e| sqlx::Error::Encode(e.into())))?);
         Ok(())
     }
 
@@ -274,29 +274,6 @@ impl<Args: Send + Sync + Unpin + 'static + Serialize + DeserializeOwned>
             pool: self.pool.clone(),
             flush_future: None,
         }
-    }
-}
-
-impl<Args: Send + Sync + Unpin + 'static> TaskSink<Args> for PgSink<Args> {
-    type Codec = JsonCodec<Value>;
-
-    type Compact = Value;
-
-    type Error = sqlx::Error;
-
-    type Context = SqlContext;
-
-    type Timestamp = u64;
-
-    async fn push_raw_request(
-        &mut self,
-        req: Request<Self::Compact, Self::Context>,
-    ) -> Result<apalis_core::request::Parts<Self::Context>, Self::Error> {
-        use futures::SinkExt;
-        let parts = req.parts.clone();
-        self.buffer.push(req);
-        self.flush().await?;
-        Ok(parts)
     }
 }
 
@@ -616,6 +593,7 @@ mod tests {
                 .await
                 .unwrap(),
             config: Config::default(),
+            fetcher: None,
         };
 
         let mut sink = backend.sink();

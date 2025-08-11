@@ -37,15 +37,13 @@ impl<S: fmt::Debug, Into: fmt::Debug, Args, Ctx> fmt::Debug for Pipe<S, Into, Ar
     }
 }
 
-impl<Args, Ctx, S, I, Compact, Err> Backend<Args, Ctx> for Pipe<S, I, Args, Ctx>
+impl<Args, Ctx, S, I, Err> Backend<Args, Ctx> for Pipe<S, I, Args, Ctx>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
     I: BackendWithSink<Args, Ctx>,
     I::Error: Into<BoxDynError> + Send + Sync + 'static,
-    I::Sink: TaskSink<Args, Compact = Compact> + 'static + Sink<Request<Args, Ctx>>,
+    I::Sink: 'static + Sink<Request<Args, Ctx>> + Unpin + Send,
     I::Beat: Send + 'static,
-    <<I as BackendWithSink<Args, Ctx>>::Sink as TaskSink<Args>>::Codec:
-        Encoder<Args, Compact = Compact>,
 
     I::Stream: Send + 'static,
     Args: Send + 'static,
@@ -101,17 +99,13 @@ where
     }
 }
 
-impl<S, I, Args, Ctx, Compact, Err> BackendWithSink<Args, Ctx>
-    for Pipe<S, I, Args, Ctx>
+impl<S, I, Args, Ctx, Err> BackendWithSink<Args, Ctx> for Pipe<S, I, Args, Ctx>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
     I: BackendWithSink<Args, Ctx>,
     I::Error: Into<BoxDynError> + Send + Sync + 'static,
-    I::Sink: TaskSink<Args, Compact = Compact> + 'static + Sink<Request<Args, Ctx>>,
+    I::Sink: Unpin + Send + 'static + Sink<Request<Args, Ctx>>,
     I::Beat: Send + 'static,
-    <<I as BackendWithSink<Args, Ctx>>::Sink as TaskSink<Args>>::Codec:
-        Encoder<Args, Compact = Compact>,
-
     I::Stream: Send + 'static,
     Args: Send + 'static,
     Ctx: Send + 'static + Default,
@@ -137,7 +131,7 @@ impl<B, Args, Ctx, Err> PipeExt<B, Args, Ctx> for BoxStream<'static, Result<Args
 where
     B: BackendWithSink<Args, Ctx>,
     B::Error: Into<BoxDynError> + Send + Sync + 'static,
-    B::Sink: TaskSink<Args, Context = Ctx>,
+    B::Sink: Sink<Request<Args, Ctx>>,
 {
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx> {
         Pipe::new(self, backend)

@@ -608,12 +608,13 @@ impl<T: Serialize + Send + Unpin, Cdc: Send + Unpin, Conn: ConnectionLike + Send
 
     type Context = RedisContext;
 
-    type Timestamp = u64;
-    async fn push_raw_request(
+    async fn push_request(
         &mut self,
-        request: Request<Self::Compact, Self::Context>,
+        request: Request<T, Self::Context>,
     ) -> Result<Parts<Self::Context>, Self::Error> {
         let task_id = request.parts.task_id.to_string();
+
+        // let compact = Cdc:: TODO: remove serialize
 
         let parts: Parts<RedisContext> = request.parts;
 
