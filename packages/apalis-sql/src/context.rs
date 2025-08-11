@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 /// Used to provide a context for a job with an sql backend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlContext {
-    run_at: DateTime<Utc>,
     max_attempts: i32,
     last_error: Option<String>,
     lock_at: Option<i64>,
@@ -27,7 +26,6 @@ impl SqlContext {
     /// Build a new context with defaults
     pub fn new() -> Self {
         SqlContext {
-            run_at: Utc::now(),
             lock_at: None,
             done_at: None,
             max_attempts: 5,
@@ -55,16 +53,6 @@ impl SqlContext {
     /// Set the time a job was done
     pub fn set_done_at(&mut self, done_at: Option<i64>) {
         self.done_at = done_at;
-    }
-
-    /// Get the time a job is supposed to start
-    pub fn run_at(&self) -> &DateTime<Utc> {
-        &self.run_at
-    }
-
-    /// Set the time a job should run
-    pub fn set_run_at(&mut self, run_at: DateTime<Utc>) {
-        self.run_at = run_at;
     }
 
     /// Get the time a job was locked

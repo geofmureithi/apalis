@@ -1,4 +1,5 @@
 use std::{
+    backtrace::Backtrace,
     collections::HashMap,
     fmt::Debug,
     future::Future,
@@ -32,7 +33,7 @@ use futures::{
     FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{calculate_status, context::SqlContext, postgres::fetcher::PgFetcher, Config};
@@ -188,12 +189,15 @@ where
                 let mut priorities = Vec::new();
                 let mut max_attempts_vec = Vec::new();
 
-                for request in buffer {
-                    ids.push(request.meta.task_id.to_string());
-                    job_data.push(request.args);
-                    run_ats.push(request.meta.context.run_at().clone());
-                    priorities.push(*request.meta.context.priority());
-                    max_attempts_vec.push(request.meta.context.max_attempts());
+                for task in buffer {
+                    ids.push(task.meta.task_id.to_string());
+                    job_data.push(task.args);
+                    run_ats.push(
+                        DateTime::from_timestamp(task.meta.run_at as i64, 0)
+                            .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?,
+                    );
+                    priorities.push(*task.meta.context.priority());
+                    max_attempts_vec.push(task.meta.context.max_attempts());
                 }
 
                 sqlx::query!(
@@ -283,13 +287,9 @@ impl<Res: Serialize> Acknowledge<Res, SqlContext> for PgAck {
         parts: &Metadata<SqlContext>,
     ) -> Self::Future {
         let task_id = parts.task_id.clone();
-        let worker_id = parts
-            .context
-            .lock_by()
-            .clone()
-            .unwrap_or("rango-tango".to_owned());
-        let response = serde_json::to_string(&res.as_ref().map_err(|e| e.to_string()))
-            .expect("Could not convert response to JSON");
+        let worker_id = parts.context.lock_by().clone();
+
+        let response = serde_json::to_string(&res.as_ref().map_err(|e| e.to_string()));
         let status = calculate_status(&parts.context, res);
         let attempt = parts.attempt.current() as i32;
         let now = Utc::now();
@@ -299,18 +299,17 @@ impl<Res: Serialize> Acknowledge<Res, SqlContext> for PgAck {
                 r#"
                             UPDATE apalis.jobs 
                             SET 
-                                status = $5,
+                                status = $4,
                                 attempts = $2,
                                 last_error = $3,
-                                done_at = $4
-                            WHERE id = $1 AND lock_by = $6
+                                done_at = NOW()
+                            WHERE id = $1 AND lock_by = $5
                             "#,
                 &task_id.to_string(),
                 attempt,
-                &response,
-                now,
+                &response.map_err(|e| sqlx::Error::Decode(e.into()))?,
                 status.to_string(),
-                worker_id
+                worker_id.ok_or(sqlx::Error::ColumnNotFound("WORKER_ID_LOCK_BY".to_owned()))?
             )
             .execute(&pool)
             .await?;
@@ -370,12 +369,12 @@ impl PgTask {
                 .id
                 .ok_or(sqlx::Error::ColumnNotFound("task_id".to_owned()))
                 .and_then(|s| TaskId::from_str(&s).map_err(|e| sqlx::Error::Decode(e.into())))?,
+            run_at: self
+                .run_at
+                .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?
+                .timestamp() as u64,
             context: {
                 let mut ctx = SqlContext::default();
-                ctx.set_run_at(
-                    self.run_at
-                        .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?,
-                );
                 ctx.set_lock_at(self.lock_at.map(|s| s.timestamp()));
                 ctx.set_lock_by(self.lock_by);
                 // TODO: complete the rest
@@ -596,16 +595,30 @@ mod tests {
 
         let task = Task::builder(Default::default())
             .run_after(Duration::from_secs(5))
+            .with_context(|mut ctx: SqlContext| {
+                ctx.set_priority(1);
+                ctx
+            })
+            .build();
+        let task2 = Task::builder(Default::default())
+            .with_context(|mut ctx: SqlContext| {
+                ctx.set_priority(2);
+                ctx
+            })
+            .run_after(Duration::from_secs(5))
             .build();
 
-        sink.send(task).await.unwrap();
+        sink.send_all(&mut stream::iter(vec![task, task2].into_iter().map(Ok)))
+            .await
+            .unwrap();
 
         async fn send_reminder(
             _: HashMap<String, String>,
             ctx: SqlContext,
         ) -> Result<(), BoxDynError> {
-            // tokio::time::sleep(Duration::from_secs(2)).await;
-            Err("Failed".into())
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            // Err("Failed".into())
+            Ok(())
         }
 
         let worker = WorkerBuilder::new("rango-tango")

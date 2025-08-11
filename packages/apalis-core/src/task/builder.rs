@@ -4,9 +4,10 @@ use crate::task::{
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Builder for creating `Task` instances with optional configuration
+#[derive(Debug)]
 pub struct TaskBuilder<Args, Ctx> {
     args: Args,
-    context: Option<Ctx>,
+    context: Ctx,
     data: Option<Extensions>,
     task_id: Option<TaskId>,
     attempt: Option<Attempt>,
@@ -14,12 +15,12 @@ pub struct TaskBuilder<Args, Ctx> {
     run_at: Option<u64>,
 }
 
-impl<Args, Ctx> TaskBuilder<Args, Ctx> {
+impl<Args, Ctx: Default> TaskBuilder<Args, Ctx> {
     /// Create a new TaskBuilder with the required args
     pub fn new(args: Args) -> Self {
         Self {
             args,
-            context: None,
+            context: Default::default(),
             data: None,
             task_id: None,
             attempt: None,
@@ -29,8 +30,8 @@ impl<Args, Ctx> TaskBuilder<Args, Ctx> {
     }
 
     /// Set the task context
-    pub fn with_context(mut self, context: Ctx) -> Self {
-        self.context = Some(context);
+    pub fn with_context<F: Fn(Ctx) -> Ctx>(mut self, context_fn: F) -> Self {
+        self.context = context_fn(self.context);
         self
     }
 
@@ -87,17 +88,17 @@ impl<Args, Ctx> TaskBuilder<Args, Ctx> {
     }
 
     /// Schedule the task to run in the specified number of seconds
-    pub fn run_in_seconds(mut self, seconds: u64) -> Self {
+    pub fn run_in_seconds(self, seconds: u64) -> Self {
         self.run_after(Duration::from_secs(seconds))
     }
 
     /// Schedule the task to run in the specified number of minutes
-    pub fn run_in_minutes(mut self, minutes: u64) -> Self {
+    pub fn run_in_minutes(self, minutes: u64) -> Self {
         self.run_after(Duration::from_secs(minutes * 60))
     }
 
     /// Schedule the task to run in the specified number of hours
-    pub fn run_in_hours(mut self, hours: u64) -> Self {
+    pub fn run_in_hours(self, hours: u64) -> Self {
         self.run_after(Duration::from_secs(hours * 3600))
     }
 
@@ -119,7 +120,7 @@ impl<Args, Ctx> TaskBuilder<Args, Ctx> {
                 task_id: self.task_id.unwrap_or_default(),
                 data: self.data.unwrap_or_default(),
                 attempt: self.attempt.unwrap_or_default(),
-                context: self.context.unwrap_or_default(),
+                context: self.context,
                 status: self.status.unwrap_or(Status::Pending),
                 run_at: self.run_at.unwrap_or_else(current_time),
             },
@@ -141,7 +142,7 @@ impl<Args, Ctx> TaskBuilder<Args, Ctx> {
                 task_id: self.task_id.unwrap_or_default(),
                 data: self.data.unwrap_or_default(),
                 attempt: self.attempt.unwrap_or_default(),
-                context: self.context.unwrap_or(default_context),
+                context: default_context,
                 status: self.status.unwrap_or(Status::Pending),
                 run_at: self.run_at.unwrap_or_else(current_time),
             },
@@ -150,7 +151,7 @@ impl<Args, Ctx> TaskBuilder<Args, Ctx> {
 }
 
 // Convenience methods for Task to create a builder
-impl<Args, Ctx> Task<Args, Ctx> {
+impl<Args, Ctx: Default> Task<Args, Ctx> {
     /// Create a TaskBuilder with the given args
     pub fn builder(args: Args) -> TaskBuilder<Args, Ctx> {
         TaskBuilder::new(args)

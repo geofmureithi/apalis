@@ -8,7 +8,10 @@ use std::{
 };
 
 use futures_sink::Sink;
-use futures_util::{stream::BoxStream, Stream};
+use futures_util::{
+    stream::{self, BoxStream},
+    Stream,
+};
 
 use crate::{
     backend::codec::Encoder,
@@ -46,6 +49,16 @@ pub type RequestStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>
 pub trait TaskSink<Args, Context> {
     type Error;
     fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    fn push_bulk(
+        &mut self,
+        tasks: Vec<Args>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    fn push_stream(
+        &mut self,
+        tasks: impl Stream<Item = Args> + Unpin + Send,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 impl<Args, Ctx: Default, S> TaskSink<Args, Ctx> for S
@@ -53,11 +66,34 @@ where
     S: Sink<Task<Args, Ctx>> + Unpin + Send,
     Args: Send,
     Ctx: Send,
+    S::Error: Send,
 {
     type Error = S::Error;
     async fn push(&mut self, task: Args) -> Result<(), Self::Error> {
         use futures_util::SinkExt;
         self.send(Task::new(task)).await
+    }
+
+    async fn push_bulk(&mut self, tasks: Vec<Args>) -> Result<(), Self::Error> {
+        use futures_util::SinkExt;
+        self.send_all(&mut stream::iter(
+            tasks
+                .into_iter()
+                .map(Task::new)
+                .map(Result::Ok)
+                .collect::<Vec<_>>(),
+        ))
+        .await
+    }
+
+    async fn push_stream(
+        &mut self,
+        tasks: impl Stream<Item = Args> + Unpin + Send,
+    ) -> Result<(), Self::Error> {
+        use futures_util::SinkExt;
+        use futures_util::StreamExt;
+        self.send_all(&mut tasks.map(Task::new).map(Result::Ok))
+            .await
     }
 }
 

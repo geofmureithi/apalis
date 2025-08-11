@@ -105,8 +105,6 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
         parts.attempt = Attempt::new_with_value(attempt as usize);
         let mut context = SqlContext::new();
 
-        let run_at = row.try_get("run_at")?;
-        context.set_run_at(run_at);
 
         if let Ok(max_attempts) = row.try_get("max_attempts") {
             context.set_max_attempts(max_attempts)
