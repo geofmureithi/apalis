@@ -52,11 +52,11 @@ use apalis_core::{
     backend::{
         codec::{json::JsonCodec, Codec, Decoder, Encoder},
         shared::MakeShared,
-        Backend, TaskStream, TaskSink,
+        Backend, TaskSink, TaskStream,
     },
     error::BoxDynError,
-    task::{attempt::Attempt, state::Status, task_id::TaskId, Metadata, Task},
     service_fn::from_request::FromRequest,
+    task::{attempt::Attempt, state::Status, task_id::TaskId, Metadata, Task},
     worker::{
         context::WorkerContext,
         ext::ack::{Acknowledge, AcknowledgeLayer},
@@ -318,18 +318,18 @@ where
     }
 }
 
-impl<T, Conn, C> RedisStorage<T, Conn, C>
+impl<Args, Conn, C> RedisStorage<Args, Conn, C>
 where
-    T: DeserializeOwned + Unpin + Send + Sync + 'static,
+    Args: DeserializeOwned + Unpin + Send + Sync + 'static,
     Conn: ConnectionLike + Send + Sync + 'static,
-    C: Decoder<T, Compact = Vec<u8>>,
+    C: Decoder<Args, Compact = Vec<u8>>,
     C::Error: Into<BoxDynError>,
 {
     async fn fetch_next(
         worker: &WorkerContext,
         config: &RedisConfig,
         conn: &mut Conn,
-    ) -> Result<Vec<Task<T, RedisContext>>, RedisError> {
+    ) -> Result<Vec<Task<Args, RedisContext>>, RedisError> {
         let fetch_jobs = redis::Script::new(include_str!("../lua/get_jobs.lua"));
         let consumers_set = config.consumers_set();
         let active_jobs_list = config.active_jobs_list();
@@ -353,7 +353,7 @@ where
                 let mut processed = vec![];
                 let tasks = deserialize_with_meta(&jobs[0], &jobs[1])?;
                 for task in tasks {
-                    let args: T =
+                    let args: Args =
                         C::decode(task.data).map_err(|e| build_error(&e.into().to_string()))?;
                     let context = RedisContext {
                         max_attempts: task.max_attempts,
@@ -368,8 +368,7 @@ where
                         TaskId::from_str(task.task_id).map_err(|e| build_error(&e.to_string()))?;
 
                     parts.task_id = task_id;
-                    let mut request: Task<T, RedisContext> =
-                        Task::new_with_parts(args, parts);
+                    let mut request: Task<Args, RedisContext> = Task::new_with_parts(args, parts);
                     request.meta.context.lock_by = Some(worker.name().clone());
                     processed.push(request)
                 }
@@ -506,7 +505,6 @@ impl SharedRedisStorage {
 }
 
 impl<Args> MakeShared<Args, RedisStorage<Args, MultiplexedConnection>> for SharedRedisStorage {
-
     type Config = RedisConfig;
 
     type MakeError = RedisError;
@@ -539,8 +537,8 @@ impl<Args> MakeShared<Args, RedisStorage<Args, MultiplexedConnection>> for Share
     }
 }
 
-pub struct RedisSink<Args, Codec, Conn = ConnectionManager> {
-    _args: PhantomData<(Args, Codec)>,
+pub struct RedisSink<Args, Encode, Conn = ConnectionManager> {
+    _args: PhantomData<(Args, Encode)>,
     config: RedisConfig,
     pending: Vec<Task<Vec<u8>, RedisContext>>,
     conn: Conn,
@@ -560,7 +558,11 @@ impl<Conn: ConnectionLike + Send + Clone + 'static, Res: Serialize> Acknowledge<
 
     type Error = RedisError;
 
-    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Metadata<RedisContext>) -> Self::Future {
+    fn ack(
+        &mut self,
+        res: &Result<Res, BoxDynError>,
+        parts: &Metadata<RedisContext>,
+    ) -> Self::Future {
         let task_id = parts.task_id.to_string();
         let attempt = parts.attempt.current();
         let worker_id = &parts.context.lock_by.as_ref().unwrap();
@@ -597,8 +599,8 @@ impl<Conn: ConnectionLike + Send + Clone + 'static, Res: Serialize> Acknowledge<
     }
 }
 
-impl<T: Serialize + Send + Unpin, Cdc: Send + Unpin, Conn: ConnectionLike + Send + Unpin>
-    TaskSink<T> for RedisSink<T, Cdc, Conn>
+impl<Args: Serialize + Send + Unpin, Cdc: Send + Unpin, Conn: ConnectionLike + Send + Unpin>
+    TaskSink<Args> for RedisSink<Args, Cdc, Conn>
 {
     type Error = RedisError;
 
@@ -610,7 +612,7 @@ impl<T: Serialize + Send + Unpin, Cdc: Send + Unpin, Conn: ConnectionLike + Send
 
     async fn push_request(
         &mut self,
-        request: Task<T, Self::Context>,
+        request: Task<Args, Self::Context>,
     ) -> Result<Metadata<Self::Context>, Self::Error> {
         let task_id = request.meta.task_id.to_string();
 
@@ -670,10 +672,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(
-        self: Pin<&mut Self>,
-        item: Task<Args, RedisContext>,
-    ) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Task<Args, RedisContext>) -> Result<(), Self::Error> {
         let this = Pin::get_mut(self);
         let req = item
             .try_map(|req| Cdc::encode(&req))
@@ -891,8 +890,8 @@ mod tests {
 
     use apalis_core::{
         backend::{memory::MemoryStorage, TaskSink},
-        task::data::Data,
         service_fn::{self, service_fn, ServiceFn},
+        task::data::Data,
         worker::{
             builder::WorkerBuilder,
             ext::{
@@ -919,7 +918,9 @@ mod tests {
         let conn = client.get_connection_manager().await.unwrap();
         let backend = RedisStorage::new_with_config(
             conn,
-            RedisConfig::default().set_namespace("redis_basic_worker").set_buffer_size(100),
+            RedisConfig::default()
+                .set_namespace("redis_basic_worker")
+                .set_buffer_size(100),
         );
         let mut sink = backend.sink();
         for i in 0..ITEMS {

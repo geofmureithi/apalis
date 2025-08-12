@@ -26,40 +26,44 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use ulid::Ulid;
+
 use crate::task::{attempt::Attempt, extensions::Extensions, status::Status, task_id::TaskId};
 
 pub mod attempt;
+pub mod builder;
 pub mod data;
 pub mod extensions;
 pub mod status;
 pub mod task_id;
-pub mod builder;
 
 /// Represents a task which can be serialized and executed
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
-pub struct Task<Args, Ctx> {
+pub struct Task<Args, Ctx, IdType = Ulid> {
     /// The inner request part
     pub args: Args,
     /// Parts of the request eg id, attempts and context
-    pub meta: Metadata<Ctx>,
+    pub meta: Metadata<Ctx, IdType>,
 }
 
 /// Component parts of a `Request`
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
-pub struct Metadata<Ctx> {
-    /// The request's id
-    pub task_id: TaskId,
+pub struct Metadata<Ctx, IdType = Ulid> {
+    /// The task's id
+    pub task_id: TaskId<IdType>,
 
-    /// The request's extensions
+    /// The tasks's extensions
+    /// See more -->
     #[cfg_attr(feature = "serde", serde(skip))]
     pub data: Extensions,
 
-    /// The request's attempts
+    /// The tasks's attempts
+    /// Keeps track of the number of attempts a task has been worked on
     pub attempt: Attempt,
 
-    /// The request specific data stored by the backend
+    /// The task specific data provided by the backend
     pub context: Ctx,
 
     /// The task status
@@ -69,22 +73,26 @@ pub struct Metadata<Ctx> {
     pub run_at: u64,
 }
 
-impl<T, Ctx> Task<T, Ctx> {
+impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     /// Creates a new [Request]
-    pub fn new(args: T) -> Self
+    pub fn new(args: Args) -> Self
     where
         Ctx: Default,
+        IdType: Default,
     {
         Self::new_with_data(args, Extensions::default(), Ctx::default())
     }
 
     /// Creates a request with all parts provided
-    pub fn new_with_parts(args: T, parts: Metadata<Ctx>) -> Self {
+    pub fn new_with_parts(args: Args, parts: Metadata<Ctx, IdType>) -> Self {
         Self { args, meta: parts }
     }
 
     /// Creates a request with context provided
-    pub fn new_with_ctx(req: T, ctx: Ctx) -> Self {
+    pub fn new_with_ctx(req: Args, ctx: Ctx) -> Self
+    where
+        IdType: Default,
+    {
         Self {
             args: req,
             meta: Metadata {
@@ -104,7 +112,10 @@ impl<T, Ctx> Task<T, Ctx> {
     }
 
     /// Creates a request with data and context provided
-    pub fn new_with_data(req: T, data: Extensions, ctx: Ctx) -> Self {
+    pub fn new_with_data(req: Args, data: Extensions, ctx: Ctx) -> Self
+    where
+        IdType: Default,
+    {
         Self {
             args: req,
             meta: Metadata {
@@ -124,14 +135,14 @@ impl<T, Ctx> Task<T, Ctx> {
     }
 
     /// Take the task into its parts
-    pub fn take(self) -> (T, Metadata<Ctx>) {
+    pub fn take(self) -> (Args, Metadata<Ctx, IdType>) {
         (self.args, self.meta)
     }
 }
 
-impl<Args, Ctx> Task<Args, Ctx> {
+impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     /// Maps the `args` field using the provided function, consuming the request.
-    pub fn try_map<F, NewArgs, Err>(self, f: F) -> Result<Task<NewArgs, Ctx>, Err>
+    pub fn try_map<F, NewArgs, Err>(self, f: F) -> Result<Task<NewArgs, Ctx, IdType>, Err>
     where
         F: FnOnce(Args) -> Result<NewArgs, Err>,
     {
@@ -141,7 +152,7 @@ impl<Args, Ctx> Task<Args, Ctx> {
         })
     }
     /// Maps the `args` field using the provided function, consuming the request.
-    pub fn map<F, NewArgs>(self, f: F) -> Task<NewArgs, Ctx>
+    pub fn map<F, NewArgs>(self, f: F) -> Task<NewArgs, Ctx, IdType>
     where
         F: FnOnce(Args) -> NewArgs,
     {
@@ -151,31 +162,19 @@ impl<Args, Ctx> Task<Args, Ctx> {
         }
     }
 
-    /// Maps the `args` field by reference.
-    pub fn map_ref<F, NewArgs>(&self, f: F) -> Task<NewArgs, Ctx>
-    where
-        F: FnOnce(&Args) -> NewArgs,
-        Ctx: Clone, // Needed to clone parts if they contain references
-    {
-        Task {
-            args: f(&self.args),
-            meta: self.meta.clone(),
-        }
-    }
-
     /// Maps both `args` and `parts` together.
-    pub fn map_all<F, NewArgs, NewCtx>(self, f: F) -> Task<NewArgs, NewCtx>
+    pub fn map_all<F, NewArgs, NewCtx>(self, f: F) -> Task<NewArgs, NewCtx, IdType>
     where
-        F: FnOnce(Args, Metadata<Ctx>) -> (NewArgs, Metadata<NewCtx>),
+        F: FnOnce(Args, Metadata<Ctx, IdType>) -> (NewArgs, Metadata<NewCtx, IdType>),
     {
         let (args, parts) = f(self.args, self.meta);
         Task { args, meta: parts }
     }
 
     /// Maps only the `parts` field.
-    pub fn map_parts<F, NewCtx>(self, f: F) -> Task<Args, NewCtx>
+    pub fn map_parts<F, NewCtx>(self, f: F) -> Task<Args, NewCtx, IdType>
     where
-        F: FnOnce(Metadata<Ctx>) -> Metadata<NewCtx>,
+        F: FnOnce(Metadata<Ctx, IdType>) -> Metadata<NewCtx, IdType>,
     {
         Task {
             args: self.args,
@@ -184,14 +183,14 @@ impl<Args, Ctx> Task<Args, Ctx> {
     }
 }
 
-impl<T, Ctx> std::ops::Deref for Task<T, Ctx> {
+impl<Args, Ctx, IdType> std::ops::Deref for Task<Args, Ctx, IdType> {
     type Target = Extensions;
     fn deref(&self) -> &Self::Target {
         &self.meta.data
     }
 }
 
-impl<T, Ctx> std::ops::DerefMut for Task<T, Ctx> {
+impl<Args, Ctx, IdType> std::ops::DerefMut for Task<Args, Ctx, IdType> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.meta.data
     }

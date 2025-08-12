@@ -97,24 +97,24 @@ where
     }
 }
 
-pub trait FetchById<T, Context>: Backend<T, Context> {
+pub trait FetchById<Args, Context>: Backend<Args, Context> {
     fn fetch_by_id(
         &mut self,
         task_id: &TaskId,
-    ) -> impl Future<Output = Result<Option<Task<T, Context>>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Option<Task<Args, Context>>, Self::Error>> + Send;
 }
 
-pub trait Update<T, Context>: Backend<T, Context> {
+pub trait Update<Args, Context>: Backend<Args, Context> {
     fn update(
         &mut self,
-        task: Task<T, Context>,
+        task: Task<Args, Context>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-pub trait Reschedule<T, Context>: Backend<T, Context> {
+pub trait Reschedule<Args, Context>: Backend<Args, Context> {
     fn reschedule(
         &mut self,
-        task: Task<T, Context>,
+        task: Task<Args, Context>,
         wait: Duration,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
@@ -124,10 +124,10 @@ pub trait Vacuum {
     fn vacuum(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
-pub trait ConsumeNext<T, Context>: Backend<T, Context> {
+pub trait ConsumeNext<Args, Context>: Backend<Args, Context> {
     fn consume_next(
         &mut self,
-    ) -> impl Future<Output = Result<Option<Task<T, Context>>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Option<Task<Args, Context>>, Self::Error>> + Send;
 }
 
 pub trait ConsumeBatch<T, Context>: Backend<T, Context> {

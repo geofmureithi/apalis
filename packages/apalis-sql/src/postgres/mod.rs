@@ -464,7 +464,9 @@ impl PgTask {
             task_id: self
                 .id
                 .ok_or(sqlx::Error::ColumnNotFound("task_id".to_owned()))
-                .and_then(|s| TaskId::from_str(&s).map_err(|e| sqlx::Error::Decode(e.into())))?,
+                .and_then(|s| {
+                    TaskId::from_str(&s).map_err(|e | sqlx::Error::Decode(e.into()))
+                })?,
             run_at: self
                 .run_at
                 .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?
@@ -515,11 +517,11 @@ mod fetcher {
         Config,
     };
 
-    async fn fetch_next<T, D: Decoder<T, Compact = CompactT>>(
+    async fn fetch_next<Args, D: Decoder<Args, Compact = CompactT>>(
         pool: PgPool,
         config: Config,
         worker: WorkerContext,
-    ) -> Result<Vec<Task<T, SqlContext>>, sqlx::Error>
+    ) -> Result<Vec<Task<Args, SqlContext>>, sqlx::Error>
     where
         D::Error: std::error::Error + Send + Sync + 'static,
     {
@@ -537,15 +539,15 @@ mod fetcher {
         .fetch_all(&pool)
         .await?
         .into_iter()
-        .map(|r| r.try_into_req::<D, T>())
+        .map(|r| r.try_into_req::<D, Args>())
         .collect()
     }
 
-    enum StreamState<T> {
+    enum StreamState<Args> {
         Ready,
         Delay(Delay),
-        Fetch(BoxFuture<'static, Result<Vec<Task<T, SqlContext>>, sqlx::Error>>),
-        Buffered(VecDeque<Task<T, SqlContext>>),
+        Fetch(BoxFuture<'static, Result<Vec<Task<Args, SqlContext>>, sqlx::Error>>),
+        Buffered(VecDeque<Task<Args, SqlContext>>),
         Empty,
     }
 

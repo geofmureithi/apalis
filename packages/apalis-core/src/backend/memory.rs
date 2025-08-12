@@ -29,12 +29,12 @@ pub struct MemoryStorage<S> {
     /// This would be the backend you are targeting, eg a connection poll
     inner: S,
 }
-impl<T: Send + 'static> MemoryStorage<MemoryWrapper<T>> {
+impl<Args: Send + 'static> MemoryStorage<MemoryWrapper<Args>> {
     /// Create a new in-memory storage
     pub fn new() -> Self {
         let (sender, receiver) = unbounded();
         let sender = Box::new(sender)
-            as Box<dyn Sink<Task<T, ()>, Error = SendError> + Send + Sync + Unpin>;
+            as Box<dyn Sink<Task<Args, ()>, Error = SendError> + Send + Sync + Unpin>;
         Self {
             inner: MemoryWrapper {
                 sender: MemorySink {
@@ -46,7 +46,7 @@ impl<T: Send + 'static> MemoryStorage<MemoryWrapper<T>> {
     }
 
     #[cfg(feature = "json")]
-    pub fn new_with_json() -> MemoryStorage<JsonMemory<T>> {
+    pub fn new_with_json() -> MemoryStorage<JsonMemory<Args>> {
         MemoryStorage {
             inner: JsonMemory {
                 tasks: Default::default(),
@@ -64,18 +64,18 @@ struct TaskKey {
 
 #[cfg(feature = "json")]
 #[derive(Debug, Clone, Default)]
-pub struct JsonMemory<T> {
+pub struct JsonMemory<Args> {
     tasks: Arc<RwLock<BTreeMap<TaskKey, std::sync::Mutex<Value>>>>,
-    buffer: Vec<Task<T, ()>>,
+    buffer: Vec<Task<Args, ()>>,
 }
 
 #[cfg(feature = "json")]
 impl JsonMemory<Value> {
-    fn create_channel<T: 'static + DeserializeOwned + Serialize + Send>(
+    fn create_channel<Args: 'static + DeserializeOwned + Serialize + Send>(
         &self,
     ) -> (
-        Box<dyn Sink<Task<T, ()>, Error = SendError> + Send + Sync + Unpin + 'static>,
-        Pin<Box<dyn Stream<Item = Task<T, ()>> + Send>>,
+        Box<dyn Sink<Task<Args, ()>, Error = SendError> + Send + Sync + Unpin + 'static>,
+        Pin<Box<dyn Stream<Item = Task<Args, ()>> + Send>>,
     ) {
         // Create a channel for communication
         let sender = self.clone();
@@ -84,13 +84,13 @@ impl JsonMemory<Value> {
         let wrapped_sender = {
             let inner = self.clone();
 
-            sender.with_flat_map(move |request: Task<T, ()>| {
+            sender.with_flat_map(move |request: Task<Args, ()>| {
                 let task_id = request.meta.task_id.clone();
                 let value = serde_json::to_value(request.args).unwrap();
                 inner.tasks.write().unwrap().insert(
                     TaskKey {
                         task_id,
-                        namespace: std::any::type_name::<T>().to_owned(),
+                        namespace: std::any::type_name::<Args>().to_owned(),
                     },
                     value.clone().into(),
                 );
@@ -111,7 +111,7 @@ impl JsonMemory<Value> {
 
         // Combine the sender and receiver
         let sender = Box::new(wrapped_sender)
-            as Box<dyn Sink<Task<T, ()>, Error = SendError> + Send + Sync + Unpin>;
+            as Box<dyn Sink<Task<Args, ()>, Error = SendError> + Send + Sync + Unpin>;
         let receiver = filtered_stream.boxed();
 
         (sender, receiver)
@@ -195,7 +195,7 @@ impl<T> Clone for MemorySink<T> {
     }
 }
 
-impl<T> Sink<Task<T, ()>> for MemorySink<T> {
+impl<Args> Sink<Task<Args, ()>> for MemorySink<Args> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -203,7 +203,7 @@ impl<T> Sink<Task<T, ()>> for MemorySink<T> {
         Pin::new(&mut *lock).poll_ready_unpin(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Task<T, ()>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Task<Args, ()>) -> Result<(), Self::Error> {
         let mut lock = self.inner.try_lock().unwrap();
         Pin::new(&mut *lock).start_send_unpin(item)
     }
@@ -220,13 +220,13 @@ impl<T> Sink<Task<T, ()>> for MemorySink<T> {
 }
 
 /// In-memory queue that implements [Stream]
-pub struct MemoryWrapper<T> {
-    sender: MemorySink<T>,
-    receiver: Pin<Box<dyn Stream<Item = Task<T, ()>> + Send>>,
+pub struct MemoryWrapper<Args> {
+    sender: MemorySink<Args>,
+    receiver: Pin<Box<dyn Stream<Item = Task<Args, ()>> + Send>>,
 }
 
-impl<T> Stream for MemoryWrapper<T> {
-    type Item = Task<T, ()>;
+impl<Args> Stream for MemoryWrapper<Args> {
+    type Item = Task<Args, ()>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.as_mut().receiver.poll_next_unpin(cx)
@@ -234,9 +234,9 @@ impl<T> Stream for MemoryWrapper<T> {
 }
 
 // MemoryStorage as a Backend
-impl<T: 'static + Clone + Send> Backend<T, ()> for MemoryStorage<MemoryWrapper<T>> {
+impl<Args: 'static + Clone + Send> Backend<Args, ()> for MemoryStorage<MemoryWrapper<Args>> {
     type Error = BoxDynError;
-    type Stream = TaskStream<Task<T, ()>>;
+    type Stream = TaskStream<Task<Args, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -262,9 +262,9 @@ impl<T: Clone + Send + Unpin + 'static> BackendWithSink<T, ()> for MemoryStorage
 }
 
 #[cfg(feature = "json")]
-impl<T: 'static + Send + DeserializeOwned> Backend<T, ()> for MemoryStorage<JsonMemory<T>> {
+impl<Args: 'static + Send + DeserializeOwned> Backend<Args, ()> for MemoryStorage<JsonMemory<Args>> {
     type Error = BoxDynError;
-    type Stream = TaskStream<Task<T, ()>>;
+    type Stream = TaskStream<Task<Args, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -331,15 +331,15 @@ struct SharedInMemoryStream<T> {
 }
 
 #[cfg(feature = "json")]
-impl<T: DeserializeOwned> Stream for SharedInMemoryStream<T> {
-    type Item = Task<T, ()>;
+impl<Args: DeserializeOwned> Stream for SharedInMemoryStream<Args> {
+    type Item = Task<Args, ()>;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut map = self.inner.tasks.write().unwrap();
         if let Some((key, mutex)) =
-            map.pop_first_with(|k, v| &k.namespace == std::any::type_name::<T>())
+            map.pop_first_with(|k, v| &k.namespace == std::any::type_name::<Args>())
         {
             let args = mutex.into_inner().unwrap();
-            let args = match serde_json::from_value::<T>(args) {
+            let args = match serde_json::from_value::<Args>(args) {
                 Ok(value) => value,
                 Err(_) => return Poll::Ready(None),
             };
