@@ -200,7 +200,7 @@ where
 pub struct PgSink<Args, Compact = CompactT, Codec = JsonCodec<CompactT>> {
     _marker: PhantomData<(Args, Codec)>,
     pool: PgPool,
-    buffer: Vec<Task<Compact, SqlContext>>,
+    buffer: Vec<Task<Compact, SqlContext, Ulid>>,
     config: Config,
     flush_future: Option<Pin<Box<dyn Future<Output = Result<(), sqlx::Error>> + Send>>>,
 }
@@ -233,7 +233,7 @@ impl<Args, Encode> PgSink<Args, CompactT, Encode> {
     }
 }
 
-impl<Args, Encode> Sink<Task<Args, SqlContext>> for PgSink<Args, CompactT, Encode>
+impl<Args, Encode> Sink<Task<Args, SqlContext, Ulid>> for PgSink<Args, CompactT, Encode>
 where
     Args: Unpin + Send + Sync + 'static,
     Encode: Encoder<Args, Compact = CompactT> + Unpin,
@@ -247,7 +247,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Task<Args, SqlContext>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Task<Args, SqlContext, Ulid>) -> Result<(), Self::Error> {
         // Add the item to the buffer
         self.get_mut()
             .buffer
@@ -391,7 +391,7 @@ impl<Res: Serialize> Acknowledge<Res, SqlContext, Ulid> for PgAck {
     fn ack(
         &mut self,
         res: &Result<Res, BoxDynError>,
-        parts: &Metadata<SqlContext>,
+        parts: &Metadata<SqlContext, Ulid>,
     ) -> Self::Future {
         let task_id = parts.task_id.clone();
         let worker_id = parts.context.lock_by().clone();
@@ -460,7 +460,7 @@ pub struct PgTask<Compact = CompactT> {
 impl PgTask {
     fn try_into_req<D: Decoder<Args, Compact = CompactT>, Args>(
         self,
-    ) -> Result<Task<Args, SqlContext>, sqlx::Error>
+    ) -> Result<Task<Args, SqlContext, Ulid>, sqlx::Error>
     where
         D::Error: std::error::Error + Send + Sync + 'static,
     {
@@ -512,7 +512,7 @@ mod fetcher {
 
     use apalis_core::{
         backend::codec::{json::JsonCodec, Decoder},
-        task::Task,
+        task::{task_id::Ulid, Task},
         timer::Delay,
         worker::context::WorkerContext,
     };
@@ -536,7 +536,7 @@ mod fetcher {
         pool: PgPool,
         config: Config,
         worker: WorkerContext,
-    ) -> Result<Vec<Task<Args, SqlContext>>, sqlx::Error>
+    ) -> Result<Vec<Task<Args, SqlContext, Ulid>>, sqlx::Error>
     where
         D::Error: std::error::Error + Send + Sync + 'static,
     {
@@ -561,8 +561,8 @@ mod fetcher {
     enum StreamState<Args> {
         Ready,
         Delay(Delay),
-        Fetch(BoxFuture<'static, Result<Vec<Task<Args, SqlContext>>, sqlx::Error>>),
-        Buffered(VecDeque<Task<Args, SqlContext>>),
+        Fetch(BoxFuture<'static, Result<Vec<Task<Args, SqlContext, Ulid>>, sqlx::Error>>),
+        Buffered(VecDeque<Task<Args, SqlContext, Ulid>>),
         Empty,
     }
 
@@ -582,7 +582,7 @@ mod fetcher {
                         Config,
                         WorkerContext,
                     )
-                        -> BoxFuture<'static, Result<Vec<Task<Args, SqlContext>>, sqlx::Error>>
+                        -> BoxFuture<'static, Result<Vec<Task<Args, SqlContext, Ulid>>, sqlx::Error>>
                     + Send
                     + Sync,
             >,
@@ -653,7 +653,7 @@ mod fetcher {
         Decode: Decoder<Args, Compact = CompactT> + 'static,
         // Compact: Unpin + Send + 'static,
     {
-        type Item = Result<Option<Task<Args, SqlContext>>, sqlx::Error>;
+        type Item = Result<Option<Task<Args, SqlContext, Ulid>>, sqlx::Error>;
 
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             let mut this = self.get_mut();

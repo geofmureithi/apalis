@@ -8,8 +8,6 @@ use std::{
     time::SystemTime,
 };
 
-pub use ulid::Ulid;
-
 use crate::{
     service_fn::from_request::FromRequest,
     task::{data::MissingDataError, Task},
@@ -17,10 +15,12 @@ use crate::{
 
 pub use unique_id::UniqueId;
 
+pub use ulid::Ulid;
+
 /// A wrapper type that defines a task id.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
-pub struct TaskId<IdType = Ulid>(Arc<IdType>);
+pub struct TaskId<IdType = UniqueId>(Arc<IdType>);
 
 impl<IdType> Clone for TaskId<IdType> {
     fn clone(&self) -> Self {
@@ -84,6 +84,8 @@ impl<Args: Sync, Ctx: Sync, IdType: Sync + Send> FromRequest<Task<Args, Ctx, IdT
 }
 
 mod unique_id {
+    use super::*;
+    use std::convert::Infallible;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -93,7 +95,31 @@ mod unique_id {
     const RANDOM_LEN: usize = 5;
 
     /// Consider using a ulid/uuid/nanoid in backend implementation
+    /// This is a placeholder and does not guarantee/tested as the other implementations
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
     pub struct UniqueId(String);
+
+    impl FromStr for UniqueId {
+        type Err = Infallible;
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            Ok(UniqueId(s.to_owned()))
+        }
+    }
+
+    impl TryFrom<&'_ str> for UniqueId {
+        type Error = Infallible;
+
+        fn try_from(value: &'_ str) -> Result<Self, Self::Error> {
+            Self::from_str(value)
+        }
+    }
+
+    impl Display for UniqueId {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            Display::fmt(&self.0, f)
+        }
+    }
 
     impl Default for UniqueId {
         fn default() -> Self {

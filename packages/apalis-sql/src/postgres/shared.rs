@@ -147,7 +147,7 @@ where
 
     type Error = sqlx::Error;
 
-    type Stream = TaskStream<Task<Args, SqlContext>, sqlx::Error>;
+    type Stream = TaskStream<Task<Args, SqlContext, Ulid>, sqlx::Error>;
 
     type Beat = BoxStream<'static, Result<(), sqlx::Error>>;
 
@@ -277,9 +277,10 @@ mod tests {
                 .unwrap();
         });
 
-        async fn send_reminder(
+        async fn send_reminder<I>(
             _: HashMap<String, String>,
             ctx: SqlContext,
+            task_id: TaskId<I>
         ) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_secs(2)).await;
             // Err("Failed".into())

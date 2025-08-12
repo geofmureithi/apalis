@@ -29,7 +29,7 @@ use std::{
 
 use ulid::Ulid;
 
-use crate::task::{attempt::Attempt, extensions::Extensions, status::Status, task_id::TaskId};
+use crate::task::{attempt::Attempt, extensions::Extensions, status::Status, task_id::{TaskId, UniqueId}};
 
 pub mod attempt;
 pub mod builder;
@@ -41,7 +41,7 @@ pub mod task_id;
 /// Represents a task which can be serialized and executed
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
-pub struct Task<Args, Ctx, IdType = Ulid> {
+pub struct Task<Args, Ctx, IdType = UniqueId> {
     /// The inner request part
     pub args: Args,
     /// Parts of the request eg id, attempts and context
@@ -51,7 +51,7 @@ pub struct Task<Args, Ctx, IdType = Ulid> {
 /// Component parts of a `Request`
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Default)]
-pub struct Metadata<Ctx, IdType = Ulid> {
+pub struct Metadata<Ctx, IdType = UniqueId> {
     /// The task's id if allocated
     pub task_id: Option<TaskId<IdType>>,
 

@@ -1,7 +1,10 @@
 use crate::{
     backend::{codec::CloneOpCodec, Backend, BackendWithSink, TaskSink, TaskStream},
     error::BoxDynError,
-    task::{task_id::TaskId, Metadata, Task},
+    task::{
+        task_id::{TaskId, UniqueId},
+        Metadata, Task,
+    },
     worker::context::WorkerContext,
 };
 use futures_channel::mpsc::{unbounded, SendError};
@@ -18,8 +21,6 @@ use std::{
     task::{Context, Poll},
 };
 use tower_layer::Identity;
-#[cfg(feature = "json")]
-use ulid::Ulid;
 
 #[cfg(feature = "serde")]
 use serde::{de::DeserializeOwned, Serialize};
@@ -87,13 +88,12 @@ impl JsonMemory<Value> {
             let inner = self.clone();
 
             sender.with_flat_map(move |request: Task<Args, ()>| {
-                use ulid::Ulid;
-
+                use crate::task::task_id::UniqueId;
                 let task_id = request
                     .meta
                     .task_id
                     .clone()
-                    .unwrap_or(TaskId::new(Ulid::new()));
+                    .unwrap_or(TaskId::new(UniqueId::default()));
                 let value = serde_json::to_value(request.args).unwrap();
                 inner.tasks.write().unwrap().insert(
                     TaskKey {
@@ -146,11 +146,13 @@ impl<Args: Unpin + Serialize> Sink<Task<Args, ()>> for JsonMemory<Args> {
         let this = Pin::get_mut(self);
         let mut tasks = this.tasks.write().unwrap();
         for task in this.buffer.drain(..) {
+            use crate::task::task_id::UniqueId;
+
             let task_id = task
                 .meta
                 .task_id
                 .clone()
-                .unwrap_or(TaskId::new(Ulid::new()));
+                .unwrap_or(TaskId::new(UniqueId::default()));
             tasks.insert(
                 TaskKey {
                     task_id,
@@ -247,7 +249,7 @@ impl<Args> Stream for MemoryWrapper<Args> {
 
 // MemoryStorage as a Backend
 impl<Args: 'static + Clone + Send> Backend<Args, ()> for MemoryStorage<MemoryWrapper<Args>> {
-    type IdType = Ulid;
+    type IdType = UniqueId;
 
     type Error = BoxDynError;
     type Stream = TaskStream<Task<Args, ()>>;
@@ -279,7 +281,7 @@ impl<T: Clone + Send + Unpin + 'static> BackendWithSink<T, ()> for MemoryStorage
 impl<Args: 'static + Send + DeserializeOwned> Backend<Args, ()>
     for MemoryStorage<JsonMemory<Args>>
 {
-    type IdType = Ulid;
+    type IdType = UniqueId;
     type Error = BoxDynError;
     type Stream = TaskStream<Task<Args, ()>>;
     type Layer = Identity;
