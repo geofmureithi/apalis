@@ -16,10 +16,10 @@ use crate::{service_fn::from_request::FromRequest, task::Task};
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub struct TaskId<IdType = Ulid>(IdType);
 
-impl<IdType: Default> TaskId<IdType> {
+impl<IdType> TaskId<IdType> {
     /// Generate a new [`TaskId`]
-    pub fn new() -> Self {
-        Self(IdType::default())
+    pub fn new(id: IdType) -> Self {
+        Self(id)
     }
     /// Get the inner [`IdType`]
     pub fn inner(&self) -> &IdType {
@@ -35,7 +35,7 @@ impl TaskId<Ulid> {
 
 impl<IdType: Default> Default for TaskId<IdType> {
     fn default() -> Self {
-        Self::new()
+        Self::new(IdType::default())
     }
 }
 
