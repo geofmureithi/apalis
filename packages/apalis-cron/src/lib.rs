@@ -148,7 +148,7 @@
 //! ```
 
 use apalis_core::backend::pipe::{Pipe, PipeExt};
-use apalis_core::backend::{Backend, RequestStream};
+use apalis_core::backend::{Backend, TaskStream};
 use apalis_core::error::BoxDynError;
 use apalis_core::task::attempt::Attempt;
 use apalis_core::task::data::MissingDataError;
@@ -315,7 +315,7 @@ where
     Tz::Offset: Send + Sync + Unpin + Display,
 {
     type Error = CronStreamError<Tz>;
-    type Stream = RequestStream<Task<Args, CronContext<Tz>>, CronStreamError<Tz>>;
+    type Stream = TaskStream<Task<Args, CronContext<Tz>>, CronStreamError<Tz>>;
 
     type Layer = Identity;
 

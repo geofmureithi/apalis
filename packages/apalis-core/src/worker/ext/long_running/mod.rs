@@ -5,8 +5,9 @@ use tower_layer::{Layer, Stack};
 use tower_service::Service;
 
 use crate::{
-    task::{data::MissingDataError, Task},
+    backend::Backend,
     service_fn::from_request::FromRequest,
+    task::{data::MissingDataError, Task},
     worker::{
         builder::WorkerBuilder,
         context::{Tracked, WorkerContext},
@@ -99,12 +100,12 @@ where
     fn call(&mut self, mut request: Task<Args, Ctx>) -> Self::Future {
         let tracker = TaskTracker::new();
         request.insert(tracker.clone());
-
+        let worker: WorkerContext = request.get().cloned().unwrap();
         let req = self.service.call(request);
         let fut = async move {
             let res = req.await;
             tracker.close();
-            let tracker_fut = tracker.wait().boxed();
+            let tracker_fut = worker.track(tracker.wait()); // Long running tasks will be awaited in a shutdown
             tracker_fut.await;
             res
         }
@@ -124,14 +125,15 @@ pub trait LongRunningExt<Args, Ctx, Source, Middleware>: Sized {
     ) -> WorkerBuilder<Args, Ctx, Source, Stack<LongRunningLayer, Middleware>>;
 }
 
-impl<Args, P, M, Ctx> LongRunningExt<Args, Ctx, P, M> for WorkerBuilder<Args, Ctx, P, M>
+impl<Args, B, M, Ctx> LongRunningExt<Args, Ctx, B, M> for WorkerBuilder<Args, Ctx, B, M>
 where
     M: Layer<LongRunningLayer>,
+    B: Backend<Args, Ctx>,
 {
     fn long_running_with_cfg(
         self,
         cfg: LongRunningConfig,
-    ) -> WorkerBuilder<Args, Ctx, P, Stack<LongRunningLayer, M>> {
+    ) -> WorkerBuilder<Args, Ctx, B, Stack<LongRunningLayer, M>> {
         let this = self.layer(LongRunningLayer);
         WorkerBuilder {
             name: this.name,
@@ -151,8 +153,8 @@ mod tests {
     use crate::{
         backend::{memory::MemoryStorage, Backend, BackendWithSink, TaskSink},
         error::BoxDynError,
-        task::data::Data,
         service_fn::{self, service_fn, ServiceFn},
+        task::data::Data,
         worker::{
             builder::WorkerBuilder,
             context::WorkerContext,
@@ -166,7 +168,7 @@ mod tests {
 
     #[tokio::test]
     async fn basic_worker() {
-        let in_memory = MemoryStorage::new();
+        let mut in_memory = MemoryStorage::new();
         let mut sink = in_memory.sink();
         for i in 0..ITEMS {
             sink.push(i).await.unwrap();

@@ -52,7 +52,7 @@ use apalis_core::{
     backend::{
         codec::{json::JsonCodec, Codec, Decoder, Encoder},
         shared::MakeShared,
-        Backend, RequestStream, TaskSink,
+        Backend, TaskStream, TaskSink,
     },
     error::BoxDynError,
     task::{attempt::Attempt, state::Status, task_id::TaskId, Metadata, Task},
@@ -204,7 +204,7 @@ where
     C: Decoder<Args, Compact = Vec<u8>> + Unpin + Send + 'static,
     C::Error: Into<BoxDynError>,
 {
-    type Stream = RequestStream<Task<Args, RedisContext>, RedisError>;
+    type Stream = TaskStream<Task<Args, RedisContext>, RedisError>;
 
     type Error = RedisError;
     type Layer = AcknowledgeLayer<RedisAck<Conn>>;

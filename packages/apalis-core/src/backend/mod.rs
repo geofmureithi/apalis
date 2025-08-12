@@ -40,11 +40,11 @@ pub trait Backend<Args, Ctx> {
 pub trait BackendWithSink<Args, Ctx>: Backend<Args, Ctx> {
     type Sink: Sink<Task<Args, Ctx>>;
 
-    #[must_use = "Sinks do nothing unless polled"]
-    fn sink(&self) -> Self::Sink;
+    #[must_use = "Sinks do nothing unless flushed"]
+    fn sink(&mut self) -> Self::Sink;
 }
 /// Represents a stream for T.
-pub type RequestStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
+pub type TaskStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
 
 pub trait TaskSink<Args, Context> {
     type Error;
@@ -143,7 +143,7 @@ pub trait FetchBatch<T> {
 
 pub trait FetchAll<Context> {
     type Compact;
-    fn fetch_many(&mut self) -> RequestStream<Task<Self::Compact, Context>>;
+    fn fetch_many(&mut self) -> TaskStream<Task<Self::Compact, Context>>;
 }
 
 pub trait ResumeById<T, Context>: Backend<T, Context> {

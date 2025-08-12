@@ -93,8 +93,8 @@ use crate::{
     backend::Backend,
     error::BoxDynError,
     monitor::shutdown::Shutdown,
-    task::{data::Data, Task},
     service_fn::into_response::IntoResponse,
+    task::{data::Data, Task},
     worker::{event::EventHandler, Worker},
 };
 
@@ -136,7 +136,6 @@ impl WorkerBuilder<(), (), (), Identity> {
 }
 
 impl WorkerBuilder<(), (), (), Identity> {
-
     /// Set the source to a backend that implements [Backend]
     pub fn backend<NB: Backend<NJ, Ctx>, NJ, Ctx>(
         self,
@@ -153,7 +152,10 @@ impl WorkerBuilder<(), (), (), Identity> {
     }
 }
 
-impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M> {
+impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M>
+where
+    B: Backend<Args, Ctx>,
+{
     /// Allows of decorating the service that consumes jobs.
     /// Allows adding multiple [`tower`] middleware
     pub fn chain<NewLayer>(
@@ -200,6 +202,17 @@ impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M> {
             shutdown: self.shutdown,
             event_handler: self.event_handler,
         }
+    }
+
+    #[inline]
+
+    pub fn check_service<S, U, E>(self) -> Self
+    where
+        M: Layer<S>,
+
+        M::Service: Service<Task<Args, Ctx>, Response = U, Error = E>,
+    {
+        self
     }
 }
 

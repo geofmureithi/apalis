@@ -1,5 +1,5 @@
 use crate::{
-    backend::{codec::CloneOpCodec, Backend, BackendWithSink, RequestStream, TaskSink},
+    backend::{codec::CloneOpCodec, Backend, BackendWithSink, TaskStream, TaskSink},
     error::BoxDynError,
     task::{task_id::TaskId, Metadata, Task},
     worker::context::WorkerContext,
@@ -236,7 +236,7 @@ impl<T> Stream for MemoryWrapper<T> {
 // MemoryStorage as a Backend
 impl<T: 'static + Clone + Send> Backend<T, ()> for MemoryStorage<MemoryWrapper<T>> {
     type Error = BoxDynError;
-    type Stream = RequestStream<Task<T, ()>>;
+    type Stream = TaskStream<Task<T, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -256,7 +256,7 @@ impl<T: 'static + Clone + Send> Backend<T, ()> for MemoryStorage<MemoryWrapper<T
 impl<T: Clone + Send + Unpin + 'static> BackendWithSink<T, ()> for MemoryStorage<MemoryWrapper<T>> {
     type Sink = MemorySink<T>;
 
-    fn sink(&self) -> Self::Sink {
+    fn sink(&mut self) -> Self::Sink {
         self.inner.sender.clone()
     }
 }
@@ -264,7 +264,7 @@ impl<T: Clone + Send + Unpin + 'static> BackendWithSink<T, ()> for MemoryStorage
 #[cfg(feature = "json")]
 impl<T: 'static + Send + DeserializeOwned> Backend<T, ()> for MemoryStorage<JsonMemory<T>> {
     type Error = BoxDynError;
-    type Stream = RequestStream<Task<T, ()>>;
+    type Stream = TaskStream<Task<T, ()>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -285,7 +285,7 @@ impl<T: 'static + Send + DeserializeOwned + Unpin + Serialize + Clone> BackendWi
     for MemoryStorage<JsonMemory<T>>
 {
     type Sink = JsonMemory<T>;
-    fn sink(&self) -> Self::Sink {
+    fn sink(&mut self) -> Self::Sink {
         self.inner.clone()
     }
 }

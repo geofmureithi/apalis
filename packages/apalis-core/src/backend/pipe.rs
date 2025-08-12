@@ -73,7 +73,7 @@ where
         self.into.middleware()
     }
 
-    fn poll(self, worker: &WorkerContext) -> Self::Stream {
+    fn poll(mut self, worker: &WorkerContext) -> Self::Stream {
         let mut sink = self.into.sink().sink_map_err(|e| e.into());
 
         let mut sink_stream = self
@@ -115,7 +115,7 @@ where
 {
     type Sink = I::Sink;
 
-    fn sink(&self) -> Self::Sink {
+    fn sink(&mut self) -> Self::Sink {
         self.into.sink()
     }
 }

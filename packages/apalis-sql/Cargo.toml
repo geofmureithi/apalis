@@ -12,6 +12,7 @@ description = "SQL Storage for apalis. Use sqlite, postgres and mysql for backgr
 [features]
 default = ["migrate", "tokio-comp"]
 postgres = ["sqlx/postgres", "sqlx/json"]
+postgres-bytes = ["sqlx/postgres"]
 sqlite = ["sqlx/sqlite", "sqlx/json"]
 mysql = ["sqlx/mysql", "sqlx/json", "sqlx/bigdecimal"]
 migrate = ["sqlx/migrate", "sqlx/macros"]

@@ -86,6 +86,7 @@ pub mod state;
 pub mod test_worker;
 
 /// A worker that is ready for running
+#[must_use = "Workers must be run or streamed to execute jobs"]
 pub struct Worker<Args, Ctx, Backend, Svc, Middleware> {
     pub(crate) name: String,
     pub(crate) backend: Backend,
@@ -295,8 +296,6 @@ where
     type Future = Tracked<AttemptOnPollFuture<S::Future>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        println!("Tracker called {:?}", self.ctx.is_ready);
-
         self.service.poll_ready(cx)
     }
 
@@ -368,7 +367,6 @@ where
     type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        println!("Readiness called {:?}", self.ctx.is_ready);
         // Delegate poll_ready to the inner service
         let result = self.inner.poll_ready(cx);
         // Update the readiness state based on the result
@@ -399,8 +397,8 @@ mod tests {
 
     use crate::{
         backend::{memory::MemoryStorage, BackendWithSink, TaskSink},
-        task::Metadata,
         service_fn::{self, service_fn, ServiceFn},
+        task::Metadata,
         worker::{
             builder::WorkerBuilder,
             ext::{
@@ -454,7 +452,11 @@ mod tests {
         impl<Ctx: Debug> Acknowledge<(), Ctx> for MyAcknowledger {
             type Error = SendError;
             type Future = BoxFuture<'static, Result<(), SendError>>;
-            fn ack(&mut self, res: &Result<(), BoxDynError>, parts: &Metadata<Ctx>) -> Self::Future {
+            fn ack(
+                &mut self,
+                res: &Result<(), BoxDynError>,
+                parts: &Metadata<Ctx>,
+            ) -> Self::Future {
                 println!("{res:?}, {parts:?}");
                 ready(Ok(())).boxed()
             }
@@ -475,7 +477,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_streams() {
-        let in_memory = MemoryStorage::new();
+        let mut in_memory = MemoryStorage::new();
         let mut sink = in_memory.sink();
 
         for i in 0..ITEMS {

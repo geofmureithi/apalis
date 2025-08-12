@@ -1,17 +1,18 @@
 use futures_util::future::BoxFuture;
-use tower_layer::{Layer, Stack};
-use tower_service::Service;
 use std::{
     future::Future,
+    ops::Deref,
     task::{Context, Poll},
 };
+use tower_layer::{Layer, Stack};
+use tower_service::Service;
 
 use crate::{
+    backend::Backend,
     error::BoxDynError,
     task::{status::Status, Metadata, Task},
-    worker::builder::WorkerBuilder,
+    worker::{builder::WorkerBuilder, context::WorkerContext},
 };
-
 
 pub trait AcknowledgementExt<Args, Ctx, Source, Middleware, Ack: Acknowledge<Res, Ctx>, Res>:
     Sized
@@ -94,27 +95,25 @@ where
 
     fn call(&mut self, req: Task<Args, Ctx>) -> Self::Future {
         let parts = req.meta.clone();
+        let worker: WorkerContext = req.get().cloned().unwrap();
         let future = self.inner.call(req);
         let mut acknowledger = self.acknowledger.clone();
         Box::pin(async move {
             let res = future.await.map_err(|e| e.into());
-            acknowledger.ack(&res, &parts).await?;
+            worker.track(acknowledger.ack(&res, &parts)).await?; // Ensure ack is gracefully shutdown
             res
         })
     }
 }
 
-impl<Args, P, M, Ctx, Ack, Res> AcknowledgementExt<Args, Ctx, P, M, Ack, Res>
-    for WorkerBuilder<Args, Ctx, P, M>
+impl<Args, B, M, Ctx, Ack, Res> AcknowledgementExt<Args, Ctx, B, M, Ack, Res>
+    for WorkerBuilder<Args, Ctx, B, M>
 where
     M: Layer<AcknowledgeLayer<Ack>>,
-    // M::Service: Service<Request<Args, Ctx>, Response = Res>, 
     Ack: Acknowledge<Res, Ctx>,
+    B: Backend<Args, Ctx>,
 {
-    fn ack_with(
-        self,
-        ack: Ack,
-    ) -> WorkerBuilder<Args, Ctx, P, Stack<AcknowledgeLayer<Ack>, M>> {
+    fn ack_with(self, ack: Ack) -> WorkerBuilder<Args, Ctx, B, Stack<AcknowledgeLayer<Ack>, M>> {
         let this = self.layer(AcknowledgeLayer::new(ack));
         WorkerBuilder {
             name: this.name,

@@ -61,8 +61,8 @@ use std::{
 use crate::{
     error::{WorkerError, WorkerStateError},
     monitor::shutdown::Shutdown,
-    task::{data::MissingDataError, Task},
     service_fn::from_request::FromRequest,
+    task::{data::MissingDataError, Task},
     worker::{
         event::{CtxEventHandler, Event},
         state::{InnerWorkerState, WorkerState},
@@ -70,6 +70,7 @@ use crate::{
 };
 
 /// Stores the Workers context
+/// Most fields are wrapped inside [`Arc`] so it should be cheap to clone
 #[derive(Clone)]
 pub struct WorkerContext {
     pub(super) name: Arc<String>,

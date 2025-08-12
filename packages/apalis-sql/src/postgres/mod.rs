@@ -38,16 +38,82 @@ use sqlx::PgPool;
 
 use crate::{calculate_status, context::SqlContext, postgres::fetcher::PgFetcher, Config};
 
+mod custom;
 mod shared;
 
-pub struct PostgresStorage<Args, Fetcher = PgFetcher<Args, JsonCodec<Value>>> {
-    _marker: PhantomData<Args>,
+#[cfg(feature = "postgres")]
+pub type CompactT = Value;
+
+#[cfg(feature = "postgres-bytes")]
+pub type CompactT = Vec<u8>;
+
+pub struct PostgresStorage<
+    Args,
+    Compact = CompactT,
+    Codec = JsonCodec<CompactT>,
+    Fetcher = DefaultFetcher,
+> {
+    _marker: PhantomData<(Args, Compact, Codec)>,
     pool: PgPool,
     config: Config,
-    fetcher: Option<Fetcher>,
+    fetcher: Fetcher,
 }
 
-async fn register(
+pub struct DefaultFetcher(());
+
+impl<Args> PostgresStorage<Args> {
+    /// Creates a new PostgresStorage instance.
+    pub fn new(pool: PgPool, config: Config) -> Self {
+        Self {
+            _marker: PhantomData,
+            pool,
+            config,
+            fetcher: DefaultFetcher(()),
+        }
+    }
+
+    /// Returns a reference to the pool.
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    /// Returns a mutable reference to the pool.
+    pub fn pool_mut(&mut self) -> &mut PgPool {
+        &mut self.pool
+    }
+
+    /// Returns a reference to the config.
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// Returns a mutable reference to the config.
+    pub fn config_mut(&mut self) -> &mut Config {
+        &mut self.config
+    }
+
+    // /// Returns a reference to the fetcher (if any).
+    // pub fn fetcher(&self) -> Option<&Fetcher> {
+    //     self.fetcher.as_ref()
+    // }
+
+    // /// Returns a mutable reference to the fetcher (if any).
+    // pub fn fetcher_mut(&mut self) -> Option<&mut Fetcher> {
+    //     self.fetcher.as_mut()
+    // }
+
+    // /// Sets the fetcher.
+    // pub fn set_fetcher(&mut self, fetcher: Fetcher) {
+    //     self.fetcher = Some(fetcher);
+    // }
+
+    // /// Clears the fetcher.
+    // pub fn clear_fetcher(&mut self) {
+    //     self.fetcher = None;
+    // }
+}
+
+pub(crate) async fn register(
     pool: PgPool,
     worker_type: String,
     worker: WorkerContext,
@@ -86,22 +152,24 @@ async fn register(
     Ok(())
 }
 
-impl<Args, D> Backend<Args, SqlContext> for PostgresStorage<Args, PgFetcher<Args, D>>
+impl<Args, Decode> Backend<Args, SqlContext>
+    for PostgresStorage<Args, CompactT, Decode, DefaultFetcher>
 where
     Args: Send + 'static + Unpin,
-    D: Decoder<Args, Compact = Value> + 'static,
-    D::Error: std::error::Error + Send + Sync + 'static,
+    Decode: Decoder<Args, Compact = CompactT> + 'static,
+    Decode::Error: std::error::Error + Send + Sync + 'static,
+    // Compact: 'static + Send + Unpin,
 {
     type Error = sqlx::Error;
 
-    type Stream = PgFetcher<Args, D>;
+    type Stream = PgFetcher<Args, CompactT, Decode>;
 
     type Beat = BoxStream<'static, Result<(), sqlx::Error>>;
 
     type Layer = AcknowledgeLayer<PgAck>;
 
     fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat {
-        let worker_type = "apalis::sql".to_owned();
+        let worker_type = self.config.namespace().to_owned();
         let fut = register(
             self.pool.clone(),
             worker_type,
@@ -118,35 +186,52 @@ where
     }
 
     fn poll(self, worker: &WorkerContext) -> Self::Stream {
-        Self::Stream::new(self.pool, self.config, worker.clone())
+        Self::Stream::new(&self.pool, &self.config, worker)
     }
 }
 
-pub struct PgSink<Args, Codec = JsonCodec<Value>> {
+pub struct PgSink<Args, Compact = CompactT, Codec = JsonCodec<CompactT>> {
     _marker: PhantomData<(Args, Codec)>,
     pool: PgPool,
-    buffer: Vec<Task<Value, SqlContext>>,
+    buffer: Vec<Task<Compact, SqlContext>>,
     config: Config,
     flush_future: Option<Pin<Box<dyn Future<Output = Result<(), sqlx::Error>> + Send>>>,
 }
 
-impl<Args> PgSink<Args> {
-    pub fn new(pool: PgPool, config: Config) -> Self {
+impl<Args, Compact, Codec> Clone for PgSink<Args, Compact, Codec>
+where
+    PgPool: Clone,
+    Config: Clone,
+{
+    fn clone(&self) -> Self {
         Self {
             _marker: PhantomData,
-            pool,
+            pool: self.pool.clone(),
             buffer: Vec::new(),
-            config,
+            config: self.config.clone(),
             flush_future: None,
         }
     }
 }
 
-impl<Args, E> Sink<Task<Args, SqlContext>> for PgSink<Args, E>
+impl<Args, Encode> PgSink<Args, CompactT, Encode> {
+    pub fn new(pool: &PgPool, config: &Config) -> Self {
+        Self {
+            _marker: PhantomData,
+            pool: pool.clone(),
+            buffer: Vec::new(),
+            config: config.clone(),
+            flush_future: None,
+        }
+    }
+}
+
+impl<Args, Encode> Sink<Task<Args, SqlContext>> for PgSink<Args, CompactT, Encode>
 where
     Args: Unpin + Send + Sync + 'static,
-    E: Encoder<Args, Compact = Value> + Unpin,
-    E::Error: std::error::Error + Send + Sync + 'static,
+    Encode: Encoder<Args, Compact = CompactT> + Unpin,
+    Encode::Error: std::error::Error + Send + Sync + 'static,
+    // Compact: Unpin + Send + 'static, // for<'a> &'a [Compact]: sqlx::Encode<'a, sqlx::Postgres>
 {
     type Error = sqlx::Error;
 
@@ -159,7 +244,7 @@ where
         // Add the item to the buffer
         self.get_mut()
             .buffer
-            .push(item.try_map(|s| E::encode(&s).map_err(|e| sqlx::Error::Encode(e.into())))?);
+            .push(item.try_map(|s| Encode::encode(&s).map_err(|e| sqlx::Error::Encode(e.into())))?);
         Ok(())
     }
 
@@ -203,7 +288,7 @@ where
                 sqlx::query!(
                     r#"
                     INSERT INTO apalis.jobs (id, job_type, job, status, attempts, max_attempts, run_at, priority)
-                    SELECT 
+                    SELECT
                         unnest($1::text[]) as id,
                         $2::text as job_type,
                         unnest($3::jsonb[]) as job,
@@ -222,7 +307,6 @@ where
                 )
                 .execute(&pool)
                 .await?;
-
                 Ok::<(), sqlx::Error>(())
             };
 
@@ -258,11 +342,17 @@ where
     }
 }
 
-impl<Args: Send + Sync + Unpin + 'static + Serialize + DeserializeOwned>
-    BackendWithSink<Args, SqlContext> for PostgresStorage<Args>
+impl<Args, Fetch, Encode> BackendWithSink<Args, SqlContext>
+    for PostgresStorage<Args, CompactT, Encode, Fetch>
+where
+    PostgresStorage<Args, CompactT, Encode, Fetch>: Backend<Args, SqlContext>,
+    Args: Send + Sync + Unpin + 'static + Serialize + DeserializeOwned,
+    Encode: Encoder<Args, Compact = CompactT> + Unpin,
+    Encode::Error: std::error::Error + Send + Sync + 'static,
+    // Compact: Unpin + Send + 'static,
 {
-    type Sink = PgSink<Args>;
-    fn sink(&self) -> Self::Sink {
+    type Sink = PgSink<Args, CompactT, Encode>;
+    fn sink(&mut self) -> Self::Sink {
         PgSink {
             _marker: PhantomData,
             buffer: Vec::new(),
@@ -276,6 +366,11 @@ impl<Args: Send + Sync + Unpin + 'static + Serialize + DeserializeOwned>
 #[derive(Clone)]
 pub struct PgAck {
     pool: PgPool,
+}
+impl PgAck {
+    fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
 }
 
 impl<Res: Serialize> Acknowledge<Res, SqlContext> for PgAck {
@@ -323,8 +418,9 @@ impl<Res: Serialize> Acknowledge<Res, SqlContext> for PgAck {
     }
 }
 
-pub struct PgTask {
-    job: Value,
+#[derive(Debug)]
+pub struct PgTask<Compact = CompactT> {
+    job: Compact,
     id: Option<String>,
     job_type: Option<String>,
     status: Option<String>,
@@ -348,7 +444,7 @@ pub struct PgTask {
 // }
 
 impl PgTask {
-    fn try_into_req<D: Decoder<Args, Compact = Value>, Args>(
+    fn try_into_req<D: Decoder<Args, Compact = CompactT>, Args>(
         self,
     ) -> Result<Task<Args, SqlContext>, sqlx::Error>
     where
@@ -392,6 +488,7 @@ mod fetcher {
         collections::VecDeque,
         marker::PhantomData,
         pin::Pin,
+        sync::Arc,
         task::{Context, Poll},
         time::{Duration, Instant},
     };
@@ -412,9 +509,13 @@ mod fetcher {
     use serde_json::Value;
     use sqlx::{PgPool, Pool, Postgres};
 
-    use crate::{context::SqlContext, postgres::PgTask, Config};
+    use crate::{
+        context::SqlContext,
+        postgres::{CompactT, PgTask},
+        Config,
+    };
 
-    async fn fetch_next<T, D: Decoder<T, Compact = Value>>(
+    async fn fetch_next<T, D: Decoder<T, Compact = CompactT>>(
         pool: PgPool,
         config: Config,
         worker: WorkerContext,
@@ -449,7 +550,7 @@ mod fetcher {
     }
 
     #[pin_project(PinnedDrop)]
-    pub struct PgFetcher<Args, Decode = JsonCodec<Value>> {
+    pub struct PgFetcher<Args, Compact = Value, Decode = JsonCodec<Value>> {
         pool: Pool<Postgres>,
         config: Config,
         wrk: WorkerContext,
@@ -457,20 +558,68 @@ mod fetcher {
         state: StreamState<Args>,
         current_backoff: Duration,
         last_fetch_time: Option<Instant>,
-        decode: PhantomData<Decode>,
+        fetch_fn: Arc<
+            Box<
+                dyn Fn(
+                        Pool<Postgres>,
+                        Config,
+                        WorkerContext,
+                    )
+                        -> BoxFuture<'static, Result<Vec<Task<Args, SqlContext>>, sqlx::Error>>
+                    + Send
+                    + Sync,
+            >,
+        >,
+        _marker: PhantomData<(Compact, Decode)>,
     }
 
-    impl<Args, D> PgFetcher<Args, D> {
-        pub fn new(pool: Pool<Postgres>, config: Config, wrk: WorkerContext) -> Self {
+    impl<Args, Compact, Decode> Clone for PgFetcher<Args, Compact, Decode> {
+        fn clone(&self) -> Self {
+            Self {
+                pool: self.pool.clone(),
+                config: self.config.clone(),
+                wrk: self.wrk.clone(),
+                state: StreamState::Ready,
+                current_backoff: self.current_backoff,
+                last_fetch_time: self.last_fetch_time,
+                fetch_fn: self.fetch_fn.clone(),
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    impl<Args: 'static, Decode> PgFetcher<Args, CompactT, Decode>
+    where
+        Decode: Decoder<Args, Compact = CompactT> + 'static,
+        Decode::Error: std::error::Error + Send + Sync + 'static,
+    {
+        pub fn new(
+            pool: &Pool<Postgres>,
+            config: &Config,
+            wrk: &WorkerContext,
+            // fetch_fn: Box<
+            //     dyn Fn(
+            //             Pool<Postgres>,
+            //             Config,
+            //             WorkerContext,
+            //         )
+            //             -> BoxFuture<'static, Result<Vec<Task<Args, SqlContext>>, sqlx::Error>>
+            //         + Send
+            //         + Sync,
+            // >,
+        ) -> Self {
             let initial_backoff = config.poll_interval;
             Self {
-                pool,
+                pool: pool.clone(),
                 config: config.clone(),
-                wrk,
+                wrk: wrk.clone(),
                 state: StreamState::Delay(Delay::new(initial_backoff)),
                 current_backoff: initial_backoff,
                 last_fetch_time: None,
-                decode: PhantomData,
+                fetch_fn: Arc::new(Box::new(|pool, config, worker| {
+                    fetch_next::<Args, Decode>(pool, config, worker).boxed()
+                })),
+                _marker: PhantomData,
             }
         }
 
@@ -480,10 +629,12 @@ mod fetcher {
         }
     }
 
-    impl<Args: Send + 'static + Unpin, D: Decoder<Args, Compact = Value> + 'static> Stream
-        for PgFetcher<Args, D>
+    impl<Args, Decode> Stream for PgFetcher<Args, CompactT, Decode>
     where
-        D::Error: std::error::Error + Send + Sync + 'static,
+        Decode::Error: std::error::Error + Send + Sync + 'static,
+        Args: Send + 'static + Unpin,
+        Decode: Decoder<Args, Compact = CompactT> + 'static,
+        // Compact: Unpin + Send + 'static,
     {
         type Item = Result<Option<Task<Args, SqlContext>>, sqlx::Error>;
 
@@ -493,7 +644,7 @@ mod fetcher {
             loop {
                 match this.state {
                     StreamState::Ready => {
-                        let stream = fetch_next::<Args, D>(
+                        let stream = (this.fetch_fn)(
                             this.pool.clone(),
                             this.config.clone(),
                             this.wrk.clone(),
@@ -553,7 +704,7 @@ mod fetcher {
     }
 
     #[pin_project::pinned_drop]
-    impl<Args, D> PinnedDrop for PgFetcher<Args, D> {
+    impl<Args, Compact, Decode> PinnedDrop for PgFetcher<Args, Compact, Decode> {
         fn drop(self: Pin<&mut Self>) {
             match &self.state {
                 StreamState::Buffered(remaining) => {
@@ -582,14 +733,12 @@ mod tests {
 
     #[tokio::test]
     async fn basic_worker() {
-        let backend = PostgresStorage {
-            _marker: PhantomData,
-            pool: PgPool::connect("postgres://postgres:postgres@localhost/apalis_dev")
+        let mut backend = PostgresStorage::new(
+            PgPool::connect("postgres://postgres:postgres@localhost/apalis_dev")
                 .await
                 .unwrap(),
-            config: Config::default(),
-            fetcher: None,
-        };
+            Default::default(),
+        );
 
         let mut sink = backend.sink();
 
@@ -617,7 +766,6 @@ mod tests {
             ctx: SqlContext,
         ) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_secs(2)).await;
-            // Err("Failed".into())
             Ok(())
         }
 

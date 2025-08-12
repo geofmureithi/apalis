@@ -36,6 +36,10 @@ pub mod from_row;
 #[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
 pub mod postgres;
 
+#[cfg(feature = "postgres-bytes")]
+#[cfg_attr(docsrs, doc(cfg(feature = "postgres-bytes")))]
+pub mod postgres;
+
 /// Sqlite Storage for apalis.
 /// Uses a transaction and min(rowid)
 #[cfg(feature = "sqlite")]
