@@ -298,12 +298,12 @@ impl<Tz: TimeZone> CronContext<Tz> {
     }
 }
 
-impl<Req: Sync, Tz: TimeZone> FromRequest<Task<Req, CronContext<Tz>>> for CronContext<Tz>
+impl<Args: Sync, Tz: TimeZone> FromRequest<Task<Args, CronContext<Tz>>> for CronContext<Tz>
 where
     Tz::Offset: Sync,
 {
     type Error = Infallible;
-    async fn from_request(req: &Task<Req, CronContext<Tz>>) -> Result<Self, Infallible> {
+    async fn from_request(req: &Task<Args, CronContext<Tz>>) -> Result<Self, Infallible> {
         Ok(req.meta.context.clone())
     }
 }
@@ -337,7 +337,7 @@ where
     fn poll(self, _: &WorkerContext) -> Self::Stream {
         let stream = self.and_then(|s| async {
             let timestamp: SystemTime = s.get_timestamp().clone().into();
-            let task_id = TaskId::from_system_time(timestamp);
+            let task_id = TaskId::from_system_time(datetime);
             let parts = Metadata {
                 task_id,
                 context: s,

@@ -35,9 +35,9 @@ pub struct EventListenerService<S> {
     service: S,
 }
 
-impl<S, Args, Ctx> Service<Task<Args, Ctx>> for EventListenerService<S>
+impl<S, Args, Ctx, IdType> Service<Task<Args, Ctx, IdType>> for EventListenerService<S>
 where
-    S: Service<Task<Args, Ctx>>,
+    S: Service<Task<Args, Ctx, IdType>>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -50,7 +50,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Task<Args, Ctx>) -> Self::Future {
+    fn call(&mut self, request: Task<Args, Ctx, IdType>) -> Self::Future {
         // TODO
         // let ctx: &WorkerContext = request.get_checked().unwrap();
         self.service.call(request)

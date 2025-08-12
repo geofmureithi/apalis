@@ -163,7 +163,7 @@ impl Monitor {
         should_restart: impl Fn(&WorkerError, usize) -> bool + 'static + Send,
     ) -> BoxFuture<'static, Result<(), Event>>
     where
-        S: Service<Task<Args, Ctx>> + Send + 'static,
+        S: Service<Task<Args, Ctx, P::IdType>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Args, Ctx> + Send + 'static,
@@ -174,17 +174,20 @@ impl Monitor {
         Ctx: Send + 'static,
         M: Layer<ReadinessService<TrackerService<S>>> + 'static,
         P::Layer: Layer<M::Service>,
-        <P::Layer as Layer<M::Service>>::Service: Service<Task<Args, Ctx>> + Send + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx>>>::Error:
+        <P::Layer as Layer<M::Service>>::Service:
+            Service<Task<Args, Ctx, P::IdType>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx, P::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx>>>::Future: Send,
-        M::Service: Service<Task<Args, Ctx>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx, P::IdType>>>::Future:
+            Send,
+        M::Service: Service<Task<Args, Ctx, P::IdType>> + Send + 'static,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, Ctx>,
+            Task<Args, Ctx, P::IdType>,
         >>::Future: Send,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, Ctx>,
+            Task<Args, Ctx, P::IdType>,
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
+        P::IdType: Sync + Send + 'static,
     {
         let stream = worker.stream_with_ctx(&mut ctx);
         let worker_ctx = ctx.clone();
@@ -256,7 +259,7 @@ impl Monitor {
         factory: impl Fn(usize) -> Worker<Args, Ctx, P, S, M> + 'static,
     ) -> Self
     where
-        S: Service<Task<Args, Ctx>> + Send + 'static,
+        S: Service<Task<Args, Ctx, P::IdType>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Args, Ctx> + Send + 'static,
@@ -267,17 +270,20 @@ impl Monitor {
         Ctx: Send + 'static,
         M: Layer<ReadinessService<TrackerService<S>>> + 'static,
         P::Layer: Layer<M::Service>,
-        <P::Layer as Layer<M::Service>>::Service: Service<Task<Args, Ctx>> + Send + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx>>>::Error:
+        <P::Layer as Layer<M::Service>>::Service:
+            Service<Task<Args, Ctx, P::IdType>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx, P::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx>>>::Future: Send,
-        M::Service: Service<Task<Args, Ctx>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, Ctx, P::IdType>>>::Future:
+            Send,
+        M::Service: Service<Task<Args, Ctx, P::IdType>> + Send + 'static,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, Ctx>,
+            Task<Args, Ctx, P::IdType>,
         >>::Future: Send,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, Ctx>,
+            Task<Args, Ctx, P::IdType>,
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
+        P::IdType: Send + Sync + 'static,
     {
         let worker = factory(0);
 
@@ -505,9 +511,11 @@ mod tests {
                     .on_event(|wrk, e| {
                         println!("{}, {e:?}", wrk.name());
                     })
-                    .build(move |r| async move { if r % 5 == 0 {
-                        panic!("Brrr")
-                    } })
+                    .build(move |r| async move {
+                        if r % 5 == 0 {
+                            panic!("Brrr")
+                        }
+                    })
             })
             .on_event(|wrk, e| {
                 println!("{}, {e:?}", wrk.name());

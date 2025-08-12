@@ -51,6 +51,7 @@ once_cell = "1.19.0"
 apalis-sql = { path = ".", features = ["tokio-comp"] }
 apalis-core = { path = "../apalis-core", features = ["test-utils"] }
 tower = {version = "0.5", features = ["full"]}
+nanoid = "0.4.0"
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

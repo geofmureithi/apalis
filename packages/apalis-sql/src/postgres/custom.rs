@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use apalis_core::backend::{Backend, BackendWithSink};
+use apalis_core::task::task_id::Ulid;
 use apalis_core::task::Task;
 use apalis_core::utils::Identity;
 use apalis_core::worker::context::WorkerContext;
@@ -12,22 +13,22 @@ use crate::context::SqlContext;
 use crate::Config;
 
 #[derive(Clone)]
-pub struct CustomBackend<Args, DB, Fetch, Sink> {
-    _marker: PhantomData<Args>,
+pub struct CustomBackend<Args, DB, Fetch, Sink, IdType> {
+    _marker: PhantomData<(Args, IdType)>,
     pool: DB,
     fetcher: Arc<Box<dyn Fn(&mut DB, &Config, &WorkerContext) -> Fetch>>,
     sink: Arc<Box<dyn Fn(&mut DB, &Config) -> Sink>>,
 }
 
 /// Builder for `CustomSqlBackend`
-pub struct BackendBuilder<Args, DB, Fetch, Sink> {
-    _marker: PhantomData<Args>,
+pub struct BackendBuilder<Args, DB, Fetch, Sink, IdType> {
+    _marker: PhantomData<(Args, IdType)>,
     database: Option<DB>,
     fetcher: Option<Box<dyn Fn(&mut DB, &Config, &WorkerContext) -> Fetch>>,
     sink: Option<Box<dyn Fn(&mut DB, &Config) -> Sink>>,
 }
 
-impl<Args, DB, Fetch, Sink> Default for BackendBuilder<Args, DB, Fetch, Sink> {
+impl<Args, DB, Fetch, Sink, IdType> Default for BackendBuilder<Args, DB, Fetch, Sink, IdType> {
     fn default() -> Self {
         Self {
             _marker: PhantomData,
@@ -38,7 +39,7 @@ impl<Args, DB, Fetch, Sink> Default for BackendBuilder<Args, DB, Fetch, Sink> {
     }
 }
 
-impl<Args, DB, Fetch, Sink> BackendBuilder<Args, DB, Fetch, Sink> {
+impl<Args, DB, Fetch, Sink, IdType> BackendBuilder<Args, DB, Fetch, Sink, IdType> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -61,7 +62,7 @@ impl<Args, DB, Fetch, Sink> BackendBuilder<Args, DB, Fetch, Sink> {
         self
     }
 
-    pub fn build(self) -> Result<CustomBackend<Args, DB, Fetch, Sink>, &'static str> {
+    pub fn build(self) -> Result<CustomBackend<Args, DB, Fetch, Sink, IdType>, &'static str> {
         Ok(CustomBackend {
             _marker: PhantomData,
             pool: self.database.ok_or("Pool is required")?,
@@ -71,10 +72,13 @@ impl<Args, DB, Fetch, Sink> BackendBuilder<Args, DB, Fetch, Sink> {
     }
 }
 
-impl<Args, DB, Fetch, Sink, E> Backend<Args, SqlContext> for CustomBackend<Args, DB, Fetch, Sink>
+impl<Args, DB, Fetch, Sink, IdType, E> Backend<Args, SqlContext>
+    for CustomBackend<Args, DB, Fetch, Sink, IdType>
 where
-    Fetch: Stream<Item = Result<Option<Task<Args, SqlContext>>, E>>,
+    Fetch: Stream<Item = Result<Option<Task<Args, SqlContext, IdType>>, E>>,
 {
+    type IdType = IdType;
+
     type Error = E;
 
     type Stream = Fetch;
@@ -96,11 +100,12 @@ where
     }
 }
 
-impl<Args, DB, Fetch, Sink, E> BackendWithSink<Args, SqlContext>
-    for CustomBackend<Args, DB, Fetch, Sink>
+impl<Args, DB, Fetch, Sink, E, IdType> BackendWithSink<Args, SqlContext>
+    for CustomBackend<Args, DB, Fetch, Sink, IdType>
 where
-    Fetch: Stream<Item = Result<Option<Task<Args, SqlContext>>, E>>,
-    Sink: futures::Sink<Task<Args, SqlContext>>,
+    Fetch: Stream<Item = Result<Option<Task<Args, SqlContext, IdType>>, E>>,
+    Sink: futures::Sink<Task<Args, SqlContext, IdType>>,
+    CustomBackend<Args, DB, Fetch, Sink, IdType>: Backend<Args, SqlContext, IdType = IdType>,
 {
     type Sink = Sink;
 
@@ -123,7 +128,10 @@ mod tests {
         backend::{codec::json::JsonCodec, memory::MemoryStorage, BackendWithSink, TaskSink},
         error::BoxDynError,
         service_fn::{self, service_fn, ServiceFn},
-        task::{task_id::TaskId, Metadata},
+        task::{
+            task_id::{TaskId, Ulid},
+            Metadata,
+        },
         worker::{
             builder::WorkerBuilder,
             context::WorkerContext,
@@ -221,7 +229,6 @@ mod tests {
                 stream::unfold(pool.clone(), |pool| {
                     let p = pool.clone();
                     let fetch = async move {
-                        println!("Called");
                         let mut tx = p.begin().await?;
                         let res = sqlx::query(r#"
                             WITH next_email AS (
@@ -268,12 +275,12 @@ mod tests {
                 })
             })
             .sink(|pool, config| {
-                let sink = sink::unfold(pool.clone(), |pool, item: Task<Email, SqlContext>| {
+                let sink = sink::unfold(pool.clone(), |pool, item: Task<Email, SqlContext, String>| {
                     let p = pool.clone();
                     async move {
                         let mut tx = p.begin().await?;
                         sqlx::query("INSERT INTO emails (id, recipient, subject, message, send_at) VALUES ($1, $2, $3, $4, $5)")
-                            .bind(&item.meta.task_id.to_string())
+                            .bind(&item.meta.task_id.unwrap_or(TaskId::new(nanoid::nanoid!())).to_string())
                             .bind(&item.args.to)
                             .bind(&item.args.subject)
                             .bind(&item.args.message)
@@ -291,13 +298,12 @@ mod tests {
             .unwrap();
         let mut sink = backend.sink();
         for i in 0..ITEMS {
-            sink.push(Email {
+            let _ = sink.push(Email {
                 to: "one@gmail.com".to_owned(),
                 subject: i.to_string(),
                 message: "Not spam".to_owned(),
             })
-            .await
-            .unwrap();
+            .await.unwrap();
         }
 
         async fn task(task: Email, ctx: WorkerContext) -> Result<(), BoxDynError> {
@@ -313,9 +319,9 @@ mod tests {
             .backend(backend)
             .layer(ConcurrencyLimitLayer::new(1))
             .ack_with(
-                move |res: &Result<(), BoxDynError>, meta: &Metadata<SqlContext>| {
+                move |res: &Result<(), BoxDynError>, meta: &Metadata<SqlContext, String>| {
                     let p = pool.clone();
-                    let id = meta.task_id.to_string();
+                    let id = meta.task_id.as_ref().unwrap().to_string();
                     let status = match res {
                         Ok(_) => "Done",
                         Err(_) => "Failed",

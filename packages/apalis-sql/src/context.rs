@@ -1,6 +1,9 @@
 use std::convert::Infallible;
 
-use apalis_core::{task::{status::Status, Task}, service_fn::from_request::FromRequest};
+use apalis_core::{
+    service_fn::from_request::FromRequest,
+    task::{status::Status, Task},
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -65,7 +68,6 @@ impl SqlContext {
         self.lock_at = lock_at;
     }
 
-
     /// Get the time a job was locked
     pub fn lock_by(&self) -> &Option<String> {
         &self.lock_by
@@ -97,9 +99,9 @@ impl SqlContext {
     }
 }
 
-impl<Req: Sync> FromRequest<Task<Req, SqlContext>> for SqlContext {
+impl<Args: Sync, IdType: Send + Sync> FromRequest<Task<Args, SqlContext, IdType>> for SqlContext {
     type Error = Infallible;
-    async fn from_request(req: &Task<Req, SqlContext>) -> Result<Self, Infallible> {
+    async fn from_request(req: &Task<Args, SqlContext, IdType>) -> Result<Self, Infallible> {
         Ok(req.meta.context.clone())
     }
 }

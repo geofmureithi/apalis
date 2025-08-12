@@ -204,15 +204,17 @@ where
         }
     }
 
+    // pub fn check_worker<S, U, E, IdType>(self, service: S) -> Self
+
     #[inline]
-
-    pub fn check_service<S, U, E>(self) -> Self
+    pub fn build_check<W, Svc>(self, service: Svc)
     where
-        M: Layer<S>,
-
-        M::Service: Service<Task<Args, Ctx>, Response = U, Error = E>,
+        Svc: WorkerBuilderExt<Args, Ctx, W, B, M> + Service<Task<Args, Ctx, B::IdType>>,
+         // M::Service: Service<Task<Args, Ctx, IdType>, Response = U, Error = E>,
     {
-        self
+        WorkerServiceBuilder::<B, Svc, Args, Ctx>::build(service, &self.source);
+        // assert_worker(worker);
+        // fn assert_worker<Args, Ctx, B, W, M>(_: Worker<Args, Ctx, B, W, M>) {
     }
 }
 

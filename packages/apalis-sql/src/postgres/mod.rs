@@ -17,7 +17,12 @@ use apalis_core::{
         Backend, BackendWithSink, TaskSink,
     },
     error::{BoxDynError, WorkerError},
-    task::{attempt::Attempt, status::Status, task_id::TaskId, Metadata, Task},
+    task::{
+        attempt::Attempt,
+        status::Status,
+        task_id::{TaskId, Ulid},
+        Metadata, Task,
+    },
     utils::Identity,
     worker::{
         context::WorkerContext,
@@ -160,6 +165,8 @@ where
     Decode::Error: std::error::Error + Send + Sync + 'static,
     // Compact: 'static + Send + Unpin,
 {
+    type IdType = Ulid;
+
     type Error = sqlx::Error;
 
     type Stream = PgFetcher<Args, CompactT, Decode>;
@@ -275,7 +282,12 @@ where
                 let mut max_attempts_vec = Vec::new();
 
                 for task in buffer {
-                    ids.push(task.meta.task_id.to_string());
+                    ids.push(
+                        task.meta
+                            .task_id
+                            .map(|id| id.to_string())
+                            .unwrap_or(Ulid::new().to_string()),
+                    );
                     job_data.push(task.args);
                     run_ats.push(
                         DateTime::from_timestamp(task.meta.run_at as i64, 0)
@@ -345,7 +357,7 @@ where
 impl<Args, Fetch, Encode> BackendWithSink<Args, SqlContext>
     for PostgresStorage<Args, CompactT, Encode, Fetch>
 where
-    PostgresStorage<Args, CompactT, Encode, Fetch>: Backend<Args, SqlContext>,
+    PostgresStorage<Args, CompactT, Encode, Fetch>: Backend<Args, SqlContext, IdType = Ulid>,
     Args: Send + Sync + Unpin + 'static + Serialize + DeserializeOwned,
     Encode: Encoder<Args, Compact = CompactT> + Unpin,
     Encode::Error: std::error::Error + Send + Sync + 'static,
@@ -373,7 +385,7 @@ impl PgAck {
     }
 }
 
-impl<Res: Serialize> Acknowledge<Res, SqlContext> for PgAck {
+impl<Res: Serialize> Acknowledge<Res, SqlContext, Ulid> for PgAck {
     type Error = sqlx::Error;
     type Future = BoxFuture<'static, Result<(), Self::Error>>;
     fn ack(
@@ -400,7 +412,9 @@ impl<Res: Serialize> Acknowledge<Res, SqlContext> for PgAck {
                                 done_at = NOW()
                             WHERE id = $1 AND lock_by = $5
                             "#,
-                &task_id.to_string(),
+                task_id
+                    .ok_or(sqlx::Error::ColumnNotFound("TASK_ID_FOR_ACK".to_owned()))?
+                    .to_string(),
                 attempt,
                 &response.map_err(|e| sqlx::Error::Decode(e.into()))?,
                 status.to_string(),
@@ -461,12 +475,13 @@ impl PgTask {
                 .status
                 .ok_or(sqlx::Error::ColumnNotFound("status".to_owned()))
                 .and_then(|s| Status::from_str(&s).map_err(|e| sqlx::Error::Decode(e.into())))?,
-            task_id: self
-                .id
-                .ok_or(sqlx::Error::ColumnNotFound("task_id".to_owned()))
-                .and_then(|s| {
-                    TaskId::from_str(&s).map_err(|e | sqlx::Error::Decode(e.into()))
-                })?,
+            task_id: Some(
+                self.id
+                    .ok_or(sqlx::Error::ColumnNotFound("task_id".to_owned()))
+                    .and_then(|s| {
+                        TaskId::from_str(&s).map_err(|e| sqlx::Error::Decode(e.into()))
+                    })?,
+            ),
             run_at: self
                 .run_at
                 .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?

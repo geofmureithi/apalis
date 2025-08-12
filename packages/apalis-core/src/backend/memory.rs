@@ -1,5 +1,5 @@
 use crate::{
-    backend::{codec::CloneOpCodec, Backend, BackendWithSink, TaskStream, TaskSink},
+    backend::{codec::CloneOpCodec, Backend, BackendWithSink, TaskSink, TaskStream},
     error::BoxDynError,
     task::{task_id::TaskId, Metadata, Task},
     worker::context::WorkerContext,
@@ -18,6 +18,8 @@ use std::{
     task::{Context, Poll},
 };
 use tower_layer::Identity;
+#[cfg(feature = "json")]
+use ulid::Ulid;
 
 #[cfg(feature = "serde")]
 use serde::{de::DeserializeOwned, Serialize};
@@ -85,7 +87,13 @@ impl JsonMemory<Value> {
             let inner = self.clone();
 
             sender.with_flat_map(move |request: Task<Args, ()>| {
-                let task_id = request.meta.task_id.clone();
+                use ulid::Ulid;
+
+                let task_id = request
+                    .meta
+                    .task_id
+                    .clone()
+                    .unwrap_or(TaskId::new(Ulid::new()));
                 let value = serde_json::to_value(request.args).unwrap();
                 inner.tasks.write().unwrap().insert(
                     TaskKey {
@@ -120,14 +128,14 @@ impl JsonMemory<Value> {
 
 #[cfg(feature = "json")]
 
-impl<T: Unpin + Serialize> Sink<Task<T, ()>> for JsonMemory<T> {
+impl<Args: Unpin + Serialize> Sink<Task<Args, ()>> for JsonMemory<Args> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Task<T, ()>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Task<Args, ()>) -> Result<(), Self::Error> {
         let this = Pin::get_mut(self);
 
         this.buffer.push(item);
@@ -138,11 +146,15 @@ impl<T: Unpin + Serialize> Sink<Task<T, ()>> for JsonMemory<T> {
         let this = Pin::get_mut(self);
         let mut tasks = this.tasks.write().unwrap();
         for task in this.buffer.drain(..) {
-            let task_id = task.meta.task_id.clone();
+            let task_id = task
+                .meta
+                .task_id
+                .clone()
+                .unwrap_or(TaskId::new(Ulid::new()));
             tasks.insert(
                 TaskKey {
                     task_id,
-                    namespace: std::any::type_name::<T>().to_owned(),
+                    namespace: std::any::type_name::<Args>().to_owned(),
                 },
                 std::sync::Mutex::new(serde_json::to_value(task.args).unwrap()),
             );
@@ -151,25 +163,25 @@ impl<T: Unpin + Serialize> Sink<Task<T, ()>> for JsonMemory<T> {
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Sink::<Task<T, ()>>::poll_flush(self, cx)
+        Sink::<Task<Args, ()>>::poll_flush(self, cx)
     }
 }
 
 #[cfg(feature = "json")]
 
-impl<T: DeserializeOwned> Stream for JsonMemory<T> {
-    type Item = Task<T, ()>;
+impl<Args: DeserializeOwned> Stream for JsonMemory<Args> {
+    type Item = Task<Args, ()>;
 
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut map = self.tasks.write().unwrap();
         if let Some((key, mutex)) =
-            map.pop_first_with(|s, _| s.namespace == std::any::type_name::<T>())
+            map.pop_first_with(|s, _| s.namespace == std::any::type_name::<Args>())
         {
             let args = mutex.into_inner().unwrap();
             Poll::Ready(Some(Task::new_with_parts(
                 serde_json::from_value(args).unwrap(),
                 Metadata {
-                    task_id: key.task_id,
+                    task_id: Some(key.task_id),
                     ..Default::default()
                 },
             )))
@@ -179,15 +191,15 @@ impl<T: DeserializeOwned> Stream for JsonMemory<T> {
     }
 }
 
-pub struct MemorySink<T> {
+pub struct MemorySink<Args> {
     inner: Arc<
         futures_util::lock::Mutex<
-            Box<dyn Sink<Task<T, ()>, Error = SendError> + Send + Sync + Unpin + 'static>,
+            Box<dyn Sink<Task<Args, ()>, Error = SendError> + Send + Sync + Unpin + 'static>,
         >,
     >,
 }
 
-impl<T> Clone for MemorySink<T> {
+impl<Args> Clone for MemorySink<Args> {
     fn clone(&self) -> Self {
         MemorySink {
             inner: Arc::clone(&self.inner),
@@ -235,6 +247,8 @@ impl<Args> Stream for MemoryWrapper<Args> {
 
 // MemoryStorage as a Backend
 impl<Args: 'static + Clone + Send> Backend<Args, ()> for MemoryStorage<MemoryWrapper<Args>> {
+    type IdType = Ulid;
+
     type Error = BoxDynError;
     type Stream = TaskStream<Task<Args, ()>>;
     type Layer = Identity;
@@ -262,7 +276,10 @@ impl<T: Clone + Send + Unpin + 'static> BackendWithSink<T, ()> for MemoryStorage
 }
 
 #[cfg(feature = "json")]
-impl<Args: 'static + Send + DeserializeOwned> Backend<Args, ()> for MemoryStorage<JsonMemory<Args>> {
+impl<Args: 'static + Send + DeserializeOwned> Backend<Args, ()>
+    for MemoryStorage<JsonMemory<Args>>
+{
+    type IdType = Ulid;
     type Error = BoxDynError;
     type Stream = TaskStream<Task<Args, ()>>;
     type Layer = Identity;
@@ -346,7 +363,7 @@ impl<Args: DeserializeOwned> Stream for SharedInMemoryStream<Args> {
             Poll::Ready(Some(Task::new_with_parts(
                 args,
                 Metadata {
-                    task_id: key.task_id,
+                    task_id: Some(key.task_id),
                     ..Default::default()
                 },
             )))
@@ -396,8 +413,8 @@ mod tests {
 
     use crate::{
         backend::{memory::MemoryStorage, shared::MakeShared, TaskSink},
-        task::data::Data,
         service_fn::{self, service_fn, ServiceFn},
+        task::data::Data,
         worker::{
             builder::WorkerBuilder,
             ext::{

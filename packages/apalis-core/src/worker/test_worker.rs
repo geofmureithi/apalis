@@ -55,6 +55,7 @@ use std::marker::PhantomData;
 use std::task::{Context, Poll};
 use tower_layer::Layer;
 use tower_service::Service;
+use ulid::Ulid;
 
 /// A test worker to allow you to test services.
 /// Important for testing backends and tasks
@@ -84,8 +85,8 @@ use tower_service::Service;
 ///    }
 ///}
 /// ````
-pub struct TestWorker<B, S, Res> {
-    stream: BoxStream<'static, Result<(TaskId, Result<Res, BoxDynError>), WorkerError>>,
+pub struct TestWorker<B, S, Res, IdType = Ulid> {
+    stream: BoxStream<'static, Result<(TaskId<IdType>, Result<Res, BoxDynError>), WorkerError>>,
     backend: PhantomData<B>,
     service: PhantomData<(S, Res)>,
 }
@@ -96,54 +97,55 @@ pub trait ExecuteNext<Args, Ctx> {
     fn execute_next(&mut self) -> impl Future<Output = Self::Result> + Send;
 }
 
-impl<B, S, Args, Ctx, Res> ExecuteNext<Args, Ctx> for TestWorker<B, S, Res>
+impl<B, S, Args, Ctx, Res, IdType> ExecuteNext<Args, Ctx> for TestWorker<B, S, Res, IdType>
 where
-    S: Service<Task<Args, Ctx>, Response = Res> + Send + 'static,
+    S: Service<Task<Args, Ctx, IdType>, Response = Res> + Send + 'static,
     B: Send,
     Res: Send,
 {
-    type Result = Option<Result<(TaskId, Result<Res, BoxDynError>), WorkerError>>;
+    type Result = Option<Result<(TaskId<IdType>, Result<Res, BoxDynError>), WorkerError>>;
     async fn execute_next(&mut self) -> Self::Result {
         self.stream.next().await
     }
 }
 
-impl<B, S, Res> TestWorker<B, S, Res> {
+impl<B, S, Res> TestWorker<B, S, Res, ()> {
     /// Build a new test worker
-    pub fn new<Args, Ctx>(backend: B, service: S) -> Self
+    pub fn new<Args, Ctx>(backend: B, service: S) -> TestWorker<B, S, Res, B::IdType>
     where
         B: Backend<Args, Ctx> + 'static,
-        S: Service<Task<Args, Ctx>, Response = Res> + Send + 'static,
+        S: Service<Task<Args, Ctx, B::IdType>, Response = Res> + Send + 'static,
         B::Stream: Unpin + Send + 'static,
         B::Beat: Unpin + Send + 'static,
         Args: Send + 'static,
         Ctx: Send + 'static,
         B::Error: Into<BoxDynError> + Send + 'static,
-        B::Layer: Layer<ReadinessService<TrackerService<TestEmitService<S, Res>>>>,
+        B::Layer: Layer<ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>>,
         S::Future: Send,
         S::Error: Into<BoxDynError> + Send + Sync,
         S::Response: Clone + Send,
         Res: 'static,
         <<B as Backend<Args, Ctx>>::Layer as Layer<
-            ReadinessService<TrackerService<TestEmitService<S, Res>>>,
-        >>::Service: Service<Task<Args, Ctx>>,
+            ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
+        >>::Service: Service<Task<Args, Ctx, B::IdType>>,
         <<<B as Backend<Args, Ctx>>::Layer as Layer<
-            ReadinessService<TrackerService<TestEmitService<S, Res>>>,
-        >>::Service as Service<Task<Args, Ctx>>>::Error: Into<BoxDynError> + Sync + Send,
+            ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
+        >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Error: Into<BoxDynError> + Sync + Send,
         <<<B as Backend<Args, Ctx>>::Layer as Layer<
-            ReadinessService<TrackerService<TestEmitService<S, Res>>>,
-        >>::Service as Service<Task<Args, Ctx>>>::Future: Send,
+            ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
+        >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Future: Send,
         <<B as Backend<Args, Ctx>>::Layer as Layer<
-            ReadinessService<TrackerService<TestEmitService<S, Res>>>,
+            ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service: std::marker::Send + 'static,
+        B::IdType: Send + Sync + 'static,
     {
-        enum Item<R> {
+        enum Item<R, IdType> {
             Ev(Result<Event, WorkerError>),
-            Res((TaskId, Result<R, BoxDynError>)),
+            Res((TaskId<IdType>, Result<R, BoxDynError>)),
         }
         let (tx, rx) = channel(1);
         let sender = tx.clone();
-        let service = TestEmitService {
+        let service: TestEmitService<S, Res, B::IdType> = TestEmitService {
             service,
             tx: tx.clone(),
         };
@@ -168,7 +170,7 @@ impl<B, S, Res> TestWorker<B, S, Res> {
                 }
             })
             .boxed();
-        Self {
+        TestWorker {
             stream,
             service: PhantomData,
             backend: PhantomData,
@@ -178,19 +180,20 @@ impl<B, S, Res> TestWorker<B, S, Res> {
 
 /// A generic service that emits the result of a test
 #[derive(Debug, Clone)]
-pub struct TestEmitService<S, Response> {
-    tx: mpsc::Sender<(TaskId, Result<Response, BoxDynError>)>,
+pub struct TestEmitService<S, Response, IdType> {
+    tx: mpsc::Sender<(TaskId<IdType>, Result<Response, BoxDynError>)>,
     service: S,
 }
 
-impl<S, Args, Ctx, Res> Service<Task<Args, Ctx>> for TestEmitService<S, Res>
+impl<S, Args, Ctx, Res, IdType> Service<Task<Args, Ctx, IdType>> for TestEmitService<S, Res, IdType>
 where
-    S: Service<Task<Args, Ctx>, Response = Res> + Send + 'static,
+    S: Service<Task<Args, Ctx, IdType>, Response = Res> + Send + 'static,
     S::Future: Send + 'static,
     Args: Send + 'static,
     Ctx: Send + 'static,
     S::Response: Send + 'static,
     S::Error: Into<BoxDynError> + Send,
+    IdType: Send + 'static + Sync,
 {
     type Response = ();
     type Error = String;
@@ -202,8 +205,8 @@ where
             .map_err(|e| e.into().to_string())
     }
 
-    fn call(&mut self, req: Task<Args, Ctx>) -> Self::Future {
-        let task_id = req.meta.task_id.clone();
+    fn call(&mut self, req: Task<Args, Ctx, IdType>) -> Self::Future {
+        let task_id = req.meta.task_id.clone().unwrap();
         let mut tx = Clone::clone(&self.tx);
         let fut = self.service.call(req);
         Box::pin(async move {

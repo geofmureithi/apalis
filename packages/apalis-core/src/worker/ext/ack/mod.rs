@@ -14,8 +14,10 @@ use crate::{
     worker::{builder::WorkerBuilder, context::WorkerContext},
 };
 
-pub trait AcknowledgementExt<Args, Ctx, Source, Middleware, Ack: Acknowledge<Res, Ctx>, Res>:
-    Sized
+pub trait AcknowledgementExt<Args, Ctx, Source, Middleware, Ack, Res>: Sized
+where
+    Source: Backend<Args, Ctx>,
+    Ack: Acknowledge<Res, Ctx, Source::IdType>,
 {
     fn ack_with(
         self,
@@ -23,22 +25,30 @@ pub trait AcknowledgementExt<Args, Ctx, Source, Middleware, Ack: Acknowledge<Res
     ) -> WorkerBuilder<Args, Ctx, Source, Stack<AcknowledgeLayer<Ack>, Middleware>>;
 }
 
-pub trait Acknowledge<Res, Ctx> {
+pub trait Acknowledge<Res, Ctx, IdType> {
     type Error;
     type Future: Future<Output = Result<(), Self::Error>>;
 
-    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Metadata<Ctx>) -> Self::Future;
+    fn ack(
+        &mut self,
+        res: &Result<Res, BoxDynError>,
+        parts: &Metadata<Ctx, IdType>,
+    ) -> Self::Future;
 }
 
-impl<Res, Ctx, F, Fut, E> Acknowledge<Res, Ctx> for F
+impl<Res, Ctx, F, Fut, IdType, E> Acknowledge<Res, Ctx, IdType> for F
 where
-    F: FnMut(&Result<Res, BoxDynError>, &Metadata<Ctx>) -> Fut,
+    F: FnMut(&Result<Res, BoxDynError>, &Metadata<Ctx, IdType>) -> Fut,
     Fut: Future<Output = Result<(), E>>,
 {
     type Error = E;
     type Future = Fut;
 
-    fn ack(&mut self, res: &Result<Res, BoxDynError>, parts: &Metadata<Ctx>) -> Self::Future {
+    fn ack(
+        &mut self,
+        res: &Result<Res, BoxDynError>,
+        parts: &Metadata<Ctx, IdType>,
+    ) -> Self::Future {
         (self)(res, parts)
     }
 }
@@ -74,16 +84,17 @@ pub struct AcknowledgeService<S, A> {
     acknowledger: A,
 }
 
-impl<S, A, Args, Ctx, Res> Service<Task<Args, Ctx>> for AcknowledgeService<S, A>
+impl<S, A, Args, Ctx, Res, IdType> Service<Task<Args, Ctx, IdType>> for AcknowledgeService<S, A>
 where
-    S: Service<Task<Args, Ctx>, Response = Res>,
-    A: Acknowledge<Res, Ctx> + Clone + Send + 'static,
+    S: Service<Task<Args, Ctx, IdType>, Response = Res>,
+    A: Acknowledge<Res, Ctx, IdType> + Clone + Send + 'static,
     S::Error: Into<BoxDynError>,
     A::Error: std::error::Error + Send + Sync + 'static,
     S::Future: Send + 'static,
     A::Future: Send + 'static,
     Ctx: Clone + Sync + 'static + Send,
     Res: Send,
+    IdType: Send + Sync + 'static,
 {
     type Response = Res;
     type Error = BoxDynError;
@@ -93,7 +104,7 @@ where
         self.inner.poll_ready(cx).map_err(|e| e.into())
     }
 
-    fn call(&mut self, req: Task<Args, Ctx>) -> Self::Future {
+    fn call(&mut self, req: Task<Args, Ctx, IdType>) -> Self::Future {
         let parts = req.meta.clone();
         let worker: WorkerContext = req.get().cloned().unwrap();
         let future = self.inner.call(req);
@@ -110,7 +121,7 @@ impl<Args, B, M, Ctx, Ack, Res> AcknowledgementExt<Args, Ctx, B, M, Ack, Res>
     for WorkerBuilder<Args, Ctx, B, M>
 where
     M: Layer<AcknowledgeLayer<Ack>>,
-    Ack: Acknowledge<Res, Ctx>,
+    Ack: Acknowledge<Res, Ctx, B::IdType>,
     B: Backend<Args, Ctx>,
 {
     fn ack_with(self, ack: Ack) -> WorkerBuilder<Args, Ctx, B, Stack<AcknowledgeLayer<Ack>, M>> {

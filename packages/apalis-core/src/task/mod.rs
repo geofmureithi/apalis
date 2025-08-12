@@ -23,6 +23,7 @@
 
 use std::{
     fmt::Debug,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -49,10 +50,10 @@ pub struct Task<Args, Ctx, IdType = Ulid> {
 
 /// Component parts of a `Request`
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct Metadata<Ctx, IdType = Ulid> {
-    /// The task's id
-    pub task_id: TaskId<IdType>,
+    /// The task's id if allocated
+    pub task_id: Option<TaskId<IdType>>,
 
     /// The tasks's extensions
     /// See more -->
@@ -73,12 +74,27 @@ pub struct Metadata<Ctx, IdType = Ulid> {
     pub run_at: u64,
 }
 
+impl<Ctx, IdType> Clone for Metadata<Ctx, IdType>
+where
+    Ctx: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            task_id: self.task_id.clone(),
+            data: self.data.clone(),
+            attempt: self.attempt.clone(),
+            context: self.context.clone(),
+            status: self.status.clone(),
+            run_at: self.run_at,
+        }
+    }
+}
+
 impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     /// Creates a new [Request]
     pub fn new(args: Args) -> Self
     where
         Ctx: Default,
-        IdType: Default,
     {
         Self::new_with_data(args, Extensions::default(), Ctx::default())
     }
@@ -89,10 +105,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     }
 
     /// Creates a request with context provided
-    pub fn new_with_ctx(req: Args, ctx: Ctx) -> Self
-    where
-        IdType: Default,
-    {
+    pub fn new_with_ctx(req: Args, ctx: Ctx) -> Self {
         Self {
             args: req,
             meta: Metadata {
@@ -112,10 +125,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     }
 
     /// Creates a request with data and context provided
-    pub fn new_with_data(req: Args, data: Extensions, ctx: Ctx) -> Self
-    where
-        IdType: Default,
-    {
+    pub fn new_with_data(req: Args, data: Extensions, ctx: Ctx) -> Self {
         Self {
             args: req,
             meta: Metadata {

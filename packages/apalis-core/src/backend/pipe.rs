@@ -37,24 +37,26 @@ impl<S: fmt::Debug, Into: fmt::Debug, Args, Ctx> fmt::Debug for Pipe<S, Into, Ar
     }
 }
 
-impl<Args, Ctx, S, I, Err> Backend<Args, Ctx> for Pipe<S, I, Args, Ctx>
+impl<Args, Ctx, S, TSink, Err> Backend<Args, Ctx> for Pipe<S, TSink, Args, Ctx>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    I: BackendWithSink<Args, Ctx>,
-    I::Error: Into<BoxDynError> + Send + Sync + 'static,
-    I::Sink: 'static + Sink<Task<Args, Ctx>> + Unpin + Send,
-    I::Beat: Send + 'static,
-
-    I::Stream: Send + 'static,
+    TSink: BackendWithSink<Args, Ctx>,
+    TSink::Error: Into<BoxDynError> + Send + Sync + 'static,
+    TSink::Sink: 'static + Sink<Task<Args, Ctx, TSink::IdType>> + Unpin + Send,
+    TSink::Beat: Send + 'static,
+    TSink::IdType: Send + Sync + 'static,
+    TSink::Stream: Send + 'static,
     Args: Send + 'static,
     Ctx: Send + 'static + Default,
     Err: Into<BoxDynError> + Send + Sync + 'static,
-    <<I as BackendWithSink<Args, Ctx>>::Sink as Sink<Task<Args, Ctx>>>::Error:
+    <<TSink as BackendWithSink<Args, Ctx>>::Sink as Sink<Task<Args, Ctx, TSink::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
 {
-    type Stream = BoxStream<'static, Result<Option<Task<Args, Ctx>>, PipeError>>;
+    type IdType = TSink::IdType;
 
-    type Layer = I::Layer;
+    type Stream = BoxStream<'static, Result<Option<Task<Args, Ctx, Self::IdType>>, PipeError>>;
+
+    type Layer = TSink::Layer;
 
     type Beat = BoxStream<'static, Result<(), PipeError>>;
 
@@ -104,14 +106,15 @@ where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
     I: BackendWithSink<Args, Ctx>,
     I::Error: Into<BoxDynError> + Send + Sync + 'static,
-    I::Sink: Unpin + Send + 'static + Sink<Task<Args, Ctx>>,
+    I::Sink: Unpin + Send + 'static + Sink<Task<Args, Ctx, I::IdType>>,
     I::Beat: Send + 'static,
     I::Stream: Send + 'static,
     Args: Send + 'static,
     Ctx: Send + 'static + Default,
     Err: Into<BoxDynError> + Send + Sync + 'static,
-    <<I as BackendWithSink<Args, Ctx>>::Sink as Sink<Task<Args, Ctx>>>::Error:
+    <<I as BackendWithSink<Args, Ctx>>::Sink as Sink<Task<Args, Ctx, I::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
+    I::IdType: Send + Sync + 'static,
 {
     type Sink = I::Sink;
 
@@ -131,7 +134,7 @@ impl<B, Args, Ctx, Err> PipeExt<B, Args, Ctx> for BoxStream<'static, Result<Args
 where
     B: BackendWithSink<Args, Ctx>,
     B::Error: Into<BoxDynError> + Send + Sync + 'static,
-    B::Sink: Sink<Task<Args, Ctx>>,
+    B::Sink: Sink<Task<Args, Ctx, B::IdType>>,
 {
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx> {
         Pipe::new(self, backend)

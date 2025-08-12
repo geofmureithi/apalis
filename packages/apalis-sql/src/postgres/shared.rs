@@ -13,7 +13,10 @@ use apalis_core::{
         shared::MakeShared,
         Backend, BackendWithSink, TaskStream,
     },
-    task::{task_id::TaskId, Task},
+    task::{
+        task_id::{TaskId, Ulid},
+        Task,
+    },
     worker::{context::WorkerContext, ext::ack::AcknowledgeLayer},
 };
 use chrono::Utc;
@@ -140,6 +143,8 @@ where
     Decode: Decoder<Args, Compact = CompactT> + 'static + Unpin + Send,
     Decode::Error: std::error::Error + Send + Sync + 'static,
 {
+    type IdType = Ulid;
+
     type Error = sqlx::Error;
 
     type Stream = TaskStream<Task<Args, SqlContext>, sqlx::Error>;

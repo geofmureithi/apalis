@@ -5,17 +5,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Builder for creating `Task` instances with optional configuration
 #[derive(Debug)]
-pub struct TaskBuilder<Args, Ctx> {
+pub struct TaskBuilder<Args, Ctx, IdType> {
     args: Args,
     context: Ctx,
     data: Option<Extensions>,
-    task_id: Option<TaskId>,
+    task_id: Option<TaskId<IdType>>,
     attempt: Option<Attempt>,
     status: Option<Status>,
     run_at: Option<u64>,
 }
 
-impl<Args, Ctx: Default> TaskBuilder<Args, Ctx> {
+impl<Args, Ctx: Default, IdType> TaskBuilder<Args, Ctx, IdType> {
     /// Create a new TaskBuilder with the required args
     pub fn new(args: Args) -> Self {
         Self {
@@ -42,7 +42,7 @@ impl<Args, Ctx: Default> TaskBuilder<Args, Ctx> {
     }
 
     /// Set the task ID
-    pub fn with_task_id(mut self, task_id: TaskId) -> Self {
+    pub fn with_task_id(mut self, task_id: TaskId<IdType>) -> Self {
         self.task_id = Some(task_id);
         self
     }
@@ -103,7 +103,7 @@ impl<Args, Ctx: Default> TaskBuilder<Args, Ctx> {
     }
 
     /// Build the Task with default context
-    pub fn build(self) -> Task<Args, Ctx>
+    pub fn build(self) -> Task<Args, Ctx, IdType>
     where
         Ctx: Default,
     {
@@ -117,7 +117,7 @@ impl<Args, Ctx: Default> TaskBuilder<Args, Ctx> {
         Task {
             args: self.args,
             meta: Metadata {
-                task_id: self.task_id.unwrap_or_default(),
+                task_id: self.task_id,
                 data: self.data.unwrap_or_default(),
                 attempt: self.attempt.unwrap_or_default(),
                 context: self.context,
@@ -128,7 +128,7 @@ impl<Args, Ctx: Default> TaskBuilder<Args, Ctx> {
     }
 
     /// Build the Task with provided default context
-    pub fn build_with_default_context(self, default_context: Ctx) -> Task<Args, Ctx> {
+    pub fn build_with_default_context(self, default_context: Ctx) -> Task<Args, Ctx, IdType> {
         let current_time = || {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -139,7 +139,7 @@ impl<Args, Ctx: Default> TaskBuilder<Args, Ctx> {
         Task {
             args: self.args,
             meta: Metadata {
-                task_id: self.task_id.unwrap_or_default(),
+                task_id: self.task_id,
                 data: self.data.unwrap_or_default(),
                 attempt: self.attempt.unwrap_or_default(),
                 context: default_context,
@@ -151,9 +151,9 @@ impl<Args, Ctx: Default> TaskBuilder<Args, Ctx> {
 }
 
 // Convenience methods for Task to create a builder
-impl<Args, Ctx: Default> Task<Args, Ctx> {
+impl<Args, Ctx: Default, IdType> Task<Args, Ctx, IdType> {
     /// Create a TaskBuilder with the given args
-    pub fn builder(args: Args) -> TaskBuilder<Args, Ctx> {
+    pub fn builder(args: Args) -> TaskBuilder<Args, Ctx, IdType> {
         TaskBuilder::new(args)
     }
 }

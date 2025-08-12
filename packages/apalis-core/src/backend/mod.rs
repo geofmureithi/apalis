@@ -27,8 +27,9 @@ pub mod shared;
 
 /// A backend represents a task source
 pub trait Backend<Args, Ctx> {
+    type IdType;
     type Error;
-    type Stream: Stream<Item = Result<Option<Task<Args, Ctx>>, Self::Error>>;
+    type Stream: Stream<Item = Result<Option<Task<Args, Ctx, Self::IdType>>, Self::Error>>;
     type Beat: Stream<Item = Result<(), Self::Error>>;
     type Layer;
 
@@ -38,7 +39,7 @@ pub trait Backend<Args, Ctx> {
 }
 
 pub trait BackendWithSink<Args, Ctx>: Backend<Args, Ctx> {
-    type Sink: Sink<Task<Args, Ctx>>;
+    type Sink: Sink<Task<Args, Ctx, Self::IdType>>;
 
     #[must_use = "Sinks do nothing unless flushed"]
     fn sink(&mut self) -> Self::Sink;
@@ -46,7 +47,7 @@ pub trait BackendWithSink<Args, Ctx>: Backend<Args, Ctx> {
 /// Represents a stream for T.
 pub type TaskStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
 
-pub trait TaskSink<Args, Context> {
+pub trait TaskSink<Args, Context, IdType> {
     type Error;
     fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
@@ -61,12 +62,13 @@ pub trait TaskSink<Args, Context> {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-impl<Args, Ctx: Default, S> TaskSink<Args, Ctx> for S
+impl<Args, Ctx: Default, IdType, S> TaskSink<Args, Ctx, IdType> for S
 where
-    S: Sink<Task<Args, Ctx>> + Unpin + Send,
+    S: Sink<Task<Args, Ctx, IdType>> + Unpin + Send,
     Args: Send,
     Ctx: Send,
     S::Error: Send,
+    IdType: Send + Sync + 'static,
 {
     type Error = S::Error;
     async fn push(&mut self, task: Args) -> Result<(), Self::Error> {
@@ -181,5 +183,5 @@ pub trait ListTasks<Args, Ctx>: Backend<Args, Ctx> {
     fn list_tasks(
         &self,
         filter: &Self::Filter,
-    ) -> impl Future<Output = Result<Vec<Task<Args, Ctx>>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Vec<Task<Args, Ctx, Self::IdType>>, Self::Error>> + Send;
 }

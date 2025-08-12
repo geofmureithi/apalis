@@ -99,12 +99,11 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
                 source: Box::new(e),
             })?;
         let mut parts = Metadata::<SqlContext>::default();
-        parts.task_id = task_id;
+        parts.task_id = Some(task_id);
 
         let attempt: i32 = row.try_get("attempts").unwrap_or(0);
         parts.attempt = Attempt::new_with_value(attempt as usize);
         let mut context = SqlContext::new();
-
 
         if let Ok(max_attempts) = row.try_get("max_attempts") {
             context.set_max_attempts(max_attempts)

@@ -43,6 +43,7 @@
 //! [`ServiceFn`]: crate::service_fn::ServiceFn
 //! [`Service`]: tower_service::Service
 //! [`Request<Args, Context>`]: crate::request::Request
+use crate::backend::Backend;
 use crate::error::BoxDynError;
 use crate::task::Task;
 use crate::service_fn::from_request::FromRequest;
@@ -73,7 +74,7 @@ pub fn service_fn<F, Args, Ctx, FnArgs>(f: F) -> ServiceFn<F, Args, Ctx, FnArgs>
 /// See [`service_fn`] for more details.
 pub struct ServiceFn<F, Args, Ctx, FnArgs> {
     f: F,
-    req: PhantomData<Task<Args, Ctx>>,
+    req: PhantomData<(Args, Ctx)>,
     fn_args: PhantomData<FnArgs>,
 }
 
@@ -115,14 +116,14 @@ pub type FnFuture<F, O, R, E> = Map<F, fn(O) -> std::result::Result<R, E>>;
 macro_rules! impl_service_fn {
     ($($K:ident),+) => {
         #[allow(unused_parens)]
-        impl<T, F, Args: Send + 'static, R, Ctx: Send + 'static, $($K),+> Service<Task<Args, Ctx>> for ServiceFn<T, Args, Ctx, ($($K),+)>
+        impl<T, F, Args: Send + 'static, R, Ctx: Send + 'static, IdType: Send + Sync + 'static, $($K),+> Service<Task<Args, Ctx, IdType>> for ServiceFn<T, Args, Ctx, ($($K),+)>
         where
             T: FnMut(Args, $($K),+) -> F + Send + Clone + 'static,
             F: Future + Send,
             F::Output: IntoResponse<Output = R>,
             $(
-                $K: FromRequest<Task<Args, Ctx>> + Send,
-                < $K as FromRequest<Task<Args, Ctx>> >::Error: std::error::Error + 'static + Send + Sync,
+                $K: FromRequest<Task<Args, Ctx, IdType>> + Send,
+                < $K as FromRequest<Task<Args, Ctx, IdType>> >::Error: std::error::Error + 'static + Send + Sync,
             )+
         {
             type Response = R;
@@ -133,7 +134,7 @@ macro_rules! impl_service_fn {
                 Poll::Ready(Ok(()))
             }
 
-            fn call(&mut self, task: Task<Args, Ctx>) -> Self::Future {
+            fn call(&mut self, task: Task<Args, Ctx, IdType>) -> Self::Future {
                 let mut svc = self.f.clone();
                 #[allow(non_snake_case)]
                 let fut = async move {
@@ -151,25 +152,26 @@ macro_rules! impl_service_fn {
         }
 
         #[allow(unused_parens)]
-        impl<T, Args, Ctx, F, R, Backend, $($K),+>
-            WorkerServiceBuilder<Backend, ServiceFn<T, Args, Ctx, ($($K),+)>, Args, Ctx> for T
+        impl<T, Args, Ctx, F, R, B, $($K),+>
+            WorkerServiceBuilder<B, ServiceFn<T, Args, Ctx, ($($K),+)>, Args, Ctx> for T
         where
+            B: Backend<Args, Ctx>,
             T: FnMut(Args, $($K),+) -> F,
             F: Future,
             F::Output: IntoResponse<Output = R>,
             $(
-                $K: FromRequest<Task<Args, Ctx>> + Send,
-                < $K as FromRequest<Task<Args, Ctx>> >::Error: std::error::Error + 'static + Send + Sync,
+                $K: FromRequest<Task<Args, Ctx, B::IdType>> + Send,
+                < $K as FromRequest<Task<Args, Ctx, B::IdType>> >::Error: std::error::Error + 'static + Send + Sync,
             )+
         {
-            fn build(self, _: &Backend) -> ServiceFn<T, Args, Ctx, ($($K),+)> {
+            fn build(self, _: &B) -> ServiceFn<T, Args, Ctx, ($($K),+)> {
                 service_fn(self)
             }
         }
     };
 }
 
-impl<T, F, Args, R, Ctx> Service<Task<Args, Ctx>> for ServiceFn<T, Args, Ctx, ()>
+impl<T, F, Args, R, Ctx, IdType> Service<Task<Args, Ctx, IdType>> for ServiceFn<T, Args, Ctx, ()>
 where
     T: FnMut(Args) -> F,
     F: Future,
@@ -183,7 +185,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, task: Task<Args, Ctx>) -> Self::Future {
+    fn call(&mut self, task: Task<Args, Ctx, IdType>) -> Self::Future {
         let fut = (self.f)(task.args);
 
         fut.map(F::Output::into_response)
@@ -202,11 +204,12 @@ where
     }
 }
 
-impl<Args, Ctx, S, Backend> WorkerServiceBuilder<Backend, S, Args, Ctx> for S
+impl<Args, Ctx, S, B> WorkerServiceBuilder<B, S, Args, Ctx> for S
 where
-    S: Service<Task<Args, Ctx>>,
+    S: Service<Task<Args, Ctx, B::IdType>>,
+    B: Backend<Args, Ctx>
 {
-    fn build(self, _: &Backend) -> S {
+    fn build(self, _: &B) -> S {
         self
     }
 }

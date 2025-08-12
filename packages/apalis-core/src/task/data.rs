@@ -1,8 +1,11 @@
-use std::{ops::Deref, task::{Context, Poll}};
+use std::{
+    ops::Deref,
+    task::{Context, Poll},
+};
 
 use tower_service::Service;
 
-use crate::{task::Task, service_fn::from_request::FromRequest};
+use crate::{service_fn::from_request::FromRequest, task::Task};
 
 /// Extension data for tasks.
 /// This is commonly used to share state across tasks. or across layers within the same tasks
@@ -69,9 +72,9 @@ pub struct AddExtension<S, T> {
     value: T,
 }
 
-impl<S, T, Req, Ctx> Service<Task<Req, Ctx>> for AddExtension<S, T>
+impl<S, T, Args, Ctx, IdType> Service<Task<Args, Ctx, IdType>> for AddExtension<S, T>
 where
-    S: Service<Task<Req, Ctx>>,
+    S: Service<Task<Args, Ctx, IdType>>,
     T: Clone + Send + Sync + 'static,
 {
     type Response = S::Response;
@@ -83,7 +86,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: Task<Req, Ctx>) -> Self::Future {
+    fn call(&mut self, mut req: Task<Args, Ctx, IdType>) -> Self::Future {
         req.meta.data.insert(self.value.clone());
         self.inner.call(req)
     }
@@ -93,13 +96,15 @@ where
 pub enum MissingDataError {
     #[error("the type for key `{0}` is not available")]
     NotFound(String),
+    #[error("Missing critical data from backend with context: `{0}`. This is a bug, please file a bug report")]
+    MissingTaskIdentifier(&'static str),
 }
 
-impl<T: Clone + Send + Sync + 'static, Req: Sync, Ctx: Sync> FromRequest<Task<Req, Ctx>>
+impl<T: Clone + Send + Sync + 'static, Args: Sync, Ctx: Sync, IdType: Sync + Send> FromRequest<Task<Args, Ctx, IdType>>
     for Data<T>
 {
     type Error = MissingDataError;
-    async fn from_request(req: &Task<Req, Ctx>) -> Result<Self, Self::Error> {
+    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
         req.meta.data.get_checked().cloned().map(Data::new)
     }
 }
