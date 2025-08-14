@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.3](https://github.com/geofmureithi/apalis/releases/tag/v0.7.3)
+
 ### Fixed
 
 - **deps**: update rust crate redis to `0.32` ([#584](https://github.com/geofmureithi/apalis/pull/584))
@@ -11,7 +13,6 @@ All notable changes to this project are documented in this file.
 - **deps**: update rust crate criterion to 0.7.0 ([#591](https://github.com/geofmureithi/apalis/pull/591))
 - **deps**: update actions/checkout digest to 08eba0b ([#592](https://github.com/geofmureithi/apalis/pull/592))
 - **deps**: update actions/checkout action to v5 ([#593](https://github.com/geofmureithi/apalis/pull/593))
-
 
 ## [0.7.2](https://github.com/geofmureithi/apalis/releases/tag/v0.7.2)
 
