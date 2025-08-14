@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- **deps**: update rust crate redis to `0.32` ([#584](https://github.com/geofmureithi/apalis/pull/584))
+
 ## [0.7.2](https://github.com/geofmureithi/apalis/releases/tag/v0.7.2)
 
 ### Fixed
