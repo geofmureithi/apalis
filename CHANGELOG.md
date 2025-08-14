@@ -4,7 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
 - **deps**: update rust crate redis to `0.32` ([#584](https://github.com/geofmureithi/apalis/pull/584))
+- **deps**: update rust crate sentry-core to 0.42.0 ([#585](https://github.com/geofmureithi/apalis/pull/585))
+
 
 ## [0.7.2](https://github.com/geofmureithi/apalis/releases/tag/v0.7.2)
 
