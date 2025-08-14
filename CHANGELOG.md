@@ -10,7 +10,7 @@ All notable changes to this project are documented in this file.
 - **deps**: update rust crate sentry-core to 0.42.0 ([#585](https://github.com/geofmureithi/apalis/pull/585))
 - **deps**: update rust crate criterion to 0.7.0 ([#591](https://github.com/geofmureithi/apalis/pull/591))
 - **deps**: update actions/checkout digest to 08eba0b ([#592](https://github.com/geofmureithi/apalis/pull/592))
-
+- **deps**: update actions/checkout action to v5 ([#593](https://github.com/geofmureithi/apalis/pull/593))
 
 
 ## [0.7.2](https://github.com/geofmureithi/apalis/releases/tag/v0.7.2)
