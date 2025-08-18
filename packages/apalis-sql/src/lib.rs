@@ -31,6 +31,9 @@ pub mod context;
 /// Util for fetching rows
 pub mod from_row;
 
+pub mod sink;
+pub mod fetcher;
+
 /// Postgres storage for apalis. Uses `NOTIFY` and `SKIP LOCKED`
 #[cfg(feature = "postgres")]
 #[cfg_attr(docsrs, doc(cfg(feature = "postgres")))]

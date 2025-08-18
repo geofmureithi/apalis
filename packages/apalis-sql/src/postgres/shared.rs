@@ -94,18 +94,36 @@ impl SharedPostgresStorage {
         }
     }
 }
+#[derive(Debug)]
+pub enum SharedPostgresError {
+    NamespaceExists(String),
+    RegistryLocked,
+}
 
 impl<Args, Compact, Codec> MakeShared<Args> for SharedPostgresStorage<Compact, Codec> {
     type Backend = PostgresStorage<Args, Compact, Codec, SharedFetcher>;
     type Config = Config;
-    type MakeError = ();
+    type MakeError = SharedPostgresError;
+    fn make_shared(&mut self) -> Result<Self::Backend, Self::MakeError>
+    where
+        Self::Config: Default,
+    {
+        Self::make_shared_with_config(self, Config::new(std::any::type_name::<Args>()))
+    }
     fn make_shared_with_config(
         &mut self,
         config: Self::Config,
     ) -> Result<Self::Backend, Self::MakeError> {
         let (tx, rx) = mpsc::channel(config.buffer_size);
-        let mut r = self.registry.try_lock().unwrap();
-        r.insert(config.namespace().to_owned(), tx);
+        let mut r = self
+            .registry
+            .try_lock()
+            .ok_or(SharedPostgresError::RegistryLocked)?;
+        if let Some(_) = r.insert(config.namespace().to_owned(), tx) {
+            return Err(SharedPostgresError::NamespaceExists(
+                config.namespace().to_owned(),
+            ));
+        }
         Ok(PostgresStorage {
             _marker: PhantomData,
             config,
@@ -236,7 +254,7 @@ mod tests {
     use chrono::Local;
 
     use apalis_core::{
-        backend::memory::MemoryStorage,
+        backend::{memory::MemoryStorage, TaskSink},
         error::BoxDynError,
         worker::{builder::WorkerBuilder, event::Event, ext::event_listener::EventListenerExt},
     };
@@ -251,13 +269,17 @@ mod tests {
             .unwrap();
         let mut store = SharedPostgresStorage::new(pool);
 
-        let mut backend = store.make_shared().unwrap();
+        let mut map_store = store.make_shared().unwrap();
 
-        let mut sink = backend.sink();
+        let mut int_store = store.make_shared().unwrap();
+
+        let mut int_sink = int_store.sink();
+
+        let mut map_sink = map_store.sink();
 
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(3)).await;
-            let task = Task::builder(Default::default())
+            let task = Task::builder(99u32)
                 .run_after(Duration::from_secs(2))
                 .with_context(|mut ctx: SqlContext| {
                     ctx.set_priority(1);
@@ -272,23 +294,25 @@ mod tests {
                 // .run_after(Duration::from_secs(5))
                 .build();
 
-            sink.send_all(&mut stream::iter(vec![task, task2].into_iter().map(Ok)))
+            map_sink
+                .send_all(&mut stream::iter(vec![task, task2].into_iter().map(Ok)))
                 .await
                 .unwrap();
+            int_sink.push(99).await.unwrap();
         });
 
-        async fn send_reminder<I>(
-            _: HashMap<String, String>,
+        async fn send_reminder<T, I>(
+            _: T,
             ctx: SqlContext,
-            task_id: TaskId<I>
+            task_id: TaskId<I>,
         ) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_secs(2)).await;
             // Err("Failed".into())
             Ok(())
         }
 
-        let worker = WorkerBuilder::new("rango-tango")
-            .backend(backend)
+        let int_worker = WorkerBuilder::new("rango-tango-2")
+            .backend(int_store)
             .layer(ConcurrencyLimitLayer::new(1))
             .on_event(move |ctx, ev| {
                 println!("{:?}", ev);
@@ -304,6 +328,23 @@ mod tests {
                 }
             })
             .build(send_reminder);
-        worker.run().await.unwrap();
+        let map_worker = WorkerBuilder::new("rango-tango-1")
+            .backend(map_store)
+            .layer(ConcurrencyLimitLayer::new(1))
+            .on_event(move |ctx, ev| {
+                println!("{:?}", ev);
+                let ctx = ctx.clone();
+
+                if matches!(ev, Event::Start) {
+                    tokio::spawn(async move {
+                        if ctx.is_running() {
+                            tokio::time::sleep(Duration::from_millis(15000)).await;
+                            ctx.stop().unwrap();
+                        }
+                    });
+                }
+            })
+            .build(send_reminder);
+        let res = tokio::try_join!(int_worker.run(), map_worker.run()).unwrap();
     }
 }

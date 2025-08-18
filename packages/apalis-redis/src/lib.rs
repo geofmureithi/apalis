@@ -114,9 +114,9 @@ impl Default for RedisContext {
     }
 }
 
-impl<Req: Sync> FromRequest<Task<Req, RedisContext>> for RedisContext {
+impl<Args: Sync> FromRequest<Task<Args, RedisContext>> for RedisContext {
     type Error = Infallible;
-    async fn from_request(req: &Task<Req, RedisContext>) -> Result<Self, Self::Error> {
+    async fn from_request(req: &Task<Args, RedisContext>) -> Result<Self, Self::Error> {
         Ok(req.meta.context.clone())
     }
 }
