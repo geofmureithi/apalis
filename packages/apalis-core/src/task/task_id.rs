@@ -13,25 +13,19 @@ use crate::{
     task::{data::MissingDataError, Task},
 };
 
-pub use unique_id::UniqueId;
+pub use random_id::RandomId;
 
 pub use ulid::Ulid;
 
 /// A wrapper type that defines a task id.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
-pub struct TaskId<IdType = UniqueId>(Arc<IdType>);
-
-impl<IdType> Clone for TaskId<IdType> {
-    fn clone(&self) -> Self {
-        TaskId(self.0.clone())
-    }
-}
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq, PartialOrd, Ord)]
+pub struct TaskId<IdType = RandomId>(IdType);
 
 impl<IdType> TaskId<IdType> {
     /// Generate a new [`TaskId`]
     pub fn new(id: IdType) -> Self {
-        Self(Arc::new(id))
+        Self(id)
     }
     /// Get the inner [`IdType`]
     pub fn inner(&self) -> &IdType {
@@ -68,22 +62,22 @@ impl<IdType: Display> Display for TaskId<IdType> {
     }
 }
 
-impl<Args: Sync, Ctx: Sync, IdType: Sync + Send> FromRequest<Task<Args, Ctx, IdType>>
+impl<Args: Sync, Meta: Sync, IdType: Sync + Send + Clone> FromRequest<Task<Args, Meta, IdType>>
     for TaskId<IdType>
 {
     type Error = MissingDataError;
-    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
+    async fn from_request(req: &Task<Args, Meta, IdType>) -> Result<Self, Self::Error> {
         Ok(req
-            .meta
+            .ctx
             .task_id
             .clone()
             .ok_or(MissingDataError::MissingTaskIdentifier(
-                std::any::type_name::<Ctx>(),
+                std::any::type_name::<Meta>(),
             ))?)
     }
 }
 
-mod unique_id {
+mod random_id {
     use super::*;
     use std::convert::Infallible;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -98,16 +92,16 @@ mod unique_id {
     /// This is a placeholder and does not guarantee/tested as the other implementations
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
-    pub struct UniqueId(String);
+    pub struct RandomId(String);
 
-    impl FromStr for UniqueId {
+    impl FromStr for RandomId {
         type Err = Infallible;
         fn from_str(s: &str) -> Result<Self, Self::Err> {
-            Ok(UniqueId(s.to_owned()))
+            Ok(RandomId(s.to_owned()))
         }
     }
 
-    impl TryFrom<&'_ str> for UniqueId {
+    impl TryFrom<&'_ str> for RandomId {
         type Error = Infallible;
 
         fn try_from(value: &'_ str) -> Result<Self, Self::Error> {
@@ -115,15 +109,15 @@ mod unique_id {
         }
     }
 
-    impl Display for UniqueId {
+    impl Display for RandomId {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             Display::fmt(&self.0, f)
         }
     }
 
-    impl Default for UniqueId {
+    impl Default for RandomId {
         fn default() -> Self {
-            UniqueId(unique_id())
+            RandomId(unique_id())
         }
     }
 

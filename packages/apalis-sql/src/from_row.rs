@@ -1,21 +1,21 @@
-use apalis_core::task::Metadata;
+use apalis_core::task::ExecutionContext;
 use apalis_core::task::Task;
 
 use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Type};
 
-use crate::context::SqlContext;
+use crate::context::SqlMetadata;
 /// Wrapper for [Request]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlRequest<T> {
     /// The inner request
-    pub req: Task<T, SqlContext>,
+    pub req: Task<T, SqlMetadata>,
     pub(crate) _priv: (),
 }
 
 impl<T> SqlRequest<T> {
     /// Creates a new SqlRequest.
-    pub fn new(req: Task<T, SqlContext>) -> Self {
+    pub fn new(req: Task<T, SqlMetadata>) -> Self {
         SqlRequest { req, _priv: () }
     }
 }
@@ -37,13 +37,13 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut parts = Metadata::<SqlContext>::default();
+        let mut parts = ExecutionContext::<SqlMetadata>::default();
         parts.task_id = task_id;
 
         let attempt: i32 = row.try_get("attempts").unwrap_or(0);
         parts.attempt = Attempt::new_with_value(attempt as usize);
 
-        let mut context = crate::context::SqlContext::new();
+        let mut context = crate::context::SqlMetadata::new();
 
         let run_at: i64 = row.try_get("run_at")?;
         context.set_run_at(DateTime::from_timestamp(run_at, 0).unwrap_or_default());
@@ -73,9 +73,9 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
         let priority: i32 = row.try_get("priority").unwrap_or_default();
         context.set_priority(priority);
 
-        parts.context = context;
+        parts.metadata = context;
         Ok(SqlRequest {
-            req: Task::new_with_parts(job, parts),
+            req: Task::new_with_ctx(job, parts),
             _priv: (),
         })
     }
@@ -98,12 +98,12 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut parts = Metadata::<SqlContext>::default();
+        let mut parts = ExecutionContext::<SqlMetadata>::default();
         parts.task_id = Some(task_id);
 
         let attempt: i32 = row.try_get("attempts").unwrap_or(0);
         parts.attempt = Attempt::new_with_value(attempt as usize);
-        let mut context = SqlContext::new();
+        let mut context = SqlMetadata::new();
 
         if let Ok(max_attempts) = row.try_get("max_attempts") {
             context.set_max_attempts(max_attempts)
@@ -124,9 +124,9 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
         let priority: i32 = row.try_get("priority").unwrap_or_default();
         context.set_priority(priority);
 
-        parts.context = context;
+        parts.metadata = context;
         Ok(SqlRequest {
-            req: Task::new_with_parts(job, parts),
+            req: Task::new_with_ctx(job, parts),
             _priv: (),
         })
     }
@@ -147,13 +147,13 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut parts = Metadata::<SqlContext>::default();
+        let mut parts = ExecutionContext::<SqlMetadata>::default();
         parts.task_id = task_id;
 
         let attempt: i32 = row.try_get("attempts").unwrap_or(0);
         parts.attempt = Attempt::new_with_value(attempt as usize);
 
-        let mut context = SqlContext::new();
+        let mut context = SqlMetadata::new();
 
         let run_at = row.try_get("run_at")?;
         context.set_run_at(run_at);
@@ -183,9 +183,9 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
         let priority: i32 = row.try_get("priority").unwrap_or_default();
         context.set_priority(priority);
 
-        parts.context = context;
+        parts.metadata = context;
         Ok(SqlRequest {
-            req: Task::new_with_parts(job, parts),
+            req: Task::new_with_ctx(job, parts),
             _priv: (),
         })
     }

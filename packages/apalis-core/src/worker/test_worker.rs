@@ -92,14 +92,14 @@ pub struct TestWorker<B, S, Res, IdType = Ulid> {
 }
 
 /// Utility for executing the next item in the queue
-pub trait ExecuteNext<Args, Ctx> {
+pub trait ExecuteNext<Args, Meta> {
     type Result;
     fn execute_next(&mut self) -> impl Future<Output = Self::Result> + Send;
 }
 
-impl<B, S, Args, Ctx, Res, IdType> ExecuteNext<Args, Ctx> for TestWorker<B, S, Res, IdType>
+impl<B, S, Args, Meta, Res, IdType> ExecuteNext<Args, Meta> for TestWorker<B, S, Res, IdType>
 where
-    S: Service<Task<Args, Ctx, IdType>, Response = Res> + Send + 'static,
+    S: Service<Task<Args, Meta, IdType>, Response = Res> + Send + 'static,
     B: Send,
     Res: Send,
 {
@@ -111,33 +111,33 @@ where
 
 impl<B, S, Res> TestWorker<B, S, Res, ()> {
     /// Build a new test worker
-    pub fn new<Args, Ctx>(backend: B, service: S) -> TestWorker<B, S, Res, B::IdType>
+    pub fn new<Args, Meta>(backend: B, service: S) -> TestWorker<B, S, Res, B::IdType>
     where
-        B: Backend<Args, Ctx> + 'static,
-        S: Service<Task<Args, Ctx, B::IdType>, Response = Res> + Send + 'static,
+        B: Backend<Args, Meta> + 'static,
+        S: Service<Task<Args, Meta, B::IdType>, Response = Res> + Send + 'static,
         B::Stream: Unpin + Send + 'static,
         B::Beat: Unpin + Send + 'static,
         Args: Send + 'static,
-        Ctx: Send + 'static,
+        Meta: Send + 'static,
         B::Error: Into<BoxDynError> + Send + 'static,
         B::Layer: Layer<ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>>,
         S::Future: Send,
         S::Error: Into<BoxDynError> + Send + Sync,
         S::Response: Clone + Send,
         Res: 'static,
-        <<B as Backend<Args, Ctx>>::Layer as Layer<
+        <<B as Backend<Args, Meta>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
-        >>::Service: Service<Task<Args, Ctx, B::IdType>>,
-        <<<B as Backend<Args, Ctx>>::Layer as Layer<
+        >>::Service: Service<Task<Args, Meta, B::IdType>>,
+        <<<B as Backend<Args, Meta>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
-        >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Error: Into<BoxDynError> + Sync + Send,
-        <<<B as Backend<Args, Ctx>>::Layer as Layer<
+        >>::Service as Service<Task<Args, Meta, B::IdType>>>::Error: Into<BoxDynError> + Sync + Send,
+        <<<B as Backend<Args, Meta>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
-        >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Future: Send,
-        <<B as Backend<Args, Ctx>>::Layer as Layer<
+        >>::Service as Service<Task<Args, Meta, B::IdType>>>::Future: Send,
+        <<B as Backend<Args, Meta>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service: std::marker::Send + 'static,
-        B::IdType: Send + Sync + 'static,
+        B::IdType: Send + Clone + 'static,
     {
         enum Item<R, IdType> {
             Ev(Result<Event, WorkerError>),
@@ -185,15 +185,15 @@ pub struct TestEmitService<S, Response, IdType> {
     service: S,
 }
 
-impl<S, Args, Ctx, Res, IdType> Service<Task<Args, Ctx, IdType>> for TestEmitService<S, Res, IdType>
+impl<S, Args, Meta, Res, IdType> Service<Task<Args, Meta, IdType>> for TestEmitService<S, Res, IdType>
 where
-    S: Service<Task<Args, Ctx, IdType>, Response = Res> + Send + 'static,
+    S: Service<Task<Args, Meta, IdType>, Response = Res> + Send + 'static,
     S::Future: Send + 'static,
     Args: Send + 'static,
-    Ctx: Send + 'static,
+    Meta: Send + 'static,
     S::Response: Send + 'static,
     S::Error: Into<BoxDynError> + Send,
-    IdType: Send + 'static + Sync,
+    IdType: Send + 'static + Clone,
 {
     type Response = ();
     type Error = String;
@@ -205,8 +205,8 @@ where
             .map_err(|e| e.into().to_string())
     }
 
-    fn call(&mut self, req: Task<Args, Ctx, IdType>) -> Self::Future {
-        let task_id = req.meta.task_id.clone().unwrap();
+    fn call(&mut self, req: Task<Args, Meta, IdType>) -> Self::Future {
+        let task_id = req.ctx.task_id.clone().unwrap();
         let mut tx = Clone::clone(&self.tx);
         let fut = self.service.call(req);
         Box::pin(async move {

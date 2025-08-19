@@ -21,7 +21,7 @@ use apalis_core::{
         attempt::Attempt,
         status::Status,
         task_id::{TaskId, Ulid},
-        Metadata, Task,
+        ExecutionContext, Task,
     },
     utils::Identity,
     worker::{
@@ -38,11 +38,11 @@ use futures::{
     FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use sqlx::PgPool;
 
 use crate::{
-    calculate_status, context::SqlContext, postgres::fetcher::PgFetcher, sink::SqlSink, Config,
+    calculate_status, context::SqlMetadata, postgres::fetcher::PgFetcher, sink::SqlSink, Config,
 };
 
 mod custom;
@@ -139,7 +139,7 @@ pub(crate) async fn register(
     Ok(())
 }
 
-impl<Args, Decode> Backend<Args, SqlContext>
+impl<Args, Decode> Backend<Args, SqlMetadata>
     for PostgresStorage<Args, CompactT, Decode, DefaultFetcher>
 where
     Args: Send + 'static + Unpin,
@@ -187,14 +187,14 @@ pub struct PgSink<Args, Compact = CompactT, Codec = JsonCodec<CompactT>> {
             dyn Fn(
                     PgPool,
                     Config,
-                    Vec<Task<Compact, SqlContext, Ulid>>,
+                    Vec<Task<Compact, SqlMetadata, Ulid>>,
                 ) -> BoxFuture<'static, Result<(), sqlx::Error>>
                 + Send
                 + Sync
                 + 'static,
         >,
         Args,
-        SqlContext,
+        SqlMetadata,
         Ulid,
         Compact,
         Codec,
@@ -215,7 +215,7 @@ where
 impl<Args, Encode> PgSink<Args, CompactT, Encode> {
     pub fn new(pool: &PgPool, config: &Config) -> Self {
         let sink_fn = Box::new(
-            |pool: PgPool, cfg: Config, buffer: Vec<Task<CompactT, SqlContext, Ulid>>| {
+            |pool: PgPool, cfg: Config, buffer: Vec<Task<CompactT, SqlMetadata, Ulid>>| {
                 async move {
                 let job_type = cfg.namespace();
                 // Build the multi-row INSERT with UNNEST
@@ -227,18 +227,18 @@ impl<Args, Encode> PgSink<Args, CompactT, Encode> {
 
                 for task in buffer {
                     ids.push(
-                        task.meta
+                        task.ctx
                             .task_id
                             .map(|id| id.to_string())
                             .unwrap_or(Ulid::new().to_string()),
                     );
                     job_data.push(task.args);
                     run_ats.push(
-                        DateTime::from_timestamp(task.meta.run_at as i64, 0)
+                        DateTime::from_timestamp(task.ctx.run_at as i64, 0)
                             .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?,
                     );
-                    priorities.push(*task.meta.context.priority());
-                    max_attempts_vec.push(task.meta.context.max_attempts());
+                    priorities.push(*task.ctx.metadata.priority());
+                    max_attempts_vec.push(task.ctx.metadata.max_attempts());
                 }
 
                 sqlx::query!(
@@ -272,7 +272,7 @@ impl<Args, Encode> PgSink<Args, CompactT, Encode> {
     }
 }
 
-impl<Args, Encode> Sink<Task<Args, SqlContext, Ulid>> for PgSink<Args, CompactT, Encode>
+impl<Args, Encode> Sink<Task<Args, SqlMetadata, Ulid>> for PgSink<Args, CompactT, Encode>
 where
     Args: Unpin + Send + Sync + 'static,
     Encode: Encoder<Args, Compact = CompactT> + Unpin,
@@ -289,7 +289,7 @@ where
 
     fn start_send(
         mut self: Pin<&mut Self>,
-        item: Task<Args, SqlContext, Ulid>,
+        item: Task<Args, SqlMetadata, Ulid>,
     ) -> Result<(), Self::Error> {
         self.inner.start_send_unpin(item).map_err(|e| match e {
             crate::sink::SqlSinkError::EncodeError(e) => sqlx::Error::Encode(e.into()),
@@ -313,10 +313,10 @@ where
     }
 }
 
-impl<Args, Fetch, Encode> BackendWithSink<Args, SqlContext>
+impl<Args, Fetch, Encode> BackendWithSink<Args, SqlMetadata>
     for PostgresStorage<Args, CompactT, Encode, Fetch>
 where
-    PostgresStorage<Args, CompactT, Encode, Fetch>: Backend<Args, SqlContext, IdType = Ulid>,
+    PostgresStorage<Args, CompactT, Encode, Fetch>: Backend<Args, SqlMetadata, IdType = Ulid>,
     Args: Send + Sync + Unpin + 'static + Serialize + DeserializeOwned,
     Encode: Encoder<Args, Compact = CompactT> + Unpin,
     Encode::Error: std::error::Error + Send + Sync + 'static,
@@ -338,19 +338,19 @@ impl PgAck {
     }
 }
 
-impl<Res: Serialize> Acknowledge<Res, SqlContext, Ulid> for PgAck {
+impl<Res: Serialize> Acknowledge<Res, SqlMetadata, Ulid> for PgAck {
     type Error = sqlx::Error;
     type Future = BoxFuture<'static, Result<(), Self::Error>>;
     fn ack(
         &mut self,
         res: &Result<Res, BoxDynError>,
-        parts: &Metadata<SqlContext, Ulid>,
+        parts: &ExecutionContext<SqlMetadata, Ulid>,
     ) -> Self::Future {
         let task_id = parts.task_id.clone();
-        let worker_id = parts.context.lock_by().clone();
+        let worker_id = parts.metadata.lock_by().clone();
 
         let response = serde_json::to_string(&res.as_ref().map_err(|e| e.to_string()));
-        let status = calculate_status(&parts.context, res);
+        let status = calculate_status(&parts.metadata, res);
         let attempt = parts.attempt.current() as i32;
         let now = Utc::now();
         let pool = self.pool.clone();
@@ -399,6 +399,7 @@ pub struct PgTask<Compact = CompactT> {
     lock_by: Option<String>,
     done_at: Option<DateTime<Utc>>,
     priority: Option<i32>,
+    meta: Option<Map<String, Value>>
 }
 
 // #[derive(Debug, Serialize, Deserialize)]
@@ -413,12 +414,12 @@ pub struct PgTask<Compact = CompactT> {
 impl PgTask {
     fn try_into_req<D: Decoder<Args, Compact = CompactT>, Args>(
         self,
-    ) -> Result<Task<Args, SqlContext, Ulid>, sqlx::Error>
+    ) -> Result<Task<Args, SqlMetadata, Ulid>, sqlx::Error>
     where
         D::Error: std::error::Error + Send + Sync + 'static,
     {
         let args = D::decode(&self.job).map_err(|e| sqlx::Error::Decode(e.into()))?;
-        let parts = Metadata {
+        let parts = ExecutionContext {
             attempt: Attempt::new_with_value(
                 self.attempts
                     .ok_or(sqlx::Error::ColumnNotFound("attempts".to_owned()))?
@@ -439,8 +440,8 @@ impl PgTask {
                 .run_at
                 .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?
                 .timestamp() as u64,
-            context: {
-                let mut ctx = SqlContext::default();
+            metadata: {
+                let mut ctx = SqlMetadata::default();
                 ctx.set_lock_at(self.lock_at.map(|s| s.timestamp()));
                 ctx.set_lock_by(self.lock_by);
                 // TODO: complete the rest
@@ -449,8 +450,12 @@ impl PgTask {
 
             ..Default::default()
         };
-        Ok(Task::new_with_parts(args, parts))
+        Ok(Task::new_with_ctx(args, parts))
     }
+}
+
+pub struct PgMeta {
+
 }
 
 mod fetcher {
@@ -480,7 +485,7 @@ mod fetcher {
     use sqlx::{PgPool, Pool, Postgres};
 
     use crate::{
-        context::SqlContext,
+        context::SqlMetadata,
         fetcher::SqlFetcher,
         postgres::{CompactT, PgSink, PgTask},
         Config,
@@ -490,7 +495,7 @@ mod fetcher {
         pool: PgPool,
         config: Config,
         worker: WorkerContext,
-    ) -> Result<Vec<Task<Args, SqlContext, Ulid>>, sqlx::Error>
+    ) -> Result<Vec<Task<Args, SqlMetadata, Ulid>>, sqlx::Error>
     where
         D::Error: std::error::Error + Send + Sync + 'static,
     {
@@ -515,8 +520,8 @@ mod fetcher {
     enum StreamState<Args> {
         Ready,
         Delay(Delay),
-        Fetch(BoxFuture<'static, Result<Vec<Task<Args, SqlContext, Ulid>>, sqlx::Error>>),
-        Buffered(VecDeque<Task<Args, SqlContext, Ulid>>),
+        Fetch(BoxFuture<'static, Result<Vec<Task<Args, SqlMetadata, Ulid>>, sqlx::Error>>),
+        Buffered(VecDeque<Task<Args, SqlMetadata, Ulid>>),
         Empty,
     }
 
@@ -526,7 +531,7 @@ mod fetcher {
                 Config,
                 WorkerContext,
             )
-                -> BoxFuture<'static, Result<Vec<Task<Args, SqlContext, Ulid>>, sqlx::Error>>
+                -> BoxFuture<'static, Result<Vec<Task<Args, SqlMetadata, Ulid>>, sqlx::Error>>
             + Send
             + Sync,
     >;
@@ -538,7 +543,7 @@ mod fetcher {
             Config,
             FetchFn<Args>,
             Args,
-            SqlContext,
+            SqlMetadata,
             Ulid,
             Compact,
             Decode,
@@ -580,7 +585,7 @@ mod fetcher {
         Decode: Decoder<Args, Compact = CompactT> + 'static,
         // Compact: Unpin + Send + 'static,
     {
-        type Item = Result<Option<Task<Args, SqlContext, Ulid>>, sqlx::Error>;
+        type Item = Result<Option<Task<Args, SqlMetadata, Ulid>>, sqlx::Error>;
 
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             self.get_mut().inner.poll_next_unpin(cx)
@@ -628,9 +633,9 @@ mod tests {
         let mut items = stream::repeat_with(|| {
             let task = Task::builder(HashMap::default())
                 .run_after(Duration::from_secs(5))
-                .with_context(|mut ctx: SqlContext| {
-                    ctx.set_priority(1);
-                    ctx
+                .with_metadata(|mut meta: SqlMetadata| {
+                    meta.set_priority(1);
+                    meta
                 })
                 .build();
             Ok(task)
@@ -640,7 +645,7 @@ mod tests {
 
         async fn send_reminder(
             _: HashMap<String, String>,
-            ctx: SqlContext,
+            ctx: SqlMetadata,
         ) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_secs(2)).await;
             Ok(())

@@ -6,35 +6,38 @@ use apalis_core::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 /// The context for a job is represented here
 /// Used to provide a context for a job with an sql backend
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SqlContext {
+pub struct SqlMetadata {
     max_attempts: i32,
     last_error: Option<String>,
     lock_at: Option<i64>,
     lock_by: Option<String>,
     done_at: Option<i64>,
     priority: i32,
+    extensions: Map<String, Value>,
 }
 
-impl Default for SqlContext {
+impl Default for SqlMetadata {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SqlContext {
+impl SqlMetadata {
     /// Build a new context with defaults
     pub fn new() -> Self {
-        SqlContext {
+        SqlMetadata {
             lock_at: None,
             done_at: None,
             max_attempts: 5,
             last_error: None,
             lock_by: None,
             priority: 0,
+            extensions: Map::new(),
         }
     }
 
@@ -97,11 +100,22 @@ impl SqlContext {
     pub fn priority(&self) -> &i32 {
         &self.priority
     }
+
+    /// Get the job specific extensions
+    pub fn extensions(&self) -> &Map<String, Value> {
+        &self.extensions
+    }
+
+    /// Add extensions to the job meta
+    pub fn insert<S: AsRef<str>, D: Serialize>(&mut self, key: S, data: D) {
+        self.extensions
+            .insert(key.as_ref().to_owned(), serde_json::to_value(data).unwrap());
+    }
 }
 
-impl<Args: Sync, IdType: Send + Sync> FromRequest<Task<Args, SqlContext, IdType>> for SqlContext {
+impl<Args: Sync, IdType: Send + Sync> FromRequest<Task<Args, SqlMetadata, IdType>> for SqlMetadata {
     type Error = Infallible;
-    async fn from_request(req: &Task<Args, SqlContext, IdType>) -> Result<Self, Infallible> {
-        Ok(req.meta.context.clone())
+    async fn from_request(req: &Task<Args, SqlMetadata, IdType>) -> Result<Self, Infallible> {
+        Ok(req.ctx.metadata.clone())
     }
 }

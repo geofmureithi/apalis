@@ -2,8 +2,8 @@ use crate::{
     backend::{codec::CloneOpCodec, Backend, BackendWithSink, TaskSink, TaskStream},
     error::BoxDynError,
     task::{
-        task_id::{TaskId, UniqueId},
-        Metadata, Task,
+        task_id::{TaskId, RandomId},
+        ExecutionContext, Task,
     },
     worker::context::WorkerContext,
 };
@@ -88,12 +88,12 @@ impl JsonMemory<Value> {
             let inner = self.clone();
 
             sender.with_flat_map(move |request: Task<Args, ()>| {
-                use crate::task::task_id::UniqueId;
+                use crate::task::task_id::RandomId;
                 let task_id = request
-                    .meta
+                    .ctx
                     .task_id
                     .clone()
-                    .unwrap_or(TaskId::new(UniqueId::default()));
+                    .unwrap_or(TaskId::new(RandomId::default()));
                 let value = serde_json::to_value(request.args).unwrap();
                 inner.tasks.write().unwrap().insert(
                     TaskKey {
@@ -103,7 +103,7 @@ impl JsonMemory<Value> {
                     value.clone().into(),
                 );
 
-                let req = Task::new_with_parts(value, request.meta);
+                let req = Task::new_with_ctx(value, request.ctx);
                 futures_util::stream::iter(vec![Ok(req)])
             })
         };
@@ -146,13 +146,13 @@ impl<Args: Unpin + Serialize> Sink<Task<Args, ()>> for JsonMemory<Args> {
         let this = Pin::get_mut(self);
         let mut tasks = this.tasks.write().unwrap();
         for task in this.buffer.drain(..) {
-            use crate::task::task_id::UniqueId;
+            use crate::task::task_id::RandomId;
 
             let task_id = task
-                .meta
+                .ctx
                 .task_id
                 .clone()
-                .unwrap_or(TaskId::new(UniqueId::default()));
+                .unwrap_or(TaskId::new(RandomId::default()));
             tasks.insert(
                 TaskKey {
                     task_id,
@@ -180,9 +180,9 @@ impl<Args: DeserializeOwned> Stream for JsonMemory<Args> {
             map.pop_first_with(|s, _| s.namespace == std::any::type_name::<Args>())
         {
             let args = mutex.into_inner().unwrap();
-            Poll::Ready(Some(Task::new_with_parts(
+            Poll::Ready(Some(Task::new_with_ctx(
                 serde_json::from_value(args).unwrap(),
-                Metadata {
+                ExecutionContext {
                     task_id: Some(key.task_id),
                     ..Default::default()
                 },
@@ -217,8 +217,12 @@ impl<Args> Sink<Task<Args, ()>> for MemorySink<Args> {
         Pin::new(&mut *lock).poll_ready_unpin(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Task<Args, ()>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, mut item: Task<Args, ()>) -> Result<(), Self::Error> {
         let mut lock = self.inner.try_lock().unwrap();
+        // Ensure task has id
+        item.ctx.task_id.get_or_insert_with(|| {
+            TaskId::new(RandomId::default())
+        });
         Pin::new(&mut *lock).start_send_unpin(item)
     }
 
@@ -249,7 +253,7 @@ impl<Args> Stream for MemoryWrapper<Args> {
 
 // MemoryStorage as a Backend
 impl<Args: 'static + Clone + Send> Backend<Args, ()> for MemoryStorage<MemoryWrapper<Args>> {
-    type IdType = UniqueId;
+    type IdType = RandomId;
 
     type Error = BoxDynError;
     type Stream = TaskStream<Task<Args, ()>>;
@@ -281,7 +285,7 @@ impl<T: Clone + Send + Unpin + 'static> BackendWithSink<T, ()> for MemoryStorage
 impl<Args: 'static + Send + DeserializeOwned> Backend<Args, ()>
     for MemoryStorage<JsonMemory<Args>>
 {
-    type IdType = UniqueId;
+    type IdType = RandomId;
     type Error = BoxDynError;
     type Stream = TaskStream<Task<Args, ()>>;
     type Layer = Identity;
@@ -362,9 +366,9 @@ impl<Args: DeserializeOwned> Stream for SharedInMemoryStream<Args> {
                 Ok(value) => value,
                 Err(_) => return Poll::Ready(None),
             };
-            Poll::Ready(Some(Task::new_with_parts(
+            Poll::Ready(Some(Task::new_with_ctx(
                 args,
-                Metadata {
+                ExecutionContext {
                     task_id: Some(key.task_id),
                     ..Default::default()
                 },
@@ -433,8 +437,8 @@ mod tests {
     #[tokio::test]
     async fn it_works() {
         let mut store = SharedJsonMemory::default();
-        let string_store = store.make_shared().unwrap();
-        let int_store = store.make_shared().unwrap();
+        let mut string_store = store.make_shared().unwrap();
+        let mut int_store = store.make_shared().unwrap();
         let mut int_sink = int_store.sink();
         let mut string_sink = string_store.sink();
 

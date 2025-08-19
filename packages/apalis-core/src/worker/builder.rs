@@ -99,22 +99,22 @@ use crate::{
 };
 
 /// Utility for building a [`Worker`]
-pub struct WorkerBuilder<Args, Ctx, Source, Middleware> {
+pub struct WorkerBuilder<Args, Meta, Source, Middleware> {
     pub(crate) name: String,
-    pub(crate) request: PhantomData<(Args, Ctx)>,
+    pub(crate) request: PhantomData<(Args, Meta)>,
     pub(crate) layer: Middleware,
     pub(crate) source: Source,
     pub(crate) event_handler: EventHandler,
     pub(crate) shutdown: Option<Shutdown>,
 }
 
-impl<Args, Ctx, Source, Middleware> std::fmt::Debug
-    for WorkerBuilder<Args, Ctx, Source, Middleware>
+impl<Args, Meta, Source, Middleware> std::fmt::Debug
+    for WorkerBuilder<Args, Meta, Source, Middleware>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WorkerBuilder")
             .field("id", &self.name)
-            .field("job", &std::any::type_name::<(Args, Ctx)>())
+            .field("job", &std::any::type_name::<(Args, Meta)>())
             .field("layer", &std::any::type_name::<Middleware>())
             .field("source", &std::any::type_name::<Source>())
             .finish()
@@ -152,16 +152,16 @@ impl WorkerBuilder<(), (), (), Identity> {
     }
 }
 
-impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M>
+impl<Args, Meta, M, B> WorkerBuilder<Args, Meta, B, M>
 where
-    B: Backend<Args, Ctx>,
+    B: Backend<Args, Meta>,
 {
     /// Allows of decorating the service that consumes jobs.
     /// Allows adding multiple [`tower`] middleware
     pub fn chain<NewLayer>(
         self,
         f: impl FnOnce(M) -> NewLayer,
-    ) -> WorkerBuilder<Args, Ctx, B, NewLayer> {
+    ) -> WorkerBuilder<Args, Meta, B, NewLayer> {
         let middleware = f(self.layer);
 
         WorkerBuilder {
@@ -174,7 +174,7 @@ where
         }
     }
     /// Allows adding a single layer [tower] middleware
-    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Args, Ctx, B, Stack<U, M>>
+    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Args, Meta, B, Stack<U, M>>
     where
         M: Layer<U>,
     {
@@ -190,7 +190,7 @@ where
 
     /// Adds data to the context
     /// This will be shared by all requests
-    pub fn data<D>(self, data: D) -> WorkerBuilder<Args, Ctx, B, Stack<Data<D>, M>>
+    pub fn data<D>(self, data: D) -> WorkerBuilder<Args, Meta, B, Stack<Data<D>, M>>
     where
         M: Layer<Data<D>>,
     {
@@ -209,41 +209,41 @@ where
     #[inline]
     pub fn build_check<W, Svc>(self, service: Svc)
     where
-        Svc: WorkerBuilderExt<Args, Ctx, W, B, M> + Service<Task<Args, Ctx, B::IdType>>,
-         // M::Service: Service<Task<Args, Ctx, IdType>, Response = U, Error = E>,
+        Svc: WorkerBuilderExt<Args, Meta, W, B, M> + Service<Task<Args, Meta, B::IdType>>,
+         // M::Service: Service<Task<Args, Meta, IdType>, Response = U, Error = E>,
     {
-        WorkerServiceBuilder::<B, Svc, Args, Ctx>::build(service, &self.source);
+        WorkerServiceBuilder::<B, Svc, Args, Meta>::build(service, &self.source);
         // assert_worker(worker);
-        // fn assert_worker<Args, Ctx, B, W, M>(_: Worker<Args, Ctx, B, W, M>) {
+        // fn assert_worker<Args, Meta, B, W, M>(_: Worker<Args, Meta, B, W, M>) {
     }
 }
 
-impl<Args, Ctx, B, M> WorkerBuilder<Args, Ctx, B, M> {
-    pub fn build<W: WorkerBuilderExt<Args, Ctx, Svc, B, M>, Svc>(
+impl<Args, Meta, B, M> WorkerBuilder<Args, Meta, B, M> {
+    pub fn build<W: WorkerBuilderExt<Args, Meta, Svc, B, M>, Svc>(
         self,
         service: W,
-    ) -> Worker<Args, Ctx, B, Svc, M> {
+    ) -> Worker<Args, Meta, B, Svc, M> {
         service.with_builder(self)
     }
 }
 
-pub trait WorkerServiceBuilder<Backend, Svc, Args, Ctx> {
+pub trait WorkerServiceBuilder<Backend, Svc, Args, Meta> {
     fn build(self, backend: &Backend) -> Svc;
 }
 
-pub trait WorkerBuilderExt<Args, Ctx, Svc, Backend, M>: Sized {
+pub trait WorkerBuilderExt<Args, Meta, Svc, Backend, M>: Sized {
     fn with_builder(
         self,
-        builder: WorkerBuilder<Args, Ctx, Backend, M>,
-    ) -> Worker<Args, Ctx, Backend, Svc, M>;
+        builder: WorkerBuilder<Args, Meta, Backend, M>,
+    ) -> Worker<Args, Meta, Backend, Svc, M>;
 }
 
-impl<T, Args, Ctx, Svc, B, M> WorkerBuilderExt<Args, Ctx, Svc, B, M> for T
+impl<T, Args, Meta, Svc, B, M> WorkerBuilderExt<Args, Meta, Svc, B, M> for T
 where
-    T: WorkerServiceBuilder<B, Svc, Args, Ctx>,
-    B: Backend<Args, Ctx>,
+    T: WorkerServiceBuilder<B, Svc, Args, Meta>,
+    B: Backend<Args, Meta>,
 {
-    fn with_builder(self, builder: WorkerBuilder<Args, Ctx, B, M>) -> Worker<Args, Ctx, B, Svc, M> {
+    fn with_builder(self, builder: WorkerBuilder<Args, Meta, B, M>) -> Worker<Args, Meta, B, Svc, M> {
         let svc = self.build(&builder.source);
         let mut worker = Worker::new(builder.name, builder.source, svc, builder.layer);
         worker.event_handler = builder

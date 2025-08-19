@@ -1,13 +1,14 @@
 use crate::task::{
-    attempt::Attempt, extensions::Extensions, status::Status, task_id::TaskId, Metadata, Task,
+    attempt::Attempt, extensions::Extensions, status::Status, task_id::TaskId, ExecutionContext,
+    Task,
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Builder for creating `Task` instances with optional configuration
 #[derive(Debug)]
-pub struct TaskBuilder<Args, Ctx, IdType> {
+pub struct TaskBuilder<Args, Meta, IdType> {
     args: Args,
-    context: Ctx,
+    metadata: Meta,
     data: Option<Extensions>,
     task_id: Option<TaskId<IdType>>,
     attempt: Option<Attempt>,
@@ -15,24 +16,26 @@ pub struct TaskBuilder<Args, Ctx, IdType> {
     run_at: Option<u64>,
 }
 
-impl<Args, Ctx: Default, IdType> TaskBuilder<Args, Ctx, IdType> {
+impl<Args, Meta, IdType> TaskBuilder<Args, Meta, IdType> {
     /// Create a new TaskBuilder with the required args
-    pub fn new(args: Args) -> Self {
+    pub fn new(args: Args) -> Self
+    where
+        Meta: Default,
+    {
+        Self::new_with_metadata(args, Meta::default())
+    }
+
+    /// Set the task metadata
+    pub fn new_with_metadata(args: Args, meta: Meta) -> Self {
         Self {
             args,
-            context: Default::default(),
+            metadata: meta,
             data: None,
             task_id: None,
             attempt: None,
             status: None,
             run_at: None,
         }
-    }
-
-    /// Set the task context
-    pub fn with_context<F: Fn(Ctx) -> Ctx>(mut self, context_fn: F) -> Self {
-        self.context = context_fn(self.context);
-        self
     }
 
     /// Set the task extensions/data
@@ -103,10 +106,7 @@ impl<Args, Ctx: Default, IdType> TaskBuilder<Args, Ctx, IdType> {
     }
 
     /// Build the Task with default context
-    pub fn build(self) -> Task<Args, Ctx, IdType>
-    where
-        Ctx: Default,
-    {
+    pub fn build(self) -> Task<Args, Meta, IdType> {
         let current_time = || {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -116,33 +116,11 @@ impl<Args, Ctx: Default, IdType> TaskBuilder<Args, Ctx, IdType> {
 
         Task {
             args: self.args,
-            meta: Metadata {
+            ctx: ExecutionContext {
                 task_id: self.task_id,
                 data: self.data.unwrap_or_default(),
                 attempt: self.attempt.unwrap_or_default(),
-                context: self.context,
-                status: self.status.unwrap_or(Status::Pending),
-                run_at: self.run_at.unwrap_or_else(current_time),
-            },
-        }
-    }
-
-    /// Build the Task with provided default context
-    pub fn build_with_default_context(self, default_context: Ctx) -> Task<Args, Ctx, IdType> {
-        let current_time = || {
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Time went backwards")
-                .as_secs()
-        };
-
-        Task {
-            args: self.args,
-            meta: Metadata {
-                task_id: self.task_id,
-                data: self.data.unwrap_or_default(),
-                attempt: self.attempt.unwrap_or_default(),
-                context: default_context,
+                metadata: self.metadata,
                 status: self.status.unwrap_or(Status::Pending),
                 run_at: self.run_at.unwrap_or_else(current_time),
             },
@@ -151,9 +129,9 @@ impl<Args, Ctx: Default, IdType> TaskBuilder<Args, Ctx, IdType> {
 }
 
 // Convenience methods for Task to create a builder
-impl<Args, Ctx: Default, IdType> Task<Args, Ctx, IdType> {
+impl<Args, Meta: Default, IdType> Task<Args, Meta, IdType> {
     /// Create a TaskBuilder with the given args
-    pub fn builder(args: Args) -> TaskBuilder<Args, Ctx, IdType> {
+    pub fn builder(args: Args) -> TaskBuilder<Args, Meta, IdType> {
         TaskBuilder::new(args)
     }
 }

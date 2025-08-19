@@ -29,13 +29,12 @@ impl LongRunningConfig {
     }
 }
 
-pub struct LongRunner<Ctx> {
-    ctx: Ctx,
+pub struct LongRunnerCtx {
     tracker: TaskTracker,
     wrk: WorkerContext,
 }
 
-impl<Ctx> LongRunner<Ctx> {
+impl LongRunnerCtx {
     /// Start a task that is tracked by the long running task's context
     pub fn track<F: Future>(&self, task: F) -> Tracked<TrackedFuture<F>> {
         self.wrk.track(self.tracker.track_future(task))
@@ -43,27 +42,17 @@ impl<Ctx> LongRunner<Ctx> {
 }
 
 /// CTX: FromRequest<Request<Args, Ctx>>
-impl<Args: Sync, Ctx: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args, Ctx, IdType>>
-    for LongRunner<Ctx>
+impl<Args: Sync, Meta: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args, Meta, IdType>>
+    for LongRunnerCtx
 {
     type Error = MissingDataError;
-    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        let ctx = req.meta.context.clone();
+    async fn from_request(req: &Task<Args, Meta, IdType>) -> Result<Self, Self::Error> {
         let tracker: &TaskTracker = req.get_checked()?;
         let wrk: &WorkerContext = req.get_checked()?;
-        Ok(LongRunner {
-            ctx,
+        Ok(LongRunnerCtx {
             tracker: tracker.clone(),
             wrk: wrk.clone(),
         })
-    }
-}
-
-impl<Ctx> Deref for LongRunner<Ctx> {
-    type Target = Ctx;
-
-    fn deref(&self) -> &Self::Target {
-        &self.ctx
     }
 }
 
@@ -81,9 +70,9 @@ pub struct LongRunningService<S> {
     service: S,
 }
 
-impl<S, Args, Ctx, IdType> Service<Task<Args, Ctx, IdType>> for LongRunningService<S>
+impl<S, Args, Meta, IdType> Service<Task<Args, Meta, IdType>> for LongRunningService<S>
 where
-    S: Service<Task<Args, Ctx, IdType>>,
+    S: Service<Task<Args, Meta, IdType>>,
     S::Future: Send + 'static,
     S::Response: Send,
     S::Error: Send,
@@ -99,7 +88,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, mut request: Task<Args, Ctx, IdType>) -> Self::Future {
+    fn call(&mut self, mut request: Task<Args, Meta, IdType>) -> Self::Future {
         let tracker = TaskTracker::new();
         request.insert(tracker.clone());
         let worker: WorkerContext = request.get().cloned().unwrap();
@@ -117,25 +106,25 @@ where
 }
 
 /// Helper trait for building new Workers from [`WorkerBuilder`]
-pub trait LongRunningExt<Args, Ctx, Source, Middleware>: Sized {
-    fn long_running(self) -> WorkerBuilder<Args, Ctx, Source, Stack<LongRunningLayer, Middleware>> {
+pub trait LongRunningExt<Args, Meta, Source, Middleware>: Sized {
+    fn long_running(self) -> WorkerBuilder<Args, Meta, Source, Stack<LongRunningLayer, Middleware>> {
         self.long_running_with_cfg(Default::default())
     }
     fn long_running_with_cfg(
         self,
         cfg: LongRunningConfig,
-    ) -> WorkerBuilder<Args, Ctx, Source, Stack<LongRunningLayer, Middleware>>;
+    ) -> WorkerBuilder<Args, Meta, Source, Stack<LongRunningLayer, Middleware>>;
 }
 
-impl<Args, B, M, Ctx> LongRunningExt<Args, Ctx, B, M> for WorkerBuilder<Args, Ctx, B, M>
+impl<Args, B, M, Meta> LongRunningExt<Args, Meta, B, M> for WorkerBuilder<Args, Meta, B, M>
 where
     M: Layer<LongRunningLayer>,
-    B: Backend<Args, Ctx>,
+    B: Backend<Args, Meta>,
 {
     fn long_running_with_cfg(
         self,
         cfg: LongRunningConfig,
-    ) -> WorkerBuilder<Args, Ctx, B, Stack<LongRunningLayer, M>> {
+    ) -> WorkerBuilder<Args, Meta, B, Stack<LongRunningLayer, M>> {
         let this = self.layer(LongRunningLayer);
         WorkerBuilder {
             name: this.name,
@@ -178,7 +167,7 @@ mod tests {
 
         async fn task(
             task: u32,
-            runner: LongRunner<()>,
+            runner: LongRunnerCtx,
             worker: WorkerContext,
         ) -> Result<(), BoxDynError> {
             tokio::spawn(runner.track(async move {

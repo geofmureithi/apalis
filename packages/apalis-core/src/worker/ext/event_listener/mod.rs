@@ -10,11 +10,11 @@ use crate::{
     worker::{Event, WorkerContext},
 };
 
-pub trait EventListenerExt<Args, Ctx, Source, Middleware>: Sized {
+pub trait EventListenerExt<Args, Meta, Source, Middleware>: Sized {
     fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
         self,
         f: F,
-    ) -> WorkerBuilder<Args, Ctx, Source, Stack<EventListenerLayer, Middleware>>;
+    ) -> WorkerBuilder<Args, Meta, Source, Stack<EventListenerLayer, Middleware>>;
 }
 
 #[derive(Clone)]
@@ -35,9 +35,9 @@ pub struct EventListenerService<S> {
     service: S,
 }
 
-impl<S, Args, Ctx, IdType> Service<Task<Args, Ctx, IdType>> for EventListenerService<S>
+impl<S, Args, Meta, IdType> Service<Task<Args, Meta, IdType>> for EventListenerService<S>
 where
-    S: Service<Task<Args, Ctx, IdType>>,
+    S: Service<Task<Args, Meta, IdType>>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -50,22 +50,22 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Task<Args, Ctx, IdType>) -> Self::Future {
+    fn call(&mut self, request: Task<Args, Meta, IdType>) -> Self::Future {
         // TODO
         // let ctx: &WorkerContext = request.get_checked().unwrap();
         self.service.call(request)
     }
 }
 
-impl<Args, P, M, Ctx> EventListenerExt<Args, Ctx, P, M> for WorkerBuilder<Args, Ctx, P, M>
+impl<Args, P, M, Meta> EventListenerExt<Args, Meta, P, M> for WorkerBuilder<Args, Meta, P, M>
 where
-    P: Backend<Args, Ctx>,
+    P: Backend<Args, Meta>,
     M: Layer<EventListenerLayer>,
 {
     fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
         self,
         f: F,
-    ) -> WorkerBuilder<Args, Ctx, P, Stack<EventListenerLayer, M>> {
+    ) -> WorkerBuilder<Args, Meta, P, Stack<EventListenerLayer, M>> {
         let new_fn = self
             .event_handler
             .write()

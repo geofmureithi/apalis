@@ -55,7 +55,7 @@ pub mod sqlite;
 pub mod mysql;
 
 use apalis_core::{error::BoxDynError, task::status::Status};
-use context::SqlContext;
+use context::SqlMetadata;
 // Re-exports
 pub use sqlx;
 
@@ -187,7 +187,7 @@ impl Config {
 
 /// TODO: Apply
 /// Calculates the status from a result
-pub fn calculate_status<Res>(ctx: &SqlContext, res: &Result<Res, BoxDynError>) -> Status {
+pub fn calculate_status<Res>(ctx: &SqlMetadata, res: &Result<Res, BoxDynError>) -> Status {
     match &res {
         Ok(_) => Status::Done,
         Err(e) => match &e {

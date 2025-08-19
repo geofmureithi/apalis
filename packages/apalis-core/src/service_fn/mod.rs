@@ -61,7 +61,7 @@ pub mod into_response;
 use crate::service_fn::into_response::IntoResponse;
 
 /// A helper method to build functions
-pub fn service_fn<F, Args, Ctx, FnArgs>(f: F) -> ServiceFn<F, Args, Ctx, FnArgs> {
+pub fn service_fn<F, Args, Meta, FnArgs>(f: F) -> ServiceFn<F, Args, Meta, FnArgs> {
     ServiceFn {
         f,
         req: PhantomData,
@@ -72,15 +72,15 @@ pub fn service_fn<F, Args, Ctx, FnArgs>(f: F) -> ServiceFn<F, Args, Ctx, FnArgs>
 /// An executable service implemented by a closure.
 ///
 /// See [`service_fn`] for more details.
-pub struct ServiceFn<F, Args, Ctx, FnArgs> {
+pub struct ServiceFn<F, Args, Meta, FnArgs> {
     f: F,
-    req: PhantomData<(Args, Ctx)>,
+    req: PhantomData<(Args, Meta)>,
     fn_args: PhantomData<FnArgs>,
 }
 
-impl<T: Copy, Args, Ctx, FnArgs> Copy for ServiceFn<T, Args, Ctx, FnArgs> {}
+impl<T: Copy, Args, Meta, FnArgs> Copy for ServiceFn<T, Args, Meta, FnArgs> {}
 
-impl<T: Clone, Args, Ctx, FnArgs> Clone for ServiceFn<T, Args, Ctx, FnArgs> {
+impl<T: Clone, Args, Meta, FnArgs> Clone for ServiceFn<T, Args, Meta, FnArgs> {
     fn clone(&self) -> Self {
         ServiceFn {
             f: self.f.clone(),
@@ -90,7 +90,7 @@ impl<T: Clone, Args, Ctx, FnArgs> Clone for ServiceFn<T, Args, Ctx, FnArgs> {
     }
 }
 
-impl<T, Args, Ctx, FnArgs> fmt::Debug for ServiceFn<T, Args, Ctx, FnArgs> {
+impl<T, Args, Meta, FnArgs> fmt::Debug for ServiceFn<T, Args, Meta, FnArgs> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ServiceFn")
             .field("f", &std::any::type_name::<T>())
@@ -99,7 +99,7 @@ impl<T, Args, Ctx, FnArgs> fmt::Debug for ServiceFn<T, Args, Ctx, FnArgs> {
                 &format_args!(
                     "PhantomData<Request<{}, {}>>",
                     std::any::type_name::<Args>(),
-                    std::any::type_name::<Ctx>()
+                    std::any::type_name::<Meta>()
                 ),
             )
             .field(
@@ -116,14 +116,14 @@ pub type FnFuture<F, O, R, E> = Map<F, fn(O) -> std::result::Result<R, E>>;
 macro_rules! impl_service_fn {
     ($($K:ident),+) => {
         #[allow(unused_parens)]
-        impl<T, F, Args: Send + 'static, R, Ctx: Send + 'static, IdType: Send + Sync + 'static, $($K),+> Service<Task<Args, Ctx, IdType>> for ServiceFn<T, Args, Ctx, ($($K),+)>
+        impl<T, F, Args: Send + 'static, R, Meta: Send + 'static, IdType: Send + Clone + 'static, $($K),+> Service<Task<Args, Meta, IdType>> for ServiceFn<T, Args, Meta, ($($K),+)>
         where
             T: FnMut(Args, $($K),+) -> F + Send + Clone + 'static,
             F: Future + Send,
             F::Output: IntoResponse<Output = R>,
             $(
-                $K: FromRequest<Task<Args, Ctx, IdType>> + Send,
-                < $K as FromRequest<Task<Args, Ctx, IdType>> >::Error: std::error::Error + 'static + Send + Sync,
+                $K: FromRequest<Task<Args, Meta, IdType>> + Send,
+                < $K as FromRequest<Task<Args, Meta, IdType>> >::Error: std::error::Error + 'static + Send + Sync,
             )+
         {
             type Response = R;
@@ -134,7 +134,7 @@ macro_rules! impl_service_fn {
                 Poll::Ready(Ok(()))
             }
 
-            fn call(&mut self, task: Task<Args, Ctx, IdType>) -> Self::Future {
+            fn call(&mut self, task: Task<Args, Meta, IdType>) -> Self::Future {
                 let mut svc = self.f.clone();
                 #[allow(non_snake_case)]
                 let fut = async move {
@@ -152,26 +152,26 @@ macro_rules! impl_service_fn {
         }
 
         #[allow(unused_parens)]
-        impl<T, Args, Ctx, F, R, B, $($K),+>
-            WorkerServiceBuilder<B, ServiceFn<T, Args, Ctx, ($($K),+)>, Args, Ctx> for T
+        impl<T, Args, Meta, F, R, B, $($K),+>
+            WorkerServiceBuilder<B, ServiceFn<T, Args, Meta, ($($K),+)>, Args, Meta> for T
         where
-            B: Backend<Args, Ctx>,
+            B: Backend<Args, Meta>,
             T: FnMut(Args, $($K),+) -> F,
             F: Future,
             F::Output: IntoResponse<Output = R>,
             $(
-                $K: FromRequest<Task<Args, Ctx, B::IdType>> + Send,
-                < $K as FromRequest<Task<Args, Ctx, B::IdType>> >::Error: std::error::Error + 'static + Send + Sync,
+                $K: FromRequest<Task<Args, Meta, B::IdType>> + Send,
+                < $K as FromRequest<Task<Args, Meta, B::IdType>> >::Error: std::error::Error + 'static + Send + Sync,
             )+
         {
-            fn build(self, _: &B) -> ServiceFn<T, Args, Ctx, ($($K),+)> {
+            fn build(self, _: &B) -> ServiceFn<T, Args, Meta, ($($K),+)> {
                 service_fn(self)
             }
         }
     };
 }
 
-impl<T, F, Args, R, Ctx, IdType> Service<Task<Args, Ctx, IdType>> for ServiceFn<T, Args, Ctx, ()>
+impl<T, F, Args, R, Meta, IdType> Service<Task<Args, Meta, IdType>> for ServiceFn<T, Args, Meta, ()>
 where
     T: FnMut(Args) -> F,
     F: Future,
@@ -185,29 +185,29 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, task: Task<Args, Ctx, IdType>) -> Self::Future {
+    fn call(&mut self, task: Task<Args, Meta, IdType>) -> Self::Future {
         let fut = (self.f)(task.args);
 
         fut.map(F::Output::into_response)
     }
 }
 
-impl<T, Args, Ctx, F, R, Backend>
-    WorkerServiceBuilder<Backend, ServiceFn<T, Args, Ctx, ()>, Args, Ctx> for T
+impl<T, Args, Meta, F, R, Backend>
+    WorkerServiceBuilder<Backend, ServiceFn<T, Args, Meta, ()>, Args, Meta> for T
 where
     T: FnMut(Args) -> F,
     F: Future,
     F::Output: IntoResponse<Output = R>,
 {
-    fn build(self, _: &Backend) -> ServiceFn<T, Args, Ctx, ()> {
+    fn build(self, _: &Backend) -> ServiceFn<T, Args, Meta, ()> {
         service_fn(self)
     }
 }
 
-impl<Args, Ctx, S, B> WorkerServiceBuilder<B, S, Args, Ctx> for S
+impl<Args, Meta, S, B> WorkerServiceBuilder<B, S, Args, Meta> for S
 where
-    S: Service<Task<Args, Ctx, B::IdType>>,
-    B: Backend<Args, Ctx>
+    S: Service<Task<Args, Meta, B::IdType>>,
+    B: Backend<Args, Meta>
 {
     fn build(self, _: &B) -> S {
         self

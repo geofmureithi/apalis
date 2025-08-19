@@ -12,13 +12,13 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 
 /// A generic Pipe that wraps an inner type along with a `RequestStream`.
-pub struct Pipe<S, Into, Args, Ctx> {
+pub struct Pipe<S, Into, Args, Meta> {
     pub(crate) from: S,
     pub(crate) into: Into,
-    pub(crate) _req: PhantomData<(Args, Ctx)>,
+    pub(crate) _req: PhantomData<(Args, Meta)>,
 }
 
-impl<S, Into, Args, Ctx> Pipe<S, Into, Args, Ctx> {
+impl<S, Into, Args, Meta> Pipe<S, Into, Args, Meta> {
     pub fn new(stream: S, backend: Into) -> Self {
         Pipe {
             from: stream,
@@ -28,7 +28,7 @@ impl<S, Into, Args, Ctx> Pipe<S, Into, Args, Ctx> {
     }
 }
 
-impl<S: fmt::Debug, Into: fmt::Debug, Args, Ctx> fmt::Debug for Pipe<S, Into, Args, Ctx> {
+impl<S: fmt::Debug, Into: fmt::Debug, Args, Meta> fmt::Debug for Pipe<S, Into, Args, Meta> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Pipe")
             .field("inner", &self.from)
@@ -37,24 +37,24 @@ impl<S: fmt::Debug, Into: fmt::Debug, Args, Ctx> fmt::Debug for Pipe<S, Into, Ar
     }
 }
 
-impl<Args, Ctx, S, TSink, Err> Backend<Args, Ctx> for Pipe<S, TSink, Args, Ctx>
+impl<Args, Meta, S, TSink, Err> Backend<Args, Meta> for Pipe<S, TSink, Args, Meta>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    TSink: BackendWithSink<Args, Ctx>,
+    TSink: BackendWithSink<Args, Meta>,
     TSink::Error: Into<BoxDynError> + Send + Sync + 'static,
-    TSink::Sink: 'static + Sink<Task<Args, Ctx, TSink::IdType>> + Unpin + Send,
+    TSink::Sink: 'static + Sink<Task<Args, Meta, TSink::IdType>> + Unpin + Send,
     TSink::Beat: Send + 'static,
-    TSink::IdType: Send + Sync + 'static,
+    TSink::IdType: Send + Clone + 'static,
     TSink::Stream: Send + 'static,
     Args: Send + 'static,
-    Ctx: Send + 'static + Default,
+    Meta: Send + 'static + Default,
     Err: Into<BoxDynError> + Send + Sync + 'static,
-    <<TSink as BackendWithSink<Args, Ctx>>::Sink as Sink<Task<Args, Ctx, TSink::IdType>>>::Error:
+    <<TSink as BackendWithSink<Args, Meta>>::Sink as Sink<Task<Args, Meta, TSink::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
 {
     type IdType = TSink::IdType;
 
-    type Stream = BoxStream<'static, Result<Option<Task<Args, Ctx, Self::IdType>>, PipeError>>;
+    type Stream = BoxStream<'static, Result<Option<Task<Args, Meta, Self::IdType>>, PipeError>>;
 
     type Layer = TSink::Layer;
 
@@ -101,20 +101,20 @@ where
     }
 }
 
-impl<S, I, Args, Ctx, Err> BackendWithSink<Args, Ctx> for Pipe<S, I, Args, Ctx>
+impl<S, I, Args, Meta, Err> BackendWithSink<Args, Meta> for Pipe<S, I, Args, Meta>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    I: BackendWithSink<Args, Ctx>,
+    I: BackendWithSink<Args, Meta>,
     I::Error: Into<BoxDynError> + Send + Sync + 'static,
-    I::Sink: Unpin + Send + 'static + Sink<Task<Args, Ctx, I::IdType>>,
+    I::Sink: Unpin + Send + 'static + Sink<Task<Args, Meta, I::IdType>>,
     I::Beat: Send + 'static,
     I::Stream: Send + 'static,
     Args: Send + 'static,
-    Ctx: Send + 'static + Default,
+    Meta: Send + 'static + Default,
     Err: Into<BoxDynError> + Send + Sync + 'static,
-    <<I as BackendWithSink<Args, Ctx>>::Sink as Sink<Task<Args, Ctx, I::IdType>>>::Error:
+    <<I as BackendWithSink<Args, Meta>>::Sink as Sink<Task<Args, Meta, I::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
-    I::IdType: Send + Sync + 'static,
+    I::IdType: Send + Clone + 'static,
 {
     type Sink = I::Sink;
 
@@ -130,13 +130,13 @@ where
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx>;
 }
 
-impl<B, Args, Ctx, Err> PipeExt<B, Args, Ctx> for BoxStream<'static, Result<Args, Err>>
+impl<B, Args, Meta, Err> PipeExt<B, Args, Meta> for BoxStream<'static, Result<Args, Err>>
 where
-    B: BackendWithSink<Args, Ctx>,
+    B: BackendWithSink<Args, Meta>,
     B::Error: Into<BoxDynError> + Send + Sync + 'static,
-    B::Sink: Sink<Task<Args, Ctx, B::IdType>>,
+    B::Sink: Sink<Task<Args, Meta, B::IdType>>,
 {
-    fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx> {
+    fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Meta> {
         Pipe::new(self, backend)
     }
 }

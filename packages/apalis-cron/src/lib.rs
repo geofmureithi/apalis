@@ -53,10 +53,10 @@
 //! struct Reminder;
 //!
 //! // The handler for the job
-//! async fn handle_reminder(_job: Reminder, ctx: CronContext, data: Data<usize>) {
+//! async fn handle_reminder(job: CronContext, data: Data<usize>) {
 //!     println!(
 //!         "Good morning! It's time for your daily reminder at {}. Data: {}",
-//!         ctx.get_timestamp(),
+//!         job.get_timestamp(),
 //!         data.0,
 //!     );
 //! }
@@ -87,8 +87,8 @@
 //! use apalis_cron::{CronStream, Schedule, CronContext};
 //! use chrono::Local;
 //!
-//! async fn handle_reminder(_job: (), ctx: CronContext<Local>) {
-//!     println!("Reminder for timezone: {}", ctx.get_timestamp());
+//! async fn handle_reminder(job: CronContext<Local>) {
+//!     println!("Reminder for timezone: {}", job.get_timestamp());
 //! }
 //!
 //! #[tokio::main]
@@ -150,13 +150,13 @@
 use apalis_core::backend::pipe::{Pipe, PipeExt};
 use apalis_core::backend::{Backend, TaskStream};
 use apalis_core::error::BoxDynError;
+use apalis_core::service_fn::from_request::FromRequest;
 use apalis_core::task::attempt::Attempt;
+use apalis_core::task::builder::TaskBuilder;
 use apalis_core::task::data::MissingDataError;
 use apalis_core::task::extensions::Extensions;
-use apalis_core::task::state::Status;
-use apalis_core::task::task_id::TaskId;
-use apalis_core::task::{Metadata, Task};
-use apalis_core::service_fn::from_request::FromRequest;
+use apalis_core::task::task_id::{TaskId, Ulid};
+use apalis_core::task::{ExecutionContext, Task};
 use apalis_core::timer::Delay;
 use apalis_core::worker::context::WorkerContext;
 use chrono::{DateTime, Days, NaiveDateTime, Offset, OutOfRangeError, TimeDelta, TimeZone, Utc};
@@ -177,22 +177,21 @@ use tower::layer::util::Identity;
 /// Represents a stream from a cron schedule with a timezone
 #[doc = "# Feature Support\n"]
 #[derive(Debug)]
-pub struct CronStream<J, Tz: TimeZone> {
+pub struct CronStream<Tz: TimeZone> {
     schedule: Schedule,
     timezone: Tz,
     next_tick: Option<DateTime<Tz>>,
     delay: Option<Delay>,
-    _marker: PhantomData<J>,
 }
 
-impl<J> CronStream<J, Utc> {
+impl CronStream<Utc> {
     /// Build a new cron stream from a schedule using the UTC timezone
     pub fn new(schedule: Schedule) -> Self {
         Self::new_with_timezone(schedule, Utc)
     }
 }
 
-impl<J, Tz> CronStream<J, Tz>
+impl<Tz> CronStream<Tz>
 where
     Tz: TimeZone + Send + Sync + 'static,
 {
@@ -203,16 +202,15 @@ where
             timezone,
             next_tick: None,
             delay: None,
-            _marker: PhantomData,
         }
     }
 }
 
-impl<J: Unpin, Tz: TimeZone + Unpin> Stream for CronStream<J, Tz>
+impl<Tz: TimeZone + Unpin> Stream for CronStream<Tz>
 where
     Tz::Offset: Unpin,
 {
-    type Item = Result<CronContext<Tz>, CronStreamError<Tz>>;
+    type Item = Result<CronTick<Tz>, CronStreamError<Tz>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -245,7 +243,7 @@ where
                             let mut upcoming = self.schedule.upcoming(self.timezone.clone());
                             self.next_tick = upcoming.find(|dt| *dt > fired);
                             self.delay = None;
-                            return Poll::Ready(Some(Ok(CronContext { timestamp: fired })));
+                            return Poll::Ready(Some(Ok(CronTick { timestamp: fired })));
                         }
                     }
                 }
@@ -262,20 +260,19 @@ where
     }
 }
 
-impl<Req, Ctx, Tz, B> PipeExt<B, Req, Ctx> for CronStream<Req, Tz>
+impl<Ctx, Tz, B> PipeExt<B, CronTick<Tz>, Ctx> for CronStream<Tz>
 where
-    Req: Default + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync,
-    B: Backend<Req, Ctx>,
+    B: Backend<CronTick<Tz>, Ctx>,
     B::Error: Into<BoxDynError> + Send + Sync + 'static,
 {
-    fn pipe_to(self, backend: B) -> Pipe<Self, B, Req, Ctx> {
+    fn pipe_to(self, backend: B) -> Pipe<Self, B, CronTick<Tz>, Ctx> {
         Pipe::new(self, backend)
     }
 }
 
-impl<Tz: TimeZone> Default for CronContext<Tz>
+impl<Tz: TimeZone> Default for CronTick<Tz>
 where
     DateTime<Tz>: Default,
 {
@@ -286,7 +283,7 @@ where
     }
 }
 
-impl<Tz: TimeZone> CronContext<Tz> {
+impl<Tz: TimeZone> CronTick<Tz> {
     /// Create a new context provided a timestamp
     pub fn new(timestamp: DateTime<Tz>) -> Self {
         Self { timestamp }
@@ -298,28 +295,17 @@ impl<Tz: TimeZone> CronContext<Tz> {
     }
 }
 
-impl<Args: Sync, Tz: TimeZone> FromRequest<Task<Args, CronContext<Tz>>> for CronContext<Tz>
+impl<Tz: Unpin> Backend<CronTick<Tz>, CronMeta> for CronStream<Tz>
 where
-    Tz::Offset: Sync,
-{
-    type Error = Infallible;
-    async fn from_request(req: &Task<Args, CronContext<Tz>>) -> Result<Self, Infallible> {
-        Ok(req.meta.context.clone())
-    }
-}
-
-impl<Args: Unpin, Tz: Unpin> Backend<Args, CronContext<Tz>> for CronStream<Args, Tz>
-where
-    Args: Default + Send + Sync + 'static,
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync + Unpin + Display,
 {
     type Error = CronStreamError<Tz>;
-    type Stream = TaskStream<Task<Args, CronContext<Tz>>, CronStreamError<Tz>>;
+    type Stream = TaskStream<Task<CronTick<Tz>, CronMeta, Ulid>, CronStreamError<Tz>>;
 
     type Layer = Identity;
 
-    type Sink = ();
+    type IdType = Ulid;
 
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -330,23 +316,21 @@ where
         Identity::new()
     }
 
-    fn sink(&self) -> Self::Sink {
-        ()
-    }
-
     fn poll(self, _: &WorkerContext) -> Self::Stream {
-        let stream = self.and_then(|s| async {
-            let timestamp: SystemTime = s.get_timestamp().clone().into();
-            let task_id = TaskId::from_system_time(datetime);
-            let parts = Metadata {
-                task_id,
-                context: s,
-                attempt: Attempt::new(),
-                data: Extensions::new(),
-                status: Status::Pending,
-            };
+        let meta = CronMeta {
+            schedule: Arc::new(self.schedule.clone()),
+        };
+        let stream = self.and_then(move |tick| {
+            let meta = meta.clone();
+            async move {
+                let timestamp: SystemTime = tick.get_timestamp().clone().into();
+                let task_id = Ulid::from_datetime(timestamp);
+                let task = TaskBuilder::new_with_metadata(tick, meta.clone())
+                    .with_task_id(TaskId::new(task_id))
+                    .build();
 
-            Ok(Some(Task::new_with_parts(Default::default(), parts)))
+                Ok(Some(task))
+            }
         });
         stream.boxed()
     }
@@ -407,13 +391,18 @@ impl<Tz: TimeZone> fmt::Debug for CronStreamError<Tz> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CronContext<Tz: TimeZone = Utc> {
+pub struct CronTick<Tz: TimeZone = Utc> {
     pub timestamp: DateTime<Tz>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CronMeta {
+    schedule: Arc<Schedule>,
 }
 
 const FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
-impl<Tz> Serialize for CronContext<Tz>
+impl<Tz> Serialize for CronTick<Tz>
 where
     Tz: TimeZone,
     Tz::Offset: std::fmt::Display,
@@ -427,7 +416,7 @@ where
     }
 }
 
-impl<'de, Tz> Deserialize<'de> for CronContext<Tz>
+impl<'de, Tz> Deserialize<'de> for CronTick<Tz>
 where
     Tz: TimeZone + TimeZoneExt,
 {
@@ -439,13 +428,13 @@ where
         let naive = NaiveDateTime::parse_from_str(&s, FORMAT).map_err(serde::de::Error::custom)?;
         let datetime =
             Tz::from_utc_datetime(&Tz::from_offset(&Tz::utc_offset_from_naive(&naive)), &naive);
-        Ok(CronContext {
+        Ok(CronTick {
             timestamp: datetime,
         })
     }
 }
 
-// Helper trait to synthesize a timezone from offset
+/// Helper trait to synthesize a timezone from offset
 pub trait TimeZoneExt: TimeZone {
     fn utc_offset_from_naive(naive: &NaiveDateTime) -> Self::Offset;
 }
@@ -459,6 +448,13 @@ impl TimeZoneExt for chrono::Utc {
 impl TimeZoneExt for chrono::Local {
     fn utc_offset_from_naive(naive: &NaiveDateTime) -> Self::Offset {
         chrono::Local.offset_from_utc_datetime(naive)
+    }
+}
+
+impl<Args: Sync, IdType: Sync> FromRequest<Task<Args, CronMeta, IdType>> for CronMeta {
+    type Error = Infallible;
+    async fn from_request(req: &Task<Args, CronMeta, IdType>) -> Result<Self, Self::Error> {
+        Ok(req.ctx.metadata.clone())
     }
 }
 
@@ -480,9 +476,13 @@ mod tests {
         let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
         let stream = CronStream::new_with_timezone(schedule, Utc);
 
-        async fn send_reminder(_: (), ctx: CronContext<Utc>) -> Result<(), BoxDynError> {
+        async fn send_reminder(tick: CronTick<Utc>, meta: CronMeta) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            println!("Running cronjob for timestamp: {}", ctx.get_timestamp());
+            println!(
+                "Running cronjob for timestamp: {} with meta: {:?}",
+                tick.get_timestamp(),
+                meta
+            );
             Err("Failed".into())
         }
 
@@ -491,7 +491,6 @@ mod tests {
             .on_event(move |ctx, ev| {
                 println!("{:?}", ev);
                 let ctx = ctx.clone();
-                dbg!(&ev, &ctx);
                 if matches!(ev, Event::Start) {
                     tokio::spawn(async move {
                         if ctx.is_running() {
@@ -509,11 +508,11 @@ mod tests {
     async fn piped_worker() {
         let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
         let stream = CronStream::new(schedule);
-        let in_memory = MemoryStorage::new_with_json();
+        let in_memory = MemoryStorage::new();
 
         let backend = stream.pipe_to(in_memory);
 
-        async fn send_reminder(job: CronContext, id: TaskId) -> Result<(), BoxDynError> {
+        async fn send_reminder(job: CronTick, id: TaskId) -> Result<(), BoxDynError> {
             println!("Running cronjob for timestamp: {:?} with id {}", job, id);
             tokio::time::sleep(Duration::from_secs(1)).await;
             Err("All failing".into())

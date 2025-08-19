@@ -9,7 +9,7 @@ use apalis_core::worker::context::WorkerContext;
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
 
-use crate::context::SqlContext;
+use crate::context::SqlMetadata;
 use crate::Config;
 
 #[derive(Clone)]
@@ -72,10 +72,10 @@ impl<Args, DB, Fetch, Sink, IdType> BackendBuilder<Args, DB, Fetch, Sink, IdType
     }
 }
 
-impl<Args, DB, Fetch, Sink, IdType, E> Backend<Args, SqlContext>
+impl<Args, DB, Fetch, Sink, IdType, E> Backend<Args, SqlMetadata>
     for CustomBackend<Args, DB, Fetch, Sink, IdType>
 where
-    Fetch: Stream<Item = Result<Option<Task<Args, SqlContext, IdType>>, E>>,
+    Fetch: Stream<Item = Result<Option<Task<Args, SqlMetadata, IdType>>, E>>,
 {
     type IdType = IdType;
 
@@ -100,12 +100,12 @@ where
     }
 }
 
-impl<Args, DB, Fetch, Sink, E, IdType> BackendWithSink<Args, SqlContext>
+impl<Args, DB, Fetch, Sink, E, IdType> BackendWithSink<Args, SqlMetadata>
     for CustomBackend<Args, DB, Fetch, Sink, IdType>
 where
-    Fetch: Stream<Item = Result<Option<Task<Args, SqlContext, IdType>>, E>>,
-    Sink: futures::Sink<Task<Args, SqlContext, IdType>>,
-    CustomBackend<Args, DB, Fetch, Sink, IdType>: Backend<Args, SqlContext, IdType = IdType>,
+    Fetch: Stream<Item = Result<Option<Task<Args, SqlMetadata, IdType>>, E>>,
+    Sink: futures::Sink<Task<Args, SqlMetadata, IdType>>,
+    CustomBackend<Args, DB, Fetch, Sink, IdType>: Backend<Args, SqlMetadata, IdType = IdType>,
 {
     type Sink = Sink;
 
@@ -130,7 +130,7 @@ mod tests {
         service_fn::{self, service_fn, ServiceFn},
         task::{
             task_id::{TaskId, Ulid},
-            Metadata,
+            ExecutionContext,
         },
         worker::{
             builder::WorkerBuilder,
@@ -275,16 +275,16 @@ mod tests {
                 })
             })
             .sink(|pool, config| {
-                let sink = sink::unfold(pool.clone(), |pool, item: Task<Email, SqlContext, String>| {
+                let sink = sink::unfold(pool.clone(), |pool, item: Task<Email, SqlMetadata, String>| {
                     let p = pool.clone();
                     async move {
                         let mut tx = p.begin().await?;
                         sqlx::query("INSERT INTO emails (id, recipient, subject, message, send_at) VALUES ($1, $2, $3, $4, $5)")
-                            .bind(&item.meta.task_id.unwrap_or(TaskId::new(nanoid::nanoid!())).to_string())
+                            .bind(&item.ctx.task_id.unwrap_or(TaskId::new(nanoid::nanoid!())).to_string())
                             .bind(&item.args.to)
                             .bind(&item.args.subject)
                             .bind(&item.args.message)
-                            .bind(&DateTime::from_timestamp(item.meta.run_at as i64, 0))
+                            .bind(&DateTime::from_timestamp(item.ctx.run_at as i64, 0))
                             .execute(&mut *tx)
                             .await?;
                         tx.commit().await?;
@@ -319,7 +319,7 @@ mod tests {
             .backend(backend)
             .layer(ConcurrencyLimitLayer::new(1))
             .ack_with(
-                move |res: &Result<(), BoxDynError>, meta: &Metadata<SqlContext, String>| {
+                move |res: &Result<(), BoxDynError>, meta: &ExecutionContext<SqlMetadata, String>| {
                     let p = pool.clone();
                     let id = meta.task_id.as_ref().unwrap().to_string();
                     let status = match res {

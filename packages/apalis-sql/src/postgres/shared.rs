@@ -32,7 +32,7 @@ use serde_json::Value;
 use sqlx::{postgres::PgListener, PgPool};
 
 use crate::{
-    context::SqlContext,
+    context::SqlMetadata,
     postgres::{fetcher::PgFetcher, register, CompactT, PgAck, PgSink, PgTask, PostgresStorage},
     Config,
 };
@@ -154,7 +154,7 @@ impl Stream for SharedFetcher {
     }
 }
 
-impl<Args, Decode> Backend<Args, SqlContext>
+impl<Args, Decode> Backend<Args, SqlMetadata>
     for PostgresStorage<Args, CompactT, Decode, SharedFetcher>
 where
     Args: Send + 'static + Unpin,
@@ -165,7 +165,7 @@ where
 
     type Error = sqlx::Error;
 
-    type Stream = TaskStream<Task<Args, SqlContext, Ulid>, sqlx::Error>;
+    type Stream = TaskStream<Task<Args, SqlMetadata, Ulid>, sqlx::Error>;
 
     type Beat = BoxStream<'static, Result<(), sqlx::Error>>;
 
@@ -281,13 +281,13 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(3)).await;
             let task = Task::builder(99u32)
                 .run_after(Duration::from_secs(2))
-                .with_context(|mut ctx: SqlContext| {
+                .with_metadata(|mut ctx: SqlMetadata| {
                     ctx.set_priority(1);
                     ctx
                 })
                 .build();
             let task2 = Task::builder(Default::default())
-                .with_context(|mut ctx: SqlContext| {
+                .with_metadata(|mut ctx: SqlMetadata| {
                     ctx.set_priority(2);
                     ctx
                 })
@@ -303,7 +303,7 @@ mod tests {
 
         async fn send_reminder<T, I>(
             _: T,
-            ctx: SqlContext,
+            ctx: SqlMetadata,
             task_id: TaskId<I>,
         ) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_secs(2)).await;
