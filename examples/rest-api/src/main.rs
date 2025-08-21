@@ -15,6 +15,7 @@ struct Filter {
     pub status: State,
     #[serde(default = "default_page")]
     pub page: i32,
+    pub page_size: Option<i32>,
 }
 
 fn default_page() -> i32 {
@@ -43,7 +44,9 @@ async fn get_jobs(
     filter: web::Query<Filter>,
 ) -> HttpResponse {
     let stats = storage.stats().await.unwrap_or_default();
-    let res = storage.list_jobs(&filter.status, filter.page).await;
+    let res = storage
+        .list_jobs(&filter.status, filter.page, filter.page_size)
+        .await;
     match res {
         Ok(jobs) => HttpResponse::Ok().json(GetJobsResult { stats, jobs }),
         Err(e) => HttpResponse::InternalServerError().json(e.to_string()),

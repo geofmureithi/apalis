@@ -767,13 +767,16 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
         &self,
         status: &State,
         page: i32,
+        page_size: Option<i32>,
     ) -> Result<Vec<Self::Request>, Self::Error> {
         let status = status.to_string();
-        let fetch_query = "SELECT * FROM apalis.jobs WHERE status = $1 AND job_type = $2 ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET $3";
+        let page_size = page_size.unwrap_or_else(|| 10);
+        let fetch_query = "SELECT * FROM apalis.jobs WHERE status = $1 AND job_type = $2 ORDER BY done_at DESC, run_at DESC LIMIT $3 OFFSET $4";
         let res: Vec<SqlRequest<serde_json::Value>> = sqlx::query_as(fetch_query)
             .bind(status)
             .bind(self.config().namespace())
-            .bind(((page - 1) * 10) as i64)
+            .bind(page_size)
+            .bind(((page - 1) * page_size).to_string())
             .fetch_all(self.pool())
             .await?;
         Ok(res
@@ -1040,7 +1043,7 @@ mod tests {
 
         // List jobs with status 'Pending' and expect the scheduled job to be there.
         let jobs = storage
-            .list_jobs(&State::Pending, 1)
+            .list_jobs(&State::Pending, 1, None)
             .await
             .expect("failed to list jobs");
         assert_eq!(jobs.len(), 1, "Expected one job to be listed");

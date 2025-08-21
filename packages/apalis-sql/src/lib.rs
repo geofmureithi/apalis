@@ -417,7 +417,7 @@ macro_rules! sql_storage_tests {
             let storage = setup_test_wrapper().await;
 
             assert!(storage.stats().await.is_ok());
-            assert!(storage.list_jobs(&State::Pending, 1).await.is_ok());
+            assert!(storage.list_jobs(&State::Pending, 1, None).await.is_ok());
             assert!(storage.list_workers().await.is_ok());
         }
 
