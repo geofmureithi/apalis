@@ -612,13 +612,16 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
         &self,
         status: &State,
         page: i32,
+        page_size: Option<i32>
     ) -> Result<Vec<Self::Request>, Self::Error> {
         let status = status.to_string();
-        let fetch_query = "SELECT * FROM Jobs WHERE status = ? AND job_type = ? ORDER BY done_at DESC, run_at DESC LIMIT 10 OFFSET ?";
+        let page_size = page_size.unwrap_or_else(|| 10);
+        let fetch_query = "SELECT * FROM Jobs WHERE status = ? AND job_type = ? ORDER BY done_at DESC, run_at DESC LIMIT ? OFFSET ?";
         let res: Vec<SqlRequest<String>> = sqlx::query_as(fetch_query)
             .bind(status)
             .bind(self.get_config().namespace())
-            .bind(((page - 1) * 10).to_string())
+            .bind(page_size)
+            .bind(((page - 1) * page_size).to_string())
             .fetch_all(self.pool())
             .await?;
         Ok(res

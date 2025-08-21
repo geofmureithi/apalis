@@ -52,6 +52,7 @@ where
         &self,
         status: &State,
         page: i32,
+        page_size: Option<i32>
     ) -> impl Future<Output = Result<Vec<Self::Request>, Self::Error>> + Send;
 }
 
