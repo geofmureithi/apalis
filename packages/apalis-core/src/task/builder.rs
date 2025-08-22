@@ -4,7 +4,7 @@ use crate::task::{
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// Builder for creating `Task` instances with optional configuration
+/// Builder for creating [`Task`] instances with optional configuration
 #[derive(Debug)]
 pub struct TaskBuilder<Args, Meta, IdType> {
     args: Args,

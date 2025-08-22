@@ -62,15 +62,14 @@
 
 use std::{
     fmt::{self, Debug, Formatter},
+    ops::Deref,
+    panic::UnwindSafe,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, RwLock},
     task::{Context, Poll},
 };
 
-use futures_util::{
-    future::BoxFuture,
-    Future, FutureExt, StreamExt,
-};
+use futures_util::{future::BoxFuture, Future, FutureExt, StreamExt};
 use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
@@ -91,11 +90,11 @@ pub mod shutdown;
 
 pin_project! {
     pub struct MonitoredWorker {
-        factory: Box<dyn Fn(usize) -> (WorkerContext, BoxFuture<'static, Result<(), Event>>)>,
+        factory: Box<dyn Fn(usize) -> (WorkerContext, BoxFuture<'static, Result<(), WorkerError>>)>,
         #[pin]
-        current: Option<(WorkerContext, BoxFuture<'static, Result<(), Event>>)>,
+        current: Option<(WorkerContext, BoxFuture<'static, Result<(), WorkerError>>)>,
         attempt: usize,
-        should_restart: Box<dyn Fn(&WorkerError, usize) -> bool + 'static + Send>,
+        should_restart: Arc<RwLock<Option<Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + 'static + Send>>>>,
     }
 }
 
@@ -106,30 +105,43 @@ impl Future for MonitoredWorker {
         use std::panic::{catch_unwind, AssertUnwindSafe};
         let mut this = self.project();
 
-        if this.current.is_none() {
-            let mut worker = (this.factory)(*this.attempt);
-            let _ = worker.0.start();
-            this.current.set(Some(worker));
-            return Poll::Pending;
-        }
+        loop {
+            if this.current.is_none() {
+                println!("Start {:?}", *this.attempt);
+                let worker = (this.factory)(*this.attempt);
+                this.current.set(Some(worker));
+            }
 
-        let mut current = this.current.as_mut().as_pin_mut().unwrap();
+            let mut current = this.current.as_mut().as_pin_mut().unwrap();
+            let poll_result = catch_unwind(AssertUnwindSafe(|| current.1.as_mut().poll(cx)))
+                .map_err(|err| {
+                    let err = if let Some(s) = err.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = err.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown panic".to_string()
+                    };
+                    WorkerError::PanicError(err)
+                });
 
-        let poll_result = catch_unwind(AssertUnwindSafe(|| current.1.as_mut().poll(cx)));
-
-        match poll_result {
-            Ok(Poll::Pending) => Poll::Pending,
-            Ok(Poll::Ready(Ok(()))) => Poll::Ready(()),
-            Ok(Poll::Ready(Err(_))) | Err(_) => {
-                *this.attempt += 1;
-                if !(this.should_restart)(&WorkerError::GracefulExit, *this.attempt) {
-                    return Poll::Ready(());
+            match poll_result {
+                Ok(Poll::Pending) => return Poll::Pending,
+                Ok(Poll::Ready(Ok(()))) => return Poll::Ready(()),
+                Ok(Poll::Ready(Err(e))) | Err(e) => {
+                    println!("Worker stopping, attempt: {}", *this.attempt);
+                    let (ctx, _) = this.current.take().unwrap();
+                    *this.attempt += 1;
+                    let should_restart = this.should_restart.read();
+                    match should_restart.as_ref().map(|s| s.as_ref()) {
+                        Ok(Some(cb)) => {
+                            if !(cb)(&ctx, &e, *this.attempt) {
+                                return Poll::Ready(());
+                            }
+                        }
+                        _ => return Poll::Ready(()),
+                    }
                 }
-                let mut worker = (this.factory)(*this.attempt);
-                let _ = worker.0.start(); // no unwrap if you don't want panic
-                this.current.replace(worker);
-
-                Poll::Pending
             }
         }
     }
@@ -141,6 +153,9 @@ pub struct Monitor {
     terminator: Option<BoxFuture<'static, ()>>,
     shutdown: Shutdown,
     event_handler: EventHandler,
+    should_restart: Arc<
+        RwLock<Option<Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + 'static + Send>>>,
+    >,
 }
 
 impl Debug for Monitor {
@@ -154,12 +169,9 @@ impl Debug for Monitor {
 
 impl Monitor {
     fn run_worker<Args, S, P, Meta, M>(
-        index: usize,
-        handler: EventHandler,
         mut ctx: WorkerContext,
         worker: Worker<Args, Meta, P, S, M>,
-        should_restart: impl Fn(&WorkerError, usize) -> bool + 'static + Send,
-    ) -> BoxFuture<'static, Result<(), Event>>
+    ) -> BoxFuture<'static, Result<(), WorkerError>>
     where
         S: Service<Task<Args, Meta, P::IdType>> + Send + 'static,
         S::Future: Send,
@@ -187,49 +199,7 @@ impl Monitor {
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
         P::IdType: Sync + Send + 'static,
     {
-        let stream = worker.stream_with_ctx(&mut ctx);
-        let worker_ctx = ctx.clone();
-        let mut stream = stream.then(move |e| match e {
-            Ok(e) => {
-                let ctx = worker_ctx.clone();
-                let handler = handler.clone();
-                async move {
-                    match handler.read() {
-                        Ok(inner) => {
-                            if let Some(h) = inner.as_deref() {
-                                // h(&ctx, &e);
-                            }
-                        }
-                        Err(_) => todo!(),
-                    };
-                    Ok(())
-                }
-                .boxed()
-            }
-            Err(e) => {
-                let ctx = worker_ctx.clone();
-                let handler = handler.clone();
-                ctx.stop().unwrap();
-                let restart = should_restart(&e, index);
-                let event = Event::Error(Arc::new(Box::new(e)));
-
-                async move {
-                    match handler.read() {
-                        Ok(inner) => {
-                            if let Some(h) = inner.as_deref() {
-                                // h(&ctx, &event);
-                            }
-                        }
-                        Err(_) => todo!(),
-                    };
-                    if restart {
-                        return Err(event);
-                    }
-                    Ok(())
-                }
-                .boxed()
-            }
-        });
+        let mut stream = worker.stream_with_ctx(&mut ctx);
         async move {
             loop {
                 match stream.next().await {
@@ -283,10 +253,9 @@ impl Monitor {
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
         P::IdType: Send + Sync + 'static,
     {
-        let worker = factory(0);
-
         let shutdown = Some(self.shutdown.clone());
         let handler = self.event_handler.clone();
+        let should_restart = self.should_restart.clone();
         // let h = handler.clone();
         // ctx.wrap_listener(move |ctx, event| {
         //     match h.read() {
@@ -301,24 +270,15 @@ impl Monitor {
 
         let worker = MonitoredWorker {
             current: None,
-            factory: Box::new(move |index| {
-                let new_worker = factory(index);
-                let id = Arc::new(worker.name.clone());
+            factory: Box::new(move |attempt| {
+                let new_worker = factory(attempt);
+                let id = Arc::new(new_worker.name.clone());
                 let mut ctx = WorkerContext::new::<M::Service>(&id);
                 ctx.shutdown = shutdown.clone();
-                (
-                    ctx.clone(),
-                    Self::run_worker(
-                        index,
-                        handler.clone(),
-                        ctx.clone(),
-                        new_worker,
-                        |_, index| index < 1,
-                    ),
-                )
+                (ctx.clone(), Self::run_worker(ctx.clone(), new_worker))
             }),
             attempt: 0,
-            should_restart: Box::new(|_, index| index < 1),
+            should_restart,
         };
         self.workers.push(worker);
         self
@@ -406,6 +366,7 @@ impl Default for Monitor {
             terminator: None,
             event_handler: Arc::default(),
             workers: Vec::new(),
+            should_restart: Default::default(), // Don't restart
         }
     }
 }
@@ -443,6 +404,17 @@ impl Monitor {
     /// longer than expected to finish.
     pub fn with_terminator(mut self, fut: impl Future<Output = ()> + Send + 'static) -> Self {
         self.terminator = Some(fut.boxed());
+        self
+    }
+
+    /// Allows controlling the restart strategy for workers
+    pub fn should_restart<F: Fn(&WorkerContext, &WorkerError, usize) -> bool + Send + 'static>(
+        self,
+        cb: F,
+    ) -> Self {
+        let _ = self.should_restart.write().map(|mut res| {
+            let _ = res.insert(Box::new(cb));
+        });
         self
     }
 }
@@ -508,12 +480,20 @@ mod tests {
                     .backend(backend.clone())
                     .on_event(|wrk, e| {
                         println!("{}, {e:?}", wrk.name());
+                        panic!("Brrr");
                     })
                     .build(move |r| async move {
                         if r % 5 == 0 {
                             panic!("Brrr")
                         }
                     })
+            })
+            .should_restart(|ctx, e, index| {
+                println!("{ctx:?}, {e:?}, {index}");
+                if index > 10 {
+                    return false;
+                }
+                return true;
             })
             .on_event(|wrk, e| {
                 println!("{}, {e:?}", wrk.name());

@@ -45,6 +45,9 @@ pub enum WorkerError {
     /// A worker that terminates when .stop was called
     #[error("Worker stopped and gracefully exited")]
     GracefulExit,
+    /// A worker panicked and the panic was caught.
+    #[error("Worker panicked: {0}")]
+    PanicError(String),
 }
 
 #[derive(Error, Debug)]

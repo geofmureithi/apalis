@@ -2,7 +2,8 @@ use crate::{
     backend::{Backend, BackendWithSink, TaskStream},
     error::BoxDynError,
     task::{
-        task_id::{RandomId, TaskId}, Task,
+        task_id::{RandomId, TaskId},
+        Task,
     },
     worker::context::WorkerContext,
 };
@@ -67,7 +68,7 @@ struct TaskKey {
 #[cfg(feature = "json")]
 #[derive(Debug, Clone, Default)]
 pub struct JsonMemory<Args> {
-    tasks: Arc<RwLock<BTreeMap<TaskKey, std::sync::Mutex<Value>>>>,
+    tasks: std::sync::Arc<std::sync::RwLock<BTreeMap<TaskKey, std::sync::Mutex<Value>>>>,
     buffer: Vec<Task<Args, ()>>,
 }
 
@@ -178,14 +179,14 @@ impl<Args: DeserializeOwned> Stream for JsonMemory<Args> {
         if let Some((key, mutex)) =
             map.pop_first_with(|s, _| s.namespace == std::any::type_name::<Args>())
         {
+            use crate::task::builder::TaskBuilder;
+
             let args = mutex.into_inner().unwrap();
-            Poll::Ready(Some(Task::new_with_ctx(
-                serde_json::from_value(args).unwrap(),
-                ExecutionContext {
-                    task_id: Some(key.task_id),
-                    ..Default::default()
-                },
-            )))
+            Poll::Ready(Some(
+                TaskBuilder::new(serde_json::from_value(args).unwrap())
+                    .with_task_id(key.task_id)
+                    .build(),
+            ))
         } else {
             Poll::Pending
         }
@@ -356,6 +357,7 @@ struct SharedInMemoryStream<T> {
 impl<Args: DeserializeOwned> Stream for SharedInMemoryStream<Args> {
     type Item = Task<Args, ()>;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        use crate::task::builder::TaskBuilder;
         let mut map = self.inner.tasks.write().unwrap();
         if let Some((key, mutex)) =
             map.pop_first_with(|k, v| &k.namespace == std::any::type_name::<Args>())
@@ -365,13 +367,9 @@ impl<Args: DeserializeOwned> Stream for SharedInMemoryStream<Args> {
                 Ok(value) => value,
                 Err(_) => return Poll::Ready(None),
             };
-            Poll::Ready(Some(Task::new_with_ctx(
-                args,
-                ExecutionContext {
-                    task_id: Some(key.task_id),
-                    ..Default::default()
-                },
-            )))
+            Poll::Ready(Some(
+                TaskBuilder::new(args).with_task_id(key.task_id).build(),
+            ))
         } else {
             Poll::Ready(None)
         }
