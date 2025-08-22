@@ -61,16 +61,14 @@
 //! This ensures that if any worker hangs or takes too long to finish, the monitor will shut down after 10 seconds.
 
 use std::{
-    collections::HashMap,
     fmt::{self, Debug, Formatter},
-    future::IntoFuture,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 
 use futures_util::{
-    future::{select, BoxFuture},
+    future::BoxFuture,
     Future, FutureExt, StreamExt,
 };
 use pin_project_lite::pin_project;

@@ -39,6 +39,7 @@ tower = { version = "0.5" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # email-service = { path = "../../examples/email-service" }
 apalis-core = { path = "../apalis-core", features = ["test-utils"] }
+bincode = "2.0.1"
 
 [features]
 default = ["tokio-comp"]

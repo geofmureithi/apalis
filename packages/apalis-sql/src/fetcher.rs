@@ -9,9 +9,10 @@ use std::{
 };
 
 use apalis_core::{
-    backend::codec::Decoder, task::Task, timer::Delay, worker::context::WorkerContext,
+    backend::codec::Codec, task::Task, timer::Delay, worker::context::WorkerContext,
 };
 use futures::{future::BoxFuture, FutureExt, Stream};
+use log::warn;
 use pin_project::pin_project;
 
 pub enum StreamState<Args, Meta, IdType, Error> {
@@ -62,7 +63,7 @@ impl<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error>
 {
     pub fn new(pool: &DB, config: &Config, wrk: &WorkerContext, fetch_fn: Fn) -> Self
     where
-        Decode: Decoder<Args, Compact = Compact> + 'static,
+        Decode: Codec<Args, Compact = Compact> + 'static,
         Decode::Error: std::error::Error + Send + Sync + 'static,
         DB: Clone,
         Config: Clone,
@@ -98,7 +99,7 @@ impl<DB, Config, TFn, Args, Meta, IdType, Compact, Decode, Error> Stream
 where
     Decode::Error: std::error::Error + Send + Sync + 'static,
     Args: Send + 'static + Unpin,
-    Decode: Decoder<Args, Compact = Compact> + 'static,
+    Decode: Codec<Args, Compact = Compact> + 'static,
     Meta: Unpin + 'static,
     TFn: Fn(
         DB,
@@ -107,7 +108,7 @@ where
     ) -> BoxFuture<'static, Result<Vec<Task<Args, Meta, IdType>>, Error>>,
     DB: Clone,
     Config: Clone,
-    IdType: 'static,
+    IdType: Unpin + 'static,
     Error: 'static,
 {
     type Item = Result<Option<Task<Args, Meta, IdType>>, Error>;
@@ -184,7 +185,7 @@ impl<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error> PinnedDrop
     fn drop(self: Pin<&mut Self>) {
         match &self.state {
             StreamState::Buffered(remaining) => {
-                println!("dropped with items in buffer {}", remaining.len());
+                warn!("dropped fetcher with items in buffer {}", remaining.len());
             }
             _ => {}
         }

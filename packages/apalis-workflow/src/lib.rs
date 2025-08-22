@@ -163,6 +163,12 @@ pub trait WorkflowServiceFactory<Req> {
     fn new_service(&self, sink: Self::Sink) -> Self::Future;
 }
 
+pub trait Step<Args> {
+    type Response;
+    type Error;
+    async fn perform(&mut self, args: Args ) -> Result<Self::Response, Self::Error>;
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

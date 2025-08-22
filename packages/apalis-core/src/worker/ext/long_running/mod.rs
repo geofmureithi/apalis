@@ -1,4 +1,4 @@
-use std::{future::Future, ops::Deref, time::Duration};
+use std::{future::Future, time::Duration};
 
 use futures_util::{future::BoxFuture, FutureExt};
 use tower_layer::{Layer, Stack};
@@ -17,11 +17,13 @@ use crate::{
 
 pub mod tracker;
 
+/// Represents the long running middleware config
 #[derive(Debug, Default)]
 pub struct LongRunningConfig {
     pub max_duration: Option<Duration>,
 }
 impl LongRunningConfig {
+    /// Create a new long running config
     pub fn new(max_duration: Duration) -> Self {
         Self {
             max_duration: Some(max_duration),
@@ -29,6 +31,7 @@ impl LongRunningConfig {
     }
 }
 
+/// The long running middleware context
 pub struct LongRunnerCtx {
     tracker: TaskTracker,
     wrk: WorkerContext,
@@ -41,7 +44,6 @@ impl LongRunnerCtx {
     }
 }
 
-/// CTX: FromRequest<Request<Args, Ctx>>
 impl<Args: Sync, Meta: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args, Meta, IdType>>
     for LongRunnerCtx
 {
@@ -56,6 +58,7 @@ impl<Args: Sync, Meta: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args,
     }
 }
 
+/// Decorates the underlying middleware with long running capabilities
 pub struct LongRunningLayer;
 
 impl<S> Layer<S> for LongRunningLayer {
@@ -66,6 +69,7 @@ impl<S> Layer<S> for LongRunningLayer {
     }
 }
 
+/// Decorates the underlying service with long running capabilities
 pub struct LongRunningService<S> {
     service: S,
 }
@@ -105,11 +109,13 @@ where
     }
 }
 
-/// Helper trait for building new Workers from [`WorkerBuilder`]
+/// Helper trait for building long running workers from [`WorkerBuilder`]
 pub trait LongRunningExt<Args, Meta, Source, Middleware>: Sized {
+    /// Extension for executing long running jobs
     fn long_running(self) -> WorkerBuilder<Args, Meta, Source, Stack<LongRunningLayer, Middleware>> {
         self.long_running_with_cfg(Default::default())
     }
+    /// Extension for executing long running jobs with a config 
     fn long_running_with_cfg(
         self,
         cfg: LongRunningConfig,

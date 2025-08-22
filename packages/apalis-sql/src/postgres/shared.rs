@@ -9,7 +9,7 @@ use std::{
 
 use apalis_core::{
     backend::{
-        codec::{json::JsonCodec, Decoder},
+        codec::{json::JsonCodec, Codec},
         shared::MakeShared,
         Backend, BackendWithSink, TaskStream,
     },
@@ -158,7 +158,7 @@ impl<Args, Decode> Backend<Args, SqlMetadata>
     for PostgresStorage<Args, CompactT, Decode, SharedFetcher>
 where
     Args: Send + 'static + Unpin,
-    Decode: Decoder<Args, Compact = CompactT> + 'static + Unpin + Send,
+    Decode: Codec<Args, Compact = CompactT> + 'static + Unpin + Send,
     Decode::Error: std::error::Error + Send + Sync + 'static,
 {
     type IdType = Ulid;

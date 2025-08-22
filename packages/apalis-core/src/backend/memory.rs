@@ -1,9 +1,8 @@
 use crate::{
-    backend::{codec::CloneOpCodec, Backend, BackendWithSink, TaskSink, TaskStream},
+    backend::{Backend, BackendWithSink, TaskStream},
     error::BoxDynError,
     task::{
-        task_id::{TaskId, RandomId},
-        ExecutionContext, Task,
+        task_id::{RandomId, TaskId}, Task,
     },
     worker::context::WorkerContext,
 };
@@ -17,7 +16,7 @@ use futures_util::{
 use std::{
     collections::BTreeMap,
     pin::Pin,
-    sync::{Arc, RwLock},
+    sync::Arc,
     task::{Context, Poll},
 };
 use tower_layer::Identity;
@@ -220,9 +219,9 @@ impl<Args> Sink<Task<Args, ()>> for MemorySink<Args> {
     fn start_send(self: Pin<&mut Self>, mut item: Task<Args, ()>) -> Result<(), Self::Error> {
         let mut lock = self.inner.try_lock().unwrap();
         // Ensure task has id
-        item.ctx.task_id.get_or_insert_with(|| {
-            TaskId::new(RandomId::default())
-        });
+        item.ctx
+            .task_id
+            .get_or_insert_with(|| TaskId::new(RandomId::default()));
         Pin::new(&mut *lock).start_send_unpin(item)
     }
 

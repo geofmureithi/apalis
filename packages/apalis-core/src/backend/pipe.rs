@@ -1,5 +1,4 @@
-use crate::backend::codec::Encoder;
-use crate::backend::{BackendWithSink, TaskSink};
+use crate::backend::BackendWithSink;
 use crate::error::BoxDynError;
 use crate::task::Task;
 use crate::{backend::Backend, worker::context::WorkerContext};

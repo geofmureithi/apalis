@@ -80,7 +80,7 @@ impl<S> Layer<S> for CircuitBreakerLayer {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct CircuitBreakerService<S> {
     inner: S,
     config: CircuitBreakerConfig,

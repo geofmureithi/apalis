@@ -1,8 +1,7 @@
 use futures_util::future::BoxFuture;
 use std::{
     future::Future,
-    ops::Deref,
-    task::{Context, Poll},
+    task::Poll,
 };
 use tower_layer::{Layer, Stack};
 use tower_service::Service;
@@ -10,7 +9,7 @@ use tower_service::Service;
 use crate::{
     backend::Backend,
     error::BoxDynError,
-    task::{status::Status, ExecutionContext, Task},
+    task::{ExecutionContext, Task},
     worker::{builder::WorkerBuilder, context::WorkerContext},
 };
 
@@ -79,6 +78,7 @@ where
 }
 
 /// Service that wraps another service and acknowledges task completion
+#[derive(Debug, Clone)]
 pub struct AcknowledgeService<S, A> {
     inner: S,
     acknowledger: A,

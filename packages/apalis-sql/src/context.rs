@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{collections::BTreeMap, convert::Infallible};
 
 use apalis_core::{
     service_fn::from_request::FromRequest,
@@ -6,28 +6,27 @@ use apalis_core::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 
 /// The context for a job is represented here
 /// Used to provide a context for a job with an sql backend
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SqlMetadata {
+pub struct SqlMetadata<Value = serde_json::Value> {
     max_attempts: i32,
     last_error: Option<String>,
     lock_at: Option<i64>,
     lock_by: Option<String>,
     done_at: Option<i64>,
     priority: i32,
-    extensions: Map<String, Value>,
+    extensions: BTreeMap<String, Value>,
 }
 
-impl Default for SqlMetadata {
+impl<Value> Default for SqlMetadata<Value> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SqlMetadata {
+impl<Value> SqlMetadata<Value> {
     /// Build a new context with defaults
     pub fn new() -> Self {
         SqlMetadata {
@@ -37,7 +36,7 @@ impl SqlMetadata {
             last_error: None,
             lock_by: None,
             priority: 0,
-            extensions: Map::new(),
+            extensions: BTreeMap::new(),
         }
     }
 
@@ -102,10 +101,12 @@ impl SqlMetadata {
     }
 
     /// Get the job specific extensions
-    pub fn extensions(&self) -> &Map<String, Value> {
+    pub fn extensions(&self) -> &BTreeMap<String, Value> {
         &self.extensions
     }
+}
 
+impl SqlMetadata<serde_json::Value> {
     /// Add extensions to the job meta
     pub fn insert<S: AsRef<str>, D: Serialize>(&mut self, key: S, data: D) {
         self.extensions
@@ -113,9 +114,13 @@ impl SqlMetadata {
     }
 }
 
-impl<Args: Sync, IdType: Send + Sync> FromRequest<Task<Args, SqlMetadata, IdType>> for SqlMetadata {
+impl<Args: Sync, IdType: Send + Sync, Value: Clone + Sync>
+    FromRequest<Task<Args, SqlMetadata<Value>, IdType>> for SqlMetadata<Value>
+{
     type Error = Infallible;
-    async fn from_request(req: &Task<Args, SqlMetadata, IdType>) -> Result<Self, Infallible> {
+    async fn from_request(
+        req: &Task<Args, SqlMetadata<Value>, IdType>,
+    ) -> Result<Self, Infallible> {
         Ok(req.ctx.metadata.clone())
     }
 }

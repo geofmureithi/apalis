@@ -29,7 +29,7 @@ use std::{num::TryFromIntError, time::Duration};
 /// The context of the sql job
 pub mod context;
 /// Util for fetching rows
-pub mod from_row;
+// pub mod from_row;
 
 pub mod sink;
 pub mod fetcher;
@@ -187,7 +187,7 @@ impl Config {
 
 /// TODO: Apply
 /// Calculates the status from a result
-pub fn calculate_status<Res>(ctx: &SqlMetadata, res: &Result<Res, BoxDynError>) -> Status {
+pub fn calculate_status<Res, T>(ctx: &SqlMetadata<T>, res: &Result<Res, BoxDynError>) -> Status {
     match &res {
         Ok(_) => Status::Done,
         Err(e) => match &e {

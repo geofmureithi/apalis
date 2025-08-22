@@ -26,8 +26,8 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let storage = MemoryStorage::new();
-//!     let sink = storage.sink();
+//!     let mut storage = MemoryStorage::new();
+//!     let mut sink = storage.sink();
 //!     for i in 0..5 {
 //!         sink.push(i).await?;
 //!     }
@@ -68,25 +68,30 @@ use crate::worker::event::Event;
 use futures_core::stream::BoxStream;
 use futures_util::{Future, FutureExt, Stream, StreamExt};
 use std::fmt::Debug;
-use std::fmt::{self, Display};
+use std::fmt::{self};
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::task::{Context, Poll};
 use tower_layer::{Layer, Stack};
 use tower_service::Service;
 
+/// Provides utilities for building a [`Worker`]
 pub mod builder;
-pub mod call_all;
+mod call_all;
+/// Provides the [`Worker`]'s context
 pub mod context;
+/// Events emitted by the [`Worker`]
 pub mod event;
+/// Provides extensions to the default worker features
 pub mod ext;
-pub mod state;
+mod state;
+/// Provides a worker that allows testing and debugging
 pub mod test_worker;
 
-/// A worker that is ready for running
-#[must_use = "Workers must be run or streamed to execute jobs"]
+/// A worker represents a task runner
+/// Tasks are polled from the [`Backend`] and executed by the service
+#[must_use = "Workers must be run or streamed to execute tasks"]
 pub struct Worker<Args, Meta, Backend, Svc, Middleware> {
     pub(crate) name: String,
     pub(crate) backend: Backend,
@@ -139,7 +144,8 @@ where
     <B::Layer as Layer<M::Service>>::Service: Service<Task<Args, Meta, B::IdType>> + Send + 'static,
     <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, Meta, B::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, Meta, B::IdType>>>::Future: Send,
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, Meta, B::IdType>>>::Future:
+        Send,
     M::Service: Service<Task<Args, Meta, B::IdType>> + Send + 'static,
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
         Task<Args, Meta, B::IdType>,
@@ -149,11 +155,13 @@ where
     >>::Error: Into<BoxDynError> + Send + Sync + 'static,
     B::IdType: Send + 'static,
 {
+    /// Runs the worker until completion
     pub async fn run(self) -> Result<(), WorkerError> {
         let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
         self.run_with_ctx(&mut ctx).await
     }
 
+    /// Runs the worker until completion provided the [`WorkerContext`]
     pub async fn run_with_ctx(self, ctx: &mut WorkerContext) -> Result<(), WorkerError> {
         let mut stream = self.stream_with_ctx(ctx);
         while let Some(res) = stream.next().await {
@@ -166,11 +174,13 @@ where
         Ok(())
     }
 
+    /// Returns a stream that represents all the worker events until completion
     pub fn stream(self) -> impl Stream<Item = Result<Event, WorkerError>> {
         let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
         self.stream_with_ctx(&mut ctx)
     }
 
+    /// Returns a stream that represents all the worker events provided [`WorkerContext`] until completion
     pub fn stream_with_ctx(
         self,
         ctx: &mut WorkerContext,
@@ -341,6 +351,7 @@ impl<Fut: Future> Future for AttemptOnPollFuture<Fut> {
     }
 }
 
+/// Injects the [`ReadinessService`] to track when workers are ready to accept new tasks
 #[derive(Clone)]
 struct ReadinessLayer {
     ctx: WorkerContext,
@@ -363,6 +374,8 @@ impl<S> Layer<S> for ReadinessLayer {
     }
 }
 
+/// Tracks the readiness of underlying services
+/// Should be the innermost service
 pub struct ReadinessService<S> {
     inner: S,
     ctx: WorkerContext,

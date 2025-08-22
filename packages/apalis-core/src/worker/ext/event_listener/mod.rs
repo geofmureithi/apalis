@@ -10,6 +10,7 @@ use crate::{
     worker::{Event, WorkerContext},
 };
 
+/// Worker extension for emitting events 
 pub trait EventListenerExt<Args, Meta, Source, Middleware>: Sized {
     fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
         self,
@@ -17,6 +18,7 @@ pub trait EventListenerExt<Args, Meta, Source, Middleware>: Sized {
     ) -> WorkerBuilder<Args, Meta, Source, Stack<EventListenerLayer, Middleware>>;
 }
 
+/// Middleware for emitting events
 #[derive(Clone)]
 pub struct EventListenerLayer;
 
@@ -28,8 +30,11 @@ impl<S> Layer<S> for EventListenerLayer {
     }
 }
 
+/// Event listening type
 pub type EventListener = Arc<Box<dyn Fn(WorkerContext, Event) + Send + Sync>>;
 
+
+/// Service for emitting events
 #[derive(Clone)]
 pub struct EventListenerService<S> {
     service: S,
@@ -51,8 +56,6 @@ where
     }
 
     fn call(&mut self, request: Task<Args, Meta, IdType>) -> Self::Future {
-        // TODO
-        // let ctx: &WorkerContext = request.get_checked().unwrap();
         self.service.call(request)
     }
 }

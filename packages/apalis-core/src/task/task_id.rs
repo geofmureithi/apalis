@@ -1,11 +1,8 @@
 /// A unique ID that can be used by a backend
 use std::{
-    convert::Infallible,
     fmt::{Debug, Display},
     hash::Hash,
     str::FromStr,
-    sync::Arc,
-    time::SystemTime,
 };
 
 use crate::{
@@ -135,7 +132,7 @@ mod random_id {
     }
 
     /// Generates a unique, time-ordered NanoID-style string (zero-deps).
-    pub fn unique_id() -> String {
+    pub(super) fn unique_id() -> String {
         let timestamp = current_time_millis();
         let time_str = encode_base64(timestamp, TIME_LEN);
 

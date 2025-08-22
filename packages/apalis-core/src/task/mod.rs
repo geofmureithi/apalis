@@ -23,11 +23,9 @@
 
 use std::{
     fmt::Debug,
-    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use ulid::Ulid;
 
 use crate::task::{attempt::Attempt, extensions::Extensions, status::Status, task_id::{TaskId, RandomId}};
 
@@ -38,13 +36,14 @@ pub mod extensions;
 pub mod status;
 pub mod task_id;
 
-/// Represents a task which can be serialized and executed
+/// Represents a task which will be executed
+/// Should be considered a single unit of work
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
 pub struct Task<Args, Meta, IdType = RandomId> {
     /// The inner request part
     pub args: Args,
-    /// Parts of the request eg id, attempts and context
+    /// Context of the request eg id, attempts and context
     pub ctx: ExecutionContext<Meta, IdType>,
 }
 

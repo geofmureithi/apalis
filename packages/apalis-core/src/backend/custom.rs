@@ -1,8 +1,9 @@
 use futures_core::stream::BoxStream;
 use futures_util::{Stream, StreamExt};
-use std::marker::PhantomData;
 use std::sync::Arc;
+use std::{fmt, marker::PhantomData};
 use tower_layer::Identity;
+use thiserror::Error;
 
 use crate::{
     backend::{Backend, BackendWithSink},
@@ -19,6 +20,30 @@ pub struct CustomBackend<Args, DB, Fetch, Sink, IdType, Config = ()> {
     config: Config,
 }
 
+impl<Args, DB, Fetch, Sink, IdType, Config> fmt::Debug
+    for CustomBackend<Args, DB, Fetch, Sink, IdType, Config>
+where
+    DB: fmt::Debug,
+    Config: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CustomBackend")
+            .field(
+                "_marker",
+                &format_args!(
+                    "PhantomData<({}, {})>",
+                    std::any::type_name::<Args>(),
+                    std::any::type_name::<IdType>()
+                ),
+            )
+            .field("pool", &self.pool)
+            .field("fetcher", &"Fn(&mut DB, &Config, &WorkerContext) -> Fetch")
+            .field("sink", &"Fn(&mut DB, &Config) -> Sink")
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
 /// Builder for `CustomSqlBackend`
 pub struct BackendBuilder<Args, DB, Fetch, Sink, IdType, Config = ()> {
     _marker: PhantomData<(Args, IdType)>,
@@ -26,6 +51,30 @@ pub struct BackendBuilder<Args, DB, Fetch, Sink, IdType, Config = ()> {
     fetcher: Option<Box<dyn Fn(&mut DB, &Config, &WorkerContext) -> Fetch + 'static>>,
     sink: Option<Box<dyn Fn(&mut DB, &Config) -> Sink + 'static>>,
     config: Option<Config>,
+}
+
+impl<Args, DB, Fetch, Sink, IdType, Config> fmt::Debug
+    for BackendBuilder<Args, DB, Fetch, Sink, IdType, Config>
+where
+    DB: fmt::Debug,
+    Config: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BackendBuilder")
+            .field(
+                "_marker",
+                &format_args!(
+                    "PhantomData<({}, {})>",
+                    std::any::type_name::<Args>(),
+                    std::any::type_name::<IdType>()
+                ),
+            )
+            .field("database", &self.database)
+            .field("fetcher", &self.fetcher.as_ref().map(|_| "Some(fn)"))
+            .field("sink", &self.sink.as_ref().map(|_| "Some(fn)"))
+            .field("config", &self.config)
+            .finish()
+    }
 }
 
 impl<Args, DB, Fetch, Sink, IdType, Config> Default
@@ -56,11 +105,13 @@ impl<Args, DB, Fetch, Sink, IdType, Config> BackendBuilder<Args, DB, Fetch, Sink
         }
     }
 
+    /// The custom backend persistence engine
     pub fn database(mut self, db: DB) -> Self {
         self.database = Some(db);
         self
     }
 
+    /// The fetcher
     pub fn fetcher<F: Fn(&mut DB, &Config, &WorkerContext) -> Fetch + 'static>(
         mut self,
         fetcher: F,
@@ -74,17 +125,30 @@ impl<Args, DB, Fetch, Sink, IdType, Config> BackendBuilder<Args, DB, Fetch, Sink
         self
     }
 
-    pub fn build(
-        self,
-    ) -> Result<CustomBackend<Args, DB, Fetch, Sink, IdType, Config>, &'static str> {
+    pub fn build(self) -> Result<CustomBackend<Args, DB, Fetch, Sink, IdType, Config>, BuildError> {
         Ok(CustomBackend {
             _marker: PhantomData,
-            pool: self.database.ok_or("Pool is required")?,
-            fetcher: self.fetcher.map(Arc::new).ok_or("Fetcher is required")?,
-            sink: self.sink.map(Arc::new).ok_or("Sink is required")?,
-            config: self.config.ok_or("Config is required")?,
+            pool: self.database.ok_or(BuildError::MissingPool)?,
+            fetcher: self
+                .fetcher
+                .map(Arc::new)
+                .ok_or(BuildError::MissingFetcher)?,
+            sink: self.sink.map(Arc::new).ok_or(BuildError::MissingSink)?,
+            config: self.config.ok_or(BuildError::MissingConfig)?,
         })
     }
+}
+
+#[derive(Debug, Error)]
+pub enum BuildError {
+    #[error("Database pool is required")]
+    MissingPool,
+    #[error("Fetcher is required")]
+    MissingFetcher,
+    #[error("Sink is required")]
+    MissingSink,
+    #[error("Config is required")]
+    MissingConfig,
 }
 
 impl<Args, DB, Fetch, Sink, IdType, E, Meta, Config> Backend<Args, Meta>

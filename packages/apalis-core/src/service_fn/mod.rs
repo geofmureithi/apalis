@@ -48,7 +48,6 @@ use crate::error::BoxDynError;
 use crate::task::Task;
 use crate::service_fn::from_request::FromRequest;
 use crate::worker::builder::{WorkerBuilderExt, WorkerServiceBuilder};
-use futures_core::future::BoxFuture;
 use futures_util::future::Map;
 use futures_util::FutureExt;
 use std::fmt;

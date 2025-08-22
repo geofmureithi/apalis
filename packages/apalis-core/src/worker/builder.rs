@@ -91,7 +91,6 @@ use tower_service::Service;
 
 use crate::{
     backend::Backend,
-    error::BoxDynError,
     monitor::shutdown::Shutdown,
     service_fn::into_response::IntoResponse,
     task::{data::Data, Task},

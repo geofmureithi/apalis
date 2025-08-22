@@ -13,7 +13,7 @@ use std::{
 
 use apalis_core::{
     backend::{
-        codec::{json::JsonCodec, Codec, Decoder, Encoder},
+        codec::{json::JsonCodec, Codec},
         Backend, BackendWithSink, TaskSink,
     },
     error::{BoxDynError, WorkerError},
@@ -143,7 +143,7 @@ impl<Args, Decode> Backend<Args, SqlMetadata>
     for PostgresStorage<Args, CompactT, Decode, DefaultFetcher>
 where
     Args: Send + 'static + Unpin,
-    Decode: Decoder<Args, Compact = CompactT> + 'static,
+    Decode: Codec<Args, Compact = CompactT> + 'static,
     Decode::Error: std::error::Error + Send + Sync + 'static,
     // Compact: 'static + Send + Unpin,
 {
@@ -275,7 +275,7 @@ impl<Args, Encode> PgSink<Args, CompactT, Encode> {
 impl<Args, Encode> Sink<Task<Args, SqlMetadata, Ulid>> for PgSink<Args, CompactT, Encode>
 where
     Args: Unpin + Send + Sync + 'static,
-    Encode: Encoder<Args, Compact = CompactT> + Unpin,
+    Encode: Codec<Args, Compact = CompactT> + Unpin,
     Encode::Error: std::error::Error + Send + Sync + 'static,
 
     Encode::Error: Into<BoxDynError>,
@@ -318,7 +318,7 @@ impl<Args, Fetch, Encode> BackendWithSink<Args, SqlMetadata>
 where
     PostgresStorage<Args, CompactT, Encode, Fetch>: Backend<Args, SqlMetadata, IdType = Ulid>,
     Args: Send + Sync + Unpin + 'static + Serialize + DeserializeOwned,
-    Encode: Encoder<Args, Compact = CompactT> + Unpin,
+    Encode: Codec<Args, Compact = CompactT> + Unpin,
     Encode::Error: std::error::Error + Send + Sync + 'static,
     // Compact: Unpin + Send + 'static,
 {
@@ -399,7 +399,7 @@ pub struct PgTask<Compact = CompactT> {
     lock_by: Option<String>,
     done_at: Option<DateTime<Utc>>,
     priority: Option<i32>,
-    meta: Option<Map<String, Value>>
+    meta: Option<Map<String, Value>>,
 }
 
 // #[derive(Debug, Serialize, Deserialize)]
@@ -412,7 +412,7 @@ pub struct PgTask<Compact = CompactT> {
 // }
 
 impl PgTask {
-    fn try_into_req<D: Decoder<Args, Compact = CompactT>, Args>(
+    fn try_into_req<D: Codec<Args, Compact = CompactT>, Args>(
         self,
     ) -> Result<Task<Args, SqlMetadata, Ulid>, sqlx::Error>
     where
@@ -454,9 +454,7 @@ impl PgTask {
     }
 }
 
-pub struct PgMeta {
-
-}
+pub struct PgMeta {}
 
 mod fetcher {
     use std::{
@@ -469,7 +467,7 @@ mod fetcher {
     };
 
     use apalis_core::{
-        backend::codec::{json::JsonCodec, Decoder},
+        backend::codec::{json::JsonCodec, Codec},
         task::{task_id::Ulid, Task},
         timer::Delay,
         worker::context::WorkerContext,
@@ -491,7 +489,7 @@ mod fetcher {
         Config,
     };
 
-    async fn fetch_next<Args, D: Decoder<Args, Compact = CompactT>>(
+    async fn fetch_next<Args, D: Codec<Args, Compact = CompactT>>(
         pool: PgPool,
         config: Config,
         worker: WorkerContext,
@@ -520,8 +518,8 @@ mod fetcher {
     enum StreamState<Args> {
         Ready,
         Delay(Delay),
-        Fetch(BoxFuture<'static, Result<Vec<Task<Args, SqlMetadata, Ulid>>, sqlx::Error>>),
-        Buffered(VecDeque<Task<Args, SqlMetadata, Ulid>>),
+        Fetch(BoxFuture<'static, Result<Vec<Task<Args, SqlMetadata<Value>, Ulid>>, sqlx::Error>>),
+        Buffered(VecDeque<Task<Args, SqlMetadata<Value>, Ulid>>),
         Empty,
     }
 
@@ -531,7 +529,7 @@ mod fetcher {
                 Config,
                 WorkerContext,
             )
-                -> BoxFuture<'static, Result<Vec<Task<Args, SqlMetadata, Ulid>>, sqlx::Error>>
+                -> BoxFuture<'static, Result<Vec<Task<Args, SqlMetadata<Value>, Ulid>>, sqlx::Error>>
             + Send
             + Sync,
     >;
@@ -543,7 +541,7 @@ mod fetcher {
             Config,
             FetchFn<Args>,
             Args,
-            SqlMetadata,
+            SqlMetadata<Value>,
             Ulid,
             Compact,
             Decode,
@@ -562,7 +560,7 @@ mod fetcher {
     impl<Args: 'static, Decode> PgFetcher<Args, CompactT, Decode> {
         pub fn new(pool: &Pool<Postgres>, config: &Config, wrk: &WorkerContext) -> Self
         where
-            Decode: Decoder<Args, Compact = CompactT> + 'static,
+            Decode: Codec<Args, Compact = CompactT> + 'static,
             Decode::Error: std::error::Error + Send + Sync + 'static,
         {
             Self {
@@ -582,7 +580,7 @@ mod fetcher {
     where
         Decode::Error: std::error::Error + Send + Sync + 'static,
         Args: Send + 'static + Unpin,
-        Decode: Decoder<Args, Compact = CompactT> + 'static,
+        Decode: Codec<Args, Compact = CompactT> + 'static,
         // Compact: Unpin + Send + 'static,
     {
         type Item = Result<Option<Task<Args, SqlMetadata, Ulid>>, sqlx::Error>;

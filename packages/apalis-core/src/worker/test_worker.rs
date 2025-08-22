@@ -49,7 +49,7 @@ use futures_channel::mpsc::{self, channel};
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_util::{FutureExt, SinkExt, StreamExt};
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::task::{Context, Poll};
@@ -85,15 +85,30 @@ use ulid::Ulid;
 ///    }
 ///}
 /// ````
+
 pub struct TestWorker<B, S, Res, IdType = Ulid> {
     stream: BoxStream<'static, Result<(TaskId<IdType>, Result<Res, BoxDynError>), WorkerError>>,
     backend: PhantomData<B>,
     service: PhantomData<(S, Res)>,
 }
 
+impl<B, S, Res, IdType> fmt::Debug for TestWorker<B, S, Res, IdType> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TestWorker")
+            .field("stream", &"BoxStream<...>") // can't really debug streams
+            .field("backend", &std::any::type_name::<B>())
+            .field("service", &std::any::type_name::<(S, Res)>())
+            .field("id_type", &std::any::type_name::<IdType>())
+            .finish()
+    }
+}
+
 /// Utility for executing the next item in the queue
 pub trait ExecuteNext<Args, Meta> {
+    /// The expected result from the provided service
     type Result;
+    /// Allows the test worker to step to the next task
+    /// No polling is done in between calls 
     fn execute_next(&mut self) -> impl Future<Output = Self::Result> + Send;
 }
 

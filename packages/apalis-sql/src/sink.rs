@@ -11,7 +11,7 @@ pub enum SqlSinkError<EncodeError, DbErr> {
     DatabaseError(DbErr),
 }
 
-use apalis_core::{backend::codec::Encoder, task::Task};
+use apalis_core::{backend::codec::Codec, task::Task};
 use futures::{future::BoxFuture, Sink};
 
 pub struct SqlSink<DB, Config, Fn, Args, Meta, IdType, Compact, Encode, Error> {
@@ -60,7 +60,7 @@ impl<DB, Config, FnT, Args, Meta, IdType, Compact, Encode, Error> Sink<Task<Args
     for SqlSink<DB, Config, FnT, Args, Meta, IdType, Compact, Encode, Error>
 where
     Args: Unpin + Send + Sync + 'static,
-    Encode: Encoder<Args, Compact = Compact> + Unpin,
+    Encode: Codec<Args, Compact = Compact> + Unpin,
     Encode::Error: std::error::Error + Send + Sync + 'static,
     Compact: Unpin + Send + 'static,
     FnT: Fn(DB, Config, Vec<Task<Compact, Meta, IdType>>) -> BoxFuture<'static, Result<(), Error>>
@@ -70,7 +70,7 @@ where
     Config: Clone + Unpin + Send + 'static,
     DB: Clone + Unpin + Send + 'static,
     Meta: Unpin + Send + 'static,
-    IdType: Sync + Send + 'static,
+    IdType: Sync + Send + Unpin + 'static,
     Error: 'static,
 {
     type Error = SqlSinkError<Encode::Error, Error>;

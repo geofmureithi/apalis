@@ -1,11 +1,7 @@
 //! Represents a task source that provides internal middleware and can be polled
 //!
 //! Also includes helper traits
-use std::{
-    future::Future,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::{future::Future, time::Duration};
 
 use futures_sink::Sink;
 use futures_util::{
@@ -14,17 +10,16 @@ use futures_util::{
 };
 
 use crate::{
-    backend::codec::Encoder,
     error::BoxDynError,
-    task::{task_id::TaskId, ExecutionContext, Task},
+    task::{task_id::TaskId, Task},
     worker::context::WorkerContext,
 };
 
 pub mod codec;
+pub mod custom;
 pub mod memory;
 pub mod pipe;
 pub mod shared;
-pub mod custom;
 
 /// A backend represents a task source
 pub trait Backend<Args, Meta> {

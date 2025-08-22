@@ -10,6 +10,7 @@ use crate::{
 
 mod service;
 
+/// Allows breaking the circuit if an error threshold is hit
 pub trait CircuitBreaker<Args, Meta, Source, Middleware>: Sized {
     /// Allows the worker to break the circuit in case of failures
     /// Uses default configuration
