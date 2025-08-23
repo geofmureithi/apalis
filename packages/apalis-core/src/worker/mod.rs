@@ -244,7 +244,10 @@ where
         .boxed();
         let wait_for_exit: BoxStream<'static, _> = futures_util::stream::once(async move {
             match worker.await {
-                Ok(_) => Err(WorkerError::GracefulExit),
+                Ok(_) => {
+                    println!("Worker end");
+                    Err(WorkerError::GracefulExit)
+                }
                 Err(e) => Err(e),
             }
         })

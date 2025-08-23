@@ -107,12 +107,14 @@ impl Future for MonitoredWorker {
 
         loop {
             if this.current.is_none() {
-                println!("Start {:?}", *this.attempt);
                 let worker = (this.factory)(*this.attempt);
                 this.current.set(Some(worker));
             }
 
             let mut current = this.current.as_mut().as_pin_mut().unwrap();
+            if current.0.is_running() && current.0.is_shutting_down() {
+                return Poll::Ready(());
+            }
             let poll_result = catch_unwind(AssertUnwindSafe(|| current.1.as_mut().poll(cx)))
                 .map_err(|err| {
                     let err = if let Some(s) = err.downcast_ref::<&str>() {
@@ -129,15 +131,14 @@ impl Future for MonitoredWorker {
                 Ok(Poll::Pending) => return Poll::Pending,
                 Ok(Poll::Ready(Ok(()))) => return Poll::Ready(()),
                 Ok(Poll::Ready(Err(e))) | Err(e) => {
-                    println!("Worker stopping, attempt: {}", *this.attempt);
                     let (ctx, _) = this.current.take().unwrap();
-                    *this.attempt += 1;
                     let should_restart = this.should_restart.read();
                     match should_restart.as_ref().map(|s| s.as_ref()) {
                         Ok(Some(cb)) => {
                             if !(cb)(&ctx, &e, *this.attempt) {
                                 return Poll::Ready(());
                             }
+                            *this.attempt += 1;
                         }
                         _ => return Poll::Ready(()),
                     }
@@ -423,13 +424,14 @@ impl Monitor {
 mod tests {
     use crate::{
         backend::{Backend, BackendWithSink, TaskSink},
+        error::WorkerError,
         task::task_id::TaskId,
-        worker::{context::WorkerContext, ext::event_listener::EventListenerExt},
+        worker::{context::WorkerContext, event::Event, ext::event_listener::EventListenerExt},
     };
     use core::panic;
     use std::{io, time::Duration};
 
-    use tokio::time::sleep;
+    use tokio::{runtime::Handle, time::sleep};
     use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
@@ -467,12 +469,9 @@ mod tests {
         let mut backend = MemoryStorage::new_with_json();
         let mut sink = backend.sink();
 
-        tokio::spawn(async move {
-            for i in 0..10 {
-                sink.push(i).await.unwrap();
-                tokio::time::sleep(Duration::from_millis(i)).await;
-            }
-        });
+        for i in 0..10 {
+            sink.push(i).await.unwrap();
+        }
 
         let monitor: Monitor = Monitor::new()
             .register(move |index| {
@@ -480,16 +479,18 @@ mod tests {
                     .backend(backend.clone())
                     .on_event(|wrk, e| {
                         println!("{}, {e:?}", wrk.name());
-                        panic!("Brrr");
-                    })
-                    .build(move |r| async move {
-                        if r % 5 == 0 {
-                            panic!("Brrr")
+                        if matches!(e, Event::Success) {
+                            unreachable!("Brrr")
                         }
                     })
+                    .build(move |r| async move {
+                        // if r % 5 == 0 {
+                        //     panic!("Brrr")
+                        // }
+                    })
             })
-            .should_restart(|ctx, e, index| {
-                println!("{ctx:?}, {e:?}, {index}");
+            .should_restart(|_, e, index| {
+                println!("{e:?}, {index}");
                 if index > 10 {
                     return false;
                 }

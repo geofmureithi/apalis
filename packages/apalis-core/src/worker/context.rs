@@ -277,7 +277,7 @@ impl WorkerContext {
         self.event_handler = Arc::new(new);
     }
 
-    fn add_waker(&self, cx: &mut Context<'_>) {
+    pub (crate) fn add_waker(&self, cx: &mut Context<'_>) {
         if let Ok(mut waker_guard) = self.waker.lock() {
             if waker_guard
                 .as_ref()
