@@ -423,7 +423,7 @@ impl Monitor {
 #[cfg(test)]
 mod tests {
     use crate::{
-        backend::{Backend, BackendWithSink, TaskSink},
+        backend::{Backend, TaskSink},
         error::WorkerError,
         task::task_id::TaskId,
         worker::{context::WorkerContext, event::Event, ext::event_listener::EventListenerExt},
@@ -444,7 +444,7 @@ mod tests {
         let mut backend = MemoryStorage::new_with_json();
 
         for i in 0..10 {
-            backend.sink().push(i).await.unwrap();
+            backend.push(i).await.unwrap();
         }
 
         let service = tower::service_fn(|request: Task<u32, ()>| async {
@@ -467,10 +467,9 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_run() {
         let mut backend = MemoryStorage::new_with_json();
-        let mut sink = backend.sink();
 
         for i in 0..10 {
-            sink.push(i).await.unwrap();
+            backend.push(i).await.unwrap();
         }
 
         let monitor: Monitor = Monitor::new()
@@ -514,9 +513,9 @@ mod tests {
     #[tokio::test]
     async fn test_monitor_register_with_count() {
         let mut backend = MemoryStorage::new_with_json();
-        let mut sink = backend.sink();
+
         for i in 0..10 {
-            sink.push(i).await.unwrap();
+            backend.push(i).await.unwrap();
         }
 
         let monitor: Monitor = Monitor::new();

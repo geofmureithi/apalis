@@ -245,7 +245,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        backend::{memory::MemoryStorage, Backend, BackendWithSink, TaskSink},
+        backend::{memory::MemoryStorage, Backend, TaskSink},
         error::BoxDynError,
         service_fn::service_fn,
         worker::{
@@ -259,9 +259,8 @@ mod tests {
     async fn it_works() {
         let mut backend = MemoryStorage::new();
 
-        let mut sink = backend.sink();
         for i in 0..=10 {
-            sink.push(i).await.unwrap();
+            backend.push(i).await.unwrap();
         }
 
         let service = service_fn(|req: u32, w: WorkerContext| async move {

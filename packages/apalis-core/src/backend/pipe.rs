@@ -1,4 +1,3 @@
-use crate::backend::BackendWithSink;
 use crate::error::BoxDynError;
 use crate::task::Task;
 use crate::{backend::Backend, worker::context::WorkerContext};
@@ -39,16 +38,15 @@ impl<S: fmt::Debug, Into: fmt::Debug, Args, Meta> fmt::Debug for Pipe<S, Into, A
 impl<Args, Meta, S, TSink, Err> Backend<Args, Meta> for Pipe<S, TSink, Args, Meta>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    TSink: BackendWithSink<Args, Meta>,
-    TSink::Error: Into<BoxDynError> + Send + Sync + 'static,
-    TSink::Sink: 'static + Sink<Task<Args, Meta, TSink::IdType>> + Unpin + Send,
+    TSink: Backend<Args, Meta> + Sink<Task<Args, Meta, TSink::IdType>> + Clone + Unpin + Send + 'static,
+    <TSink as Backend<Args, Meta>>::Error: Into<BoxDynError> + Send + Sync + 'static,
     TSink::Beat: Send + 'static,
     TSink::IdType: Send + Clone + 'static,
     TSink::Stream: Send + 'static,
     Args: Send + 'static,
     Meta: Send + 'static + Default,
     Err: Into<BoxDynError> + Send + Sync + 'static,
-    <<TSink as BackendWithSink<Args, Meta>>::Sink as Sink<Task<Args, Meta, TSink::IdType>>>::Error:
+    <TSink as Sink<Task<Args, Meta, TSink::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
 {
     type IdType = TSink::IdType;
@@ -75,7 +73,7 @@ where
     }
 
     fn poll(mut self, worker: &WorkerContext) -> Self::Stream {
-        let mut sink = self.into.sink().sink_map_err(|e| e.into());
+        let mut sink = self.into.clone().sink_map_err(|e| e.into());
 
         let mut sink_stream = self
             .from
@@ -100,28 +98,6 @@ where
     }
 }
 
-impl<S, I, Args, Meta, Err> BackendWithSink<Args, Meta> for Pipe<S, I, Args, Meta>
-where
-    S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    I: BackendWithSink<Args, Meta>,
-    I::Error: Into<BoxDynError> + Send + Sync + 'static,
-    I::Sink: Unpin + Send + 'static + Sink<Task<Args, Meta, I::IdType>>,
-    I::Beat: Send + 'static,
-    I::Stream: Send + 'static,
-    Args: Send + 'static,
-    Meta: Send + 'static + Default,
-    Err: Into<BoxDynError> + Send + Sync + 'static,
-    <<I as BackendWithSink<Args, Meta>>::Sink as Sink<Task<Args, Meta, I::IdType>>>::Error:
-        Into<BoxDynError> + Send + Sync + 'static,
-    I::IdType: Send + Clone + 'static,
-{
-    type Sink = I::Sink;
-
-    fn sink(&mut self) -> Self::Sink {
-        self.into.sink()
-    }
-}
-
 pub trait PipeExt<B, Args, Ctx>
 where
     Self: Sized,
@@ -131,9 +107,8 @@ where
 
 impl<B, Args, Meta, Err> PipeExt<B, Args, Meta> for BoxStream<'static, Result<Args, Err>>
 where
-    B: BackendWithSink<Args, Meta>,
-    B::Error: Into<BoxDynError> + Send + Sync + 'static,
-    B::Sink: Sink<Task<Args, Meta, B::IdType>>,
+    <B as Backend<Args, Meta>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    B: Backend<Args, Meta> + Sink<Task<Args, Meta, B::IdType>>,
 {
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Meta> {
         Pipe::new(self, backend)

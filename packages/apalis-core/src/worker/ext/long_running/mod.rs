@@ -148,7 +148,7 @@ mod tests {
     use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
     use crate::{
-        backend::{memory::MemoryStorage, Backend, BackendWithSink, TaskSink},
+        backend::{memory::MemoryStorage, Backend, TaskSink},
         error::BoxDynError,
         service_fn::{self, service_fn, ServiceFn},
         task::data::Data,
@@ -166,9 +166,8 @@ mod tests {
     #[tokio::test]
     async fn basic_worker() {
         let mut in_memory = MemoryStorage::new();
-        let mut sink = in_memory.sink();
         for i in 0..ITEMS {
-            sink.push(i).await.unwrap();
+            in_memory.push(i).await.unwrap();
         }
 
         async fn task(

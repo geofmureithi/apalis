@@ -34,33 +34,27 @@ pub trait Backend<Args, Meta> {
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
 }
 
-pub trait BackendWithSink<Args, Meta>: Backend<Args, Meta> {
-    type Sink: Sink<Task<Args, Meta, Self::IdType>>;
-
-    #[must_use = "Sinks do nothing unless flushed"]
-    fn sink(&mut self) -> Self::Sink;
-}
 /// Represents a stream for T.
 pub type TaskStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
 
 pub trait TaskSink<Args, Meta, IdType> {
     type Error;
-    fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>>;
 
     fn push_bulk(
         &mut self,
         tasks: Vec<Args>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    ) -> impl Future<Output = Result<(), Self::Error>>;
 
     fn push_stream(
         &mut self,
         tasks: impl Stream<Item = Args> + Unpin + Send,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    ) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 impl<Args, Meta: Default, IdType, S> TaskSink<Args, Meta, IdType> for S
 where
-    S: Sink<Task<Args, Meta, IdType>> + Unpin + Send,
+    S: Sink<Task<Args, Meta, IdType>> + Unpin,
     Args: Send,
     Meta: Send,
     S::Error: Send,

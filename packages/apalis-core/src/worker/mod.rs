@@ -200,9 +200,6 @@ where
                     layer: Stack::new(layer, self.layer),
                 }
             }
-            fn into_inner(self) -> L {
-                self.layer
-            }
             fn service<S>(&self, service: S) -> L::Service
             where
                 L: Layer<S>,
@@ -244,10 +241,7 @@ where
         .boxed();
         let wait_for_exit: BoxStream<'static, _> = futures_util::stream::once(async move {
             match worker.await {
-                Ok(_) => {
-                    println!("Worker end");
-                    Err(WorkerError::GracefulExit)
-                }
+                Ok(_) => Err(WorkerError::GracefulExit),
                 Err(e) => Err(e),
             }
         })
@@ -422,7 +416,7 @@ mod tests {
     use futures_core::future::BoxFuture;
 
     use crate::{
-        backend::{memory::MemoryStorage, BackendWithSink, TaskSink},
+        backend::{memory::MemoryStorage, TaskSink},
         service_fn::{self, service_fn, ServiceFn},
         task::ExecutionContext,
         worker::{
@@ -443,9 +437,8 @@ mod tests {
     #[tokio::test]
     async fn it_works() {
         let mut in_memory = MemoryStorage::new();
-        let mut sink = in_memory.sink();
         for i in 0..ITEMS {
-            sink.push(i).await.unwrap();
+            in_memory.push(i).await.unwrap();
         }
 
         #[derive(Clone, Debug, Default)]
@@ -504,10 +497,9 @@ mod tests {
     #[tokio::test]
     async fn it_streams() {
         let mut in_memory = MemoryStorage::new();
-        let mut sink = in_memory.sink();
 
         for i in 0..ITEMS {
-            sink.push(i).await.unwrap();
+            in_memory.push(i).await.unwrap();
         }
 
         #[derive(Clone, Debug, Default)]

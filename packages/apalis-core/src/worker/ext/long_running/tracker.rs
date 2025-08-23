@@ -279,7 +279,7 @@ impl TaskTracker {
     /// Returns `true` if there are no tasks in this `TaskTracker`.
     #[inline]
     #[must_use]
-    pub(super) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.inner.state.load(Ordering::Acquire) <= 1
     }
 

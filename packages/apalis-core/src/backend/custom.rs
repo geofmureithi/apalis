@@ -1,23 +1,47 @@
 use futures_core::stream::BoxStream;
+use futures_sink::Sink;
+use futures_util::SinkExt;
 use futures_util::{Stream, StreamExt};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::{fmt, marker::PhantomData};
-use tower_layer::Identity;
 use thiserror::Error;
+use tower_layer::Identity;
 
-use crate::{
-    backend::{Backend, BackendWithSink},
-    task::Task,
-    worker::context::WorkerContext,
-};
+use crate::{backend::Backend, task::Task, worker::context::WorkerContext};
 
-#[derive(Clone)]
-pub struct CustomBackend<Args, DB, Fetch, Sink, IdType, Config = ()> {
-    _marker: PhantomData<(Args, IdType)>,
-    pool: DB,
-    fetcher: Arc<Box<dyn Fn(&mut DB, &Config, &WorkerContext) -> Fetch>>,
-    sink: Arc<Box<dyn Fn(&mut DB, &Config) -> Sink>>,
-    config: Config,
+pin_project_lite::pin_project! {
+    #[must_use = "Custom backends must be polled or used as a sink"]
+    pub struct CustomBackend<Args, DB, Fetch, Sink, IdType, Config = ()> {
+        _marker: PhantomData<(Args, IdType)>,
+        pool: DB,
+        fetcher: Arc<Box<dyn Fn(&mut DB, &Config, &WorkerContext) -> Fetch>>,
+        sinker: Arc<Box<dyn Fn(&mut DB, &Config) -> Sink>>,
+        #[pin]
+        current_sink: Sink,
+        config: Config,
+    }
+}
+
+impl<Args, DB, Fetch, Sink, IdType, Config> Clone
+    for CustomBackend<Args, DB, Fetch, Sink, IdType, Config>
+where
+    DB: Clone,
+    Config: Clone,
+{
+    fn clone(&self) -> Self {
+        let mut pool = self.pool.clone();
+        let current_sink = (self.sinker)(&mut pool, &self.config);
+        Self {
+            _marker: PhantomData,
+            pool,
+            fetcher: Arc::clone(&self.fetcher),
+            sinker: Arc::clone(&self.sinker),
+            current_sink,
+            config: self.config.clone(),
+        }
+    }
 }
 
 impl<Args, DB, Fetch, Sink, IdType, Config> fmt::Debug
@@ -126,15 +150,21 @@ impl<Args, DB, Fetch, Sink, IdType, Config> BackendBuilder<Args, DB, Fetch, Sink
     }
 
     pub fn build(self) -> Result<CustomBackend<Args, DB, Fetch, Sink, IdType, Config>, BuildError> {
+        let mut pool = self.database.ok_or(BuildError::MissingPool)?;
+        let config = self.config.ok_or(BuildError::MissingConfig)?;
+        let sink_fn = self.sink.ok_or(BuildError::MissingSink)?;
+        let sink = sink_fn(&mut pool, &config);
+
         Ok(CustomBackend {
             _marker: PhantomData,
-            pool: self.database.ok_or(BuildError::MissingPool)?,
+            pool,
             fetcher: self
                 .fetcher
                 .map(Arc::new)
                 .ok_or(BuildError::MissingFetcher)?,
-            sink: self.sink.map(Arc::new).ok_or(BuildError::MissingSink)?,
-            config: self.config.ok_or(BuildError::MissingConfig)?,
+            current_sink: sink,
+            sinker: Arc::new(sink_fn),
+            config,
         })
     }
 }
@@ -179,27 +209,43 @@ where
     }
 }
 
-impl<Args, DB, Fetch, Sink, E, IdType, Meta> BackendWithSink<Args, Meta>
-    for CustomBackend<Args, DB, Fetch, Sink, IdType>
+impl<Args, Meta, IdType, DB, Fetch, S, Config> Sink<Task<Args, Meta, IdType>>
+    for CustomBackend<Args, DB, Fetch, S, IdType, Config>
 where
-    Fetch: Stream<Item = Result<Option<Task<Args, Meta, IdType>>, E>>,
-    Sink: futures_sink::Sink<Task<Args, Meta, IdType>>,
-    CustomBackend<Args, DB, Fetch, Sink, IdType>: Backend<Args, Meta, IdType = IdType>,
+    S: Sink<Task<Args, Meta, IdType>>,
 {
-    type Sink = Sink;
+    type Error = S::Error;
 
-    fn sink(&mut self) -> Self::Sink {
-        (self.sink)(&mut self.pool, &self.config)
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().current_sink.poll_ready_unpin(cx)
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: Task<Args, Meta, IdType>) -> Result<(), Self::Error> {
+        self.project().current_sink.start_send_unpin(item)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().current_sink.poll_flush_unpin(cx)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().current_sink.poll_close_unpin(cx)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{collections::VecDeque, convert::Infallible, time::Duration};
+
+    use futures_channel::mpsc::SendError;
+    use futures_util::{lock::Mutex, sink, stream, FutureExt};
+    use tokio::sync::RwLock;
+    use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
         backend::{memory::MemoryStorage, TaskSink},
         error::BoxDynError,
+        task::{builder::TaskBuilder, task_id::RandomId},
         worker::{builder::WorkerBuilder, ext::event_listener::EventListenerExt},
     };
 
@@ -209,17 +255,39 @@ mod tests {
 
     #[tokio::test]
     async fn basic_custom_backend() {
-        let memory = MemoryStorage::new_with_json();
+        let memory: Arc<Mutex<VecDeque<Task<u32, ()>>>> = Arc::new(Mutex::new(VecDeque::new()));
 
         let mut backend = BackendBuilder::new()
             .database(memory)
-            .fetcher(|pool, _, worker| pool.clone().poll(worker))
-            .sink(|pool, _| pool.sink())
+            .fetcher(|pool, _, _| {
+                stream::unfold(pool.clone(), |p| async move {
+                    tokio::time::sleep(Duration::from_millis(100)).await; // Debounce
+                    let mut pool = p.lock().await;
+                    let item = pool.pop_front();
+                    drop(pool);
+                    match item {
+                        Some(item) => Some((Ok::<_, Infallible>(Some(item)), p)),
+                        None => Some((Ok::<_, Infallible>(None), p)),
+                    }
+                })
+                .boxed()
+            })
+            .sink(|pool, _| {
+                sink::unfold(pool.clone(), move |p, item| {
+                    async move {
+                        let mut pool = p.lock().await;
+                        pool.push_back(item);
+                        drop(pool);
+                        Ok::<_, Infallible>(p)
+                    }
+                    .boxed()
+                })
+            })
             .build()
             .unwrap();
-        let mut sink = backend.sink();
+
         for i in 0..ITEMS {
-            sink.push(i).await.unwrap();
+            backend.push(i).await.unwrap();
         }
 
         async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {

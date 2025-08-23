@@ -56,7 +56,7 @@ mod tests {
     use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
-        backend::{memory::MemoryStorage, BackendWithSink, TaskSink},
+        backend::{memory::MemoryStorage, TaskSink},
         error::BoxDynError,
         worker::{
             builder::WorkerBuilder,
@@ -72,9 +72,8 @@ mod tests {
     #[tokio::test]
     async fn basic_worker() {
         let mut in_memory = MemoryStorage::new();
-        let mut sink = in_memory.sink();
         for i in 0..ITEMS {
-            sink.push(i).await.unwrap();
+            in_memory.push(i).await.unwrap();
         }
 
         async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {

@@ -1,5 +1,5 @@
 use crate::{
-    backend::{Backend, BackendWithSink, TaskStream},
+    backend::{Backend, TaskStream},
     error::BoxDynError,
     task::{
         task_id::{RandomId, TaskId},
@@ -56,6 +56,46 @@ impl<Args: Send + 'static> MemoryStorage<MemoryWrapper<Args>> {
                 buffer: Default::default(),
             },
         }
+    }
+}
+
+impl<Args, T: Sink<Task<Args, ()>> + Unpin + Send> Sink<Task<Args, ()>> for MemoryStorage<T> {
+    type Error = T::Error;
+
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.as_mut().inner.poll_ready_unpin(cx)
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: Task<Args, ()>) -> Result<(), Self::Error> {
+        self.as_mut().inner.start_send_unpin(item)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.as_mut().inner.poll_flush_unpin(cx)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.as_mut().inner.poll_close_unpin(cx)
+    }
+}
+
+impl<Args> Sink<Task<Args, ()>> for MemoryWrapper<Args> {
+    type Error = SendError;
+
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.as_mut().sender.poll_ready_unpin(cx)
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: Task<Args, ()>) -> Result<(), Self::Error> {
+        self.as_mut().sender.start_send_unpin(item)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.as_mut().sender.poll_flush_unpin(cx)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.as_mut().sender.poll_close_unpin(cx)
     }
 }
 
@@ -273,14 +313,6 @@ impl<Args: 'static + Clone + Send> Backend<Args, ()> for MemoryStorage<MemoryWra
     }
 }
 
-impl<T: Clone + Send + Unpin + 'static> BackendWithSink<T, ()> for MemoryStorage<MemoryWrapper<T>> {
-    type Sink = MemorySink<T>;
-
-    fn sink(&mut self) -> Self::Sink {
-        self.inner.sender.clone()
-    }
-}
-
 #[cfg(feature = "json")]
 impl<Args: 'static + Send + DeserializeOwned> Backend<Args, ()>
     for MemoryStorage<JsonMemory<Args>>
@@ -303,24 +335,7 @@ impl<Args: 'static + Send + DeserializeOwned> Backend<Args, ()>
     }
 }
 
-#[cfg(feature = "json")]
-impl<T: 'static + Send + DeserializeOwned + Unpin + Serialize + Clone> BackendWithSink<T, ()>
-    for MemoryStorage<JsonMemory<T>>
-{
-    type Sink = JsonMemory<T>;
-    fn sink(&mut self) -> Self::Sink {
-        self.inner.clone()
-    }
-}
-
-#[cfg(feature = "json")]
-#[derive(Debug, Clone, Default)]
-struct Wrapped {
-    namespace: String,
-    value: serde_json::Value,
-}
-
-pub trait PopFirstWith<K, V> {
+trait PopFirstWith<K, V> {
     fn pop_first_with<F>(&mut self, predicate: F) -> Option<(K, V)>
     where
         F: FnMut(&K, &V) -> bool;
@@ -436,12 +451,9 @@ mod tests {
         let mut store = SharedJsonMemory::default();
         let mut string_store = store.make_shared().unwrap();
         let mut int_store = store.make_shared().unwrap();
-        let mut int_sink = int_store.sink();
-        let mut string_sink = string_store.sink();
-
         for i in 0..ITEMS {
-            string_sink.push(format!("ITEM: {i}")).await.unwrap();
-            int_sink.push(i).await.unwrap();
+            string_store.push(format!("ITEM: {i}")).await.unwrap();
+            int_store.push(i).await.unwrap();
         }
         #[derive(Clone, Debug, Default)]
         struct Count(Arc<AtomicUsize>);
