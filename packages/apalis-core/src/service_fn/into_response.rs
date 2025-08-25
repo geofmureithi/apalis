@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use crate::error::BoxDynError;
 
 /// Helper for Job Responses
@@ -16,6 +18,13 @@ impl IntoResponse for bool {
             true => Ok(true),
             false => Err("Task returned false".into()),
         }
+    }
+}
+
+impl<T> IntoResponse for Option<T> {
+    type Output = Option<T>;
+    fn into_response(self) -> Result<Option<T>, BoxDynError> {
+        Ok(self)
     }
 }
 

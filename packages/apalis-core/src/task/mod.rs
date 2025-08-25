@@ -35,6 +35,7 @@ pub mod data;
 pub mod extensions;
 pub mod status;
 pub mod task_id;
+pub mod metadata;
 
 /// Represents a task which will be executed
 /// Should be considered a single unit of work
