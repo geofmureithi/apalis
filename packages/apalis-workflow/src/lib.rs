@@ -8,7 +8,10 @@ use std::{
     time::Duration,
 };
 
-use futures::future::BoxFuture;
+use futures::{
+    future::{ready, BoxFuture},
+    FutureExt,
+};
 // use futures::{channel::mpsc::Receiver, stream::BoxStream, StreamExt};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -53,17 +56,66 @@ pub enum GoTo<N> {
 
     FilterMap(N),
 }
-pub trait Step<Args> {
+pub trait Step<Args, Meta, Backend> {
     type Response;
     type Error;
-    fn pre(&self, ctx: &StepContext) -> Result<(), Self::Error>;
+    fn pre(
+        &self,
+        ctx: &StepContext<Backend>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
-    fn run(&self, ctx: &StepContext, args: Args) -> Result<Self::Response, Self::Error>;
+    fn run(
+        &mut self,
+        ctx: &StepContext<Backend>,
+        args: Task<Args, Meta>,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send;
 
-    fn post(&self, ctx: &StepContext, res: &Self::Response) -> Result<(), Self::Error>;
+    fn post(
+        &self,
+        ctx: &StepContext<Backend>,
+        res: &Self::Response,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-pub type BoxStep<Args> = Box<dyn Step<Args, Response = Value, Error = BoxDynError>>;
+// pub type BoxStep<Args> = Box<dyn Step<Args, Response = Value, Error = BoxDynError>>;
+
+pub struct StepService<S, C, Args, B> {
+    step: S,
+    codec: PhantomData<(C, Args)>,
+    backend: B,
+}
+
+impl<Args, Meta, S, C, Compact, B> Service<Task<Compact, Meta>> for StepService<S, C, Args, B>
+where
+    S: Step<Args, Meta, B> + Clone + Send + 'static,
+    C: Codec<Args, Compact = Compact>,
+    S::Response: Send + 'static,
+    C::Error: Debug,
+    S::Error: Debug + Send + 'static,
+    B: Clone + Send + 'static,
+    Args: Send + 'static,
+    Meta: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<S::Response, S::Error>>;
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+    fn call(&mut self, req: Task<Compact, Meta>) -> Self::Future {
+        let req = req.try_map(|arg| C::decode(arg)).unwrap();
+
+        let ctx = StepContext::new(self.backend.clone());
+
+        let mut step = self.step.clone();
+        Box::pin(async move {
+            let pre = step.pre(&ctx).await.unwrap();
+            let res = step.run(&ctx, req).await.unwrap();
+            let post = step.post(&ctx, &res).await.unwrap();
+            Ok(res)
+        })
+    }
+}
 
 // pub struct ThenStep<F> {
 //     f: F,
@@ -107,7 +159,7 @@ pub struct WorkFlow<
     Meta = (),
     Backend = MemoryStorage<JsonMemory<serde_json::Value>>,
 > {
-    steps: HashMap<usize, SteppedService<Compact, Meta>>,
+    steps: HashMap<usize, Box<dyn FnOnce(Backend) -> SteppedService<Compact, Meta>>>,
     _marker: PhantomData<(Input, Current, Backend)>,
 }
 
@@ -120,7 +172,6 @@ impl<Input> WorkFlow<Input, Input> {
     }
 }
 
-
 impl<Input, Current, Meta> WorkFlow<Input, Current, serde_json::Value, Meta>
 where
     Current: DeserializeOwned + Send + 'static,
@@ -129,21 +180,48 @@ where
     where
         O: Serialize + Send + 'static,
         E: Into<BoxDynError> + Send + Sync + 'static,
-        F: Send + 'static,
+        F: Send + 'static + Sync + Clone,
         ServiceFn<F, Current, Meta, FnArgs>: Service<Task<Current, Meta>, Response = O, Error = E>,
-        FnArgs: std::marker::Send + 'static,
-        Current: std::marker::Send + 'static,
-        Meta: Send + 'static,
+        FnArgs: std::marker::Send + 'static + Sync,
+        Current: std::marker::Send + 'static + Serialize + Sync,
+        Meta: Send + 'static + Sync,
         <ServiceFn<F, Current, Meta, FnArgs> as Service<Task<Current, Meta>>>::Future:
             Send + 'static,
         <ServiceFn<F, Current, Meta, FnArgs> as Service<Task<Current, Meta>>>::Error:
             Into<BoxDynError>,
     {
+        self.add_step(ThenStep {
+            inner: service_fn::<F, Current, Meta, FnArgs>(then),
+            _marker: PhantomData,
+        })
+    }
+
+    pub fn add_step< O, S>(mut self, step: S) -> WorkFlow<Input, O, serde_json::Value, Meta>
+    where
+        O: Serialize + Send + 'static,
+        Current: std::marker::Send + 'static + Serialize + Sync,
+        Meta: Send + 'static + Sync,
+        S: Step<
+                Current,
+                Meta,
+                MemoryStorage<JsonMemory<Value>>,
+                Response = GoTo<Value>,
+                Error = BoxDynError,
+            > + Clone
+            + Sync
+            + Send
+            + 'static,
+        S::Response: Send,
+        S::Error: Debug + Send,
+    {
         self.steps.insert(
             self.steps.len(),
-            SteppedService::<Value, Meta>::new(ThenStep {
-                inner: service_fn::<F, Current, Meta, FnArgs>(then),
-                _marker: PhantomData,
+            Box::new(|backend: MemoryStorage<JsonMemory<Value>>| {
+                SteppedService::<Value, Meta>::new(StepService {
+                    backend,
+                    codec: PhantomData::<(JsonCodec<Value>, Current)>,
+                    step,
+                })
             }),
         );
         WorkFlow {
@@ -173,13 +251,13 @@ where
             Into<BoxDynError>,
     {
         let current_step = self.steps.len() + 1;
-        self.steps.insert(
-            current_step,
-            SteppedService::<Value, Meta>::new(FilterStep {
-                inner: service_fn::<F, Current, Meta, FnArgs>(predicate),
-                _marker: PhantomData,
-            }),
-        );
+        // self.steps.insert(
+        //     current_step,
+        //     SteppedService::<Value, Meta>::new(FilterStep {
+        //         inner: service_fn::<F, Current, Meta, FnArgs>(predicate),
+        //         _marker: PhantomData,
+        //     }),
+        // );
 
         WorkFlow {
             steps: self.steps,
@@ -203,13 +281,13 @@ where
             Into<BoxDynError>,
         T: Send + Serialize + 'static,
     {
-        self.steps.insert(
-            self.steps.len(),
-            SteppedService::<Value, Meta>::new(FilterMapStep {
-                inner: service_fn::<F, Current, Meta, FnArgs>(predicate),
-                _marker: PhantomData,
-            }),
-        );
+        // self.steps.insert(
+        //     self.steps.len(),
+        //     SteppedService::<Value, Meta>::new(FilterMapStep {
+        //         inner: service_fn::<F, Current, Meta, FnArgs>(predicate),
+        //         _marker: PhantomData,
+        //     }),
+        // );
         WorkFlow {
             steps: self.steps,
             _marker: PhantomData,
@@ -301,9 +379,19 @@ impl<Input, Current, Meta> WorkFlow<Input, Current, serde_json::Value, Meta> {
     }
 }
 
+#[derive(Debug)]
 pub struct ThenStep<S, T> {
     inner: S,
     _marker: std::marker::PhantomData<T>,
+}
+
+impl<S: Clone, T> Clone for ThenStep<S, T> {
+    fn clone(&self) -> Self {
+        ThenStep {
+            inner: self.inner.clone(),
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<S, T> ThenStep<S, T> {
@@ -315,33 +403,53 @@ impl<S, T> ThenStep<S, T> {
     }
 }
 
-impl<S, T, O, E, Meta> Service<Task<serde_json::Value, Meta>> for ThenStep<S, T>
+impl<S, T, O, E, Meta, B> Step<T, Meta, B> for ThenStep<S, T>
 where
-    S: Service<Task<T, Meta>, Response = O, Error = E>,
-    T: DeserializeOwned,
+    S: Service<Task<T, Meta>, Response = O, Error = E> + Sync + Send,
+    T: DeserializeOwned + Sync,
     S::Future: Send + 'static,
     S::Error: Into<BoxDynError>,
     E: Into<BoxDynError>,
     O: Serialize,
+    B: Sync,
+    T: Send,
+    Meta: Send,
 {
     type Response = GoTo<serde_json::Value>;
     type Error = BoxDynError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(|e| e.into())
+    async fn pre(&self, ctx: &StepContext<B>) -> Result<(), Self::Error> {
+        Ok(())
     }
 
-    fn call(&mut self, req: Task<serde_json::Value, Meta>) -> Self::Future {
-        let mapped = req.map(|v| serde_json::from_value::<T>(v).unwrap());
-
-        let fut = self.inner.call(mapped);
-
-        Box::pin(async move {
-            let resp = fut.await.map_err(|e| e.into())?;
-            Ok(GoTo::Next(serde_json::to_value(resp).unwrap()))
-        })
+    async fn run(
+        &mut self,
+        ctx: &StepContext<B>,
+        args: Task<T, Meta>,
+    ) -> Result<Self::Response, Self::Error> {
+        let res = self.inner.call(args).await.map_err(|e| e.into())?;
+        Ok(GoTo::Next(serde_json::to_value(res).unwrap()))
     }
+
+    async fn post(&self, ctx: &StepContext<B>, res: &Self::Response) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    // type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    // fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    //     self.inner.poll_ready(cx).map_err(|e| e.into())
+    // }
+
+    // fn call(&mut self, req: Task<serde_json::Value, Meta>) -> Self::Future {
+    //     let mapped = req.map(|v| serde_json::from_value::<T>(v).unwrap());
+
+    //     let fut = self.inner.call(mapped);
+
+    //     Box::pin(async move {
+    //         let resp = fut.await.map_err(|e| e.into())?;
+    //         Ok(GoTo::Next(serde_json::to_value(resp).unwrap()))
+    //     })
+    // }
 }
 
 pub struct FilterMapStep<S, T, O> {
@@ -408,8 +516,18 @@ pub struct FilterContext {
     task_ids: Vec<TaskId>,
 }
 
-pub struct StepContext {
+#[derive(Debug)]
+pub struct StepContext<B> {
     current_step: usize,
+    backend: B,
+}
+impl<B> StepContext<B> {
+    fn new(backend: B) -> Self {
+        Self {
+            current_step: 0,
+            backend,
+        }
+    }
 }
 
 impl<S, T, Meta: MetadataExt<FilterContext>> Service<Task<serde_json::Value, Meta>>
