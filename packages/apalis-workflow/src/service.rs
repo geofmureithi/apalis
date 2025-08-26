@@ -4,21 +4,37 @@ use std::{
     task::{Context, Poll},
 };
 
-use apalis_core::{error::BoxDynError, task::Task};
+use apalis_core::{backend, error::BoxDynError, task::Task};
 use futures::future::BoxFuture;
 use serde_json::Value;
 use tower::Service;
 
-use crate::{GoTo, SteppedService};
+use crate::{CompositeService, GoTo, StepContext, SteppedService};
 
-pub struct WorkFlowService<Compact, Meta> {
-    services: HashMap<usize, SteppedService<Compact, Meta>>,
+pub struct WorkFlowService<Compact, Meta, Backend> {
+    services: HashMap<usize, CompositeService<Compact, Meta, Backend>>,
     not_ready: VecDeque<usize>,
     _phantom: PhantomData<Compact>,
+    backend: Backend,
+}
+impl<Compact, Meta, Backend> WorkFlowService<Compact, Meta, Backend> {
+    pub(crate) fn new(
+        services: HashMap<usize, CompositeService<Compact, Meta, Backend>>,
+        backend: Backend,
+    ) -> Self {
+        Self {
+            services,
+            not_ready: VecDeque::new(),
+            _phantom: PhantomData,
+            backend,
+        }
+    }
 }
 
-impl<Meta> Service<Task<Value, Meta>> for WorkFlowService<Value, Meta> {
-    type Response = GoTo<Value>;
+impl<Meta, Backend: Clone + Send + Sync + 'static> Service<Task<Value, Meta>>
+    for WorkFlowService<Value, Meta, Backend>
+{
+    type Response = Value;
     type Error = BoxDynError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -33,6 +49,7 @@ impl<Meta> Service<Task<Value, Meta>> for WorkFlowService<Value, Meta> {
                     .services
                     .get_mut(&self.not_ready[0])
                     .unwrap()
+                    .svc
                     .poll_ready(cx)?
                     .is_pending()
                 {
@@ -53,9 +70,19 @@ impl<Meta> Service<Task<Value, Meta>> for WorkFlowService<Value, Meta> {
         // match step_type {
         //
         // }
-        let idx = 0;
+        let ctx = StepContext::new(self.backend.clone());
+        let idx = 1;
+        let cl_1 = self.services.get(&(&idx + 1)).unwrap();
+        let next_hook = cl_1.pre_hook.clone();
         let cl = self.services.get_mut(&idx).unwrap();
+        let svc = &mut cl.svc;
+
         self.not_ready.push_back(idx);
-        cl.call(req)
+        let fut = svc.call(req);
+        Box::pin(async move {
+            let res = fut.await?;
+            next_hook(&ctx, &res).await?;
+            Ok(res)
+        })
     }
 }
