@@ -62,7 +62,7 @@ where
 
 impl<Args, P, M, Meta> EventListenerExt<Args, Meta, P, M> for WorkerBuilder<Args, Meta, P, M>
 where
-    P: Backend<Args, Meta>,
+    P: Backend<Args>,
     M: Layer<EventListenerLayer>,
 {
     fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(

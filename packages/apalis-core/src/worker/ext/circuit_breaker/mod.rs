@@ -30,7 +30,7 @@ pub trait CircuitBreaker<Args, Meta, Source, Middleware>: Sized {
 
 impl<Args, P, M, Meta> CircuitBreaker<Args, Meta, P, M> for WorkerBuilder<Args, Meta, P, M>
 where
-    P: Backend<Args, Meta>,
+    P: Backend<Args>,
     M: Layer<CircuitBreakerLayer>,
 {
     fn break_circuit_with(

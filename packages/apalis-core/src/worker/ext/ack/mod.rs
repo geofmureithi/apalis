@@ -16,7 +16,7 @@ use crate::{
 /// 
 pub trait AcknowledgementExt<Args, Meta, Source, Middleware, Ack, Res>: Sized
 where
-    Source: Backend<Args, Meta>,
+    Source: Backend<Args>,
     Ack: Acknowledge<Res, Meta, Source::IdType>,
 {
     fn ack_with(
@@ -123,7 +123,7 @@ impl<Args, B, M, Meta, Ack, Res> AcknowledgementExt<Args, Meta, B, M, Ack, Res>
 where
     M: Layer<AcknowledgeLayer<Ack>>,
     Ack: Acknowledge<Res, Meta, B::IdType>,
-    B: Backend<Args, Meta>,
+    B: Backend<Args>,
 {
     fn ack_with(self, ack: Ack) -> WorkerBuilder<Args, Meta, B, Stack<AcknowledgeLayer<Ack>, M>> {
         let this = self.layer(AcknowledgeLayer::new(ack));

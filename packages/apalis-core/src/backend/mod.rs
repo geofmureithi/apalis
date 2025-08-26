@@ -22,10 +22,11 @@ pub mod pipe;
 pub mod shared;
 
 /// A backend represents a task source
-pub trait Backend<Args, Meta> {
+pub trait Backend<Args> {
     type IdType;
+    type Meta;
     type Error;
-    type Stream: Stream<Item = Result<Option<Task<Args, Meta, Self::IdType>>, Self::Error>>;
+    type Stream: Stream<Item = Result<Option<Task<Args, Self::Meta, Self::IdType>>, Self::Error>>;
     type Beat: Stream<Item = Result<(), Self::Error>>;
     type Layer;
 
@@ -89,24 +90,24 @@ where
     }
 }
 
-pub trait FetchById<Args, Meta>: Backend<Args, Meta> {
+pub trait FetchById<Args>: Backend<Args> {
     fn fetch_by_id(
         &mut self,
         task_id: &TaskId,
-    ) -> impl Future<Output = Result<Option<Task<Args, Meta>>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Option<Task<Args, Self::Meta>>, Self::Error>> + Send;
 }
 
-pub trait Update<Args, Context>: Backend<Args, Context> {
+pub trait Update<Args>: Backend<Args> {
     fn update(
         &mut self,
-        task: Task<Args, Context>,
+        task: Task<Args, Self::Meta>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-pub trait Reschedule<Args, Meta>: Backend<Args, Meta> {
+pub trait Reschedule<Args>: Backend<Args> {
     fn reschedule(
         &mut self,
-        task: Task<Args, Meta>,
+        task: Task<Args, Self::Meta>,
         wait: Duration,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
@@ -116,15 +117,6 @@ pub trait Vacuum {
     fn vacuum(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
-pub trait ConsumeNext<Args, Meta>: Backend<Args, Meta> {
-    fn consume_next(
-        &mut self,
-    ) -> impl Future<Output = Result<Option<Task<Args, Meta>>, Self::Error>> + Send;
-}
-
-pub trait ConsumeBatch<T, Meta>: Backend<T, Meta> {
-    fn consume_batch(&mut self) -> Self::Stream;
-}
 
 pub trait FetchBatch<T> {
     type Id;
@@ -138,7 +130,7 @@ pub trait FetchAll<Meta> {
     fn fetch_many(&mut self) -> TaskStream<Task<Self::Compact, Meta>>;
 }
 
-pub trait ResumeById<T, Context>: Backend<T, Context> {
+pub trait ResumeById<T>: Backend<T> {
     type Id;
 
     fn resume_by_id(
@@ -147,11 +139,11 @@ pub trait ResumeById<T, Context>: Backend<T, Context> {
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
-pub trait ResumeAbandoned<T, Context>: Backend<T, Context> {
+pub trait ResumeAbandoned<T, Context>: Backend<T> {
     fn resume_abandoned(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
-pub trait RegisterWorker<T, Context>: Backend<T, Context> {
+pub trait RegisterWorker<T, Context>: Backend<T> {
     fn register_worker(
         &mut self,
         worker_id: String,
@@ -163,15 +155,15 @@ pub trait Metric<Output> {
     fn metric(&mut self) -> impl Future<Output = Result<Output, Self::Error>> + Send;
 }
 
-pub trait ListWorkers<Args, Meta>: Backend<Args, Meta> {
+pub trait ListWorkers<Args>: Backend<Args> {
     type Worker;
     fn list_workers(&self) -> impl Future<Output = Result<Vec<Self::Worker>, Self::Error>> + Send;
 }
 
-pub trait ListTasks<Args, Meta>: Backend<Args, Meta> {
+pub trait ListTasks<Args>: Backend<Args> {
     type Filter;
     fn list_tasks(
         &self,
         filter: &Self::Filter,
-    ) -> impl Future<Output = Result<Vec<Task<Args, Meta, Self::IdType>>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Vec<Task<Args, Self::Meta, Self::IdType>>, Self::Error>> + Send;
 }

@@ -125,7 +125,7 @@ pub trait LongRunningExt<Args, Meta, Source, Middleware>: Sized {
 impl<Args, B, M, Meta> LongRunningExt<Args, Meta, B, M> for WorkerBuilder<Args, Meta, B, M>
 where
     M: Layer<LongRunningLayer>,
-    B: Backend<Args, Meta>,
+    B: Backend<Args>,
 {
     fn long_running_with_cfg(
         self,

@@ -337,10 +337,12 @@ impl<Args, Meta> Stream for MemoryWrapper<Args, Meta> {
 }
 
 // MemoryStorage as a Backend
-impl<Args: 'static + Clone + Send, Meta: 'static> Backend<Args, Meta>
+impl<Args: 'static + Clone + Send, Meta: 'static> Backend<Args>
     for MemoryStorage<MemoryWrapper<Args, Meta>>
 {
     type IdType = RandomId;
+
+    type Meta = Meta;
 
     type Error = BoxDynError;
     type Stream = TaskStream<Task<Args, Meta>>;
@@ -361,11 +363,12 @@ impl<Args: 'static + Clone + Send, Meta: 'static> Backend<Args, Meta>
 }
 
 #[cfg(feature = "json")]
-impl<Args: 'static + Send + DeserializeOwned> Backend<Args, JsonMapMetadata>
+impl<Args: 'static + Send + DeserializeOwned> Backend<Args>
     for MemoryStorage<JsonMemory<Args>>
 {
     type IdType = RandomId;
     type Error = BoxDynError;
+    type Meta = JsonMapMetadata;
     type Stream = TaskStream<Task<Args, JsonMapMetadata>>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;

@@ -154,7 +154,7 @@ macro_rules! impl_service_fn {
         impl<T, Args, Meta, F, R, B, $($K),+>
             WorkerServiceBuilder<B, ServiceFn<T, Args, Meta, ($($K),+)>, Args, Meta> for T
         where
-            B: Backend<Args, Meta>,
+            B: Backend<Args>,
             T: FnMut(Args, $($K),+) -> F,
             F: Future,
             F::Output: IntoResponse<Output = R>,
@@ -206,7 +206,7 @@ where
 impl<Args, Meta, S, B> WorkerServiceBuilder<B, S, Args, Meta> for S
 where
     S: Service<Task<Args, Meta, B::IdType>>,
-    B: Backend<Args, Meta>
+    B: Backend<Args>
 {
     fn build(self, _: &B) -> S {
         self

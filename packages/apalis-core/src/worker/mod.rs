@@ -130,28 +130,29 @@ impl<Args, Meta, B, Svc, M> Worker<Args, Meta, B, Svc, M> {
     }
 }
 
-impl<Args, Meta, S, B, M> Worker<Args, Meta, B, S, M>
+impl<Args, S, B, M> Worker<Args, B::Meta, B, S, M>
 where
-    B: Backend<Args, Meta>,
-    S: Service<Task<Args, Meta, B::IdType>> + Send + 'static,
+    B: Backend<Args>,
+    S: Service<Task<Args, B::Meta, B::IdType>> + Send + 'static,
     B::Stream: Unpin + Send + 'static,
     B::Beat: Unpin + Send + 'static,
     Args: Send + 'static,
-    Meta: Send + 'static,
+    B::Meta: Send + 'static,
     B::Error: Into<BoxDynError> + Send + 'static,
     M: Layer<ReadinessService<TrackerService<S>>>,
     B::Layer: Layer<M::Service>,
-    <B::Layer as Layer<M::Service>>::Service: Service<Task<Args, Meta, B::IdType>> + Send + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, Meta, B::IdType>>>::Error:
+    <B::Layer as Layer<M::Service>>::Service:
+        Service<Task<Args, B::Meta, B::IdType>> + Send + 'static,
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Meta, B::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, Meta, B::IdType>>>::Future:
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Meta, B::IdType>>>::Future:
         Send,
-    M::Service: Service<Task<Args, Meta, B::IdType>> + Send + 'static,
+    M::Service: Service<Task<Args, B::Meta, B::IdType>> + Send + 'static,
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-        Task<Args, Meta, B::IdType>,
+        Task<Args, B::Meta, B::IdType>,
     >>::Future: Send,
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-        Task<Args, Meta, B::IdType>,
+        Task<Args, B::Meta, B::IdType>,
     >>::Error: Into<BoxDynError> + Send + Sync + 'static,
     B::IdType: Send + 'static,
 {
@@ -255,7 +256,7 @@ where
             });
         starter.chain(work_stream)
     }
-    fn poll_tasks<Svc, Stm, E: Into<BoxDynError> + Send + 'static>(
+    fn poll_tasks<Svc, Stm, E, Meta>(
         service: Svc,
         stream: Stm,
     ) -> BoxStream<'static, Result<Event, WorkerError>>
@@ -266,6 +267,7 @@ where
         Svc::Future: Send,
         Meta: Send + 'static,
         Svc::Error: Into<BoxDynError> + Sync + Send,
+        E: Into<BoxDynError> + Send + 'static,
     {
         let stream = CallAllUnordered::new(service, stream).map(|r| match r {
             Ok(Some(_)) => Ok(Event::Success),

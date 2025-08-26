@@ -181,12 +181,14 @@ pub enum BuildError {
     MissingConfig,
 }
 
-impl<Args, DB, Fetch, Sink, IdType, E, Meta, Config> Backend<Args, Meta>
+impl<Args, DB, Fetch, Sink, IdType, E, Meta, Config> Backend<Args>
     for CustomBackend<Args, DB, Fetch, Sink, IdType, Config>
 where
     Fetch: Stream<Item = Result<Option<Task<Args, Meta, IdType>>, E>>,
 {
     type IdType = IdType;
+
+    type Meta = Meta;
 
     type Error = E;
 

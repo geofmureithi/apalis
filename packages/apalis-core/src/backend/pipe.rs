@@ -35,11 +35,11 @@ impl<S: fmt::Debug, Into: fmt::Debug, Args, Meta> fmt::Debug for Pipe<S, Into, A
     }
 }
 
-impl<Args, Meta, S, TSink, Err> Backend<Args, Meta> for Pipe<S, TSink, Args, Meta>
+impl<Args, Meta, S, TSink, Err> Backend<Args> for Pipe<S, TSink, Args, Meta>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    TSink: Backend<Args, Meta> + Sink<Task<Args, Meta, TSink::IdType>> + Clone + Unpin + Send + 'static,
-    <TSink as Backend<Args, Meta>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    TSink: Backend<Args, Meta = Meta> + Sink<Task<Args, Meta, TSink::IdType>> + Clone + Unpin + Send + 'static,
+    <TSink as Backend<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
     TSink::Beat: Send + 'static,
     TSink::IdType: Send + Clone + 'static,
     TSink::Stream: Send + 'static,
@@ -50,6 +50,8 @@ where
         Into<BoxDynError> + Send + Sync + 'static,
 {
     type IdType = TSink::IdType;
+
+    type Meta = Meta;
 
     type Stream = BoxStream<'static, Result<Option<Task<Args, Meta, Self::IdType>>, PipeError>>;
 
@@ -107,8 +109,8 @@ where
 
 impl<B, Args, Meta, Err> PipeExt<B, Args, Meta> for BoxStream<'static, Result<Args, Err>>
 where
-    <B as Backend<Args, Meta>>::Error: Into<BoxDynError> + Send + Sync + 'static,
-    B: Backend<Args, Meta> + Sink<Task<Args, Meta, B::IdType>>,
+    <B as Backend<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    B: Backend<Args> + Sink<Task<Args, Meta, B::IdType>>,
 {
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Meta> {
         Pipe::new(self, backend)

@@ -136,7 +136,7 @@ impl WorkerBuilder<(), (), (), Identity> {
 
 impl WorkerBuilder<(), (), (), Identity> {
     /// Set the source to a backend that implements [Backend]
-    pub fn backend<NB: Backend<NJ, Ctx>, NJ, Ctx>(
+    pub fn backend<NB: Backend<NJ>, NJ, Ctx>(
         self,
         backend: NB,
     ) -> WorkerBuilder<NJ, Ctx, NB, Identity> {
@@ -153,7 +153,7 @@ impl WorkerBuilder<(), (), (), Identity> {
 
 impl<Args, Meta, M, B> WorkerBuilder<Args, Meta, B, M>
 where
-    B: Backend<Args, Meta>,
+    B: Backend<Args>,
 {
     /// Allows of decorating the service that consumes jobs.
     /// Allows adding multiple [`tower`] middleware
@@ -240,7 +240,7 @@ pub trait WorkerBuilderExt<Args, Meta, Svc, Backend, M>: Sized {
 impl<T, Args, Meta, Svc, B, M> WorkerBuilderExt<Args, Meta, Svc, B, M> for T
 where
     T: WorkerServiceBuilder<B, Svc, Args, Meta>,
-    B: Backend<Args, Meta>,
+    B: Backend<Args>,
 {
     fn with_builder(self, builder: WorkerBuilder<Args, Meta, B, M>) -> Worker<Args, Meta, B, Svc, M> {
         let svc = self.build(&builder.source);
