@@ -46,7 +46,7 @@ impl<FlowSink: Clone + Send + Sync + 'static + TaskSink<Compact>, Encode, Compac
 where
     FlowSink::Meta: MetadataExt<WorkflowRequest>,
     Encode: Send + Sync + 'static,
-    Compact: Send+ 'static
+    Compact: Send + 'static,
 {
     type Response = Compact;
     type Error = BoxDynError;
@@ -86,9 +86,10 @@ where
 
         let next_hook = self.services.get(&(&idx + 1)).map(|s| s.pre_hook.clone());
 
-        dbg!(idx);
-
-        let cl = self.services.get_mut(&idx).unwrap();
+        let cl = self
+            .services
+            .get_mut(&idx)
+            .expect("Attempted to run a step that doesn't exist");
         let svc = &mut cl.svc;
 
         req.insert(ctx.clone());

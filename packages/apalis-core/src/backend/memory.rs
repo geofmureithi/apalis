@@ -43,7 +43,6 @@ where
 
     fn extract(&self) -> Result<T, serde_json::Error> {
         use serde::de::Error as _;
-
         let key = std::any::type_name::<T>();
         match self.get(key) {
             Some(value) => serde_json::from_value(value.clone()),

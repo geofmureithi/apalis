@@ -1,12 +1,11 @@
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 use apalis_core::{
-    backend::{codec::Codec, TaskResult, TaskSink, WaitForCompletion},
-    task::{builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId, Task},
+    backend::{codec::Codec, TaskResult, TaskSink, WaitForCompletion}, error::BoxDynError, task::{builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId, Task}
 };
 use futures::{lock::Mutex, StreamExt};
 
-use crate::WorkflowRequest;
+use crate::{StepError, WorkflowRequest};
 
 #[derive(Debug)]
 pub struct StepContext<FlowSink, Encode> {
@@ -76,40 +75,43 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
         &mut self,
         index: usize,
         step: &T,
-    ) -> Result<TaskId<FlowSink::IdType>, FlowSink::Error>
+    ) -> Result<TaskId<FlowSink::IdType>, StepError<Encode::Error>>
     where
         FlowSink: Sync + TaskSink<Compact>,
         T: Send + Sync,
         FlowSink::Meta: Send + Default + MetadataExt<WorkflowRequest>,
-        FlowSink::Error: Debug,
-        // Meta::Error: Debug,
+        FlowSink::Error: Into<BoxDynError>,
         FlowSink::IdType: Default + Clone,
         Encode: Codec<T, Compact = Compact>,
-        Encode::Error: Debug,
     {
         let task_id = TaskId::new(FlowSink::IdType::default());
         let mut meta = FlowSink::Meta::default();
         meta.inject(WorkflowRequest { step_index: index });
-        let task = TaskBuilder::new_with_metadata(Encode::encode(step).unwrap(), meta)
-            .with_task_id(task_id.clone())
-            .build();
-        self.sink.push_raw(task).await.unwrap();
+        let task = TaskBuilder::new_with_metadata(
+            Encode::encode(step).map_err(|e| StepError::CodecError(e))?,
+            meta,
+        )
+        .with_task_id(task_id.clone())
+        .build();
+        self.sink
+            .push_raw(task)
+            .await
+            .map_err(|e| StepError::SinkError(e.into()))?;
         Ok(task_id)
     }
 
     pub async fn push_step<T, Compact>(
         &mut self,
         step: &T,
-    ) -> Result<TaskId<FlowSink::IdType>, FlowSink::Error>
+    ) -> Result<TaskId<FlowSink::IdType>, StepError<Encode::Error>>
     where
         FlowSink: Sync + TaskSink<Compact>,
         T: Send + Sync,
         FlowSink::Meta: Send + Default + MetadataExt<WorkflowRequest>,
-        FlowSink::Error: Debug,
-    //     // Meta::Error: Debug,
+        FlowSink::Error: Into<BoxDynError>,
+        //     // Meta::Error: Debug,
         FlowSink::IdType: Default + Clone,
         Encode: Codec<T, Compact = Compact>,
-        Encode::Error: Debug,
     {
         self.push_step_with_index(1, step).await
     }

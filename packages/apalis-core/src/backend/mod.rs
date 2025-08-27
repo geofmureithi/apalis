@@ -10,7 +10,10 @@ use futures_util::{
 };
 
 use crate::{
-    backend::codec::Codec, error::BoxDynError, task::{task_id::TaskId, Task}, worker::context::WorkerContext
+    backend::codec::Codec,
+    error::BoxDynError,
+    task::{task_id::TaskId, Task},
+    worker::context::WorkerContext,
 };
 
 pub mod codec;
@@ -42,14 +45,17 @@ pub trait BackendWithCodec {
 pub type TaskStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
 
 pub trait TaskSink<Args>: Backend<Args> {
-    fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>>;
+    fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
-    fn push_bulk(&mut self, tasks: Vec<Args>) -> impl Future<Output = Result<(), Self::Error>>;
+    fn push_bulk(
+        &mut self,
+        tasks: Vec<Args>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     fn push_stream(
         &mut self,
         tasks: impl Stream<Item = Args> + Unpin + Send,
-    ) -> impl Future<Output = Result<(), Self::Error>>;
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     fn push_raw(
         &mut self,
@@ -59,10 +65,14 @@ pub trait TaskSink<Args>: Backend<Args> {
 
 impl<Args, S, E> TaskSink<Args> for S
 where
-    S: Sink<Task<Args, Self::Meta, Self::IdType>, Error = E> + Unpin + Backend<Args, Error = E> + Send,
+    S: Sink<Task<Args, Self::Meta, Self::IdType>, Error = E>
+        + Unpin
+        + Backend<Args, Error = E>
+        + Send,
     Args: Send,
     S::Meta: Send + Default,
     S::IdType: Send + 'static,
+    E: Send
 {
     async fn push(&mut self, task: Args) -> Result<(), Self::Error> {
         use futures_util::SinkExt;
@@ -99,7 +109,6 @@ where
         self.send(task).await
     }
 }
-
 
 pub trait FetchById<Args>: Backend<Args> {
     fn fetch_by_id(
