@@ -24,7 +24,7 @@ pub mod shared;
 
 /// A backend represents a task source
 pub trait Backend<Args> {
-    type IdType;
+    type IdType: Clone;
     type Meta: Default;
     type Error;
     type Stream: Stream<Item = Result<Option<Task<Args, Self::Meta, Self::IdType>>, Self::Error>>;

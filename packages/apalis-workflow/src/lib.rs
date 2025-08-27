@@ -112,20 +112,18 @@ where
         Current: std::marker::Send + 'static + Sync,
         FlowSink::Meta: Send + 'static + Sync,
         S: Step<Current, FlowSink, Encode, Response = Res, Error = E>
-            + Clone
             + Sync
             + Send
-            + 'static,
+            + 'static
+            + Clone,
         S::Response: Send,
         S::Error: Send,
         Res: 'static,
         FlowSink::IdType: Send,
-        FlowSink::Meta: Clone,
         Encode: Codec<Current, Compact = Compact, Error = CodecError>
             + Codec<Res, Compact = Compact, Error = CodecError>,
-        Compact: Clone,
-        Compact: Send + Sync + 'static,
-        Encode: Send + Sync + 'static + Clone,
+        Compact: Send + Sync + 'static + Clone,
+        Encode: Send + Sync + 'static,
         E: Into<BoxDynError> + Send + Sync + 'static,
         CodecError: std::error::Error + Send + 'static + Sync,
     {
@@ -212,21 +210,22 @@ where
                             let res = step
                                 .run(&ctx, task)
                                 .await
-                                .map_err(|e| StepError::SingleStepError(e.into()))?;
+                                .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
                             let should_next = step
                                 .post(&ctx, &res)
                                 .await
-                                .map_err(|e| StepError::SingleStepError(e.into()))?;
+                                .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
                             Ok((
                                 should_next,
-                                Encode::encode(&res).map_err(|e| StepError::CodecError(e))?,
+                                Encode::encode(&res)
+                                    .map_err(|e| WorkflowError::CodecError(e.into()))?,
                             ))
                         })
                     }
-                    Err(e) => ready(Err(StepError::CodecError(e))).boxed(),
+                    Err(e) => ready(Err(WorkflowError::CodecError(e.into()))).boxed(),
                 }
             }
-            None => ready(Err(StepError::MissingContextError)).boxed(),
+            None => ready(Err(WorkflowError::MissingContextError)).boxed(),
         }
         .map_err(|e| BoxDynError::from(e))
         .boxed()
@@ -235,15 +234,17 @@ where
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum StepError<CE> {
+pub enum WorkflowError {
     #[error("Missing StepContext")]
     MissingContextError,
     #[error("CodecError: {0}")]
-    CodecError(CE),
+    CodecError(BoxDynError),
     #[error("SingleStepError: {0}")]
     SingleStepError(BoxDynError),
     #[error("SinkError: {0}")]
     SinkError(BoxDynError),
+    #[error("MetadataError: {0}")]
+    MetadataError(BoxDynError),
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -274,7 +275,7 @@ where
 }
 
 pub trait TaskFlowSink<Args>: BackendWithCodec + Backend<Self::Compact> {
-    fn push_start(&mut self, step: Args) -> impl Future<Output = Result<(), Self::Error>> + Send {
+    fn push_start(&mut self, step: Args) -> impl Future<Output = Result<(), WorkflowError>> + Send {
         self.push_step(step, 0)
     }
 
@@ -282,7 +283,7 @@ pub trait TaskFlowSink<Args>: BackendWithCodec + Backend<Self::Compact> {
         &mut self,
         step: Args,
         index: usize,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    ) -> impl Future<Output = Result<(), WorkflowError>> + Send;
 }
 
 impl<S: Send, Args: Send> TaskFlowSink<Args> for S
@@ -291,17 +292,25 @@ where
     S::IdType: Default + Clone + Send,
     <S as BackendWithCodec>::Codec: Codec<Args, Compact = Self::Compact>,
     S::Meta: MetadataExt<WorkflowRequest> + Send,
-    S::Error: Debug,
-    <<S as BackendWithCodec>::Codec as Codec<Args>>::Error: Debug,
+    S::Error: Into<BoxDynError> + Send + Sync + 'static,
+    <<S as BackendWithCodec>::Codec as Codec<Args>>::Error:
+        Into<BoxDynError> + Send + Sync + 'static,
+    <S::Meta as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError> + Send + Sync + 'static,
 {
-    async fn push_step(&mut self, step: Args, index: usize) -> Result<(), Self::Error> {
+    async fn push_step(&mut self, step: Args, index: usize) -> Result<(), WorkflowError> {
         let task_id = TaskId::new(S::IdType::default());
         let mut meta = S::Meta::default();
-        meta.inject(WorkflowRequest { step_index: index });
-        let task = TaskBuilder::new_with_metadata(S::Codec::encode(&step).unwrap(), meta)
-            .with_task_id(task_id.clone())
-            .build();
-        self.push_raw(task).await
+        meta.inject(WorkflowRequest { step_index: index })
+            .map_err(|e| WorkflowError::MetadataError(e.into()))?;
+        let task = TaskBuilder::new_with_metadata(
+            S::Codec::encode(&step).map_err(|e| WorkflowError::CodecError(e.into()))?,
+            meta,
+        )
+        .with_task_id(task_id.clone())
+        .build();
+        self.push_raw(task)
+            .await
+            .map_err(|e| WorkflowError::SinkError(e.into()))
     }
 }
 
@@ -329,12 +338,14 @@ mod tests {
     #[tokio::test]
     async fn it_works() {
         let workflow = WorkFlow::new("count_to_100")
-            .then(|a: usize| async move { Ok::<_, BoxDynError>(vec![a, a + 1]) })
+            .then(|a: usize| async move { Ok::<_, WorkflowError>(vec![a, a + 1]) })
             .then(|res, wrk: WorkerContext| async move {
                 dbg!(res);
                 wrk.stop().unwrap();
             })
-            .then(|_| async { unreachable!("Worker should have stopped"); });
+            .then(|_| async {
+                unreachable!("Worker should have stopped");
+            });
 
         let mut in_memory = MemoryStorage::new_with_json();
 
