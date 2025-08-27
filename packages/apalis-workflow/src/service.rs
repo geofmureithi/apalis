@@ -1,40 +1,54 @@
 use std::{
     collections::{HashMap, VecDeque},
+    fmt::Debug,
     marker::PhantomData,
     task::{Context, Poll},
 };
 
-use apalis_core::{backend, error::BoxDynError, task::Task};
+use apalis_core::{
+    backend::{self, TaskSink},
+    error::BoxDynError,
+    task::{metadata::MetadataExt, Task},
+};
 use futures::future::BoxFuture;
 use serde_json::Value;
 use tower::Service;
 
-use crate::{CompositeService, GoTo, StepContext, SteppedService};
+use crate::{CompositeService, StepContext, SteppedService, WorkflowRequest};
 
-pub struct WorkFlowService<Compact, Meta, Backend> {
-    services: HashMap<usize, CompositeService<Compact, Meta, Backend>>,
+pub struct WorkFlowService<FlowSink, Encode, Compact>
+where
+    FlowSink: TaskSink<Compact>,
+{
+    services: HashMap<usize, CompositeService<FlowSink, Encode, Compact>>,
     not_ready: VecDeque<usize>,
-    _phantom: PhantomData<Compact>,
-    backend: Backend,
+    backend: FlowSink,
 }
-impl<Compact, Meta, Backend> WorkFlowService<Compact, Meta, Backend> {
+impl<FlowSink, Encode, Compact> WorkFlowService<FlowSink, Encode, Compact>
+where
+    FlowSink: TaskSink<Compact>,
+{
     pub(crate) fn new(
-        services: HashMap<usize, CompositeService<Compact, Meta, Backend>>,
-        backend: Backend,
+        services: HashMap<usize, CompositeService<FlowSink, Encode, Compact>>,
+        backend: FlowSink,
     ) -> Self {
         Self {
             services,
             not_ready: VecDeque::new(),
-            _phantom: PhantomData,
             backend,
         }
     }
 }
 
-impl<Meta, Backend: Clone + Send + Sync + 'static> Service<Task<Value, Meta>>
-    for WorkFlowService<Value, Meta, Backend>
+impl<FlowSink: Clone + Send + Sync + 'static + TaskSink<Compact>, Encode, Compact>
+    Service<Task<Compact, FlowSink::Meta, FlowSink::IdType>>
+    for WorkFlowService<FlowSink, Encode, Compact>
+where
+    FlowSink::Meta: MetadataExt<WorkflowRequest>,
+    Encode: Send + Sync + 'static,
+    Compact: Send+ 'static
 {
-    type Response = Value;
+    type Response = Compact;
     type Error = BoxDynError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -61,27 +75,33 @@ impl<Meta, Backend: Clone + Send + Sync + 'static> Service<Task<Value, Meta>>
         }
     }
 
-    fn call(&mut self, req: Task<Value, Meta>) -> Self::Future {
+    fn call(&mut self, mut req: Task<Compact, FlowSink::Meta, FlowSink::IdType>) -> Self::Future {
         assert!(
             self.not_ready.is_empty(),
             "Workflow must wait for all services to be ready. Did you forget to call poll_ready()?"
         );
-        // idx
-        // match step_type {
-        //
-        // }
-        let ctx = StepContext::new(self.backend.clone());
-        let idx = 1;
-        let cl_1 = self.services.get(&(&idx + 1)).unwrap();
-        let next_hook = cl_1.pre_hook.clone();
+        let meta: WorkflowRequest = req.ctx.metadata.extract().unwrap_or_default();
+        let idx = meta.step_index;
+        let ctx = StepContext::new(self.backend.clone(), idx);
+
+        let next_hook = self.services.get(&(&idx + 1)).map(|s| s.pre_hook.clone());
+
+        dbg!(idx);
+
         let cl = self.services.get_mut(&idx).unwrap();
         let svc = &mut cl.svc;
+
+        req.insert(ctx.clone());
 
         self.not_ready.push_back(idx);
         let fut = svc.call(req);
         Box::pin(async move {
-            let res = fut.await?;
-            next_hook(&ctx, &res).await?;
+            let (should_next, res) = fut.await?;
+            if let Some(next_hook) = next_hook {
+                if should_next {
+                    next_hook(&ctx, &res).await?;
+                }
+            }
             Ok(res)
         })
     }

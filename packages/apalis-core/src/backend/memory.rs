@@ -1,3 +1,7 @@
+#[cfg(feature = "json")]
+use crate::backend::codec::json::JsonCodec;
+#[cfg(feature = "json")]
+use crate::backend::BackendWithCodec;
 use crate::task::extensions::Extensions;
 use crate::{
     backend::{Backend, TaskStream},
@@ -38,14 +42,15 @@ where
     type Error = serde_json::Error;
 
     fn extract(&self) -> Result<T, serde_json::Error> {
+        use serde::de::Error as _;
+
         let key = std::any::type_name::<T>();
         match self.get(key) {
             Some(value) => serde_json::from_value(value.clone()),
-            None => todo!(),
-            // None => Err(serde_json::Error::custom(format!(
-            //     "No entry for type `{}` in metadata",
-            //     key
-            // ))),
+            None => Err(serde_json::Error::custom(format!(
+                "No entry for type `{}` in metadata",
+                key
+            ))),
         }
     }
 
@@ -56,7 +61,6 @@ where
         Ok(())
     }
 }
-
 
 #[derive(Debug, Clone)]
 /// An example of the basics of a backend
@@ -120,10 +124,7 @@ impl<Args, Meta> Sink<Task<Args, Meta>> for MemoryWrapper<Args, Meta> {
         self.as_mut().sender.poll_ready_unpin(cx)
     }
 
-    fn start_send(
-        mut self: Pin<&mut Self>,
-        item: Task<Args, Meta>,
-    ) -> Result<(), Self::Error> {
+    fn start_send(mut self: Pin<&mut Self>, item: Task<Args, Meta>) -> Result<(), Self::Error> {
         self.as_mut().sender.start_send_unpin(item)
     }
 
@@ -143,9 +144,16 @@ struct TaskKey {
 }
 
 #[cfg(feature = "json")]
+#[derive(Debug, Clone)]
+pub struct TaskWithMeta {
+    args: Value,
+    meta: JsonMapMetadata,
+}
+
+#[cfg(feature = "json")]
 #[derive(Debug, Clone, Default)]
 pub struct JsonMemory<Args> {
-    tasks: std::sync::Arc<std::sync::RwLock<BTreeMap<TaskKey, std::sync::Mutex<Value>>>>,
+    tasks: std::sync::Arc<std::sync::RwLock<BTreeMap<TaskKey, std::sync::Mutex<TaskWithMeta>>>>,
     buffer: Vec<Task<Args, JsonMapMetadata>>,
 }
 
@@ -154,7 +162,13 @@ impl JsonMemory<Value> {
     fn create_channel<Args: 'static + DeserializeOwned + Serialize + Send>(
         &self,
     ) -> (
-        Box<dyn Sink<Task<Args, JsonMapMetadata>, Error = SendError> + Send + Sync + Unpin + 'static>,
+        Box<
+            dyn Sink<Task<Args, JsonMapMetadata>, Error = SendError>
+                + Send
+                + Sync
+                + Unpin
+                + 'static,
+        >,
         Pin<Box<dyn Stream<Item = Task<Args, JsonMapMetadata>> + Send>>,
     ) {
         // Create a channel for communication
@@ -177,7 +191,11 @@ impl JsonMemory<Value> {
                         task_id,
                         namespace: std::any::type_name::<Args>().to_owned(),
                     },
-                    value.clone().into(),
+                    TaskWithMeta {
+                        args: value.clone(),
+                        meta: request.ctx.metadata.clone(),
+                    }
+                    .into(),
                 );
 
                 let req = Task::new_with_ctx(value, request.ctx);
@@ -238,7 +256,10 @@ impl<Args: Unpin + Serialize> Sink<Task<Args, JsonMapMetadata>> for JsonMemory<A
                     task_id,
                     namespace: std::any::type_name::<Args>().to_owned(),
                 },
-                std::sync::Mutex::new(serde_json::to_value(task.args).unwrap()),
+                std::sync::Mutex::new(TaskWithMeta {
+                    args: serde_json::to_value(task.args).unwrap(),
+                    meta: task.ctx.metadata,
+                }),
             );
         }
         Poll::Ready(Ok(()))
@@ -261,11 +282,14 @@ impl<Args: DeserializeOwned> Stream for JsonMemory<Args> {
         {
             use crate::task::builder::TaskBuilder;
 
-            let args = mutex.into_inner().unwrap();
+            let task = mutex.into_inner().unwrap();
             Poll::Ready(Some(
-                TaskBuilder::new(serde_json::from_value(args).unwrap())
-                    .with_task_id(key.task_id)
-                    .build(),
+                TaskBuilder::new_with_metadata(
+                    serde_json::from_value(task.args).unwrap(),
+                    task.meta,
+                )
+                .with_task_id(key.task_id)
+                .build(),
             ))
         } else {
             Poll::Pending
@@ -276,9 +300,7 @@ impl<Args: DeserializeOwned> Stream for JsonMemory<Args> {
 pub struct MemorySink<Args, Meta = Extensions> {
     inner: Arc<
         futures_util::lock::Mutex<
-            Box<
-                dyn Sink<Task<Args, Meta>, Error = SendError> + Send + Sync + Unpin + 'static,
-            >,
+            Box<dyn Sink<Task<Args, Meta>, Error = SendError> + Send + Sync + Unpin + 'static>,
         >,
     >,
 }
@@ -299,10 +321,7 @@ impl<Args, Meta> Sink<Task<Args, Meta>> for MemorySink<Args, Meta> {
         Pin::new(&mut *lock).poll_ready_unpin(cx)
     }
 
-    fn start_send(
-        self: Pin<&mut Self>,
-        mut item: Task<Args, Meta>,
-    ) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, mut item: Task<Args, Meta>) -> Result<(), Self::Error> {
         let mut lock = self.inner.try_lock().unwrap();
         // Ensure task has id
         item.ctx
@@ -337,15 +356,15 @@ impl<Args, Meta> Stream for MemoryWrapper<Args, Meta> {
 }
 
 // MemoryStorage as a Backend
-impl<Args: 'static + Clone + Send, Meta: 'static> Backend<Args>
+impl<Args: 'static + Clone + Send, Meta: 'static + Default> Backend<Args>
     for MemoryStorage<MemoryWrapper<Args, Meta>>
 {
     type IdType = RandomId;
 
     type Meta = Meta;
 
-    type Error = BoxDynError;
-    type Stream = TaskStream<Task<Args, Meta>>;
+    type Error = SendError;
+    type Stream = TaskStream<Task<Args, Meta>, SendError>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -363,13 +382,11 @@ impl<Args: 'static + Clone + Send, Meta: 'static> Backend<Args>
 }
 
 #[cfg(feature = "json")]
-impl<Args: 'static + Send + DeserializeOwned> Backend<Args>
-    for MemoryStorage<JsonMemory<Args>>
-{
+impl<Args: 'static + Send + DeserializeOwned> Backend<Args> for MemoryStorage<JsonMemory<Args>> {
     type IdType = RandomId;
-    type Error = BoxDynError;
+    type Error = SendError;
     type Meta = JsonMapMetadata;
-    type Stream = TaskStream<Task<Args, JsonMapMetadata>>;
+    type Stream = TaskStream<Task<Args, JsonMapMetadata>, SendError>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -383,6 +400,12 @@ impl<Args: 'static + Send + DeserializeOwned> Backend<Args>
         let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         stream
     }
+}
+
+#[cfg(feature = "json")]
+impl<Args> BackendWithCodec for MemoryStorage<JsonMemory<Args>> {
+    type Codec = JsonCodec<Value>;
+    type Compact = Value;
 }
 
 trait PopFirstWith<K, V> {
@@ -419,21 +442,23 @@ struct SharedInMemoryStream<T, Meta> {
 }
 
 #[cfg(feature = "json")]
-impl<Args: DeserializeOwned, Meta: Default> Stream for SharedInMemoryStream<Args, Meta> {
-    type Item = Task<Args, Meta>;
+impl<Args: DeserializeOwned> Stream for SharedInMemoryStream<Args, JsonMapMetadata> {
+    type Item = Task<Args, JsonMapMetadata>;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         use crate::task::builder::TaskBuilder;
         let mut map = self.inner.tasks.write().unwrap();
         if let Some((key, mutex)) =
             map.pop_first_with(|k, v| &k.namespace == std::any::type_name::<Args>())
         {
-            let args = mutex.into_inner().unwrap();
-            let args = match serde_json::from_value::<Args>(args) {
+            let task = mutex.into_inner().unwrap();
+            let args = match serde_json::from_value::<Args>(task.args) {
                 Ok(value) => value,
                 Err(_) => return Poll::Ready(None),
             };
             Poll::Ready(Some(
-                TaskBuilder::new(args).with_task_id(key.task_id).build(),
+                TaskBuilder::new_with_metadata(args, task.meta)
+                    .with_task_id(key.task_id)
+                    .build(),
             ))
         } else {
             Poll::Ready(None)

@@ -10,9 +10,7 @@ use futures_util::{
 };
 
 use crate::{
-    error::BoxDynError,
-    task::{task_id::TaskId, Task},
-    worker::context::WorkerContext,
+    backend::codec::Codec, error::BoxDynError, task::{task_id::TaskId, Task}, worker::context::WorkerContext
 };
 
 pub mod codec;
@@ -24,7 +22,7 @@ pub mod shared;
 /// A backend represents a task source
 pub trait Backend<Args> {
     type IdType;
-    type Meta;
+    type Meta: Default;
     type Error;
     type Stream: Stream<Item = Result<Option<Task<Args, Self::Meta, Self::IdType>>, Self::Error>>;
     type Beat: Stream<Item = Result<(), Self::Error>>;
@@ -35,33 +33,37 @@ pub trait Backend<Args> {
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
 }
 
+pub trait BackendWithCodec {
+    type Codec;
+    type Compact;
+}
+
 /// Represents a stream for T.
 pub type TaskStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
 
-pub trait TaskSink<Args, Meta, IdType> {
-    type Error;
+pub trait TaskSink<Args>: Backend<Args> {
     fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>>;
 
-    fn push_bulk(
-        &mut self,
-        tasks: Vec<Args>,
-    ) -> impl Future<Output = Result<(), Self::Error>>;
+    fn push_bulk(&mut self, tasks: Vec<Args>) -> impl Future<Output = Result<(), Self::Error>>;
 
     fn push_stream(
         &mut self,
         tasks: impl Stream<Item = Args> + Unpin + Send,
     ) -> impl Future<Output = Result<(), Self::Error>>;
+
+    fn push_raw(
+        &mut self,
+        task: Task<Args, Self::Meta, Self::IdType>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-impl<Args, Meta: Default, IdType, S> TaskSink<Args, Meta, IdType> for S
+impl<Args, S, E> TaskSink<Args> for S
 where
-    S: Sink<Task<Args, Meta, IdType>> + Unpin,
+    S: Sink<Task<Args, Self::Meta, Self::IdType>, Error = E> + Unpin + Backend<Args, Error = E> + Send,
     Args: Send,
-    Meta: Send,
-    S::Error: Send,
-    IdType: Send + Clone + 'static,
+    S::Meta: Send + Default,
+    S::IdType: Send + 'static,
 {
-    type Error = S::Error;
     async fn push(&mut self, task: Args) -> Result<(), Self::Error> {
         use futures_util::SinkExt;
         self.send(Task::new(task)).await
@@ -88,7 +90,16 @@ where
         self.send_all(&mut tasks.map(Task::new).map(Result::Ok))
             .await
     }
+
+    async fn push_raw(
+        &mut self,
+        task: Task<Args, Self::Meta, Self::IdType>,
+    ) -> Result<(), Self::Error> {
+        use futures_util::SinkExt;
+        self.send(task).await
+    }
 }
+
 
 pub trait FetchById<Args>: Backend<Args> {
     fn fetch_by_id(
@@ -116,7 +127,6 @@ pub trait Vacuum {
     type Error;
     fn vacuum(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
-
 
 pub trait FetchBatch<T> {
     type Id;
@@ -166,4 +176,33 @@ pub trait ListTasks<Args>: Backend<Args> {
         &self,
         filter: &Self::Filter,
     ) -> impl Future<Output = Result<Vec<Task<Args, Self::Meta, Self::IdType>>, Self::Error>> + Send;
+}
+
+use crate::task::status::Status;
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone)]
+pub struct TaskResult<T> {
+    pub task_id: TaskId,
+    pub status: Status,
+    pub result: Result<T, String>,
+}
+
+pub trait WaitForCompletion<T, Args>: Backend<Args> {
+    type ResultStream: Stream<Item = Result<TaskResult<T>, Self::Error>> + Send + 'static;
+
+    /// Wait for multiple tasks to complete, yielding results as they become available
+    fn wait_for(
+        &self,
+        task_ids: impl IntoIterator<Item = TaskId<Self::IdType>>,
+    ) -> Self::ResultStream;
+
+    fn wait_for_single(&self, task_id: TaskId<Self::IdType>) -> Self::ResultStream {
+        self.wait_for(std::iter::once(task_id))
+    }
+
+    /// Check current status of tasks without waiting
+    async fn check_status(
+        &self,
+        task_ids: impl IntoIterator<Item = TaskId<Self::IdType>>,
+    ) -> Result<Vec<TaskResult<T>>, Self::Error>;
 }
