@@ -53,22 +53,43 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
         Ok(items)
     }
 
-    pub async fn push_raw<Args, Compact>(
+    pub async fn push_compact_task<Compact>(
+        &mut self,
+        task: Task<Compact, FlowSink::Meta, FlowSink::IdType>,
+    ) -> Result<(), WorkflowError>
+    where
+        FlowSink: Sync + TaskSink<Compact>,
+        Compact: Send,
+        FlowSink::Meta: Send + Default + MetadataExt<WorkflowRequest>,
+        FlowSink::Error: Into<BoxDynError>,
+        FlowSink::IdType: Default,
+    {
+        self.sink
+            .push_task(task)
+            .await
+            .map_err(|e| WorkflowError::SinkError(e.into()))
+    }
+
+    pub async fn push_task<Args, Compact>(
         &mut self,
         task: Task<Args, FlowSink::Meta, FlowSink::IdType>,
-    ) -> Result<(), FlowSink::Error>
+    ) -> Result<(), WorkflowError>
     where
         FlowSink: Sync + TaskSink<Compact>,
         Args: Send,
         FlowSink::Meta: Send + Default + MetadataExt<WorkflowRequest>,
-        FlowSink::Error: Debug,
+        FlowSink::Error: Into<BoxDynError>,
         FlowSink::IdType: Default,
         Encode: Codec<Args, Compact = Compact>,
-        Encode::Error: Debug,
+        Encode::Error: Into<BoxDynError>,
     {
         self.sink
-            .push_raw(task.try_map(|s| Encode::encode(&s)).unwrap())
+            .push_task(
+                task.try_map(|s| Encode::encode(&s))
+                    .map_err(|e| WorkflowError::CodecError(e.into()))?,
+            )
             .await
+            .map_err(|e| WorkflowError::SinkError(e.into()))
     }
 
     pub async fn push_step_with_index<T, Compact>(
@@ -81,8 +102,7 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
         T: Send + Sync,
         FlowSink::Meta: Send + Default + MetadataExt<WorkflowRequest>,
         FlowSink::Error: Into<BoxDynError>,
-        <FlowSink::Meta as MetadataExt<WorkflowRequest>>::Error:
-            std::error::Error + Sync + Send + 'static,
+        <FlowSink::Meta as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
         FlowSink::IdType: Default,
         Encode: Codec<T, Compact = Compact>,
         Encode::Error: Into<BoxDynError>,
@@ -98,7 +118,7 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
         .with_task_id(task_id.clone())
         .build();
         self.sink
-            .push_raw(task)
+            .push_task(task)
             .await
             .map_err(|e| WorkflowError::SinkError(e.into()))?;
         Ok(task_id)
@@ -115,8 +135,7 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
         FlowSink::Error: Into<BoxDynError>,
         FlowSink::IdType: Default,
         Encode: Codec<T, Compact = Compact>,
-        <FlowSink::Meta as MetadataExt<WorkflowRequest>>::Error:
-            std::error::Error + Sync + Send + 'static,
+        <FlowSink::Meta as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
         Encode::Error: Into<BoxDynError>,
     {
         self.push_step_with_index(self.current_step + 1, step).await

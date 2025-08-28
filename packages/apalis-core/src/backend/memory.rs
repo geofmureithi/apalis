@@ -1,10 +1,11 @@
 #[cfg(feature = "json")]
-use crate::backend::codec::json::JsonCodec;
-#[cfg(feature = "json")]
 use crate::backend::BackendWithCodec;
-use crate::task::extensions::Extensions;
+#[cfg(feature = "json")]
+use crate::backend::{codec::json::JsonCodec, TaskResult};
+#[cfg(feature = "json")]
+use crate::worker::ext::ack::AcknowledgeLayer;
 use crate::{
-    backend::{Backend, TaskStream},
+    backend::{Backend, TaskStream, WaitForCompletion},
     error::BoxDynError,
     task::{
         task_id::{RandomId, TaskId},
@@ -12,13 +13,16 @@ use crate::{
     },
     worker::context::WorkerContext,
 };
+use crate::{task::extensions::Extensions, worker::ext::ack::Acknowledge};
 use futures_channel::mpsc::{unbounded, SendError};
-use futures_core::ready;
+use futures_core::{future::BoxFuture, ready};
 use futures_sink::Sink;
 use futures_util::{
+    future::{ready, Ready},
     stream::{self, BoxStream},
     FutureExt, SinkExt, Stream, StreamExt,
 };
+use serde::de::Error;
 use std::{
     collections::BTreeMap,
     pin::Pin,
@@ -45,7 +49,7 @@ where
         use serde::de::Error as _;
         let key = std::any::type_name::<T>();
         match self.get(key) {
-            Some(value) => serde_json::from_value(value.clone()),
+            Some(value) => T::deserialize(value),
             None => Err(serde_json::Error::custom(format!(
                 "No entry for type `{}` in metadata",
                 key
@@ -89,6 +93,7 @@ impl<Args: Send + 'static> MemoryStorage<MemoryWrapper<Args>> {
             inner: JsonMemory {
                 tasks: Default::default(),
                 buffer: Default::default(),
+                results: Default::default(),
             },
         }
     }
@@ -150,10 +155,22 @@ pub struct TaskWithMeta {
 }
 
 #[cfg(feature = "json")]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct JsonMemory<Args> {
     tasks: std::sync::Arc<std::sync::RwLock<BTreeMap<TaskKey, std::sync::Mutex<TaskWithMeta>>>>,
     buffer: Vec<Task<Args, JsonMapMetadata>>,
+    results: std::sync::Arc<futures_util::lock::Mutex<BTreeMap<TaskKey, Value>>>,
+}
+
+#[cfg(feature = "json")]
+impl<Args> Clone for JsonMemory<Args> {
+    fn clone(&self) -> Self {
+        Self {
+            tasks: self.tasks.clone(),
+            buffer: Vec::new(),
+            results: self.results.clone(),
+        }
+    }
 }
 
 #[cfg(feature = "json")]
@@ -386,18 +403,144 @@ impl<Args: 'static + Send + DeserializeOwned> Backend<Args> for MemoryStorage<Js
     type Error = SendError;
     type Meta = JsonMapMetadata;
     type Stream = TaskStream<Task<Args, JsonMapMetadata>, SendError>;
-    type Layer = Identity;
+    type Layer = AcknowledgeLayer<JsonAck<Args>>;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
     fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
     }
     fn middleware(&self) -> Self::Layer {
-        Identity::new()
+        use crate::worker::ext::ack::AcknowledgeLayer;
+
+        AcknowledgeLayer::new(JsonAck {
+            inner: self.inner.clone(),
+        })
     }
     fn poll(self, _worker: &WorkerContext) -> Self::Stream {
         let stream = self.inner.map(|r| Ok(Some(r))).boxed();
         stream
+    }
+}
+
+#[cfg(feature = "json")]
+pub struct JsonAck<Args> {
+    inner: JsonMemory<Args>,
+}
+
+impl<Args> Clone for JsonAck<Args> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "json")]
+impl<Args, Res: Serialize, Meta: Sync> Acknowledge<Res, Meta, RandomId> for JsonAck<Args> {
+    type Error = serde_json::Error;
+
+    type Future = BoxFuture<'static, Result<(), Self::Error>>;
+
+    fn ack(
+        &mut self,
+        res: &Result<Res, BoxDynError>,
+        ctx: &crate::task::ExecutionContext<Meta, RandomId>,
+    ) -> Self::Future {
+        let mutex = self.inner.results.clone();
+        let val = serde_json::to_value(res.as_ref().map_err(|e| e.to_string())).unwrap();
+        let task_id = ctx.task_id.clone().unwrap();
+        async move {
+            let mut tasks = mutex.lock().await;
+
+            tasks.insert(
+                TaskKey {
+                    task_id ,
+                    namespace: std::any::type_name::<Args>().to_owned(),
+                },
+                val,
+            );
+            Ok(())
+        }
+        .boxed()
+    }
+}
+
+#[cfg(feature = "json")]
+impl<Res: 'static + DeserializeOwned + Send, Compact: 'static> WaitForCompletion<Res, Compact>
+    for MemoryStorage<JsonMemory<Compact>>
+where
+    Compact: Send + DeserializeOwned + 'static,
+{
+    type ResultStream = BoxStream<'static, Result<TaskResult<Res>, SendError>>;
+    fn wait_for(
+        &self,
+        task_ids: impl IntoIterator<Item = TaskId<Self::IdType>>,
+    ) -> Self::ResultStream {
+        use std::{collections::HashSet, time::Duration};
+
+        let task_ids: HashSet<_> = task_ids.into_iter().collect();
+        struct PollState<T> {
+            vault: Arc<futures_util::lock::Mutex<BTreeMap<TaskKey, serde_json::Value>>>,
+            pending_tasks: HashSet<TaskId>,
+            namespace: String,
+            poll_interval: Duration,
+            _phantom: std::marker::PhantomData<T>,
+        }
+        let state = PollState {
+            vault: self.inner.results.clone(),
+            pending_tasks: task_ids,
+            namespace: std::any::type_name::<Compact>().to_owned(),
+            poll_interval: Duration::from_millis(100),
+            _phantom: std::marker::PhantomData,
+        };
+        stream::unfold(state, |mut state: PollState<Res>| {
+            async move {
+                // panic!( "{}", state.pending_tasks.len());
+                // If no pending tasks, we're done
+                if state.pending_tasks.is_empty() {
+                    return None;
+                }
+
+                loop {
+                    // Check for completed tasks
+                    let vault = state.vault.lock().await;
+                    let completed_task = state.pending_tasks.iter().find_map(|task_id| {
+                        let key = TaskKey {
+                            task_id: task_id.clone(),
+                            namespace: state.namespace.clone(),
+                        };
+
+                        vault.get(&key).map(|value| {
+                            use crate::backend::TaskResult;
+
+                            let result = match serde_json::from_value::<Result<Res, String>>(
+                                value.clone(),
+                            ) {
+                                Ok(result) => TaskResult {
+                                    task_id: task_id.clone(),
+                                    result,
+                                },
+                                Err(e) => TaskResult {
+                                    task_id: task_id.clone(),
+                                    result: Err(format!("Deserialization error: {}", e)),
+                                },
+                            };
+                            (task_id.clone(), result)
+                        })
+                    });
+                    drop(vault);
+
+                    if let Some((task_id, result)) = completed_task {
+                        state.pending_tasks.remove(&task_id);
+                        return Some((Ok(result), state));
+                    }
+
+                    // No completed tasks, wait and try again
+                    crate::timer::sleep(state.poll_interval).await;
+                }
+            }
+        })
+        .boxed()
     }
 }
 

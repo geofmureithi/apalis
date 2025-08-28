@@ -57,7 +57,7 @@ pub trait TaskSink<Args>: Backend<Args> {
         tasks: impl Stream<Item = Args> + Unpin + Send,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
-    fn push_raw(
+    fn push_task(
         &mut self,
         task: Task<Args, Self::Meta, Self::IdType>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
@@ -101,7 +101,7 @@ where
             .await
     }
 
-    async fn push_raw(
+    async fn push_task(
         &mut self,
         task: Task<Args, Self::Meta, Self::IdType>,
     ) -> Result<(), Self::Error> {
@@ -192,7 +192,7 @@ use crate::task::status::Status;
 #[derive(Debug, Clone)]
 pub struct TaskResult<T> {
     pub task_id: TaskId,
-    pub status: Status,
+    // pub status: Status,
     pub result: Result<T, String>,
 }
 
@@ -209,9 +209,9 @@ pub trait WaitForCompletion<T, Args>: Backend<Args> {
         self.wait_for(std::iter::once(task_id))
     }
 
-    /// Check current status of tasks without waiting
-    async fn check_status(
-        &self,
-        task_ids: impl IntoIterator<Item = TaskId<Self::IdType>>,
-    ) -> Result<Vec<TaskResult<T>>, Self::Error>;
+    // /// Check current status of tasks without waiting
+    // async fn check_status(
+    //     &self,
+    //     task_ids: impl IntoIterator<Item = TaskId<Self::IdType>>,
+    // ) -> Result<Vec<TaskResult<T>>, Self::Error>;
 }

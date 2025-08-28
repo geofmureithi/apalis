@@ -1,11 +1,10 @@
-
 /// A trait for converting values between a type `T` and a more compact or
-/// transport-friendly representation for a [`Backend`]. Examples include json 
+/// transport-friendly representation for a [`Backend`]. Examples include json
 /// and bytes.
-/// 
+///
 /// This is useful when you need to serialize/deserialize, compress/expand,
 /// or otherwise encode/decode values in a custom format.
-/// 
+///
 /// By default, a backend doesn't care about the specific type implementing [`Codec`]
 /// but rather the [`Codec::Compact`] type. This means if it can accept bytes, you
 /// can use familiar crates such as bincode and rkyv
@@ -33,9 +32,8 @@ pub trait Codec<T> {
     /// # Errors
     /// Returns [`Self::Error`] if the compact representation cannot
     /// be decoded into a valid `T`.
-    fn decode(val: Self::Compact) -> Result<T, Self::Error>;
+    fn decode(val: &Self::Compact) -> Result<T, Self::Error>;
 }
-
 
 /// Encoding for tasks using json
 #[cfg(feature = "json")]
@@ -60,8 +58,8 @@ pub mod json {
             serde_json::to_vec(input)
         }
 
-        fn decode(compact: Vec<u8>) -> Result<T, Self::Error> {
-            serde_json::from_slice(&compact)
+        fn decode(compact: &Vec<u8>) -> Result<T, Self::Error> {
+            serde_json::from_slice(compact)
         }
     }
 
@@ -71,7 +69,7 @@ pub mod json {
         fn encode(input: &T) -> Result<String, Self::Error> {
             serde_json::to_string(input)
         }
-        fn decode(compact: String) -> Result<T, Self::Error> {
+        fn decode(compact: &String) -> Result<T, Self::Error> {
             serde_json::from_str(&compact)
         }
     }
@@ -83,8 +81,8 @@ pub mod json {
             serde_json::to_value(input)
         }
 
-        fn decode(compact: Value) -> Result<T, Self::Error> {
-            serde_json::from_value(compact)
+        fn decode(compact: &Value) -> Result<T, Self::Error> {
+            T::deserialize(compact)
         }
     }
 }

@@ -122,7 +122,7 @@ where
         FlowSink::IdType: Send,
         Encode: Codec<Current, Compact = Compact, Error = CodecError>
             + Codec<Res, Compact = Compact, Error = CodecError>,
-        Compact: Send + Sync + 'static + Clone,
+        Compact: Send + Sync + 'static,
         Encode: Send + Sync + 'static,
         E: Into<BoxDynError> + Send + Sync + 'static,
         CodecError: std::error::Error + Send + 'static + Sync,
@@ -130,7 +130,7 @@ where
         self.steps.insert(self.steps.len(), {
             let pre_hook = Arc::new(Box::new(
                 move |ctx: &StepContext<FlowSink, Encode>, step: &Compact| {
-                    let val = Encode::decode(step.clone());
+                    let val = Encode::decode(step);
                     match val {
                         Ok(val) => {
                             let mut ctx = ctx.clone();
@@ -201,7 +201,7 @@ where
         let ctx: Option<StepContext<FlowSink, Encode>> = req.get().cloned();
         match ctx {
             Some(ctx) => {
-                let req = req.try_map(|arg| Encode::decode(arg));
+                let req = req.try_map(|arg| Encode::decode(&arg));
 
                 match req {
                     Ok(task) => {
@@ -289,7 +289,7 @@ pub trait TaskFlowSink<Args>: BackendWithCodec + Backend<Self::Compact> {
 impl<S: Send, Args: Send> TaskFlowSink<Args> for S
 where
     S: TaskSink<Self::Compact> + BackendWithCodec + Backend<Self::Compact>,
-    S::IdType: Default + Clone + Send,
+    S::IdType: Default + Send,
     <S as BackendWithCodec>::Codec: Codec<Args, Compact = Self::Compact>,
     S::Meta: MetadataExt<WorkflowRequest> + Send,
     S::Error: Into<BoxDynError> + Send + Sync + 'static,
@@ -308,7 +308,7 @@ where
         )
         .with_task_id(task_id.clone())
         .build();
-        self.push_raw(task)
+        self.push_task(task)
             .await
             .map_err(|e| WorkflowError::SinkError(e.into()))
     }
@@ -338,18 +338,29 @@ mod tests {
     #[tokio::test]
     async fn it_works() {
         let workflow = WorkFlow::new("count_to_100")
-            .then(|a: usize| async move { Ok::<_, WorkflowError>(vec![a, a + 1]) })
+            .then(|a: usize| async move { Ok::<_, WorkflowError>((a..100).collect::<Vec<_>>()) })
+            .filter_map(|a| async move {
+                dbg!(a);
+
+                Some(a * 3)
+            })
+            .filter_map(|a| async move {
+                dbg!(a);
+
+                if a % 2 == 1 {
+                    Some(a)
+                } else {
+                    None
+                }
+            })
             .then(|res, wrk: WorkerContext| async move {
                 dbg!(res);
                 wrk.stop().unwrap();
-            })
-            .then(|_| async {
-                unreachable!("Worker should have stopped");
             });
 
         let mut in_memory = MemoryStorage::new_with_json();
 
-        in_memory.push_step(usize::MIN, 0).await.unwrap();
+        in_memory.push_step(80, 0).await.unwrap();
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)

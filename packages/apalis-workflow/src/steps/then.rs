@@ -107,7 +107,7 @@ where
             Task<Current, FlowSink::Meta, FlowSink::IdType>,
         >>::Error: Into<BoxDynError>,
         FlowSink::IdType: Send + Default,
-        Compact: Sync + Send + 'static + Clone,
+        Compact: Sync + Send + 'static,
         Encode: Codec<Current, Compact = Compact, Error = CodecError> + Send + Sync,
         CodecError: Send + Sync + std::error::Error + 'static,
         E: Into<BoxDynError>,
