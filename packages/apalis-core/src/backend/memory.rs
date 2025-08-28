@@ -1,5 +1,4 @@
-#[cfg(feature = "json")]
-use crate::backend::BackendWithCodec;
+
 #[cfg(feature = "json")]
 use crate::backend::{codec::json::JsonCodec, TaskResult};
 #[cfg(feature = "json")]
@@ -384,6 +383,8 @@ impl<Args: 'static + Clone + Send, Meta: 'static + Default> Backend<Args>
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
+    type Codec = ();
+
     fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
     }
@@ -405,6 +406,8 @@ impl<Args: 'static + Send + DeserializeOwned> Backend<Args> for MemoryStorage<Js
     type Stream = TaskStream<Task<Args, JsonMapMetadata>, SendError>;
     type Layer = AcknowledgeLayer<JsonAck<Args>>;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
+
+    type Codec = JsonCodec<Value>;
 
     fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
@@ -542,12 +545,6 @@ where
         })
         .boxed()
     }
-}
-
-#[cfg(feature = "json")]
-impl<Args> BackendWithCodec for MemoryStorage<JsonMemory<Args>> {
-    type Codec = JsonCodec<Value>;
-    type Compact = Value;
 }
 
 trait PopFirstWith<K, V> {

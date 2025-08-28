@@ -31,14 +31,11 @@ pub trait Backend<Args> {
     type Beat: Stream<Item = Result<(), Self::Error>>;
     type Layer;
 
+    type Codec;
+
     fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat;
     fn middleware(&self) -> Self::Layer;
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
-}
-
-pub trait BackendWithCodec {
-    type Codec;
-    type Compact;
 }
 
 /// Represents a stream for T.

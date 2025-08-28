@@ -8,7 +8,7 @@ use std::{
 };
 
 use apalis_core::{
-    backend::{codec::Codec, Backend, BackendWithCodec, TaskSink},
+    backend::{codec::Codec, Backend, TaskSink},
     error::BoxDynError,
     task::{builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId, Task},
     worker::builder::WorkerServiceBuilder,
@@ -68,21 +68,18 @@ where
     _marker: PhantomData<(Input, Current, FlowSink)>,
 }
 
+type PreHook<FlowSink, Encode, Compact> = Box<
+    dyn Fn(&StepContext<FlowSink, Encode>, &Compact) -> BoxFuture<'static, Result<(), BoxDynError>>
+        + Send
+        + Sync
+        + 'static,
+>;
+
 pub struct CompositeService<FlowSink, Encode, Compact>
 where
     FlowSink: TaskSink<Compact>,
 {
-    pre_hook: Arc<
-        Box<
-            dyn Fn(
-                    &StepContext<FlowSink, Encode>,
-                    &Compact,
-                ) -> BoxFuture<'static, Result<(), BoxDynError>>
-                + Send
-                + Sync
-                + 'static,
-        >,
-    >,
+    pre_hook: Arc<PreHook<FlowSink, Encode, Compact>>,
     svc: SteppedService<Compact, FlowSink::Meta, FlowSink::IdType>,
 }
 
@@ -144,15 +141,7 @@ where
                     }
                 },
             )
-                as Box<
-                    dyn Fn(
-                            &StepContext<FlowSink, Encode>,
-                            &Compact,
-                        ) -> BoxFuture<'static, Result<(), BoxDynError>>
-                        + Send
-                        + Sync
-                        + 'static,
-                >);
+                as PreHook<FlowSink, Encode, Compact>);
             let svc =
                 SteppedService::<Compact, FlowSink::Meta, FlowSink::IdType>::new(StepService {
                     codec: PhantomData::<(Encode, Current, FlowSink)>,
@@ -262,7 +251,7 @@ impl<Input, Current, FlowSink, Encode, Compact>
 where
     FlowSink: Clone,
     Compact: Send,
-    FlowSink: TaskSink<Compact> + BackendWithCodec<Codec = Encode, Compact = Compact>,
+    FlowSink: TaskSink<Compact, Codec = Encode>,
 {
     fn build(self, b: &FlowSink) -> WorkFlowService<FlowSink, Encode, Compact> {
         let services: HashMap<usize, _> = self
@@ -274,7 +263,10 @@ where
     }
 }
 
-pub trait TaskFlowSink<Args>: BackendWithCodec + Backend<Self::Compact> {
+pub trait TaskFlowSink<Args, Compact>: Backend<Compact>
+where
+    Self::Codec: Codec<Args>,
+{
     fn push_start(&mut self, step: Args) -> impl Future<Output = Result<(), WorkflowError>> + Send {
         self.push_step(step, 0)
     }
@@ -286,15 +278,14 @@ pub trait TaskFlowSink<Args>: BackendWithCodec + Backend<Self::Compact> {
     ) -> impl Future<Output = Result<(), WorkflowError>> + Send;
 }
 
-impl<S: Send, Args: Send> TaskFlowSink<Args> for S
+impl<S: Send, Args: Send, Compact> TaskFlowSink<Args, Compact> for S
 where
-    S: TaskSink<Self::Compact> + BackendWithCodec + Backend<Self::Compact>,
+    S: TaskSink<Compact> + Backend<Compact>,
     S::IdType: Default + Send,
-    <S as BackendWithCodec>::Codec: Codec<Args, Compact = Self::Compact>,
+    S::Codec: Codec<Args, Compact = Compact>,
     S::Meta: MetadataExt<WorkflowRequest> + Send,
     S::Error: Into<BoxDynError> + Send + Sync + 'static,
-    <<S as BackendWithCodec>::Codec as Codec<Args>>::Error:
-        Into<BoxDynError> + Send + Sync + 'static,
+    <S::Codec as Codec<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
     <S::Meta as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError> + Send + Sync + 'static,
 {
     async fn push_step(&mut self, step: Args, index: usize) -> Result<(), WorkflowError> {
@@ -316,54 +307,46 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, convert::Infallible};
 
     use apalis_core::{
-        backend::{memory::MemoryStorage, TaskSink},
-        error::BoxDynError,
-        service_fn::service_fn,
-        task::{status::Status, Task},
+        backend::memory::MemoryStorage,
         worker::{
             builder::WorkerBuilder, context::WorkerContext, event::Event,
             ext::event_listener::EventListenerExt,
         },
     };
-    use serde_json::{Number, Value};
-    use tower::{steer::Steer, util::BoxService, ServiceExt};
 
-    use super::*;
+    use tower::limit::ConcurrencyLimitLayer;
 
-    const ITEMS: u32 = 10;
+    use crate::{TaskFlowSink, WorkFlow, WorkflowError};
 
     #[tokio::test]
-    async fn it_works() {
-        let workflow = WorkFlow::new("count_to_100")
-            .then(|a: usize| async move { Ok::<_, WorkflowError>((a..100).collect::<Vec<_>>()) })
+    async fn simple_workflow() {
+        let workflow = WorkFlow::new("odd-numbers-workflow")
+            .then(|a: usize| async move { Ok::<_, WorkflowError>((a..10).collect::<Vec<_>>()) })
             .filter_map(|a| async move {
-                dbg!(a);
-
-                Some(a * 3)
-            })
-            .filter_map(|a| async move {
-                dbg!(a);
-
                 if a % 2 == 1 {
                     Some(a)
                 } else {
                     None
                 }
             })
-            .then(|res, wrk: WorkerContext| async move {
-                dbg!(res);
+            .then(|res: Vec<usize>, wrk: WorkerContext| async move {
+                assert_eq!(
+                    res.len(),
+                    5,
+                    "There should be 5 odd numbers between 0 and 10"
+                );
                 wrk.stop().unwrap();
             });
 
         let mut in_memory = MemoryStorage::new_with_json();
 
-        in_memory.push_step(80, 0).await.unwrap();
+        in_memory.push_step(0, 0).await.unwrap();
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)
+            .layer(ConcurrencyLimitLayer::new(2)) // Using 1 will deadlock the workflow because of the filter_map step
             .on_event(|ctx, ev| {
                 println!("On Event = {:?}", ev);
                 if matches!(ev, Event::Error(_)) {

@@ -194,6 +194,8 @@ where
 
     type Stream = Fetch;
 
+    type Codec = ();
+
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
     type Layer = Identity;

@@ -251,8 +251,6 @@ where
         let filter_ctx: Result<FilterContext<FlowSink::IdType>, _> = req.ctx.metadata.extract();
         match filter_ctx {
             Ok(_) => {
-                dbg!(&ctx.current_step);
-
                 let mut step = FilterMap {
                     mapper: PhantomData::<
                         FilterMapStep<
@@ -276,8 +274,6 @@ where
                 })
             }
             Err(_) => {
-                dbg!(&ctx.current_step);
-
                 let mut step = self.step.clone();
                 Box::pin(async move {
                     let req = req

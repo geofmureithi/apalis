@@ -1,11 +1,11 @@
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, marker::PhantomData};
 
 use apalis_core::{
     backend::{codec::Codec, TaskResult, TaskSink, WaitForCompletion},
     error::BoxDynError,
     task::{builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId, Task},
 };
-use futures::{lock::Mutex, StreamExt};
+use futures::StreamExt;
 
 use crate::{WorkflowError, WorkflowRequest};
 

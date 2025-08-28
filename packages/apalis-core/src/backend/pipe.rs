@@ -61,6 +61,8 @@ where
 
     type Error = PipeError;
 
+    type Codec = TSink::Codec;
+
     fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat {
         self.into
             .heartbeat(worker)
