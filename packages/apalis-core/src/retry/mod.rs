@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 use tower::retry::backoff::Backoff;
 
-use apalis_core::{error::Error, request::Request};
+use crate::{error::Error, request::Request};
 
 /// Re-exports from [`tower::retry`]
 pub use tower::retry::*;
