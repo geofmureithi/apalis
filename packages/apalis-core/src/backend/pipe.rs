@@ -1,3 +1,50 @@
+//! # Pipe streams to backends
+//!
+//! This backend allows you to pipe tasks from any stream into another backend.
+//! It is useful for connecting different backends together, such as piping tasks
+//! from a cron stream into a database backend, or transforming and forwarding tasks
+//! between systems.
+//!
+//! ## Example
+//!
+//! ```rust
+//! use futures_util::stream;
+//! use apalis_core::backend::pipe::Pipe;
+//! use apalis_core::backend::memory::MemoryStorage;
+//! use apalis_core::worker::{WorkerBuilder, context::WorkerContext};
+//! use apalis_core::error::BoxDynError;
+//! use std::time::Duration;
+//!
+//! const ITEMS: u32 = 10;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let stm = stream::iter(0..ITEMS).map(|s| Ok::<_, std::io::Error>(s));
+//!     let in_memory = MemoryStorage::new();
+//!
+//!     let backend = Pipe::new(stm, in_memory);
+//!
+//!     async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
+//!         tokio::time::sleep(Duration::from_secs(1)).await;
+//!         if task == ITEMS - 1 {
+//!             ctx.stop().unwrap();
+//!             return Err("Graceful Exit".into());
+//!         }
+//!         Ok(())
+//!     }
+//!
+//!     let worker = WorkerBuilder::new("rango-tango")
+//!         .backend(backend)
+//!         .on_event(|_ctx, ev| {
+//!             println!("On Event = {:?}", ev);
+//!         })
+//!         .build(task);
+//!     worker.run().await.unwrap();
+//! }
+//! ```
+//!
+//! This example pipes a stream of numbers into an in-memory backend and processes them with a worker.
+
 use crate::error::BoxDynError;
 use crate::task::Task;
 use crate::{backend::Backend, worker::context::WorkerContext};
@@ -17,6 +64,7 @@ pub struct Pipe<S, Into, Args, Meta> {
 }
 
 impl<S, Into, Args, Meta> Pipe<S, Into, Args, Meta> {
+    /// Create a new Pipe instance
     pub fn new(stream: S, backend: Into) -> Self {
         Pipe {
             from: stream,
@@ -38,7 +86,12 @@ impl<S: fmt::Debug, Into: fmt::Debug, Args, Meta> fmt::Debug for Pipe<S, Into, A
 impl<Args, Meta, S, TSink, Err> Backend<Args> for Pipe<S, TSink, Args, Meta>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    TSink: Backend<Args, Meta = Meta> + Sink<Task<Args, Meta, TSink::IdType>> + Clone + Unpin + Send + 'static,
+    TSink: Backend<Args, Meta = Meta>
+        + Sink<Task<Args, Meta, TSink::IdType>>
+        + Clone
+        + Unpin
+        + Send
+        + 'static,
     <TSink as Backend<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
     TSink::Beat: Send + 'static,
     TSink::IdType: Send + Clone + 'static,
@@ -76,7 +129,7 @@ where
         self.into.middleware()
     }
 
-    fn poll(mut self, worker: &WorkerContext) -> Self::Stream {
+    fn poll(self, worker: &WorkerContext) -> Self::Stream {
         let mut sink = self.into.clone().sink_map_err(|e| e.into());
 
         let mut sink_stream = self
@@ -102,10 +155,12 @@ where
     }
 }
 
+/// Represents utility for piping streams into a backend
 pub trait PipeExt<B, Args, Ctx>
 where
     Self: Sized,
 {
+    /// Pipe the current stream into the provided backend
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx>;
 }
 
@@ -130,6 +185,7 @@ pub struct PipeError {
 pub enum PipeErrorKind {
     /// The cron stream provided a None
     EmptyStream,
+    /// An inner stream error occurred
     Inner(BoxDynError),
 }
 
@@ -156,11 +212,7 @@ mod tests {
     use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
-        backend::{
-            self,
-            memory::{MemoryStorage, MemoryWrapper},
-            TaskSink,
-        },
+        backend::{self, impls::{json::JsonStorage, memory::MemoryStorage}, TaskSink},
         error::BoxDynError,
         worker::{
             builder::WorkerBuilder,
@@ -176,7 +228,7 @@ mod tests {
     #[tokio::test]
     async fn basic_worker() {
         let stm = stream::iter(0..ITEMS).map(|s| Ok::<_, io::Error>(s));
-        let in_memory = MemoryStorage::new_with_json();
+        let in_memory = JsonStorage::new_temp().unwrap();
 
         let backend = Pipe::new(stm, in_memory);
 

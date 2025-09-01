@@ -1,6 +1,23 @@
-//! Represents a task source that provides internal middleware and can be polled
+//! Core traits and types for interacting with backends
 //!
-//! Also includes helper traits
+//! This module defines the core traits and types for `apalis` backends, which are responsible for providing sources of tasks, handling their lifecycle, and exposing middleware for internal processing.
+//! The traits here abstract over different backend implementations, allowing for extensibility and interoperability.
+//!
+//! # Overview
+//! - [`Backend`]: The primary trait representing a task source, defining methods for polling tasks, heartbeats, and middleware.
+//! - [`TaskSink`]: An extension trait for backends that support pushing tasks.
+//! - [`FetchById`], [`Update`], [`Reschedule`]: Additional traits for managing tasks.
+//! - [`Vacuum`], [`ResumeById`], [`ResumeAbandoned`]: Traits for backend maintenance and task recovery.
+//! - [`RegisterWorker`], [`ListWorkers`], [`ListTasks`]: Traits for worker management and task listing.
+//! - [`WaitForCompletion`]: A trait for waiting on task completion and checking their status.
+//!
+//!
+//! ## Default Implementations
+//!
+//! The module includes several default backend implementations, such as:
+//! - [`memory::MemoryStorage`]: An in-memory backend for testing and lightweight use cases
+//! - [`pipe::PipeBackend`]: A simple pipe-based backend for inter-thread communication
+//! - [`custom::CustomBackend`]: A flexible backend allowing custom functions for task management
 use std::{future::Future, time::Duration};
 
 use futures_sink::Sink;
@@ -10,50 +27,64 @@ use futures_util::{
 };
 
 use crate::{
-    backend::codec::Codec,
     error::BoxDynError,
-    task::{task_id::TaskId, Task},
+    task::{status::Status, task_id::TaskId, Task},
     worker::context::WorkerContext,
 };
 
 pub mod codec;
 pub mod custom;
-pub mod memory;
 pub mod pipe;
 pub mod shared;
 
+pub mod impls;
 /// A backend represents a task source
 pub trait Backend<Args> {
+    /// The type used to uniquely identify tasks.
     type IdType: Clone;
+    /// Metadata associated with each task.
     type Meta: Default;
+    /// The error type returned by backend operations
     type Error;
-    type Stream: Stream<Item = Result<Option<Task<Args, Self::Meta, Self::IdType>>, Self::Error>>;
-    type Beat: Stream<Item = Result<(), Self::Error>>;
-    type Layer;
-
+    /// The codec used for serialization/deserialization of tasks.
     type Codec;
 
+    /// A stream of tasks provided by the backend.
+    type Stream: Stream<Item = Result<Option<Task<Args, Self::Meta, Self::IdType>>, Self::Error>>;
+    /// A stream representing heartbeat signals.
+    type Beat: Stream<Item = Result<(), Self::Error>>;
+    /// The type representing backend middleware layer.
+    type Layer;
+
+    /// Returns a heartbeat stream for the given worker.
     fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat;
+    /// Returns the backend's middleware layer.
     fn middleware(&self) -> Self::Layer;
+    /// Polls the backend for tasks for the given worker.
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
 }
 
 /// Represents a stream for T.
 pub type TaskStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
 
+/// Extends Backend to allow pushing tasks into the backend
 pub trait TaskSink<Args>: Backend<Args> {
+    /// Allows pushing a single task into the backend
     fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
+    /// Allows pushing multiple tasks into the backend in bulk
     fn push_bulk(
         &mut self,
         tasks: Vec<Args>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
+    /// Allows pushing tasks from a stream into the backend
     fn push_stream(
         &mut self,
         tasks: impl Stream<Item = Args> + Unpin + Send,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
+    /// Allows pushing a fully constructed task into the backend
     fn push_task(
         &mut self,
         task: Task<Args, Self::Meta, Self::IdType>,
@@ -69,7 +100,7 @@ where
     Args: Send,
     S::Meta: Send + Default,
     S::IdType: Send + 'static,
-    E: Send
+    E: Send,
 {
     async fn push(&mut self, task: Args) -> Result<(), Self::Error> {
         use futures_util::SinkExt;
@@ -107,93 +138,131 @@ where
     }
 }
 
+/// Allows fetching a task by its ID
 pub trait FetchById<Args>: Backend<Args> {
+    /// Fetch a task by its unique identifier
     fn fetch_by_id(
         &mut self,
-        task_id: &TaskId,
+        task_id: &TaskId<Self::IdType>,
     ) -> impl Future<Output = Result<Option<Task<Args, Self::Meta>>, Self::Error>> + Send;
 }
 
+/// Allows updating an existing task
 pub trait Update<Args>: Backend<Args> {
+    /// Update the given task
     fn update(
         &mut self,
-        task: Task<Args, Self::Meta>,
+        task: Task<Args, Self::Meta, Self::IdType>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
+/// Allows rescheduling a task for later execution
 pub trait Reschedule<Args>: Backend<Args> {
+    /// Reschedule the task after a specified duration
     fn reschedule(
         &mut self,
-        task: Task<Args, Self::Meta>,
+        task: Task<Args, Self::Meta, Self::IdType>,
         wait: Duration,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
+/// Allows cleaning up resources in the backend
 pub trait Vacuum {
+    /// The error type returned by vacuum operations
     type Error;
+    /// Cleans up resources and returns the number of items vacuumed
     fn vacuum(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
-pub trait FetchBatch<T> {
-    type Id;
-    type Error;
-    type Stream: Stream<Item = Result<Option<T>, Self::Error>>;
-    fn fetch_batch(&mut self, ids: &[Self::Id]) -> Self::Stream;
-}
-
-pub trait FetchAll<Meta> {
-    type Compact;
-    fn fetch_many(&mut self) -> TaskStream<Task<Self::Compact, Meta>>;
-}
-
-pub trait ResumeById<T>: Backend<T> {
-    type Id;
-
+/// Allows resuming a task by its ID
+pub trait ResumeById<Args>: Backend<Args> {
+    /// Resume a task by its ID
     fn resume_by_id(
         &mut self,
-        id: Self::Id,
+        id: TaskId<Self::IdType>,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
-pub trait ResumeAbandoned<T, Context>: Backend<T> {
+/// Allows fetching multiple tasks by their IDs
+pub trait ResumeAbandoned<Args>: Backend<Args> {
+    /// Resume all abandoned tasks
     fn resume_abandoned(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
-pub trait RegisterWorker<T, Context>: Backend<T> {
+/// Allows registering a worker with the backend
+pub trait RegisterWorker<Args>: Backend<Args> {
+    /// Registers a worker
     fn register_worker(
         &mut self,
         worker_id: String,
-    ) -> impl Future<Output = Result<usize, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
+/// Allows collecting metrics from the backend
 pub trait Metric<Output> {
+    /// The error type returned by metric operations
     type Error;
+    /// Collects and returns backend metrics
     fn metric(&mut self) -> impl Future<Output = Result<Output, Self::Error>> + Send;
 }
 
+/// Allows listing all workers registered with the backend
 pub trait ListWorkers<Args>: Backend<Args> {
+    /// The type representing a worker
     type Worker;
+    /// List all registered workers
     fn list_workers(&self) -> impl Future<Output = Result<Vec<Self::Worker>, Self::Error>> + Send;
 }
 
+/// Allows listing tasks with optional filtering
 pub trait ListTasks<Args>: Backend<Args> {
+    /// The type representing a filter for tasks
     type Filter;
+
+    /// List tasks matching the given filter
     fn list_tasks(
         &self,
         filter: &Self::Filter,
     ) -> impl Future<Output = Result<Vec<Task<Args, Self::Meta, Self::IdType>>, Self::Error>> + Send;
 }
 
-use crate::task::status::Status;
+/// Represents the result of a task execution
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone)]
 pub struct TaskResult<T> {
-    pub task_id: TaskId,
-    // pub status: Status,
-    pub result: Result<T, String>,
+    task_id: TaskId,
+    status: Status,
+    result: Result<T, String>,
 }
 
+impl<T> TaskResult<T> {
+    /// Create a new TaskResult
+    pub fn new(task_id: TaskId, status: Status, result: Result<T, String>) -> Self {
+        Self {
+            task_id,
+            status,
+            result,
+        }
+    }
+    /// Get the ID of the task
+    pub fn task_id(&self) -> &TaskId {
+        &self.task_id
+    }
+
+    /// Get the status of the task
+    pub fn status(&self) -> &Status {
+        &self.status
+    }
+
+    /// Get the result of the task
+    pub fn result(&self) -> &Result<T, String> {
+        &self.result
+    }
+}
+
+/// Allows waiting for tasks to complete and checking their status
 pub trait WaitForCompletion<T, Args>: Backend<Args> {
+    /// The result stream type yielding task results
     type ResultStream: Stream<Item = Result<TaskResult<T>, Self::Error>> + Send + 'static;
 
     /// Wait for multiple tasks to complete, yielding results as they become available
@@ -202,13 +271,14 @@ pub trait WaitForCompletion<T, Args>: Backend<Args> {
         task_ids: impl IntoIterator<Item = TaskId<Self::IdType>>,
     ) -> Self::ResultStream;
 
+    /// Wait for a single task to complete, yielding its result
     fn wait_for_single(&self, task_id: TaskId<Self::IdType>) -> Self::ResultStream {
         self.wait_for(std::iter::once(task_id))
     }
 
-    // /// Check current status of tasks without waiting
-    // async fn check_status(
-    //     &self,
-    //     task_ids: impl IntoIterator<Item = TaskId<Self::IdType>>,
-    // ) -> Result<Vec<TaskResult<T>>, Self::Error>;
+    /// Check current status of tasks without waiting
+    fn check_status(
+        &self,
+        task_ids: impl IntoIterator<Item = TaskId<Self::IdType>> + Send,
+    ) -> impl Future<Output = Result<Vec<TaskResult<T>>, Self::Error>> + Send;
 }

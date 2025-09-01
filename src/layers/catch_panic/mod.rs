@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use apalis_core::error::Error;
-use apalis_core::request::Request;
+use apalis_core::task::Task;
 use tower::Layer;
 use tower::Service;
 

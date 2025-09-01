@@ -1,3 +1,7 @@
+//! Event definitions and handler types for worker events  
+//! 
+//! This module defines the `Event` enum representing various events that can occur during the lifecycle of a worker, such as starting, stopping, idling, and encountering errors. It also provides types for event handlers that can be used to respond to these events.
+
 use std::{
     any::Any,
     fmt,
@@ -6,9 +10,10 @@ use std::{
 
 use crate::{error::BoxDynError, worker::context::WorkerContext};
 
-/// An event handler for [`Worker`]
+/// An event handler for a worker
 pub type EventHandler = Arc<RwLock<Option<Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>>>>;
 
+/// Type alias for an event handler function wrapped in an `Arc`
 pub type CtxEventHandler = Arc<Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>>;
 
 /// Events emitted by a worker

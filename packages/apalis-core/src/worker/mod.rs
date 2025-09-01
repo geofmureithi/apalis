@@ -27,9 +27,8 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let mut storage = MemoryStorage::new();
-//!     let mut sink = storage.sink();
 //!     for i in 0..5 {
-//!         sink.push(i).await?;
+//!         storage.push(i).await?;
 //!     }
 //!
 //!     async fn handler(task: u32) {
@@ -76,21 +75,16 @@ use std::task::{Context, Poll};
 use tower_layer::{Layer, Stack};
 use tower_service::Service;
 
-/// Provides utilities for building a [`Worker`]
 pub mod builder;
-mod call_all;
-/// Provides the [`Worker`]'s context
+pub mod call_all;
 pub mod context;
-/// Events emitted by the [`Worker`]
 pub mod event;
 /// Provides extensions to the default worker features
 pub mod ext;
 mod state;
-/// Provides a worker that allows testing and debugging
 pub mod test_worker;
 
-/// A worker represents a task runner
-/// Tasks are polled from the [`Backend`] and executed by the service
+/// A worker represents a task runner that polls tasks from a backend and executes them using a service.
 #[must_use = "Workers must be run or streamed to execute tasks"]
 pub struct Worker<Args, Meta, Backend, Svc, Middleware> {
     pub(crate) name: String,
@@ -300,6 +294,8 @@ impl<S> Layer<S> for TrackerLayer {
         }
     }
 }
+
+/// Tracks a tasks future allowing graceful shutdowns
 #[derive(Debug, Clone)]
 pub struct TrackerService<S> {
     ctx: WorkerContext,
@@ -329,6 +325,7 @@ where
 }
 
 pin_project_lite::pin_project! {
+    /// A future that increments the attempt count on the first poll
     pub struct AttemptOnPollFuture<Fut> {
         attempt: Attempt,
         #[pin]
@@ -351,7 +348,7 @@ impl<Fut: Future> Future for AttemptOnPollFuture<Fut> {
 }
 
 /// Injects the [`ReadinessService`] to track when workers are ready to accept new tasks
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct ReadinessLayer {
     ctx: WorkerContext,
 }
@@ -375,6 +372,7 @@ impl<S> Layer<S> for ReadinessLayer {
 
 /// Tracks the readiness of underlying services
 /// Should be the innermost service
+#[derive(Debug, Clone)]
 pub struct ReadinessService<S> {
     inner: S,
     ctx: WorkerContext,
@@ -418,9 +416,12 @@ mod tests {
     use futures_core::future::BoxFuture;
 
     use crate::{
-        backend::{memory::MemoryStorage, TaskSink},
-        service_fn::{self, service_fn, ServiceFn},
+        backend::{
+            impls::{json::JsonStorage, memory::MemoryStorage},
+            TaskSink,
+        },
         task::ExecutionContext,
+        util::{task_fn, TaskFn},
         worker::{
             builder::WorkerBuilder,
             ext::{
@@ -434,13 +435,13 @@ mod tests {
 
     use super::*;
 
-    const ITEMS: u32 = 10;
+    const ITEMS: u32 = 100;
 
     #[tokio::test]
-    async fn it_works() {
-        let mut in_memory = MemoryStorage::new();
+    async fn basic_worker_run() {
+        let mut json_store = JsonStorage::new_temp().unwrap();
         for i in 0..ITEMS {
-            in_memory.push(i).await.unwrap();
+            json_store.push(i).await.unwrap();
         }
 
         #[derive(Clone, Debug, Default)]
@@ -484,7 +485,7 @@ mod tests {
         }
 
         let worker = WorkerBuilder::new("rango-tango")
-            .backend(in_memory)
+            .backend(json_store)
             .data(Count::default())
             .break_circuit()
             .long_running()
@@ -497,7 +498,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_streams() {
+    async fn basic_worker_stream() {
         let mut in_memory = MemoryStorage::new();
 
         for i in 0..ITEMS {

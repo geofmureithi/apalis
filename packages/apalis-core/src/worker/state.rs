@@ -35,12 +35,6 @@ pub (super) struct WorkerState {
 }
 
 impl WorkerState {
-    pub (super) fn new(state: InnerWorkerState) -> Self {
-        Self {
-            inner: AtomicUsize::new(state as usize),
-        }
-    }
-
     pub(super) fn load(&self, order: Ordering) -> InnerWorkerState {
         InnerWorkerState::try_from(self.inner.load(order)).expect("Invalid enum value")
     }

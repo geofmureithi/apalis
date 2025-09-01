@@ -20,7 +20,7 @@ futures-util = { version = "0.3.30", features = [
     "sink",
     "async-await",
     "async-await-macro",
-    "std"
+    "std",
 ], default-features = false }
 futures-core = { version = "0.3.30", default-features = false }
 futures-channel = { version = "0.3.30", features = [
@@ -32,7 +32,6 @@ tower-service = "0.3.3"
 tower-layer = "0.3.3"
 pin-project-lite = "0.2.14"
 thiserror = "2.0.0"
-ulid = { version = "1.1.2", default-features = false, features = ["std"] }
 futures-timer = { version = "3.0.3", optional = true }
 tracing = { version = "0.1", default-features = false, optional = true }
 # Needed for the codec
@@ -47,11 +46,16 @@ optional = true
 [features]
 default = []
 docsrs = ["dep:document-features"]
+## Sleep feature for backends that need to wait
 sleep = ["dep:futures-timer"]
-serde = ["dep:serde", "ulid/serde"]
+## Enable serde support
+serde = ["dep:serde"]
+## Enable serde_json support
 json = ["serde", "dep:serde_json"]
-test-utils = []
+## Enable tracing support
 tracing = ["dep:tracing"]
+## Enable test utilities
+test-utils = []
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`
@@ -61,5 +65,4 @@ all-features = true
 
 [dev-dependencies]
 tokio = { version = "1.37.0", features = ["macros", "rt", "sync"] }
-tokio-stream = "0.1.15"
-tower = {version = "0.5", features = ["full"]}
+tower = { version = "0.5", features = ["full"] }

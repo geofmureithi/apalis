@@ -1,3 +1,22 @@
+//! Worker extension for emitting events.
+//!
+//! This module provides the [`EventListenerExt`] trait, which allows you to register callbacks for worker events.
+//! It also provides the [`EventListenerLayer`] middleware for emitting events and the [`EventListenerService`] service.
+//!
+//! # Example
+//!
+//! ```rust
+//! use apalis_core::worker::ext::event_listener::EventListenerExt;
+//! use apalis_core::worker::{WorkerBuilder, Event, WorkerContext};
+//!
+//! let builder = WorkerBuilder::new("my-worker")
+//!     .on_event(|ctx: &WorkerContext, event: &Event| {
+//!         println!("Received event: {:?}", event);
+//!     });
+//! ```
+//!
+//! This will print every event emitted by the worker.
+//! 
 use std::sync::Arc;
 
 use tower_layer::{Layer, Stack};
@@ -10,8 +29,9 @@ use crate::{
     worker::{Event, WorkerContext},
 };
 
-/// Worker extension for emitting events 
+/// Worker extension for emitting events
 pub trait EventListenerExt<Args, Meta, Source, Middleware>: Sized {
+    /// Register a callback for worker events
     fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
         self,
         f: F,
@@ -19,8 +39,15 @@ pub trait EventListenerExt<Args, Meta, Source, Middleware>: Sized {
 }
 
 /// Middleware for emitting events
-#[derive(Clone)]
-pub struct EventListenerLayer;
+#[derive(Debug, Clone)]
+pub struct EventListenerLayer(());
+
+impl EventListenerLayer {
+    /// Create a new event listener layer
+    pub fn new() -> Self {
+        Self(())
+    }
+}
 
 impl<S> Layer<S> for EventListenerLayer {
     type Service = EventListenerService<S>;
@@ -33,9 +60,8 @@ impl<S> Layer<S> for EventListenerLayer {
 /// Event listening type
 pub type EventListener = Arc<Box<dyn Fn(WorkerContext, Event) + Send + Sync>>;
 
-
 /// Service for emitting events
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct EventListenerService<S> {
     service: S,
 }
@@ -96,6 +122,6 @@ where
         let _ = self.event_handler.write().map(|mut res| {
             let _ = res.insert(new_fn);
         });
-        self.layer(EventListenerLayer)
+        self.layer(EventListenerLayer::new())
     }
 }

@@ -1,3 +1,14 @@
+//! A module defining codecs for encoding and decoding task arguments and results
+//! 
+//! # Overview
+//! 
+//! This module provides the `Codec` trait, which allows for converting values
+//! between a type `T` and a more compact or transport-friendly representation.
+//! This is particularly useful for serializing/deserializing, compressing/expanding,
+//! or otherwise encoding/decoding values in a custom format.
+//! 
+//! The module includes several implementations of the `Codec` trait, such as `IdentityCodec`
+//! and `NoopCodec`, as well as a JSON codec when the `json` feature is enabled.
 /// A trait for converting values between a type `T` and a more compact or
 /// transport-friendly representation for a [`Backend`]. Examples include json
 /// and bytes.
@@ -33,6 +44,43 @@ pub trait Codec<T> {
     /// Returns [`Self::Error`] if the compact representation cannot
     /// be decoded into a valid `T`.
     fn decode(val: &Self::Compact) -> Result<T, Self::Error>;
+}
+
+/// A codec that performs no transformation, returning the input value as-is.
+#[derive(Debug, Clone, Default)]
+pub struct IdentityCodec;   
+
+impl<T> Codec<T> for IdentityCodec
+where
+    T: Clone,
+{
+    type Compact = T;
+    type Error = std::convert::Infallible;
+
+    fn encode(val: &T) -> Result<Self::Compact, Self::Error> {
+        Ok(val.clone())
+    }
+
+    fn decode(val: &Self::Compact) -> Result<T, Self::Error> {
+        Ok(val.clone())
+    }
+}
+
+/// A codec that should never be used. This is primarily a placeholder
+#[derive(Debug, Clone, Default)]
+pub struct NoopCodec;
+
+impl<T> Codec<T> for NoopCodec {
+    type Compact = T;
+    type Error = std::convert::Infallible;
+
+    fn encode(_val: &T) -> Result<Self::Compact, Self::Error> {
+        unreachable!("NoopCodec should never be used for encoding, please use a real codec")
+    }
+
+    fn decode(_val: &Self::Compact) -> Result<T, Self::Error> {
+        unreachable!("NoopCodec should never be used for decoding, please use a real codec")
+    }
 }
 
 /// Encoding for tasks using json

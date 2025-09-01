@@ -1,4 +1,4 @@
-use apalis_core::request::Request;
+use apalis_core::task::Task;
 
 use super::DEFAULT_MESSAGE_LEVEL;
 use tracing::Level;

@@ -1,3 +1,30 @@
+
+//! # Task Builder
+//! 
+//! The `TaskBuilder` module provides a flexible builder pattern for constructing [`Task`] instances
+//! with customizable configuration options. It allows users to specify arguments, metadata, extensions,
+//! task identifiers, attempt information, status, and scheduling details for tasks.
+//!
+//! ## Features
+//! - Create tasks with required arguments and optional metadata.
+//! - Attach custom extensions/data to tasks.
+//! - Assign unique task identifiers.
+//! - Configure attempt and status information.
+//! - Schedule tasks to run at specific times, after delays, or at intervals (seconds, minutes, hours).
+//! - Build tasks with sensible defaults for omitted fields.
+//!
+//! ## Usage
+//! Use [`TaskBuilder`] to incrementally configure a task, then call `.build()` to obtain a [`Task`] instance.
+//! Convenience methods are provided for common scheduling scenarios.
+//!
+//! ### Example
+//! ```rust
+//! let task = TaskBuilder::new(args)
+//!     .with_status(Status::Pending)
+//!     .run_in_minutes(10)
+//!     .build();
+//! ```
+//!
 use crate::task::{
     attempt::Attempt, extensions::Extensions, status::Status, task_id::TaskId, ExecutionContext,
     Task,

@@ -1,11 +1,18 @@
+//! Represents the status of a task
+//!
+//! ## Overview
+//! - This module defines the `Status` enum, which represents the various states
+//! a task can be in, such as `Pending`, `Running`, `Done`, `Failed`, etc.
+//! - It also includes functionality for parsing a `Status` from a string and
+//! formatting it for display.
+//!! - This is useful for tracking the lifecycle of tasks within the `apalis` framework.
 use core::fmt;
 use std::str::FromStr;
-
 
 /// Represents the state of a task
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
-#[derive(Debug, Clone, Hash, PartialEq, std::cmp::Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
     /// Task is pending
     Pending,
@@ -27,9 +34,11 @@ impl Default for Status {
     }
 }
 
+/// Errors that can occur when parsing a `Status` from a string
 #[derive(Debug, thiserror::Error)]
 pub enum StatusError {
     #[error("Unknown state: {0}")]
+    /// Unknown state error
     UnknownState(String),
 }
 

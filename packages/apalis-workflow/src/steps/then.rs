@@ -3,7 +3,7 @@ use std::{fmt::Debug, marker::PhantomData};
 use apalis_core::{
     backend::{codec::Codec, TaskSink},
     error::BoxDynError,
-    service_fn::{service_fn, ServiceFn},
+    task_fn::{service_fn, TaskFn},
     task::{metadata::MetadataExt, Task},
 };
 use futures::{channel::mpsc::SendError, FutureExt};
@@ -63,7 +63,7 @@ where
         ctx: &mut StepContext<FlowSink, Encode>,
         step: &Current,
     ) -> Result<(), Self::Error> {
-        ctx.push_step(step).await?;
+        ctx.push_next_step(step).await?;
         Ok(())
     }
 
@@ -94,16 +94,16 @@ where
         O: Sync + Send + 'static,
         E: Into<BoxDynError> + Send + Sync + 'static,
         F: Send + 'static + Sync + Clone,
-        ServiceFn<F, Current, FlowSink::Meta, FnArgs>:
+        TaskFn<F, Current, FlowSink::Meta, FnArgs>:
             Service<Task<Current, FlowSink::Meta, FlowSink::IdType>, Response = O, Error = E>,
         FnArgs: std::marker::Send + 'static + Sync,
         Current: std::marker::Send + 'static + Sync,
         FlowSink::Meta: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
         FlowSink::Error: Into<BoxDynError> + Send + 'static,
-        <ServiceFn<F, Current, FlowSink::Meta, FnArgs> as Service<
+        <TaskFn<F, Current, FlowSink::Meta, FnArgs> as Service<
             Task<Current, FlowSink::Meta, FlowSink::IdType>,
         >>::Future: Send + 'static,
-        <ServiceFn<F, Current, FlowSink::Meta, FnArgs> as Service<
+        <TaskFn<F, Current, FlowSink::Meta, FnArgs> as Service<
             Task<Current, FlowSink::Meta, FlowSink::IdType>,
         >>::Error: Into<BoxDynError>,
         FlowSink::IdType: Send + Default,

@@ -55,7 +55,7 @@ use apalis_core::{
         Backend, BackendWithSink, TaskSink, TaskStream,
     },
     error::BoxDynError,
-    service_fn::from_request::FromRequest,
+    task::from_request::FromRequest,
     task::{
         attempt::Attempt,
         status::Status,
@@ -895,7 +895,7 @@ mod tests {
 
     use apalis_core::{
         backend::{memory::MemoryStorage, TaskSink},
-        service_fn::{self, service_fn, ServiceFn},
+        task_fn::{self, service_fn, TaskFn},
         task::{builder::TaskBuilder, data::Data},
         worker::{
             builder::WorkerBuilder,

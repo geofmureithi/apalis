@@ -9,7 +9,7 @@ use std::{
 use apalis_core::{
     backend::{codec::Codec, TaskSink, WaitForCompletion},
     error::{BoxDynError, WorkerError},
-    service_fn::{service_fn, ServiceFn},
+    task_fn::{service_fn, TaskFn},
     task::{
         builder::TaskBuilder,
         metadata::MetadataExt,
@@ -78,7 +78,7 @@ where
     ) -> Result<(), Self::Error> {
         let mut task_ids = Vec::new();
         for step in steps {
-            let task_id = ctx.push_step(step).await?;
+            let task_id = ctx.push_next_step(step).await?;
             task_ids.push(task_id);
         }
         let mut meta = Sink::Meta::default();
@@ -222,7 +222,7 @@ where
         + Sync
         + Default,
     FlowSink: TaskSink<Compact> + Unpin,
-    ServiceFn<F, Current, FlowSink::Meta, FnArgs>: Service<
+    TaskFn<F, Current, FlowSink::Meta, FnArgs>: Service<
             Task<Current, FlowSink::Meta, FlowSink::IdType>,
             Response = Option<Output>,
             Error = SvcError,
@@ -231,7 +231,7 @@ where
     SvcError: Into<BoxDynError> + Send + Sync + 'static,
     MetadataError: Into<BoxDynError> + Send + Sync,
     CodecError: std::error::Error + Sync + Send + 'static,
-    <ServiceFn<F, Current, FlowSink::Meta, FnArgs> as Service<
+    <TaskFn<F, Current, FlowSink::Meta, FnArgs> as Service<
         Task<Current, FlowSink::Meta, FlowSink::IdType>,
     >>::Future: Send + 'static,
     FlowSink::Error: Into<BoxDynError> + Send + Sync,
@@ -254,7 +254,7 @@ where
                 let mut step = FilterMap {
                     mapper: PhantomData::<
                         FilterMapStep<
-                            ServiceFn<F, Current, FlowSink::Meta, FnArgs>,
+                            TaskFn<F, Current, FlowSink::Meta, FnArgs>,
                             Current,
                             Output,
                         >,
@@ -333,7 +333,7 @@ where
     ) -> WorkFlow<Input, Vec<Output>, FlowSink, Encode, Compact>
     where
         F: Send + 'static + Sync + Clone,
-        ServiceFn<F, Current, FlowSink::Meta, FnArgs>: Service<
+        TaskFn<F, Current, FlowSink::Meta, FnArgs>: Service<
             Task<Current, FlowSink::Meta, FlowSink::IdType>,
             Response = Option<Output>,
             Error = SvcError,
@@ -346,7 +346,7 @@ where
             + Default
             + MetadataExt<FilterContext<FlowSink::IdType>, Error = MetadataError>
             + MetadataExt<WorkflowRequest, Error = MetadataError>,
-        <ServiceFn<F, Current, FlowSink::Meta, FnArgs> as Service<
+        <TaskFn<F, Current, FlowSink::Meta, FnArgs> as Service<
             Task<Current, FlowSink::Meta, FlowSink::IdType>,
         >>::Future: Send + 'static,
         Output: Send + 'static + Sync,
@@ -375,7 +375,7 @@ where
                             let mut ctx = ctx.clone();
                             async move {
                                 FilterMap::<
-                                    ServiceFn<F, Current, FlowSink::Meta, FnArgs>,
+                                    TaskFn<F, Current, FlowSink::Meta, FnArgs>,
                                     Current,
                                     Output,
                                 >::pre(&mut ctx, &val)

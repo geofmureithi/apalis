@@ -150,7 +150,7 @@
 use apalis_core::backend::pipe::{Pipe, PipeExt};
 use apalis_core::backend::{Backend, TaskStream};
 use apalis_core::error::BoxDynError;
-use apalis_core::service_fn::from_request::FromRequest;
+use apalis_core::task::from_request::FromRequest;
 use apalis_core::task::attempt::Attempt;
 use apalis_core::task::builder::TaskBuilder;
 use apalis_core::task::data::MissingDataError;

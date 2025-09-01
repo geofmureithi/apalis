@@ -124,7 +124,7 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
         Ok(task_id)
     }
 
-    pub async fn push_step<T, Compact>(
+    pub async fn push_next_step<T, Compact>(
         &mut self,
         step: &T,
     ) -> Result<TaskId<FlowSink::IdType>, WorkflowError>

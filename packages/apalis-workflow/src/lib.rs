@@ -342,7 +342,7 @@ mod tests {
 
         let mut in_memory = MemoryStorage::new_with_json();
 
-        in_memory.push_step(0, 0).await.unwrap();
+        in_memory.push_step(5, 0).await.unwrap();
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)

@@ -5,7 +5,7 @@ use apalis_core::backend::Stat;
 use apalis_core::backend::WorkerState;
 use apalis_core::codec::json::JsonCodec;
 use apalis_core::codec::Codec;
-use apalis_core::request::Request;
+use apalis_core::task::Task;
 use apalis_core::request::State;
 use apalis_core::worker::SimpleWorker;
 use apalis_core::worker::WorkerId;

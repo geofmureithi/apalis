@@ -1,5 +1,26 @@
-// Taken from https://github.com/hyperium/http
-// See repo for license
+//! A type-safe container for storing protocol extensions.
+//!
+//! The `Extensions` struct provides a type map for storing arbitrary data associated with a request or response.
+//! Each extension is stored by its type, allowing for safe retrieval and mutation without explicit casting.
+//!
+//! # Features
+//! - Insert, get, mutate, and remove extensions by type.
+//! - Efficient storage: avoids allocating a map unless needed.
+//! - Type-safe API: prevents type mismatches at runtime.
+//! - Cloneable: supports cloning the entire extensions set.
+//! - Extensible: merge extensions from other instances.
+//!
+//! # Example
+//! ```
+//! use apalis_core::data::Extensions;
+//!
+//! let mut ext = Extensions::new();
+//! ext.insert(42u32);
+//! assert_eq!(ext.get::<u32>(), Some(&42u32));
+//! ext.remove::<u32>();
+//! assert!(ext.get::<u32>().is_none());
+//! ```
+//! Extracted from the [http](https://github.com/hyperium/http/blob/master/src/extensions.rs) crate with modifications to fit our use case
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt;

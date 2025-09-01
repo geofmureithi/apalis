@@ -40,7 +40,7 @@ pub enum CircuitState {
     HalfOpen, // Testing if service has recovered
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CircuitBreakerStats {
     pub failure_count: u32,
     pub success_count: u32,
@@ -96,10 +96,9 @@ impl<S> CircuitBreakerService<S> {
         }
     }
 
-    pub fn get_stats(&self) -> &CircuitBreakerStats {
-        // let res: &CircuitBreakerStats = self.stats.try_read().map(|s|(&*s).clone()).unwrap();
-        // res
-        todo!()
+    pub fn get_stats(&self) -> CircuitBreakerStats {
+        let res = self.stats.try_read().unwrap();
+        res.clone()
     }
 
     fn should_allow_request(&self) -> bool {
@@ -134,7 +133,8 @@ impl<S> CircuitBreakerService<S> {
         }
     }
 
-    fn record_success(&self) {
+    /// Record a successful request
+    pub fn record_success(&self) {
         let mut stats = match self.stats.write() {
             Ok(stats) => stats,
             Err(_) => return, // If poisoned, skip recording
@@ -155,7 +155,8 @@ impl<S> CircuitBreakerService<S> {
         }
     }
 
-    fn record_failure(&self) {
+    /// Record a failure and potentially open the circuit
+    pub fn record_failure(&self) {
         let mut stats = match self.stats.write() {
             Ok(stats) => stats,
             Err(_) => return, // If poisoned, skip recording
@@ -237,7 +238,9 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         // Check if we should allow the request
         if !self.should_allow_request() {
-            return Box::pin(async move { Err(BoxDynError::from(CircuitBreakerError::CircuitOpen)) });
+            return Box::pin(
+                async move { Err(BoxDynError::from(CircuitBreakerError::CircuitOpen)) },
+            );
         }
 
         let future = self.inner.call(req);

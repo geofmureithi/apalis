@@ -7,7 +7,7 @@ use tower::Layer;
 use tower::Service;
 
 use apalis_core::error::Error;
-use apalis_core::request::Request;
+use apalis_core::task::Task;
 use apalis_core::task::task_id::TaskId;
 
 /// Tower Layer that logs Job Details.

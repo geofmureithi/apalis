@@ -1,4 +1,17 @@
-pub trait MakeShared<Req> {
+//! # Shared backend support for `apalis`
+//! 
+//! This module provides traits and utilities for sharing backend instances across multiple workers or components within the `apalis` task processing framework.
+//! It includes the `MakeShared` trait, which defines how to create shared backend instances, potentially with configuration options.
+//! This allows for flexible and reusable backend implementations that can be easily integrated into different parts of an application.
+//! 
+//! ## Features:
+//! - `MakeShared` trait: Defines methods for creating shared backend instances, with or without configuration.
+//! - Support for various backend types, enabling code reuse and consistency across workers.
+//! - Performance optimizations by allowing backends to reuse connections and resources.
+
+/// Trait for creating shared backend instances
+pub trait MakeShared<Args> {
+    /// The backend type to be shared
     type Backend;
     /// The Config for the backend
     type Config;

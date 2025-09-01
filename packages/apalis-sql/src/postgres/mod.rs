@@ -23,7 +23,7 @@ use apalis_core::{
         task_id::{TaskId, Ulid},
         ExecutionContext, Task,
     },
-    utils::Identity,
+    layers::Identity,
     worker::{
         context::WorkerContext,
         ext::ack::{Acknowledge, AcknowledgeLayer},

@@ -1,10 +1,17 @@
-/// A unique tracker for number of attempts
+//! This module provides the `Attempt` type, a thread-safe tracker for counting the number of attempts made by a task.
+//!
+//! The `Attempt` struct wraps an atomic counter, allowing concurrent increment and retrieval of the attempt count. It is designed to be used within the Apalis job/task system, enabling tasks to keep track of how many times they have been retried or executed.
+//!
+//! Features:
+//! - Thread-safe increment and retrieval of attempt count.
+//! - Integration with apalis `FromRequest` trait for extracting attempt information from a task context.
+//! - Optional (via the `serde` feature) serialization and deserialization support for persisting or transmitting attempt state.
 use std::{
     convert::Infallible,
     sync::{atomic::AtomicUsize, Arc},
 };
 
-use crate::{task::Task, service_fn::from_request::FromRequest};
+use crate::{task::Task, util::FromRequest};
 
 /// A wrapper to keep count of the attempts tried by a task
 #[derive(Debug, Clone)]
@@ -38,7 +45,9 @@ impl Attempt {
     }
 }
 
-impl<Args: Sync, Meta: Sync, IdType: Sync + Send> FromRequest<Task<Args, Meta, IdType>> for Attempt {
+impl<Args: Sync, Meta: Sync, IdType: Sync + Send> FromRequest<Task<Args, Meta, IdType>>
+    for Attempt
+{
     type Error = Infallible;
     async fn from_request(req: &Task<Args, Meta, IdType>) -> Result<Self, Self::Error> {
         Ok(req.ctx.attempt.clone())

@@ -61,8 +61,8 @@ use std::{
 use crate::{
     error::{WorkerError, WorkerStateError},
     monitor::shutdown::Shutdown,
-    service_fn::from_request::FromRequest,
     task::{data::MissingDataError, Task},
+    util::FromRequest,
     worker::{
         event::{CtxEventHandler, Event},
         state::{InnerWorkerState, WorkerState},
@@ -121,6 +121,7 @@ impl<F: Future> Future for Tracked<F> {
 }
 
 impl WorkerContext {
+    /// Create a new worker context
     pub fn new<S>(name: &str) -> Self {
         Self {
             name: Arc::new(name.to_owned()),
@@ -156,7 +157,7 @@ impl WorkerContext {
     }
 
     /// Restart running the worker
-    pub(crate) fn restart(&mut self) -> Result<(), WorkerError> {
+    pub fn restart(&mut self) -> Result<(), WorkerError> {
         self.state
             .store(InnerWorkerState::Pending, Ordering::SeqCst);
         self.is_ready.store(false, Ordering::SeqCst);
@@ -277,7 +278,7 @@ impl WorkerContext {
         self.event_handler = Arc::new(new);
     }
 
-    pub (crate) fn add_waker(&self, cx: &mut Context<'_>) {
+    pub(crate) fn add_waker(&self, cx: &mut Context<'_>) {
         if let Ok(mut waker_guard) = self.waker.lock() {
             if waker_guard
                 .as_ref()
@@ -337,9 +338,27 @@ impl Future for WorkerContext {
     }
 }
 
-impl<Args: Sync, Meta: Sync, IdType: Sync + Send> FromRequest<Task<Args, Meta, IdType>> for WorkerContext {
+impl<Args: Sync, Meta: Sync, IdType: Sync + Send> FromRequest<Task<Args, Meta, IdType>>
+    for WorkerContext
+{
     type Error = MissingDataError;
     async fn from_request(req: &Task<Args, Meta, IdType>) -> Result<Self, Self::Error> {
         req.ctx.data.get_checked().cloned()
+    }
+}
+
+impl Drop for WorkerContext {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.state) > 1 {
+            // There are still other references to this context, so we shouldn't log a warning.
+            return;
+        }
+        if self.is_running() {
+            eprintln!(
+                "WorkerContext for worker '{}' with remaining tasks: `{}` is being dropped while still running. Consider calling stop() before dropping.",
+                self.name(),
+                self.task_count()
+            );
+        }
     }
 }

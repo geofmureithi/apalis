@@ -1,41 +1,115 @@
-//! Core request type used to represent tasks.
+//! Represents utilities for creating and managing tasks.
 //!
-//! A [`Request<Args, Ctx>`] encapsulates task input (`args`), contextual metadata (`Ctx`), and execution state.
-//! It is passed to services that process tasks and provides access to task metadata like task ID, attempt count, and user-defined extensions.
+//! This module provides the [`Task`] struct, which encapsulates a unit of work to be executed,
+//! along with its associated context, metadata, and execution status. The [`ExecutionContext`]
+//! struct contains metadata, attempt tracking, extensions, and scheduling information for each task.
 //!
-//! ## Structure
+//! # Overview
 //!
-//! - [`Request`] wraps the task arguments and metadata (`Parts`).
-//! - [`Parts`] includes task ID, retry attempts, state, context, and extensible data.
+//! In `apalis`, tasks are designed to represent discrete units of work that can be scheduled, retried, and tracked
+//! throughout their lifecycle. Each task consists of arguments (`args`) describing the work to be performed,
+//! and an [`ExecutionContext`] (`ctx`) containing metadata and control information.
 //!
-//! ## Example
+//! ## [`Task`]
+//!
+//! The [`Task`] struct is generic over:
+//! - `Args`: The type of arguments or payload for the task.
+//! - `Meta`: Metadata associated with the task, such as custom fields or backend-specific information.
+//! - `IdType`: The type used for uniquely identifying the task (defaults to [`RandomId`]).
+//!
+//! ## [`ExecutionContext`]
+//!
+//! The [`ExecutionContext`] struct provides the following:
+//! - `task_id`: Optionally stores a unique identifier for the task.
+//! - `data`: An [`Extensions`] container for storing arbitrary per-task data (e.g., middleware extensions).
+//! - `attempt`: Tracks how many times the task has been attempted.
+//! - `metadata`: Custom metadata for the task, provided by the backend or user.
+//! - `status`: The current [`Status`] of the task (e.g., Pending, Running, Completed, Failed).
+//! - `run_at`: The UNIX timestamp (in seconds) when the task should be run.
+//!
+//! The execution context is essential for tracking the state and metadata of a task as it moves through
+//! the system. It enables features such as retries, scheduling, and extensibility via the `Extensions` type.
+//!
+//! # Modules
+//!
+//! - [`attempt`]: Tracks the number of attempts a task has been executed.
+//! - [`builder`]: Utilities for constructing tasks.
+//! - [`data`]: Data types for task payloads.
+//! - [`extensions`]: Extension storage for tasks.
+//! - [`metadata`]: Metadata types for tasks.
+//! - [`status`]: Status tracking for tasks.
+//! - [`task_id`]: Types for uniquely identifying tasks.
+//!
+//! # Examples
+//!
+//! ## Creating a new task with default metadata
 //!
 //! ```rust
-//! use apalis_core::request::{Request, Parts};
-//!
-//! let req = Request::new_with_meta("send-email", "user-ctx");
-//!
-//! assert_eq!(req.args, "send-email");
-//! assert_eq!(req.ctx.metadata, "user-ctx");
+//! use apalis_core::task::Task;
+//! let task = Task::<String, (), _>::new("my work".to_string());
 //! ```
 //!
-//! This module also defines helper types such as [`Attempt`], [`State`], [`TaskId`], and [`Extensions`] for managing task metadata.
+//! ## Creating a task with custom metadata
+//!
+//! ```rust
+//! use apalis_core::task::{Task, ExecutionContext};
+//! #[derive(Default, Clone)]
+//! struct MyMeta { priority: u8 }
+//! let meta = MyMeta { priority: 5 };
+//! let task = Task::<String, MyMeta, _>::new_with_meta("important work".to_string(), meta);
+//! ```
+//!
+//! ## Accessing and modifying the execution context
+//!
+//! ```rust
+//! use apalis_core::task::{Task, ExecutionContext, Status};
+//! let mut task = Task::<String, (), _>::new("work".to_string());
+//! task.ctx.status = Status::Running;
+//! task.ctx.attempt.increment();
+//! ```
+//!
+//! ## Using Extensions for per-task data
+//!
+//! ```rust
+//! use apalis_core::task::{Task, Extensions};
+//! let mut extensions = Extensions::default();
+//! extensions.insert("trace_id", "abc123");
+//! let task = Task::<String, (), _>::new_with_data("work".to_string(), extensions, ());
+//! assert_eq!(task.ctx.data.get::<&str>("trace_id"), Some(&"abc123"));
+//! ```
+//!
+//! # See Also
+//!
+//! - [`Task`]: Represents a unit of work to be executed.
+//! - [`ExecutionContext`]: Holds metadata, status, and control information for a task.
+//! - [`Extensions`]: Type-safe storage for per-task data.
+//! - [`Status`]: Enum representing the lifecycle state of a task.
+//! - [`Attempt`]: Tracks the number of execution attempts for a task.
+//! - [`TaskId`]: Unique identifier type for tasks.
+//! - [`FromRequest`]: Trait for extracting data from task contexts.
+//! - [`IntoResponse`]: Trait for converting tasks into response types.
+//! - [`TaskBuilder`]: Fluent builder for constructing tasks with optional configuration.
+//! - [`RandomId`]: Default unique identifier type for tasks.
 
 use std::{
     fmt::Debug,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-
-use crate::task::{attempt::Attempt, extensions::Extensions, status::Status, task_id::{TaskId, RandomId}};
+use crate::task::{
+    attempt::Attempt,
+    extensions::Extensions,
+    status::Status,
+    task_id::{RandomId, TaskId},
+};
 
 pub mod attempt;
 pub mod builder;
 pub mod data;
 pub mod extensions;
+pub mod metadata;
 pub mod status;
 pub mod task_id;
-pub mod metadata;
 
 /// Represents a task which will be executed
 /// Should be considered a single unit of work
@@ -174,7 +248,10 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
     /// Maps both `args` and `parts` together.
     pub fn map_all<F, NewArgs, NewCtx>(self, f: F) -> Task<NewArgs, NewCtx, IdType>
     where
-        F: FnOnce(Args, ExecutionContext<Meta, IdType>) -> (NewArgs, ExecutionContext<NewCtx, IdType>),
+        F: FnOnce(
+            Args,
+            ExecutionContext<Meta, IdType>,
+        ) -> (NewArgs, ExecutionContext<NewCtx, IdType>),
     {
         let (args, parts) = f(self.args, self.ctx);
         Task { args, ctx: parts }

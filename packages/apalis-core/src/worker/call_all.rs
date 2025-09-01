@@ -1,3 +1,9 @@
+//! Utilities for calling all requests from a stream to a service, yielding responses as they arrive.
+//! 
+//! Call all requests from a stream to a service, yielding responses as they arrive
+//! This module provides a combinator for calling all requests from a stream to a service, yielding responses
+//! as they arrive. It supports both ordered and unordered response handling, allowing for flexible integration
+//! with asynchronous services.
 use futures_util::{ready, stream::FuturesUnordered, Stream};
 use pin_project_lite::pin_project;
 use std::{
@@ -50,10 +56,12 @@ where
     }
 }
 
-// Error type that combines stream errors and service errors
+/// Error type that combines stream errors and service errors
 #[derive(Debug)]
 pub enum CallAllError<ServiceError> {
+    /// Error originating from the request stream
     StreamError(BoxDynError),
+    /// Error originating from the service
     ServiceError(ServiceError),
 }
 

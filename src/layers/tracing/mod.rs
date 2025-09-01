@@ -3,7 +3,7 @@ mod on_failure;
 mod on_request;
 mod on_response;
 
-use apalis_core::request::Request;
+use apalis_core::task::Task;
 use std::{
     fmt::{self, Debug},
     pin::Pin,

@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, convert::Infallible};
 
 use apalis_core::{
-    service_fn::from_request::FromRequest,
+    task::from_request::FromRequest,
     task::{status::Status, Task},
 };
 use chrono::{DateTime, Utc};

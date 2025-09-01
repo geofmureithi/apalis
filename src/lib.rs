@@ -78,7 +78,7 @@ pub mod prelude {
     //     monitor::Monitor,
     //     request::{Request, RequestStream},
     //     response::IntoResponse,
-    //     service_fn::{service_fn, FromRequest, ServiceFn},
+    //     service_fn::{service_fn, FromRequest, TaskFn},
     //     // step::*,
     //     request::attempt::Attempt,
     //     request::task_id::TaskId,

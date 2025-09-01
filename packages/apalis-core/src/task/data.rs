@@ -1,3 +1,51 @@
+
+//! Extension data utilities for tasks in `apalis`.
+//!
+//! This module provides the [`Data`] type and related middleware for sharing state across tasks or layers within the same task.
+//!
+//! # Overview
+//!
+//! - [`Data<T>`]: Wraps a value of type `T` for sharing across tasks.
+//! - [`AddExtension<S, T>`]: Middleware for injecting shared data into a task's context.
+//! - [`MissingDataError`]: Error type for missing or unavailable data in a task context.
+//!
+//! # Usage
+//!
+//! Use [`Data`] to share application state (such as database connections, configuration, etc.) across tasks and layers. The [`Layer`] implementation allows easy integration with middleware stacks.
+//!
+//! ## Example
+//!
+//! ```rust
+//! use std::sync::Arc;
+//! use apalis_core::layers::extensions::Data;
+//! use apalis_core::service_fn::service_fn;
+//! use apalis_core::builder::WorkerBuilder;
+//! use apalis_core::memory::MemoryStorage;
+//!
+//! struct State { /* ... */ }
+//! struct Email;
+//!
+//! async fn email_service(email: Email, state: Data<Arc<State>>) {
+//!     // Use shared state here
+//! }
+//!
+//! let state = Arc::new(State { /* ... */ });
+//! let worker = WorkerBuilder::new("tasty-avocado")
+//!     .data(state)
+//!     .backend(MemoryStorage::new())
+//!     .build(service_fn(email_service));
+//! ```
+//!
+//! # Features
+//!
+//! - Type-safe access to shared data.
+//! - Middleware integration via [`tower_layer::Layer`].
+//! - Error handling for missing data.
+//!
+//! # See Also
+//!
+//! - [`FromRequest`] trait for extracting data from task contexts.
+//! - [`Task`] type representing a unit of work in `apalis`.
 use std::{
     ops::Deref,
     task::{Context, Poll},
@@ -5,7 +53,7 @@ use std::{
 
 use tower_service::Service;
 
-use crate::{service_fn::from_request::FromRequest, task::Task};
+use crate::{util::FromRequest, task::Task};
 
 /// Extension data for tasks.
 /// This is commonly used to share state across tasks. or across layers within the same tasks
@@ -92,12 +140,12 @@ where
     }
 }
 
+/// Error type for missing data in a task's context.
 #[derive(Debug, thiserror::Error)]
 pub enum MissingDataError {
+    /// The type was not found in the task's data map
     #[error("the type for key `{0}` is not available")]
     NotFound(String),
-    #[error("Missing critical data from backend with context: `{0}`. This is a bug, please file a bug report")]
-    MissingTaskIdentifier(&'static str),
 }
 
 impl<T: Clone + Send + Sync + 'static, Args: Sync, Meta: Sync, IdType: Sync + Send> FromRequest<Task<Args, Meta, IdType>>

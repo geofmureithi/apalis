@@ -11,6 +11,14 @@ pub struct AbortError {
     #[source]
     source: BoxDynError,
 }
+impl AbortError {
+    /// Create a new abort error
+    pub fn new<E: Into<BoxDynError>>(err: E) -> Self {
+        AbortError {
+            source: err.into(),
+        }
+    }
+}
 
 /// Execution should be retried after a specific duration
 /// This increases the attempts
@@ -19,7 +27,7 @@ pub struct AbortError {
 pub struct RetryAfterError {
     #[source]
     source: BoxDynError,
-    duration: Duration
+    duration: Duration,
 }
 
 /// Execution should be deferred, will be retried instantly
@@ -50,18 +58,25 @@ pub enum WorkerError {
     PanicError(String),
 }
 
+/// Errors related to worker state transitions
 #[derive(Error, Debug)]
 pub enum WorkerStateError {
+    /// Worker not started
     #[error("Worker not started, did you forget to call worker.start()")]
     NotStarted,
+    /// Worker already started
     #[error("Worker already started")]
     AlreadyStarted,
+    /// Worker is not running
     #[error("Worker is not running")]
     NotRunning,
+    /// Worker is not paused
     #[error("Worker is not paused")]
     NotPaused,
-     #[error("Worker is shutting down")]
+    /// Worker is shutting down
+    #[error("Worker is shutting down")]
     ShuttingDown,
+    /// Invalid state provided
     #[error("Worker provided with invalid state {0}")]
-    InvalidState(String)
+    InvalidState(String),
 }

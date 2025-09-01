@@ -1,6 +1,6 @@
 //! Types related to the [`TaskTracker`] collection.
 //!
-//! Extracted from https://github.com/tokio-rs/tokio/blob/master/tokio-util/src/task/task_tracker.rs
+//! Extracted from the [tokio-util](https://github.com/tokio-rs/tokio/blob/master/tokio-util/src/task/task_tracker.rs) crate and modified to be runtime agnostic
 
 use pin_project_lite::pin_project;
 use std::collections::VecDeque;
@@ -73,9 +73,7 @@ use std::task::{Context, Poll, Waker};
 /// }
 /// ```
 ///
-/// [`close`]: Self::close
-/// [`wait`]: Self::wait
-pub (super) struct TaskTracker {
+pub struct TaskTracker {
     inner: Arc<TaskTrackerInner>,
 }
 
@@ -104,7 +102,7 @@ pin_project! {
     ///
     /// This future is returned by [`TaskTracker::track_future`].
     #[must_use = "futures do nothing unless polled"]
-    pub struct TrackedFuture<F> {
+    pub struct LongRunningFuture<F> {
         #[pin]
         future: F,
         token: TaskTrackerToken,
@@ -258,21 +256,21 @@ impl TaskTracker {
     ///
     /// [`wait`]: Self::wait
     #[inline]
-    pub(super) fn reopen(&self) -> bool {
+    pub fn reopen(&self) -> bool {
         self.inner.set_open()
     }
 
     /// Returns `true` if this `TaskTracker` is [closed](Self::close).
     #[inline]
     #[must_use]
-    pub(super) fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         (self.inner.state.load(Ordering::Acquire) & 1) != 0
     }
 
     /// Returns the number of tasks tracked by this `TaskTracker`.
     #[inline]
     #[must_use]
-    pub(super) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.inner.state.load(Ordering::Acquire) >> 1
     }
 
@@ -317,8 +315,8 @@ impl TaskTracker {
     /// [`poll`]: std::future::Future::poll
     /// [`wait`]: Self::wait
     #[inline]
-    pub(super) fn track_future<F: Future>(&self, future: F) -> TrackedFuture<F> {
-        TrackedFuture {
+    pub(super) fn track_future<F: Future>(&self, future: F) -> LongRunningFuture<F> {
+        LongRunningFuture {
             future,
             token: self.token(),
         }
@@ -358,7 +356,7 @@ impl TaskTracker {
     /// ```
     #[inline]
     #[must_use]
-    pub(super) fn ptr_eq(left: &TaskTracker, right: &TaskTracker) -> bool {
+    pub fn ptr_eq(left: &TaskTracker, right: &TaskTracker) -> bool {
         Arc::ptr_eq(&left.inner, &right.inner)
     }
 }
@@ -458,7 +456,7 @@ impl Drop for TaskTrackerToken {
     }
 }
 
-impl<F: Future> Future for TrackedFuture<F> {
+impl<F: Future> Future for LongRunningFuture<F> {
     type Output = F::Output;
 
     #[inline]
@@ -467,9 +465,9 @@ impl<F: Future> Future for TrackedFuture<F> {
     }
 }
 
-impl<F: fmt::Debug> fmt::Debug for TrackedFuture<F> {
+impl<F: fmt::Debug> fmt::Debug for LongRunningFuture<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TrackedFuture")
+        f.debug_struct("LongRunningFuture")
             .field("future", &self.future)
             .field("task_tracker", self.token.task_tracker())
             .finish()

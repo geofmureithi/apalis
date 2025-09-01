@@ -1,6 +1,23 @@
+//! Task metadata extension trait and implementations
+//! 
+//! This module provides a trait for injecting and extracting metadata associated with tasks.
+//! It includes implementations for common metadata types.
+//! 
+//! ## Overview
+//! - `MetadataExt<T>`: A trait for extracting and injecting metadata of type `T`.
+//! 
+//! # Usage
+//! Implement the `MetadataExt` trait for your metadata types to enable easy extraction and injection
+//! from task contexts. This allows middleware and services to access and modify task metadata in a
+//! type-safe manner.
+/// Task metadata extension trait and implementations.
+/// This trait allows for injecting and extracting metadata associated with tasks.
 pub trait MetadataExt<T> {
+    /// The error type that can occur during extraction or injection.
     type Error;
+    /// Extract metadata of type `T`.
     fn extract(&self) -> Result<T, Self::Error>;
+    /// Inject metadata of type `T`.
     fn inject(&mut self, value: T) -> Result<(), Self::Error>;
 }
 
@@ -34,6 +51,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "json")]
     impl<T: serde::de::DeserializeOwned> MetadataExt<T> for SampleStore {
         type Error = Infallible;
         fn extract(&self) -> Result<T, Self::Error> {
@@ -60,7 +78,7 @@ mod tests {
         fn call(&mut self, request: Task<Args, Meta, IdType>) -> Self::Future {
             let _config = request.ctx.metadata.extract().unwrap_or_default();
             // Do something with config
-            self.call(request)
+            self.service.call(request)
         }
     }
 }

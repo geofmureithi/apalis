@@ -83,16 +83,14 @@
 //!     - `.data(...)`: Injects shared application data.
 //!     - `.layer(...)`: Adds custom middleware.
 //!     - `.build(service)`: Consumes the builder and a [`Service`] to construct the final [`Worker`].
-use std::{future::Future, marker::PhantomData};
+use std::marker::PhantomData;
 
-use futures_util::Stream;
 use tower_layer::{Identity, Layer, Stack};
 use tower_service::Service;
 
 use crate::{
     backend::Backend,
     monitor::shutdown::Shutdown,
-    service_fn::into_response::IntoResponse,
     task::{data::Data, Task},
     worker::{event::EventHandler, Worker},
 };
@@ -203,13 +201,12 @@ where
         }
     }
 
-    // pub fn check_worker<S, U, E, IdType>(self, service: S) -> Self
-
     #[inline]
+    /// A helper for checking that the builder can build a worker with the provided service
     pub fn build_check<W, Svc>(self, service: Svc)
     where
         Svc: WorkerBuilderExt<Args, Meta, W, B, M> + Service<Task<Args, Meta, B::IdType>>,
-         // M::Service: Service<Task<Args, Meta, IdType>, Response = U, Error = E>,
+        // M::Service: Service<Task<Args, Meta, IdType>, Response = U, Error = E>,
     {
         WorkerServiceBuilder::<B, Svc, Args, Meta>::build(service, &self.source);
         // assert_worker(worker);
@@ -217,7 +214,9 @@ where
     }
 }
 
+/// Finalizes the builder and constructs a [`Worker`] with the provided service
 impl<Args, Meta, B, M> WorkerBuilder<Args, Meta, B, M> {
+    /// Consumes the builder and a service to construct the final worker
     pub fn build<W: WorkerBuilderExt<Args, Meta, Svc, B, M>, Svc>(
         self,
         service: W,
@@ -226,11 +225,15 @@ impl<Args, Meta, B, M> WorkerBuilder<Args, Meta, B, M> {
     }
 }
 
+/// Trait for building a worker service provided a backend
 pub trait WorkerServiceBuilder<Backend, Svc, Args, Meta> {
+    /// Build the service from the backend
     fn build(self, backend: &Backend) -> Svc;
 }
 
+/// Extension trait for building a worker from a builder
 pub trait WorkerBuilderExt<Args, Meta, Svc, Backend, M>: Sized {
+    /// Consumes the builder and returns a worker
     fn with_builder(
         self,
         builder: WorkerBuilder<Args, Meta, Backend, M>,
@@ -242,7 +245,10 @@ where
     T: WorkerServiceBuilder<B, Svc, Args, Meta>,
     B: Backend<Args>,
 {
-    fn with_builder(self, builder: WorkerBuilder<Args, Meta, B, M>) -> Worker<Args, Meta, B, Svc, M> {
+    fn with_builder(
+        self,
+        builder: WorkerBuilder<Args, Meta, B, M>,
+    ) -> Worker<Args, Meta, B, Svc, M> {
         let svc = self.build(&builder.source);
         let mut worker = Worker::new(builder.name, builder.source, svc, builder.layer);
         worker.event_handler = builder
@@ -250,8 +256,8 @@ where
             .write()
             .map(|mut d| d.take())
             .unwrap()
-            .unwrap_or(Box::new(|ctx, e| {
-                trace!("Worker [{}] received event {e}", ctx.name());
+            .unwrap_or(Box::new(|_ctx, _e| {
+                trace!("Worker [{}] received event {_e}", _ctx.name());
             }));
         worker.shutdown = builder.shutdown;
         worker

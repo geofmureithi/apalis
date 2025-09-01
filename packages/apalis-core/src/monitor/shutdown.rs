@@ -1,3 +1,9 @@
+//! A shutdown monitor that can be used to signal shutdown to tasks and workers.
+//! 
+//! ## Overview
+//! It provides a future that resolves when a shutdown is initiated, allowing tasks to await shutdown
+//! signals and perform cleanup operations.
+
 use std::{
     pin::Pin,
     sync::{

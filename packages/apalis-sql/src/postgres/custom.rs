@@ -4,7 +4,7 @@ use std::sync::Arc;
 use apalis_core::backend::{Backend, BackendWithSink};
 use apalis_core::task::task_id::Ulid;
 use apalis_core::task::Task;
-use apalis_core::utils::Identity;
+use apalis_core::layers::Identity;
 use apalis_core::worker::context::WorkerContext;
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
@@ -127,7 +127,7 @@ mod tests {
     use apalis_core::{
         backend::{codec::json::JsonCodec, memory::MemoryStorage, BackendWithSink, TaskSink},
         error::BoxDynError,
-        service_fn::{self, service_fn, ServiceFn},
+        task_fn::{self, service_fn, TaskFn},
         task::{
             task_id::{TaskId, Ulid},
             ExecutionContext,

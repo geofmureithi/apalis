@@ -1,4 +1,7 @@
-/// A unique ID that can be used by a backend
+//! Defines the `TaskId` type and related functionality.
+//!
+//! `TaskId` is a wrapper around a generic identifier type, providing type safety and utility methods for task identification.
+//!
 use std::{
     fmt::{Debug, Display},
     hash::Hash,
@@ -6,13 +9,11 @@ use std::{
 };
 
 use crate::{
-    service_fn::from_request::FromRequest,
     task::{data::MissingDataError, Task},
+    util::FromRequest,
 };
 
 pub use random_id::RandomId;
-
-pub use ulid::Ulid;
 
 /// A wrapper type that defines a task id.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -30,8 +31,10 @@ impl<IdType> TaskId<IdType> {
     }
 }
 
+/// Errors that can occur when parsing a `TaskId` from a string
 #[derive(Debug, thiserror::Error)]
 pub enum TaskIdError<E> {
+    /// Decoding error
     #[error("could not decode task_id: `{0}`")]
     Decode(E),
 }
@@ -64,13 +67,9 @@ impl<Args: Sync, Meta: Sync, IdType: Sync + Send + Clone> FromRequest<Task<Args,
 {
     type Error = MissingDataError;
     async fn from_request(req: &Task<Args, Meta, IdType>) -> Result<Self, Self::Error> {
-        Ok(req
-            .ctx
-            .task_id
-            .clone()
-            .ok_or(MissingDataError::MissingTaskIdentifier(
-                std::any::type_name::<Meta>(),
-            ))?)
+        Ok(req.ctx.task_id.clone().ok_or(MissingDataError::NotFound(
+            std::any::type_name::<TaskId<IdType>>().to_string(),
+        ))?)
     }
 }
 
@@ -85,6 +84,8 @@ mod random_id {
     const TIME_LEN: usize = 6;
     const RANDOM_LEN: usize = 5;
 
+    /// A simple, unique, time-ordered ID (zero-deps).
+    ///
     /// Consider using a ulid/uuid/nanoid in backend implementation
     /// This is a placeholder and does not guarantee/tested as the other implementations
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
