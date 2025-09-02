@@ -1,7 +1,7 @@
 
-//! Extension data utilities for tasks in `apalis`.
+//! Utilities for task data extension.
 //!
-//! This module provides the [`Data`] type and related middleware for sharing state across tasks or layers within the same task.
+//! The [`Data`] type and related middleware are important for sharing state across tasks or layers within the same task.
 //!
 //! # Overview
 //!
@@ -45,7 +45,7 @@
 //! # See Also
 //!
 //! - [`FromRequest`] trait for extracting data from task contexts.
-//! - [`Task`] type representing a unit of work in `apalis`.
+//! - [`Task`] type representing a unit of work.
 use std::{
     ops::Deref,
     task::{Context, Poll},
@@ -53,7 +53,7 @@ use std::{
 
 use tower_service::Service;
 
-use crate::{util::FromRequest, task::Task};
+use crate::{task_fn::FromRequest, task::Task};
 
 /// Extension data for tasks.
 /// This is commonly used to share state across tasks. or across layers within the same tasks

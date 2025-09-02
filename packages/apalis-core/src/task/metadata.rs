@@ -1,11 +1,11 @@
 //! Task metadata extension trait and implementations
-//! 
-//! This module provides a trait for injecting and extracting metadata associated with tasks.
+//!
+//! The [`MetadataExt`] trait allows injecting and extracting metadata associated with tasks.
 //! It includes implementations for common metadata types.
-//! 
+//!
 //! ## Overview
 //! - `MetadataExt<T>`: A trait for extracting and injecting metadata of type `T`.
-//! 
+//!
 //! # Usage
 //! Implement the `MetadataExt` trait for your metadata types to enable easy extraction and injection
 //! from task contexts. This allows middleware and services to access and modify task metadata in a
@@ -29,15 +29,15 @@ mod tests {
     use tower::Service;
 
     #[derive(Debug, Clone)]
-    pub struct ExampleService<S> {
+    struct ExampleService<S> {
         service: S,
     }
     #[derive(Debug, Clone, Default)]
-    pub struct ExampleConfig {
+    struct ExampleConfig {
         timeout: Duration,
     }
 
-    pub struct SampleStore;
+    struct SampleStore;
 
     impl MetadataExt<ExampleConfig> for SampleStore {
         type Error = Infallible;

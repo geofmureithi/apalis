@@ -12,7 +12,7 @@
 //! A cron-like job scheduling library for `apalis` that is simple yet extensible.
 //!
 //! `apalis-cron` is built on top of `apalis` and integrates seamlessly with the `apalis` ecosystem.
-//! This means you can leverage the full power of `apalis` workers and middleware, including:
+//! This means you can leverage the full power of workers and middleware, including:
 //!
 //! - **Tracing**: For observing the execution of your cron jobs.
 //! - **Retries**: To handle transient failures with configurable backoff strategies.

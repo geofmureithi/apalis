@@ -10,7 +10,7 @@ use std::{
 
 use crate::{
     task::{data::MissingDataError, Task},
-    util::FromRequest,
+    task_fn::FromRequest,
 };
 
 pub use random_id::RandomId;
@@ -25,7 +25,7 @@ impl<IdType> TaskId<IdType> {
     pub fn new(id: IdType) -> Self {
         Self(id)
     }
-    /// Get the inner [`IdType`]
+    /// Get the inner value
     pub fn inner(&self) -> &IdType {
         &self.0
     }

@@ -20,24 +20,12 @@
     while_true
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-
-//! A high-performance, type-safe task processing framework built on top of the `tower` ecosystem.
+//! A high-performance, type-safe task processing framework for rust.
 //!
 //! `apalis-core` provides the fundamental abstractions and runtime components for building
-//! scalable background task systems with middleware support, graceful shutdown, and
-//! comprehensive monitoring capabilities.
+//! scalable background task systems with middleware support, graceful shutdown, and monitoring capabilities.
 //!
-//! This is technical documentation, for guide level documentation is found on the [website](https://apalis.dev).
-//!
-//! ## Features
-//!
-//! - **Type Safety** - Compile-time guarantees for task data and processing pipelines
-//! - **Tower Integration** - Full middleware ecosystem compatibility
-//! - **Async/Await** - Modern async runtime support with efficient resource utilization
-//! - **Graceful Shutdown** - Clean termination with task completion guarantees
-//! - **Extensibility** - Pluggable architecture for custom backends and middleware
-//! - **Observability** - Comprehensive event system and tracing integration
-//!
+//! This is advanced documentation, for guide level documentation is found on the [website](https://apalis.dev).
 //!
 //! # Core Concepts
 //!
@@ -49,15 +37,15 @@
 //! - **[`Monitor`](#monitor)**: Multi-worker coordination and observability
 //!
 //! The framework leverages the `tower` service abstraction to provide a rich middleware
-//! ecosystem for cross-cutting concerns like error handling, timeouts, rate limiting,
+//! ecosystem like error handling, timeouts, rate limiting,
 //! and observability.
 //!
 //!
 //! ## Tasks
 //!
 //! The task struct provides type-safe components for task data and metadata:
-//! - [`Args`] - The primary data payload for the task
-//! - [`Meta`] - metadata associated with the task provided by the backend
+//! - [`Args`](crate::task::args::tutorial) - The primary data payload for the task
+//! - [`Meta`](crate::task::metadata) - metadata associated with the task provided by the backend
 //! - [`ExecutionContext`](crate::task::ExecutionContext) - Contextual information for task execution
 //! - [`Status`](crate::task::Status) - Represents the current state of a task
 //! - [`TaskId`](crate::task::task_id::TaskId) - Unique identifier for task tracking
@@ -75,19 +63,20 @@
 //!     .run_in_minutes(10)
 //!     .build();
 //! ```
-//! Specific documentation for tasks can be found in the [`task` module](crate::task) and [`task::builder`](crate::task::builder).
-//! 
-//! ### Tutorials
+//! Specific documentation for tasks can be found in the [`task`](crate::task) and [`task::builder`](crate::task::builder) modules.
+//!
+//! #### Relevant tutorials:
 //! - [**Defining Task arguments**](crate::task::args::tutorial) - Creating effective task arguments that are scalable and type-safe
 
 //!
 //! ## Backends
 //!
 //! The [`Backend`](crate::backend::Backend) trait serves as the core abstraction for all task sources.
-//! It defines task polling mechanisms, streaming interfaces, and middleware integration points. In other frameworks,
-//! this concept is often referred to as a "queue" or "broker", but `apalis` uses the more general term "backend".
+//! It defines task polling mechanisms, streaming interfaces, and middleware integration points.
 //!
-//! **Associated Types:**
+//! <details>
+//! <summary>Associated Types:</summary>
+//!
 //! - `Stream` - Defines the task stream type for polling operations
 //! - `Layer` - Specifies the middleware layer stack for the backend
 //! - `Codec` - Determines serialization format for task data persistence
@@ -96,14 +85,23 @@
 //! - `Meta` - Metadata type associated with tasks
 //! - `Error` - Error type for backend operations
 //!
+//! </details>
+//!
 //! Backends handle task persistence, distribution, and reliability concerns while providing
 //! a uniform interface for worker consumption.
 //!
 //! ## Workers
 //!
-//! Workers form the core execution engine, responsible for task polling, processing, and lifecycle management.
-//! Workers can be run as a future or as a stream of events. Workers readiness is conditioned on the backend and service being ready.
-//! This means any blocking middleware eg (concurrency) will block the worker from polling tasks.
+//! The [`Worker`](crate::worker::Worker) is the core runtime component responsible for task polling, execution, and lifecycle management:
+//!
+//! ### Worker Lifecycle
+//!
+//! - Workers are responsible for task polling, processing, and lifecycle management.
+//! - Workers can be run as a future or as a stream of events.
+//! - Workers readiness is conditioned on the backend and service (and middleware) being ready.
+//! - This means any blocking middleware eg (concurrency) will block the worker from polling tasks.
+//!
+//! ### Worker Components
 //!
 //! The following are the main components the worker module:
 //!
@@ -144,22 +142,21 @@
 //! }
 //! ```
 //!
-//! Learn more about workers in the [`worker` module](crate::worker) and [`worker::builder`](crate::worker::builder).
-//! 
-//! ### Tutorials
-//! - [**Creating Task Functions**](crate::utils::task_fn::tutorial) - Defining task processing functions using the [`TaskFn`] trait
-//! - [**Testing `task_fns` with `TestWorker`**](crate::worker::test_worker) - Specialized worker implementation for unit and integration testing
+//! Learn more about workers in the [`worker`](crate::worker) and [`worker::builder`](crate::worker::builder) modules.
+//!
+//! #### Relevant Tutorials:
+//! - [**Creating task handlers**](crate::task_fn::tutorial) - Defining task processing functions using the [`TaskFn`] trait
+//! - [**Testing task handlers with `TestWorker`**](crate::worker::test_worker) - Specialized worker implementation for unit and integration testing
 //!
 //! ## Monitor
 //!
-//! The [`Monitor`](crate::monitor::Monitor) component provides centralized coordination
-//! for multiple workers with comprehensive lifecycle management:
+//! The [`Monitor`](crate::monitor::Monitor) helps manage and coordinate multiple workers:
 //!
-//! **Core Responsibilities:**
-//! - **Worker Registry** - Active worker tracking via `register
-//! - **Event Handling** - Centralized event processing and subscription
-//! - **Graceful Shutdown** - Coordinated worker termination with signal propagation
-//! - **Health Monitoring** - Worker readiness and state tracking
+//! **Main Features:**
+//! - **Worker Registry** - Keeps track of active workers
+//! - **Event Handling** - Handles and processes worker events
+//! - **Graceful Shutdown** - Stops all workers together safely
+//! - **Health Monitoring** - Restarts and manages worker health
 //! ### Example: Using `Monitor` with a Worker
 //!
 //! ```rust
@@ -191,24 +188,26 @@
 //! ```
 //!
 //! Learn more about the monitor in the [`monitor` module](crate::monitor).
-//! 
+//!
 //! ## Middleware
 //!
-//! Built on the Tower ecosystem, `apalis-core` provides extensive middleware support
-//! for cross-cutting concerns:
+//! Built on the `tower` ecosystem, `apalis-core` provides extensive middleware support like error handling, timeouts, rate limiting, and observability.
 //!
 //! ### Core Middleware
+//!
+//! The following middleware layers are included with their worker extensions:
 //! - [`AcknowledgmentLayer`] - Task acknowledgment after processing
 //! - [`EventListenerLayer`] - Worker event emission and handling
 //! - [`CircuitBreakerLayer`] - Circuit breaker pattern for failure handling
 //! - [`LongRunningLayer`] - Support for tracking long-running tasks
 //!
-//! Each middleware layer integrates seamlessly with the Tower service stack,
-//! providing composable and configurable task processing pipelines.
+//! ### Extending with middleware
 //!
-//! #### Custom Middleware
+//! You can write your own middleware to run code before or after a task is processed.
 //!
-//! You can create your own Tower `Layer` and `Service` to process `Task` objects.
+//! <details>
+//! <summary>Creating Custom Middleware</summary>
+//!
 //! Here's a simple example of a logging middleware layer:
 //!
 //! ```rust
@@ -251,8 +250,9 @@
 //!     }
 //! }
 //! ```
-//! 
-//! Learn more about worker middleware in the [`worker::ext` module](crate::worker::ext).
+//! </details>
+//!
+//! If you want your middleware to do more than just intercept requests and responses, you can use extension traits. See the [`worker::ext`](crate::worker::ext) module for examples.
 //!
 //! ## Error Handling
 //!
@@ -267,27 +267,30 @@
 //!
 //! ## Graceful Shutdown
 //!
-//! The framework implements a sophisticated graceful shutdown system ensuring
-//! clean worker termination and task completion:
+//! `apalis-core` has a reliable graceful shutdown system that makes sure
+//! workers stop safely and all tasks finish before shutting down:
 //!
-//! **Components:**
-//! - **Task Tracking** - [`WorkerContext`] maintains accurate active task counts
-//! - **Context Future** - Resolves when shutdown conditions are met and no tasks remain
-//! - **Monitor Coordination** - Shared `Shutdown` tokens orchestrate multi-worker termination
-//! - **Timeout Support** - Configurable termination timeouts via [`with_terminator()`]
+//! **Key Features:**
+//! - Task tracking: Workers keep track of how many tasks are running.
+//! - Shutdown control: The system waits until all tasks are finished before shutting down.
+//! - Monitor coordination: A shared [`Shutdown`] token helps all workers stop together.
+//! - Timeout: You can set a time limit for shutdown using [`with_terminator()`].
 //!
-//! This system ensures data integrity and prevents task loss during application shutdown.
+//! Learn more about the graceful shutdown process in the [`monitor`](crate::monitor#graceful-shutdown-with-timeout) module.
 //!
 //! # Feature flags
-#![doc = document_features::document_features!()]
+#![cfg_attr(
+    feature = "docsrs",
+    cfg_attr(doc, doc = ::document_features::document_features!())
+)]
 //!
 //! # Development
-//! 
-//! `apalis` encourages contributions and custom extensions to fit diverse use cases.
-//! `apalis-core` provides comprehensive testing utilities and extensibility mechanisms:
+//! `apalis-core` provides comprehensive extensibility mechanisms such as middleware and ext traits.
+//!  Beyond there one may want to dive deeper into the following topics:
 //!
-//! - [**Implementing Backends**](crate::backend::tutorial) - Creating custom backends by implementing the [`Backend`] trait
-//! - [**Extending Workers using extension traits**](crate::worker::ext#creating-a-custom-worker-extension-trait) - Implementing custom worker functionality via extension traits
+//! - [**Using CustomBackend**](crate::backend::custom) - using custom backend to integrate with already existing systems
+//! - [**Implementing Backends**](crate::backend::tutorial) - implementing the [`Backend`] trait from scratch
+//! - [**Extending Workers using extension traits**](crate::worker::ext#creating-a-custom-worker-extension-trait) - implementing custom worker functionality via extension traits
 //!
 //! [`Backend`]: crate::backend::Backend
 //! [`TaskFn`]: crate::task_fn::TaskFn
@@ -321,8 +324,13 @@ pub(crate) mod macros;
 /// Utilities for managing and observing workers
 pub mod monitor;
 pub mod task;
-pub mod util;
+pub mod task_fn;
 pub mod worker;
+
+/// Layer utilities for building middleware stacks
+pub mod layers {
+    pub use tower_layer::{Identity, Stack};
+}
 /// Represents timing and delaying utilities
 #[cfg(feature = "sleep")]
 pub mod timer {

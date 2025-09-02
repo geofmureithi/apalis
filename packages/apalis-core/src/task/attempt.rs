@@ -1,4 +1,4 @@
-//! This module provides the `Attempt` type, a thread-safe tracker for counting the number of attempts made by a task.
+//! A thread-safe tracker for counting the number of attempts made by a task.
 //!
 //! The `Attempt` struct wraps an atomic counter, allowing concurrent increment and retrieval of the attempt count. It is designed to be used within the Apalis job/task system, enabling tasks to keep track of how many times they have been retried or executed.
 //!
@@ -11,7 +11,7 @@ use std::{
     sync::{atomic::AtomicUsize, Arc},
 };
 
-use crate::{task::Task, util::FromRequest};
+use crate::{task::Task, task_fn::FromRequest};
 
 /// A wrapper to keep count of the attempts tried by a task
 #[derive(Debug, Clone)]

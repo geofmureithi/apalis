@@ -1,7 +1,6 @@
-//! Utilities for calling all requests from a stream to a service, yielding responses as they arrive.
+//! Utilities for executing all tasks from a stream to a service.
 //! 
-//! Call all requests from a stream to a service, yielding responses as they arrive
-//! This module provides a combinator for calling all requests from a stream to a service, yielding responses
+//! A combinator for calling all requests from a stream to a service, yielding responses
 //! as they arrive. It supports both ordered and unordered response handling, allowing for flexible integration
 //! with asynchronous services.
 use futures_util::{ready, stream::FuturesUnordered, Stream};

@@ -1,6 +1,6 @@
-//! Core traits and types for interacting with backends
+//! Core traits for interacting with backends
 //!
-//! This module defines the core traits and types for `apalis` backends, which are responsible for providing sources of tasks, handling their lifecycle, and exposing middleware for internal processing.
+//! The core traits and types for backends, responsible for providing sources of tasks, handling their lifecycle, and exposing middleware for internal processing.
 //! The traits here abstract over different backend implementations, allowing for extensibility and interoperability.
 //!
 //! # Overview
@@ -37,7 +37,17 @@ pub mod custom;
 pub mod pipe;
 pub mod shared;
 
-pub mod impls;
+mod impls;
+
+pub mod memory {
+    pub use crate::backend::impls::memory::*;
+}
+
+#[cfg(feature = "json")]
+pub mod json {
+    pub use crate::backend::impls::json::*;
+}
+
 /// A backend represents a task source
 pub trait Backend<Args> {
     /// The type used to uniquely identify tasks.

@@ -10,8 +10,8 @@
 //! - Captures task output through [`TestEmitService`] for validation.
 //!
 //! # Example
-//! ```no_run
-//! use crate::{memory::MemoryStorage, service_fn::service_fn, test_utils::TestWorker};
+//! ```rust
+//! # use crate::{backend::memory::MemoryStorage, task_fn::task_fn, worker::test_utils::TestWorker};
 //!
 //! async fn is_even(req: usize) -> Result<(), BoxDynError> {
 //!     if req % 2 == 0 {
@@ -24,18 +24,13 @@
 //! #[tokio::test]
 //! async fn test_accepts_even() {
 //!     let backend = MemoryStorage::new();
-//!     backend.enqueue(42usize).await.unwrap();
-//!     let mut worker = TestWorker::new(backend, service_fn(is_even));
+//!     backend.push(42usize).await.unwrap();
+//!     let mut worker = TestWorker::new(backend, is_even);
 //!
 //!     let (_task_id, resp) = worker.execute_next().await.unwrap().unwrap();
 //!     assert_eq!(resp, Ok("()".to_string()));
 //! }
 //! ```
-//!
-//! # Types
-//! - [`TestWorker`] — Runs a worker against an in-memory or mock backend for testing.
-//! - [`TestEmitService`] — Wraps a service and emits responses to an async channel for inspection.
-//! - [`ExecuteNext`] — Trait for advancing the test worker to process the next task.
 //!
 //! This module is intended for use in tests and local development.
 //! [`Service`]: tower_service::Service
@@ -43,7 +38,7 @@ use crate::backend::Backend;
 use crate::error::BoxDynError;
 use crate::task::task_id::{RandomId, TaskId};
 use crate::task::Task;
-use crate::worker::builder::WorkerBuilder;
+use crate::worker::builder::{WorkerBuilder, WorkerServiceBuilder};
 use crate::worker::{Event, ReadinessService, TrackerService, WorkerError};
 use futures_channel::mpsc::{self, channel};
 use futures_core::future::BoxFuture;
@@ -60,7 +55,6 @@ use tower_service::Service;
 /// Important for testing backends and tasks
 /// # Example
 /// ```no_run
-/// #[cfg(tests)]
 /// mod tests {
 ///    use crate::{error:BoxDynError, memory::MemoryStorage, service_fn::service_fn};
 ///
@@ -70,7 +64,7 @@ use tower_service::Service;
 ///        if req % 2 == 0 {
 ///            Ok(())
 ///        } else {
-///            Err("Not an even number"?)
+///            Err("Not an even number".into())
 ///        }
 ///    }
 ///
@@ -124,8 +118,43 @@ where
 }
 
 impl<B, S, Res> TestWorker<B, S, Res, ()> {
-    /// Build a new test worker
-    pub fn new<Args, Meta>(backend: B, service: S) -> TestWorker<B, S, Res, B::IdType>
+    /// Create a new test worker
+    pub fn new<Args, Meta, W>(backend: B, factory: W) -> TestWorker<B, S, Res, B::IdType>
+    where
+        W: WorkerServiceBuilder<B, S, Args, Meta>,
+        B: Backend<Args, Meta = Meta> + 'static,
+        S: Service<Task<Args, Meta, B::IdType>, Response = Res> + Send + 'static,
+        B::Stream: Unpin + Send + 'static,
+        B::Beat: Unpin + Send + 'static,
+        Args: Send + 'static,
+        Meta: Send + 'static,
+        B::Error: Into<BoxDynError> + Send + 'static,
+        B::Layer: Layer<ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>>,
+        S::Future: Send,
+        S::Error: Into<BoxDynError> + Send + Sync,
+        S::Response: Clone + Send,
+        Res: 'static,
+        <<B as Backend<Args>>::Layer as Layer<
+            ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
+        >>::Service: Service<Task<Args, Meta, B::IdType>>,
+        <<<B as Backend<Args>>::Layer as Layer<
+            ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
+        >>::Service as Service<Task<Args, Meta, B::IdType>>>::Error:
+            Into<BoxDynError> + Sync + Send,
+        <<<B as Backend<Args>>::Layer as Layer<
+            ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
+        >>::Service as Service<Task<Args, Meta, B::IdType>>>::Future: Send,
+        <<B as Backend<Args>>::Layer as Layer<
+            ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
+        >>::Service: std::marker::Send + 'static,
+        B::IdType: Send + Clone + 'static,
+    {
+        let service = factory.build(&backend);
+        TestWorker::new_with_svc(backend, service)
+    }
+
+    /// Create a new test worker with a service
+    pub fn new_with_svc<Args, Meta>(backend: B, service: S) -> TestWorker<B, S, Res, B::IdType>
     where
         B: Backend<Args, Meta = Meta> + 'static,
         S: Service<Task<Args, Meta, B::IdType>, Response = Res> + Send + 'static,
@@ -246,9 +275,9 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        backend::{impls::memory::MemoryStorage, TaskSink},
+        backend::{memory::MemoryStorage, TaskSink},
         error::BoxDynError,
-        util::task_fn,
+        task_fn::task_fn,
         worker::{
             test_worker::{ExecuteNext, TestWorker},
             WorkerContext,

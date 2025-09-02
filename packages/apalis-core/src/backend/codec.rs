@@ -1,8 +1,8 @@
-//! A module defining codecs for encoding and decoding task arguments and results
+//! Utilities for encoding and decoding task arguments and results
 //! 
 //! # Overview
 //! 
-//! This module provides the `Codec` trait, which allows for converting values
+//! The `Codec` trait allows for converting values
 //! between a type `T` and a more compact or transport-friendly representation.
 //! This is particularly useful for serializing/deserializing, compressing/expanding,
 //! or otherwise encoding/decoding values in a custom format.

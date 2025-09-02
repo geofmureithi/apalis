@@ -13,66 +13,6 @@ use std::sync::Mutex;
 use std::task::{Context, Poll, Waker};
 
 /// A task tracker used for waiting until tasks exit.
-///
-/// This is usually used together with a cancellation mechanism to implement graceful shutdown.
-/// The cancellation mechanism is used to signal to tasks that they should shut down, and the
-/// `TaskTracker` is used to wait for them to finish shutting down.
-///
-/// The `TaskTracker` will also keep track of a `closed` boolean. This is used to handle the case
-/// where the `TaskTracker` is empty, but we don't want to shut down yet. This means that the
-/// [`wait`] method will wait until *both* of the following happen at the same time:
-///
-///  * The `TaskTracker` must be closed using the [`close`] method.
-///  * The `TaskTracker` must be empty, that is, all tasks that it is tracking must have exited.
-///
-/// When a call to [`wait`] returns, it is guaranteed that all tracked tasks have exited and that
-/// the destructor of the future has finished running.
-///
-/// # Features
-///
-/// The `TaskTracker` provides several unique features:
-///
-///  1. When tasks exit, a `TaskTracker` will allow the task to immediately free its memory.
-///  2. By not closing the `TaskTracker`, [`wait`] will be prevented from returning even if
-///     the `TaskTracker` is empty.
-///  3. A `TaskTracker` does not require mutable access to insert tasks.
-///  4. A `TaskTracker` can be cloned to share it with many tasks.
-///
-/// The first point is important for long-running applications. If you keep inserting tasks and
-/// never remove them, their metadata could accumulate and consume memory. With a `TaskTracker`,
-/// once tasks exit, they are immediately removed from the `TaskTracker`.
-///
-/// Note that dropping a `TaskTracker` does not abort the tasks.
-///
-/// # Examples
-///
-/// ## Spawn tasks and wait for them to exit
-///
-/// ```
-/// use task_tracker::TaskTracker;
-///
-/// async fn example() {
-///     let tracker = TaskTracker::new();
-///
-///     // Track some futures
-///     for i in 0..10 {
-///         let future = async move {
-///             println!("Task {} is running!", i);
-///         };
-///         // You would spawn this with your preferred executor
-///         // executor.spawn(tracker.track_future(future));
-///     }
-///     
-///     // Once we spawned everything, we close the tracker.
-///     tracker.close();
-///
-///     // Wait for everything to finish.
-///     tracker.wait().await;
-///
-///     println!("This is printed after all of the tasks.");
-/// }
-/// ```
-///
 pub struct TaskTracker {
     inner: Arc<TaskTrackerInner>,
 }
@@ -229,7 +169,7 @@ impl TaskTracker {
     ///
     /// [aba]: https://en.wikipedia.org/wiki/ABA_problem
     #[inline]
-    pub(super) fn wait(&self) -> TaskTrackerWaitFuture {
+    pub fn wait(&self) -> TaskTrackerWaitFuture {
         TaskTrackerWaitFuture {
             task_tracker: self.clone(),
             registered: false,
@@ -244,7 +184,7 @@ impl TaskTracker {
     ///
     /// [`wait`]: Self::wait
     #[inline]
-    pub(super) fn close(&self) -> bool {
+    pub fn close(&self) -> bool {
         self.inner.set_closed()
     }
 
@@ -282,38 +222,6 @@ impl TaskTracker {
     }
 
     /// Track the provided future.
-    ///
-    /// The returned [`TrackedFuture`] will count as a task tracked by this collection, and will
-    /// prevent calls to [`wait`] from returning until the task is dropped.
-    ///
-    /// The task is removed from the collection when it is dropped, not when [`poll`] returns
-    /// [`Poll::Ready`].
-    ///
-    /// # Examples
-    ///
-    /// Track a future spawned with your executor of choice.
-    ///
-    /// ```
-    /// # async fn my_async_fn() {}
-    /// use task_tracker::TaskTracker;
-    ///
-    /// async fn example() {
-    ///     let tracker = TaskTracker::new();
-    ///     
-    ///     // With async-std
-    ///     // async_std::task::spawn(tracker.track_future(my_async_fn()));
-    ///     
-    ///     // With smol
-    ///     // smol::spawn(tracker.track_future(my_async_fn())).detach();
-    ///     
-    ///     // With any other executor
-    ///     // executor.spawn(tracker.track_future(my_async_fn()));
-    /// }
-    /// ```
-    ///
-    /// [`Poll::Pending`]: std::task::Poll::Pending
-    /// [`poll`]: std::future::Future::poll
-    /// [`wait`]: Self::wait
     #[inline]
     pub(super) fn track_future<F: Future>(&self, future: F) -> LongRunningFuture<F> {
         LongRunningFuture {
@@ -345,7 +253,7 @@ impl TaskTracker {
     /// # Examples
     ///
     /// ```
-    /// use task_tracker::TaskTracker;
+    /// # use crate::worker::ext::long_running::TaskTracker;
     ///
     /// let tracker_1 = TaskTracker::new();
     /// let tracker_2 = TaskTracker::new();

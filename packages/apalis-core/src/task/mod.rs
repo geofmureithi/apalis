@@ -1,6 +1,6 @@
-//! Represents utilities for creating and managing tasks.
+//! Utilities for creating and managing tasks.
 //!
-//! This module provides the [`Task`] struct, which encapsulates a unit of work to be executed,
+//! The [`Task`] component encapsulates a unit of work to be executed,
 //! along with its associated context, metadata, and execution status. The [`ExecutionContext`]
 //! struct contains metadata, attempt tracking, extensions, and scheduling information for each task.
 //!
@@ -45,8 +45,7 @@
 //! ## Creating a new task with default metadata
 //!
 //! ```rust
-//! use apalis_core::task::Task;
-//! let task = Task::<String, (), _>::new("my work".to_string());
+//! let task = TaskBuilder::new("my work".to_string()).build();
 //! ```
 //!
 //! ## Creating a task with custom metadata
@@ -56,7 +55,9 @@
 //! #[derive(Default, Clone)]
 //! struct MyMeta { priority: u8 }
 //! let meta = MyMeta { priority: 5 };
-//! let task = Task::<String, MyMeta, _>::new_with_meta("important work".to_string(), meta);
+//! let task = TaskBuilder::new("important work".to_string())
+//!     .with_meta(meta)
+//!     .build();
 //! ```
 //!
 //! ## Accessing and modifying the execution context
@@ -74,7 +75,7 @@
 //! use apalis_core::task::{Task, Extensions};
 //! let mut extensions = Extensions::default();
 //! extensions.insert("trace_id", "abc123");
-//! let task = Task::<String, (), _>::new_with_data("work".to_string(), extensions, ());
+//! let task = TaskBuilder::new("work".to_string()).with_data(extensions).build();
 //! assert_eq!(task.ctx.data.get::<&str>("trace_id"), Some(&"abc123"));
 //! ```
 //!
@@ -90,6 +91,10 @@
 //! - [`IntoResponse`]: Trait for converting tasks into response types.
 //! - [`TaskBuilder`]: Fluent builder for constructing tasks with optional configuration.
 //! - [`RandomId`]: Default unique identifier type for tasks.
+//! 
+//! [TaskBuilder]: crate::task::builder::TaskBuilder
+//! [IntoResponse]: crate::task::into_response::IntoResponse
+//! [FromRequest]: crate::task::from_request::FromRequest
 
 use std::{
     fmt::Debug,
@@ -116,13 +121,13 @@ pub mod task_id;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
 pub struct Task<Args, Meta, IdType = RandomId> {
-    /// The inner request part
+    /// The inner task part
     pub args: Args,
-    /// Context of the request eg id, attempts and context
+    /// Context of the task eg id, attempts and context
     pub ctx: ExecutionContext<Meta, IdType>,
 }
 
-/// Component parts of a `Request`
+/// Component parts of a `Task`
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Default)]
 pub struct ExecutionContext<Metadata, IdType = RandomId> {
@@ -164,7 +169,7 @@ where
 }
 
 impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
-    /// Creates a new [Request]
+    /// Creates a new [Task]
     pub fn new(args: Args) -> Self
     where
         Meta: Default,
@@ -172,12 +177,12 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
         Self::new_with_data(args, Extensions::default(), Meta::default())
     }
 
-    /// Creates a request with all parts provided
+    /// Creates a task with all parts provided
     pub fn new_with_ctx(args: Args, ctx: ExecutionContext<Meta, IdType>) -> Self {
         Self { args, ctx }
     }
 
-    /// Creates a request with metadata provided
+    /// Creates a task with metadata provided
     pub fn new_with_meta(req: Args, meta: Meta) -> Self {
         Self {
             args: req,
@@ -197,7 +202,7 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
         }
     }
 
-    /// Creates a request with data and context provided
+    /// Creates a task with data and context provided
     pub fn new_with_data(req: Args, data: Extensions, ctx: Meta) -> Self {
         Self {
             args: req,
@@ -224,7 +229,7 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
 }
 
 impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
-    /// Maps the `args` field using the provided function, consuming the request.
+    /// Maps the `args` field using the provided function, consuming the task.
     pub fn try_map<F, NewArgs, Err>(self, f: F) -> Result<Task<NewArgs, Meta, IdType>, Err>
     where
         F: FnOnce(Args) -> Result<NewArgs, Err>,
@@ -234,7 +239,7 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
             ctx: self.ctx,
         })
     }
-    /// Maps the `args` field using the provided function, consuming the request.
+    /// Maps the `args` field using the provided function, consuming the task.
     pub fn map<F, NewArgs>(self, f: F) -> Task<NewArgs, Meta, IdType>
     where
         F: FnOnce(Args) -> NewArgs,

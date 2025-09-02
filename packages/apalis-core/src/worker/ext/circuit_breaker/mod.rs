@@ -1,13 +1,13 @@
 //! Circuit Breaker extension for workers.
 //!
-//! This module provides a [`CircuitBreaker`] trait and related types to enable circuit breaker
-//! functionality for `apalis` workers. The circuit breaker pattern helps prevent repeated failures
+//! The [`CircuitBreaker`] trait and related types enable circuit breaker
+//! functionality for workers. The circuit breaker pattern helps prevent repeated failures
 //! by temporarily halting task processing when a configurable error threshold is reached.
 //!
 //! # Features
 //! - Automatically breaks the circuit when a failure threshold is hit.
 //! - Configurable recovery timeout, success threshold, and half-open state behavior.
-//! - Integrates with `apalis` worker middleware stack.
+//! - Integrates with worker middleware stack.
 //!
 //! # Example
 //!
@@ -77,6 +77,8 @@ use crate::{
 mod service;
 
 /// Allows breaking the circuit if an error threshold is hit
+///
+/// See [module level documentation](self) for more details.
 pub trait CircuitBreaker<Args, Meta, Source, Middleware>: Sized {
     /// Allows the worker to break the circuit in case of failures
     /// Uses default configuration
@@ -122,7 +124,7 @@ mod tests {
     use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
-        backend::{impls::memory::MemoryStorage, TaskSink},
+        backend::{memory::MemoryStorage, TaskSink},
         error::BoxDynError,
         worker::{
             builder::WorkerBuilder,
@@ -145,12 +147,11 @@ mod tests {
         async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_secs(1)).await;
             if task == ITEMS - 1 {
-                
                 return Err("Worker stopped!")?;
             }
-            if (task == 8) {
-                    ctx.stop().unwrap();
-                }
+            if task == 8 {
+                ctx.stop().unwrap();
+            }
             if task % 3 == 0 {
                 return Ok(());
             } else {

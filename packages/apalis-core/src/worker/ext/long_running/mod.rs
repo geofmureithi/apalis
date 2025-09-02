@@ -1,46 +1,43 @@
-//! # Long running task support for workers
+//! # Utilities for long running tasks
 //!
-//! This module provides middleware and context for handling long-running tasks within `apalis` workers.
 //! It includes a tracker for monitoring task duration and a middleware layer to integrate with the worker's service stack.
 //! The long-running task support ensures that tasks exceeding a specified duration are properly tracked and managed, allowing for graceful shutdown and resource cleanup.
 //!
 //! ## Features
-//! - TaskTracker: Monitors the duration of tasks and provides a mechanism to wait for their completion.
-//! - LongRunningLayer: A Tower middleware layer that wraps the worker's service to add long-running task tracking capabilities.
-//! - LongRunnerCtx: A context object that can be injected into tasks to allow them to register long-running operations.
-//! - Integration with WorkerBuilder: Provides an extension trait for easily adding long-running support to workers.
+//! - [`TaskTracker`]: Monitors the duration of tasks and provides a mechanism to wait for their completion.
+//! - [`LongRunningLayer`]: A Tower middleware layer that wraps the worker's service to add long-running task tracking capabilities.
+//! - [`LongRunnerCtx`]: A context object that can be injected into tasks to allow them to register long-running operations.
+//! - [`LongRunningExt`]: Provides an extension trait for easily adding long-running support to workers.
 //!
 //! ## Example
 //!
 //! ```rust
-//! use apalis_core::worker::ext::long_running::{LongRunnerCtx, LongRunningExt};
-//! use apalis_core::worker::context::WorkerContext;
-//! use apalis_core::backend::memory::MemoryStorage;
-//! use apalis_core::worker::builder::WorkerBuilder;
-//! use std::time::Duration;
+//! # use apalis_core::worker::ext::long_running::{LongRunnerCtx, LongRunningExt};
+//! # use apalis_core::worker::context::WorkerContext;
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use std::time::Duration;
+//! # use crate::apalis_core::backend::TaskSink;
+//! # use apalis_core::error::BoxDynError;
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     const ITEMS: u32 = 10;
 //!     let mut in_memory = MemoryStorage::new();
-//!     for i in 0..ITEMS {
-//!         in_memory.push(i).await.unwrap();
-//!     }
+//!     in_memory.push(42).await.unwrap();
 //!
 //!     async fn task(
 //!         task: u32,
 //!         runner: LongRunnerCtx,
-//!         worker: WorkerContext,
-//!     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+//! #        worker: WorkerContext,
+//!     ) -> Result<(), BoxDynError> {
+//!         // Spawn and track the long-running task
 //!         tokio::spawn(runner.track(async move {
 //!             tokio::time::sleep(Duration::from_secs(1)).await;
 //!         }));
-//!         if task == ITEMS - 1 {
-//!             tokio::spawn(async move {
-//!                 tokio::time::sleep(Duration::from_secs(1)).await;
-//!                 worker.stop().unwrap();
-//!             });
-//!         }
+//! #        tokio::spawn(async move {
+//! #            tokio::time::sleep(Duration::from_secs(1)).await;
+//! #            worker.stop().unwrap();
+//! #        });
 //!         Ok(())
 //!     }
 //!
@@ -60,7 +57,7 @@ use tower_service::Service;
 use crate::{
     backend::Backend,
     task::{data::MissingDataError, Task},
-    util::FromRequest,
+    task_fn::FromRequest,
     worker::{
         builder::WorkerBuilder,
         context::{Tracked, WorkerContext},
@@ -71,6 +68,8 @@ use crate::{
 pub mod tracker;
 
 /// Represents the long running middleware config
+/// 
+/// See [module level documentation](self) for more details.
 #[derive(Debug, Clone, Default)]
 pub struct LongRunningConfig {
     #[allow(unused)]
@@ -86,6 +85,8 @@ impl LongRunningConfig {
 }
 
 /// The long running middleware context
+/// 
+/// See [module level documentation](self) for more details.
 #[derive(Debug, Clone)]
 pub struct LongRunnerCtx {
     tracker: TaskTracker,
@@ -114,6 +115,8 @@ impl<Args: Sync, Meta: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args,
 }
 
 /// Decorates the underlying middleware with long running capabilities
+/// 
+/// See [module level documentation](self) for more details.
 #[derive(Debug, Clone)]
 #[allow(unused)]
 pub struct LongRunningLayer(LongRunningConfig);
@@ -134,6 +137,8 @@ impl<S> Layer<S> for LongRunningLayer {
 }
 
 /// Decorates the underlying service with long running capabilities
+/// 
+/// See [module level documentation](self) for more details.
 #[derive(Debug, Clone)]
 pub struct LongRunningService<S> {
     service: S,
@@ -175,6 +180,8 @@ where
 }
 
 /// Helper trait for building long running workers from [`WorkerBuilder`]
+/// 
+/// See [module level documentation](self) for more details.
 pub trait LongRunningExt<Args, Meta, Source, Middleware>: Sized {
     /// Extension for executing long running jobs
     fn long_running(
@@ -215,10 +222,10 @@ mod tests {
     use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
 
     use crate::{
-        backend::{impls::memory::MemoryStorage, Backend, TaskSink},
+        backend::{memory::MemoryStorage, Backend, TaskSink},
         error::BoxDynError,
         task::data::Data,
-        util::{task_fn, TaskFn},
+        task_fn::{task_fn, TaskFn},
         worker::{
             builder::WorkerBuilder,
             context::WorkerContext,

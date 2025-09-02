@@ -1,6 +1,6 @@
 //! Worker context and task tracking.
 //!
-//! This module defines [`WorkerContext`], the core structure responsible for managing
+//! [`WorkerContext`] is responsible for managing
 //! the execution lifecycle of a worker, tracking tasks, handling shutdown, and emitting
 //! lifecycle events. It also provides [`Tracked`] for wrapping and monitoring asynchronous
 //! tasks within the worker domain.
@@ -23,7 +23,7 @@
 //! - Task count is incremented before execution and decremented on completion
 //! - Shutdown is automatically triggered once all tasks are done
 //!
-//! Use [`WorkerContext::task_count`] and [`WorkerContext::has_pending_tasks`] to inspect
+//! Use [`task_count`](WorkerContext::task_count) and [`has_pending_tasks`](WorkerContext::has_pending_tasks) to inspect
 //! ongoing task state.
 //!
 //! ## Shutdown Semantics
@@ -62,7 +62,7 @@ use crate::{
     error::{WorkerError, WorkerStateError},
     monitor::shutdown::Shutdown,
     task::{data::MissingDataError, Task},
-    util::FromRequest,
+    task_fn::FromRequest,
     worker::{
         event::{CtxEventHandler, Event},
         state::{InnerWorkerState, WorkerState},
@@ -265,7 +265,8 @@ impl WorkerContext {
         handler(self, event);
     }
 
-    pub(crate) fn wrap_listener<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
+    /// Wraps the event listener with a new function
+    pub fn wrap_listener<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
         &mut self,
         f: F,
     ) {

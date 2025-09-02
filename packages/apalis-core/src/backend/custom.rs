@@ -1,17 +1,20 @@
 //! # Custom Backend
 //!
-//! This module provides a highly customizable backend for `apalis` task processing,
-//! allowing integration with any persistence engine by providing custom fetcher and sink functions.
+//! A highly customizable backend for task processing that allows integration with any persistence engine by providing custom fetcher and sink functions.
 //!
 //! ## Overview
 //!
 //! The [`CustomBackend`] struct enables you to define how tasks are fetched from and persisted to
-//! your storage engine. You can use the [`BackendBuilder`] to construct a `CustomBackend` by
+//! your storage engine. 
+//! 
+//! You can use the [`BackendBuilder`] to construct a [`CustomBackend`] by
 //! providing the required database, fetcher, sink, and optional configuration and codec.
 //!
 //! ## Usage
 //!
 //! Use [`BackendBuilder`] to configure and build your custom backend:
+//!
+//! ## Example: CustomBackend with Worker
 //!
 //! ```rust
 //! # use std::collections::VecDeque;
@@ -19,56 +22,63 @@
 //! # use futures_util::{lock::Mutex, sink, stream};
 //! # use apalis_core::backend::custom::{BackendBuilder, CustomBackend};
 //! # use apalis_core::task::Task;
-//! let memory: Arc<Mutex<VecDeque<Task<u32, ()>>>> = Arc::new(Mutex::new(VecDeque::new()));
-//!
-//! let backend = BackendBuilder::new()
-//!     .database(memory.clone())
-//!     .fetcher(|pool, _, _| {
-//!         stream::unfold(pool.clone(), |p| async move {
-//!             let mut pool = p.lock().await;
-//!             let item = pool.pop_front();
-//! #            drop(pool);
-//!             match item {
-//!                 Some(item) => Some((Ok::<_, BoxDynError>(Some(item)), p)),
-//!                 None => Some((Ok::<_, BoxDynError(None), p)),
-//!             }
-//!         })
-//!         .boxed()
-//!     })
-//!     .sink(|pool, _| {
-//!         sink::unfold(pool.clone(), move |p, item| {
-//!             async move {
-//!                 let mut pool = p.lock().await;
-//!                 pool.push_back(item);
-//! #                drop(pool);
-//!                 Ok::<_, BoxDynError>(p)
-//!             }
-//!             .boxed()
-//!         })
-//!     })
-//!     .build()
-//!     .unwrap();
-//! ```
-//!
-//! ## Example: Using with a Worker
-//!
-//! ```rust
 //! # use apalis_core::worker::builder::WorkerBuilder;
 //! # use apalis_core::worker::context::WorkerContext;
 //! # use apalis_core::error::BoxDynError;
 //! # use std::time::Duration;
-//! async fn task(_: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
-//!     tokio::time::sleep(Duration::from_secs(1)).await;
-//! #   ctx.stop().unwrap();
-//!     Ok(())
-//! }
-//! 
-//! backend.push(42).await.unwrap(); // Add a task to the backend
+//! #
+//! #[tokio::main]
+//! async fn main() {
+//!     // Create a memory-backed VecDeque
+//!     let memory = Arc::new(Mutex::new(VecDeque::new()));
 //!
-//! let worker = WorkerBuilder::new("custom-worker")
-//!     .backend(backend)
-//!     .build(task);
-//! worker.run().await.unwrap();
+//!     // Build the custom backend
+//!     let backend = BackendBuilder::new()
+//!         .database(memory)
+//!         .fetcher(|memory, _, _| {
+//!             stream::unfold(memory.clone(), |p| async move {
+//!                 let mut memory = p.lock().await;
+//!                 let item = memory.pop_front();
+//!                 drop(memory);
+//!                 match item {
+//!                     Some(item) => Some((Ok::<_, BoxDynError>(Some(item)), p)),
+//!                     None => Some((Ok::<_, BoxDynError>(None), p)),
+//!                 }
+//!             })
+//!             .boxed()
+//!         })
+//!         .sink(|memory, _| {
+//!             sink::unfold(memory.clone(), move |p, item| {
+//!                 async move {
+//!                     let mut memory = p.lock().await;
+//!                     memory.push_back(item);
+//!                     drop(memory);
+//!                     Ok::<_, BoxDynError>(p)
+//!                 }
+//!                 .boxed()
+//!             })
+//!         })
+//!         .build()
+//!         .unwrap();
+//!
+//!     // Add a task to the backend
+//!     backend.push(42).await.unwrap();
+//!
+//!     // Define the task handler
+//!     async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
+//!         tokio::time::sleep(Duration::from_secs(1)).await;
+//! #        if task == 42 {
+//! #            ctx.stop().unwrap();
+//! #        }
+//!         Ok(())
+//!     }
+//!
+//!     // Build and run the worker
+//!     let worker = WorkerBuilder::new("custom-worker")
+//!         .backend(backend)
+//!         .build(task);
+//!     worker.run().await.unwrap();
+//! }
 //! ```
 //!
 //! ## Features
@@ -96,12 +106,10 @@ use crate::error::BoxDynError;
 use crate::{backend::Backend, task::Task, worker::context::WorkerContext};
 
 pin_project_lite::pin_project! {
-    /// A highly customizable backend for apalis, allowing integration with any persistence engine
-    /// by providing custom fetcher and sink functions.
-    /// 
-    /// # Usage
-    /// Use [`BackendBuilder`] to construct a `CustomBackend` by providing the required
-    /// database, fetcher, sink, and optional configuration and codec.
+    /// A highly customizable backend for integration with any persistence engine
+    ///
+    /// This backend allows you to define how tasks are fetched from and persisted to your storage,
+    /// meaning you can use it to integrate with existing systems.
     ///
     /// # Example
     /// ```rust
@@ -115,7 +123,7 @@ pin_project_lite::pin_project! {
     #[must_use = "Custom backends must be polled or used as a sink"]
     pub struct CustomBackend<Args, DB, Fetch, Sink, IdType, Codec = IdentityCodec, Config = ()> {
         _marker: PhantomData<(Args, IdType, Codec)>,
-        pool: DB,
+        db: DB,
         fetcher: Arc<Box<dyn Fn(&mut DB, &Config, &WorkerContext) -> Fetch + Send + Sync>>,
         sinker: Arc<Box<dyn Fn(&mut DB, &Config) -> Sink + Send + Sync>>,
         #[pin]
@@ -131,11 +139,11 @@ where
     Config: Clone,
 {
     fn clone(&self) -> Self {
-        let mut pool = self.pool.clone();
-        let current_sink = (self.sinker)(&mut pool, &self.config);
+        let mut db = self.db.clone();
+        let current_sink = (self.sinker)(&mut db, &self.config);
         Self {
             _marker: PhantomData,
-            pool,
+            db: db,
             fetcher: Arc::clone(&self.fetcher),
             sinker: Arc::clone(&self.sinker),
             current_sink,
@@ -160,7 +168,7 @@ where
                     std::any::type_name::<IdType>()
                 ),
             )
-            .field("pool", &self.pool)
+            .field("db", &self.db)
             .field("fetcher", &"Fn(&mut DB, &Config, &WorkerContext) -> Fetch")
             .field("sink", &"Fn(&mut DB, &Config) -> Sink")
             .field("config", &self.config)
@@ -168,8 +176,9 @@ where
     }
 }
 
-/// Builder for `CustomBackend`
-/// Allows setting the database, fetcher, sink, codec, and configuration
+/// Builder for [`CustomBackend`]
+///
+/// Lets you set the database, fetcher, sink, codec, and config
 pub struct BackendBuilder<Args, DB, Fetch, Sink, IdType, Codec = IdentityCodec, Config = ()> {
     _marker: PhantomData<(Args, IdType, Codec)>,
     database: Option<DB>,
@@ -277,14 +286,14 @@ impl<Args, DB, Fetch, Sink, IdType, Codec, Config>
     pub fn build(
         self,
     ) -> Result<CustomBackend<Args, DB, Fetch, Sink, IdType, Codec, Config>, BuildError> {
-        let mut pool = self.database.ok_or(BuildError::MissingPool)?;
+        let mut db = self.database.ok_or(BuildError::MissingPool)?;
         let config = self.config.ok_or(BuildError::MissingConfig)?;
         let sink_fn = self.sink.ok_or(BuildError::MissingSink)?;
-        let sink = sink_fn(&mut pool, &config);
+        let sink = sink_fn(&mut db, &config);
 
         Ok(CustomBackend {
             _marker: PhantomData,
-            pool,
+            db: db,
             fetcher: self
                 .fetcher
                 .map(Arc::new)
@@ -296,11 +305,11 @@ impl<Args, DB, Fetch, Sink, IdType, Codec, Config>
     }
 }
 
-/// Errors that can occur when building a `CustomBackend`
+/// Errors encountered building a `CustomBackend`
 #[derive(Debug, Error)]
 pub enum BuildError {
-    /// Missing database pool
-    #[error("Database pool is required")]
+    /// Missing database db
+    #[error("Database db is required")]
     MissingPool,
     /// Missing fetcher function
     #[error("Fetcher is required")]
@@ -344,7 +353,7 @@ where
     }
 
     fn poll(mut self, worker: &WorkerContext) -> Self::Stream {
-        (self.fetcher)(&mut self.pool, &self.config, worker)
+        (self.fetcher)(&mut self.db, &self.config, worker)
             .map(|task| match task {
                 Ok(Some(t)) => Ok(Some(
                     t.try_map(|args| Encode::decode(&args))
@@ -391,7 +400,7 @@ mod tests {
     use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
-        backend::{impls::memory::MemoryStorage, TaskSink},
+        backend::{memory::MemoryStorage, TaskSink},
         error::BoxDynError,
         task::{builder::TaskBuilder, task_id::RandomId},
         worker::{builder::WorkerBuilder, ext::event_listener::EventListenerExt},
@@ -407,12 +416,12 @@ mod tests {
 
         let mut backend = BackendBuilder::new()
             .database(memory)
-            .fetcher(|pool, _, _| {
-                stream::unfold(pool.clone(), |p| async move {
+            .fetcher(|db, _, _| {
+                stream::unfold(db.clone(), |p| async move {
                     tokio::time::sleep(Duration::from_millis(100)).await; // Debounce
-                    let mut pool = p.lock().await;
-                    let item = pool.pop_front();
-                    drop(pool);
+                    let mut db = p.lock().await;
+                    let item = db.pop_front();
+                    drop(db);
                     match item {
                         Some(item) => Some((Ok::<_, BoxDynError>(Some(item)), p)),
                         None => Some((Ok::<_, BoxDynError>(None), p)),
@@ -420,12 +429,12 @@ mod tests {
                 })
                 .boxed()
             })
-            .sink(|pool, _| {
-                sink::unfold(pool.clone(), move |p, item| {
+            .sink(|db, _| {
+                sink::unfold(db.clone(), move |p, item| {
                     async move {
-                        let mut pool = p.lock().await;
-                        pool.push_back(item);
-                        drop(pool);
+                        let mut db = p.lock().await;
+                        db.push_back(item);
+                        drop(db);
                         Ok::<_, BoxDynError>(p)
                     }
                     .boxed()

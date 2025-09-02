@@ -1,11 +1,13 @@
-//! Represents the status of a task
+//! The status of a task
 //!
 //! ## Overview
-//! - This module defines the `Status` enum, which represents the various states
+//! 
+//! The `Status` enum represents the various states
 //! a task can be in, such as `Pending`, `Running`, `Done`, `Failed`, etc.
-//! - It also includes functionality for parsing a `Status` from a string and
+//! 
+//! - It includes functionality for parsing a `Status` from a string and
 //! formatting it for display.
-//!! - This is useful for tracking the lifecycle of tasks within the `apalis` framework.
+//! - This is useful for tracking the lifecycle of tasks.
 use core::fmt;
 use std::str::FromStr;
 

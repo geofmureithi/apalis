@@ -1,6 +1,6 @@
-//! Event definitions and handler types for worker events  
+//! Event definitions and utility types for worker events
 //! 
-//! This module defines the `Event` enum representing various events that can occur during the lifecycle of a worker, such as starting, stopping, idling, and encountering errors. It also provides types for event handlers that can be used to respond to these events.
+//! The `Event` enum represents various events that can occur during the lifecycle of a worker, such as starting, stopping, idling, and encountering errors.
 
 use std::{
     any::Any,

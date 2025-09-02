@@ -1,6 +1,6 @@
 //! # Monitor
 //!
-//! The `Monitor` provides centralized coordination and lifecycle management for multiple [`Worker`] instances.
+//! `Monitor` provides centralized coordination and lifecycle management for multiple [`Worker`] instances.
 //! It is responsible for executing, monitoring, and gracefully shutting down all registered workers in a robust and customizable manner.
 //!
 //! ## Features
@@ -54,7 +54,10 @@
 //! # use apalis_core::monitor::Monitor;
 //! # use std::time::Duration;
 //! let monitor = Monitor::new()
-//!     .shutdown_timeout(Duration::from_secs(10));
+//!     .shutdown_timeout(Duration::from_secs(10))
+//!     .run_with_signal(signal::ctrl_c())
+//!     .await
+//!     .unwrap();
 //! ```
 //!
 //! This ensures that if any worker hangs or takes too long to finish, the monitor will shut down after 10 seconds.
@@ -111,6 +114,8 @@
 //!
 //! If any worker fails, the monitor will return a `MonitorError` containing details about the failure.
 //! You can inspect the error to see which workers failed and why.
+//! 
+//! [Worker]: crate::worker::Worker
 
 use std::{
     fmt::{self, Debug, Formatter},
@@ -537,7 +542,7 @@ impl std::fmt::Display for ExitError {
 mod tests {
     use super::*;
     use crate::{
-        backend::{impls::json::JsonStorage, Backend, TaskSink},
+        backend::{json::JsonStorage, Backend, TaskSink},
         task::task_id::TaskId,
         worker::{context::WorkerContext, event::Event, ext::event_listener::EventListenerExt},
     };

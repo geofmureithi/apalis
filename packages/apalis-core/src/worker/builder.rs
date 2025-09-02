@@ -1,14 +1,14 @@
-//! Represents utilities for building workers.
+//! Utilities for composing and building workers.
 //!
-//! This module provides the [`WorkerBuilder`] type, which is the recommended
-//! way to construct [`Worker`](crate::worker::Worker) instances in a flexible and
+//! The `WorkerBuilder` component is the recommended
+//! way to construct [`Worker`] instances in a flexible and
 //! composable manner.
 //!
 //! The builder pattern enables customization of various parts of a worker,
 //! including:
 //!
-//! - Setting a backend that implements the [`Backend`](crate::backend::Backend) trait
-//! - Adding application state (shared [`Data`](crate::request::data::Data))
+//! - Setting a backend that implements the [`Backend`] trait
+//! - Adding application state (shared [`Data`])
 //! - Decorating the service pipeline using [`tower`] middleware
 //! - Handling lifecycle events with `on_event`
 //! - Providing task processing logic using either a [`Service`] or an async function via `build_fn`
@@ -154,7 +154,7 @@ where
     B: Backend<Args>,
 {
     /// Allows of decorating the service that consumes jobs.
-    /// Allows adding multiple [`tower`] middleware
+    /// Allows adding multiple middleware in one call
     pub fn chain<NewLayer>(
         self,
         f: impl FnOnce(M) -> NewLayer,
@@ -178,7 +178,7 @@ where
         WorkerBuilder {
             request: self.request,
             source: self.source,
-            layer: Stack::new(layer, self.layer), // TODO: Decide order here
+            layer: Stack::new(layer, self.layer),
             name: self.name,
             shutdown: self.shutdown,
             event_handler: self.event_handler,

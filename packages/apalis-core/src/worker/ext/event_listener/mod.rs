@@ -1,6 +1,6 @@
 //! Worker extension for emitting events.
 //!
-//! This module provides the [`EventListenerExt`] trait, which allows you to register callbacks for worker events.
+//! The [`EventListenerExt`] trait allows you to register callbacks for worker events.
 //! It also provides the [`EventListenerLayer`] middleware for emitting events and the [`EventListenerService`] service.
 //!
 //! # Example
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! This will print every event emitted by the worker.
-//! 
+//!
 use std::sync::Arc;
 
 use tower_layer::{Layer, Stack};

@@ -1,9 +1,8 @@
-//! Represents the utilities for running workers.
+//! Utilities for building and running workers.
 //!
-//! This module defines the core `Worker` type used to poll tasks from a backend, execute them using
-//! a service, emit lifecycle events, and handle graceful shutdowns. A worker is typically
-//! constructed using a [`WorkerBuilder`](crate::builder::WorkerBuilder), and is intended to be run in
-//! an asynchronous runtime.
+//! A `Worker` polls tasks from a backend, executes them using
+//! a service, emits lifecycle events, and handles graceful shutdowns. A worker is typically
+//! constructed using a [`WorkerBuilder`](crate::worker::builder).
 //!
 //! # Features
 //! - Pluggable backends for task queues (e.g., in-memory, Redis).
@@ -13,19 +12,35 @@
 //! - Job tracking and readiness probing.
 //!
 //! # Lifecycle
-//! A `Worker`:
-//! 1. **Starts** by initializing context and heartbeat.
-//! 2. **Polls** the backend for new tasks.
-//! 3. **Executes** tasks through the provided `tower_service::Service` stack.
-//! 4. **Emits events** like `Idle`, `Engage`, `Success`, `Error`, and `HeartBeat`.
-//! 5. **Gracefully shuts down** on signal or explicit stop request.
+//!
+//! ```mermaid
+//! graph TD
+//!     A[Start Worker] --> B[Initialize Context & Heartbeat]
+//!     B --> C[Poll Backend for Tasks]
+//!     C --> D{Task Available?}
+//!     D -- Yes --> E[Execute Task via Service Stack]
+//!     E --> F[Emit Events]
+//!     F --> C
+//!     D -- No --> F
+//!     F --> G{Shutdown Signal?}
+//!     G -- Yes --> H[Graceful Shutdown]
+//!     G -- No --> C
+//! ```
+//! Worker lifecycle is composed of several stages:
+//! - Initialize context and heartbeat
+//! - Poll backend for tasks
+//! - Execute tasks via service stack
+//! - Emit events (Idle, Success, Error, HeartBeat)
+//! - Graceful shutdown on signal or stop
 //!
 //! # Examples
+//!
+//! ## Run as a future
 //! ```rust,no_run
 //! use apalis_core::{WorkerBuilder, MemoryStorage};
 //!
 //! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! async fn main() -> Result<(), BoxDynError> {
 //!     let mut storage = MemoryStorage::new();
 //!     for i in 0..5 {
 //!         storage.push(i).await?;
@@ -44,17 +59,20 @@
 //! }
 //! ```
 //!
-//! ## Streaming events
+//! ## Runner as a stream
 //! The `stream` interface yields worker events (e.g., `Success`, `Error`) while running:
 //! ```rust,no_run
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), BoxDynError> {
 //! let mut stream = worker.stream();
 //! while let Some(evt) = stream.next().await {
 //!     println!("Event: {:?}", evt);
 //! }
+//! # }
 //! ```
 //!
 //! # Test Utilities
-//! This module includes the `test_worker` submodule for unit tests and validation of worker behavior.
+//! The [`test_worker`] module includes utilities for unit tests and validation of worker behavior.
 use crate::backend::Backend;
 use crate::error::{BoxDynError, WorkerError};
 use crate::monitor::shutdown::Shutdown;
@@ -79,12 +97,38 @@ pub mod builder;
 pub mod call_all;
 pub mod context;
 pub mod event;
-/// Provides extensions to the default worker features
 pub mod ext;
 mod state;
 pub mod test_worker;
 
-/// A worker represents a task runner that polls tasks from a backend and executes them using a service.
+/// Core component responsible for task polling, execution, and lifecycle management.
+///
+/// # Example
+/// Basic example:
+/// ```rust,no_run
+/// # use apalis_core::error::BoxDynError;
+/// # use apalis_core::backend::memory::MemoryStorage;
+/// # use apalis_core::worker::builder::WorkerBuilder;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), BoxDynError> {
+///     let mut storage = MemoryStorage::new();
+///     for i in 0..5 {
+///         storage.push(i).await?;
+///     }
+///
+///     async fn handler(task: u32) {
+///         println!("Processing task: {task}");
+///     }
+///
+///     let worker = WorkerBuilder::new("worker-1")
+///         .backend(storage)
+///         .build_fn(handler);
+///
+///     worker.run().await?;
+///     Ok(())
+/// }
+/// ```
 #[must_use = "Workers must be run or streamed to execute tasks"]
 pub struct Worker<Args, Meta, Backend, Svc, Middleware> {
     pub(crate) name: String,
@@ -150,13 +194,43 @@ where
     >>::Error: Into<BoxDynError> + Send + Sync + 'static,
     B::IdType: Send + 'static,
 {
-    /// Runs the worker until completion
+    /// Run the worker until completion
+    ///
+    /// # Example
+    /// ```
+    /// # use apalis_core::error::BoxDynError;
+    /// # use apalis_core::backend::memory::MemoryStorage;
+    /// # use crate::apalis_core::backend::TaskSink;
+    /// # use crate::apalis_core::worker::builder::WorkerBuilder;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), BoxDynError> {
+    ///     let mut storage = MemoryStorage::new();
+    ///     for i in 0..5 {
+    ///         storage.push(i).await?;
+    ///     }
+    ///
+    ///     async fn handler(task: u32) {
+    ///         println!("Processing task: {task}");
+    ///     }
+    ///
+    ///     let worker = WorkerBuilder::new("worker-1")
+    ///         .backend(storage)
+    ///         .build_fn(handler);
+    ///
+    ///     worker.run().await?;
+    ///     Ok(())
+    /// }
+    /// ```
     pub async fn run(self) -> Result<(), WorkerError> {
         let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
         self.run_with_ctx(&mut ctx).await
     }
 
-    /// Runs the worker until completion provided the [`WorkerContext`]
+
+    /// Run the worker with the given context.
+    ///
+    /// See [`run`](Self::run) for an example.
     pub async fn run_with_ctx(self, ctx: &mut WorkerContext) -> Result<(), WorkerError> {
         let mut stream = self.stream_with_ctx(ctx);
         while let Some(res) = stream.next().await {
@@ -169,13 +243,42 @@ where
         Ok(())
     }
 
-    /// Returns a stream that represents all the worker events until completion
+    /// Returns a stream that will yield events as they occur within the worker's lifecycle
+    /// 
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use apalis_core::error::BoxDynError;
+    /// # use apalis_core::backend::memory::MemoryStorage;
+    /// # use apalis_core::worker::builder::WorkerBuilder;
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), BoxDynError> {
+    ///     let mut storage = MemoryStorage::new();
+    ///     for i in 0..5 {
+    ///         storage.push(i).await?;
+    ///     }
+    ///     async fn handler(task: u32) {
+    ///         println!("Processing task: {task}");
+    ///     }
+    ///     let worker = WorkerBuilder::new("worker-1")
+    ///         .backend(storage)
+    ///         .build_fn(handler);
+    ///     let mut stream = worker.stream();
+    ///     while let Some(evt) = stream.next().await {
+    ///         println!("Event: {:?}", evt);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn stream(self) -> impl Stream<Item = Result<Event, WorkerError>> {
         let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
         self.stream_with_ctx(&mut ctx)
     }
 
-    /// Returns a stream that represents all the worker events provided [`WorkerContext`] until completion
+    /// Returns a stream that will yield events as they occur within the worker's lifecycle when provided
+    /// with a [`WorkerContext`].
+    /// 
+    /// See [`stream`](Self::stream) for an example.
     pub fn stream_with_ctx(
         self,
         ctx: &mut WorkerContext,
@@ -185,13 +288,13 @@ where
         ctx.wrap_listener(event_handler);
         let worker = ctx.clone();
         let inner_layers = backend.middleware();
-        struct WorkerServiceBuilder<L> {
+        struct ServiceBuilder<L> {
             layer: L,
         }
 
-        impl<L> WorkerServiceBuilder<L> {
-            fn layer<T>(self, layer: T) -> WorkerServiceBuilder<Stack<T, L>> {
-                WorkerServiceBuilder {
+        impl<L> ServiceBuilder<L> {
+            fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>> {
+                ServiceBuilder {
                     layer: Stack::new(layer, self.layer),
                 }
             }
@@ -202,7 +305,7 @@ where
                 self.layer.layer(service)
             }
         }
-        let svc = WorkerServiceBuilder {
+        let svc = ServiceBuilder {
             layer: Data::new(worker.clone()),
         };
         let service = svc
@@ -294,8 +397,7 @@ impl<S> Layer<S> for TrackerLayer {
         }
     }
 }
-
-/// Tracks a tasks future allowing graceful shutdowns
+/// Service that tracks a tasks future allowing graceful shutdowns
 #[derive(Debug, Clone)]
 pub struct TrackerService<S> {
     ctx: WorkerContext,
@@ -369,8 +471,8 @@ impl<S> Layer<S> for ReadinessLayer {
         }
     }
 }
-
-/// Tracks the readiness of underlying services
+/// Service that tracks the readiness of underlying services
+///
 /// Should be the innermost service
 #[derive(Debug, Clone)]
 pub struct ReadinessService<S> {
@@ -417,11 +519,11 @@ mod tests {
 
     use crate::{
         backend::{
-            impls::{json::JsonStorage, memory::MemoryStorage},
             TaskSink,
+            {json::JsonStorage, memory::MemoryStorage},
         },
         task::ExecutionContext,
-        util::{task_fn, TaskFn},
+        task_fn::{task_fn, TaskFn},
         worker::{
             builder::WorkerBuilder,
             ext::{

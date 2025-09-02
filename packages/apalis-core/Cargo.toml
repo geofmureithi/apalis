@@ -64,5 +64,10 @@ all-features = true
 
 
 [dev-dependencies]
-tokio = { version = "1.37.0", features = ["macros", "rt", "sync"] }
+tokio = { version = "1.37.0", features = [
+    "macros",
+    "rt",
+    "sync",
+    "rt-multi-thread",
+] }
 tower = { version = "0.5", features = ["full"] }

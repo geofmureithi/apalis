@@ -1,4 +1,4 @@
-//! # Pipe streams to backends
+//! # Utilities to pipe streams to backends
 //!
 //! This backend allows you to pipe tasks from any stream into another backend.
 //! It is useful for connecting different backends together, such as piping tasks
@@ -8,28 +8,25 @@
 //! ## Example
 //!
 //! ```rust
-//! use futures_util::stream;
-//! use apalis_core::backend::pipe::Pipe;
-//! use apalis_core::backend::memory::MemoryStorage;
-//! use apalis_core::worker::{WorkerBuilder, context::WorkerContext};
-//! use apalis_core::error::BoxDynError;
-//! use std::time::Duration;
-//!
-//! const ITEMS: u32 = 10;
-//!
+//! # use futures_util::stream;
+//! # use apalis_core::backend::pipe::Pipe;
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # use apalis_core::worker::{WorkerBuilder, context::WorkerContext};
+//! # use apalis_core::error::BoxDynError;
+//! # use std::time::Duration;
 //! #[tokio::main]
 //! async fn main() {
-//!     let stm = stream::iter(0..ITEMS).map(|s| Ok::<_, std::io::Error>(s));
-//!     let in_memory = MemoryStorage::new();
+//!     let stm = stream::iter(0..10).map(|s| Ok::<_, std::io::Error>(s));
 //!
+//!     let in_memory = MemoryStorage::new();
 //!     let backend = Pipe::new(stm, in_memory);
 //!
 //!     async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
 //!         tokio::time::sleep(Duration::from_secs(1)).await;
-//!         if task == ITEMS - 1 {
-//!             ctx.stop().unwrap();
-//!             return Err("Graceful Exit".into());
-//!         }
+//! #        if task == 9 {
+//! #            ctx.stop().unwrap();
+//! #            return Err("Graceful Exit".into());
+//! #        }
 //!         Ok(())
 //!     }
 //!
@@ -44,6 +41,9 @@
 //! ```
 //!
 //! This example pipes a stream of numbers into an in-memory backend and processes them with a worker.
+//!
+//! See also:
+//! - [`apalis-cron`](https://docs.rs/apalis-cron)
 
 use crate::error::BoxDynError;
 use crate::task::Task;
@@ -88,7 +88,7 @@ where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
     TSink: Backend<Args, Meta = Meta>
         + Sink<Task<Args, Meta, TSink::IdType>>
-        + Clone
+        + Clone // TODO: Remove clone
         + Unpin
         + Send
         + 'static,
@@ -212,7 +212,7 @@ mod tests {
     use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
-        backend::{self, impls::{json::JsonStorage, memory::MemoryStorage}, TaskSink},
+        backend::{json::JsonStorage, memory::MemoryStorage, TaskSink},
         error::BoxDynError,
         worker::{
             builder::WorkerBuilder,

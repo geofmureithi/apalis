@@ -1,38 +1,31 @@
 //! Traits and utilities for acknowledging task completion
 //!
-//! This module provides the [`Acknowledge`] trait and related types for adding custom
-//! acknowledgment logic to `apalis` workers. You can use [`AcknowledgeLayer`] to wrap
+//! The [`Acknowledge`] trait and related types are responsible for adding custom
+//! acknowledgment logic to workers. You can use [`AcknowledgeLayer`] to wrap
 //! a worker service and invoke your acknowledgment handler after each task execution.
 //!
 //! # Example
 //!
 //! ```rust
-//! use apalis_core::worker::ext::ack::{Acknowledge, AcknowledgeLayer, WorkerBuilder};
-//! use apalis_core::backend::memory::MemoryStorage;
-//! use apalis_core::worker::context::WorkerContext;
-//! use apalis_core::task::ExecutionContext;
-//! use apalis_core::error::BoxDynError;
-//! use futures_util::{future::{ready, BoxFuture}, FutureExt};
-//! use std::fmt::Debug;
-//! use tokio::sync::mpsc::error::SendError;
-//!
-//! const ITEMS: u32 = 10;
+//! # use apalis_core::worker::{builder::WorkerBuilder, ext::ack::{Acknowledge, AcknowledgeLayer}};
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # use apalis_core::worker::context::WorkerContext;
+//! # use apalis_core::task::ExecutionContext;
+//! # use apalis_core::error::BoxDynError;
+//! # use futures_util::{future::{ready, BoxFuture}, FutureExt};
+//! # use std::fmt::Debug;
+//! # use tokio::sync::mpsc::error::SendError;
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     let mut in_memory = MemoryStorage::new();
-//!     for i in 0..ITEMS {
-//!         in_memory.push(i).await.unwrap();
-//!     }
+//!     in_memory.push(42).await.unwrap();
 //!
 //!     async fn task(
 //!         task: u32,
 //!         ctx: WorkerContext,
 //!     ) -> Result<(), BoxDynError> {
-//!         if task == ITEMS - 1 {
-//!             ctx.stop().unwrap();
-//!             return Err("Worker stopped!")?;
-//!         }
+//! #       ctx.stop().unwrap();
 //!         Ok(())
 //!     }
 //!
@@ -40,8 +33,8 @@
 //!     struct MyAcknowledger;
 //!
 //!     impl<Ctx: Debug, IdType: Debug> Acknowledge<(), Ctx, IdType> for MyAcknowledger {
-//!         type Error = SendError;
-//!         type Future = BoxFuture<'static, Result<(), SendError>>;
+//!         type Error = SendError<()>;
+//!         type Future = BoxFuture<'static, Result<(), Self::Error>>;
 //!         fn ack(
 //!             &mut self,
 //!             res: &Result<(), BoxDynError>,
@@ -78,6 +71,8 @@ use crate::{
 };
 
 /// Extension trait for adding acknowledgment handling to workers
+///
+/// See [module level documentation](self) for more details.
 pub trait AcknowledgementExt<Args, Meta, Source, Middleware, Ack, Res>: Sized
 where
     Source: Backend<Args>,
@@ -91,6 +86,8 @@ where
 }
 
 /// Acknowledge the result of a task processing
+///
+/// See [module level documentation](self) for more details.
 pub trait Acknowledge<Res, Meta, IdType> {
     /// The error type returned by the acknowledgment process
     type Error;
@@ -122,6 +119,8 @@ where
 }
 
 /// Layer that adds acknowledgment functionality to services
+/// 
+/// See [module level documentation](self) for more details.
 #[derive(Debug, Clone)]
 pub struct AcknowledgeLayer<A> {
     acknowledger: A,
@@ -149,6 +148,9 @@ where
 }
 
 /// Service that wraps another service and acknowledges task completion
+/// 
+/// See [module level documentation](self) for more details.
+
 #[derive(Debug, Clone)]
 pub struct AcknowledgeService<S, A> {
     inner: S,
