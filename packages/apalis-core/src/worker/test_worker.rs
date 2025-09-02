@@ -302,7 +302,7 @@ mod tests {
         });
         let mut worker = TestWorker::new(backend, service);
         while let Some(Ok((_, ret))) = worker.execute_next().await {
-            dbg!(ret);
+            dbg!(ret.unwrap());
         }
         println!("Worker run successfully");
     }

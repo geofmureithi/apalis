@@ -523,7 +523,6 @@ mod tests {
             {json::JsonStorage, memory::MemoryStorage},
         },
         task::ExecutionContext,
-        task_fn::{task_fn, TaskFn},
         worker::{
             builder::WorkerBuilder,
             ext::{
@@ -593,7 +592,7 @@ mod tests {
             .long_running()
             .ack_with(MyAcknowledger)
             .on_event(|ctx, ev| {
-                println!("On Event = {:?}", ev);
+                println!("On Event = {:?} from {}", ev, ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();

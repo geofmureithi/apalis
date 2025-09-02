@@ -1,6 +1,6 @@
 use serde::{de::DeserializeOwned, Serialize};
 
-pub type JsonMapMetadata = serde_json::Map<String, serde_json::Value>;
+pub(super) type JsonMapMetadata = serde_json::Map<String, serde_json::Value>;
 
 impl<T> crate::task::metadata::MetadataExt<T> for JsonMapMetadata
 where

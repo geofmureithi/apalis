@@ -5,8 +5,8 @@
 //! ## Overview
 //!
 //! The [`CustomBackend`] struct enables you to define how tasks are fetched from and persisted to
-//! your storage engine. 
-//! 
+//! your storage engine.
+//!
 //! You can use the [`BackendBuilder`] to construct a [`CustomBackend`] by
 //! providing the required database, fetcher, sink, and optional configuration and codec.
 //!
@@ -392,17 +392,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, convert::Infallible, time::Duration};
+    use std::{collections::VecDeque, time::Duration};
 
-    use futures_channel::mpsc::SendError;
     use futures_util::{lock::Mutex, sink, stream, FutureExt};
-    use tokio::sync::RwLock;
-    use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
-        backend::{memory::MemoryStorage, TaskSink},
+        backend::TaskSink,
         error::BoxDynError,
-        task::{builder::TaskBuilder, task_id::RandomId},
         worker::{builder::WorkerBuilder, ext::event_listener::EventListenerExt},
     };
 
@@ -459,7 +455,7 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(backend)
             .on_event(|ctx, ev| {
-                println!("On Event = {:?}", ev);
+                println!("On Event = {:?} from {}", ev, ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();

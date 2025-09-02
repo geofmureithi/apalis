@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, collections::BTreeMap, fmt::Debug, marker::PhantomData};
+use std::{cmp::Ordering, collections::BTreeMap, fmt::Debug};
 
 use futures_channel::mpsc::SendError;
 use futures_core::stream::BoxStream;
@@ -53,6 +53,7 @@ pub struct TaskWithMeta {
     pub(super) result: Option<Value>,
 }
 
+#[derive(Debug)]
 pub struct JsonAck<Args> {
     pub(crate) inner: JsonStorage<Args>,
 }
@@ -77,7 +78,7 @@ impl<Args: Send + 'static + Debug, Res: Serialize, Meta: Sync> Acknowledge<Res, 
         res: &Result<Res, BoxDynError>,
         ctx: &crate::task::ExecutionContext<Meta, RandomId>,
     ) -> Self::Future {
-        let mut store = self.inner.clone();
+        let store = self.inner.clone();
         let val = serde_json::to_value(res.as_ref().map_err(|e| e.to_string())).unwrap();
         let task_id = ctx.task_id.clone().unwrap();
         async move {
@@ -204,7 +205,7 @@ where
 }
 
 /// Find the first item that meets the requirements
-pub trait FindFirstWith<K, V> {
+pub(super) trait FindFirstWith<K, V> {
     fn find_first_with<F>(&self, predicate: F) -> Option<(&K, &V)>
     where
         F: FnMut(&K, &V) -> bool;

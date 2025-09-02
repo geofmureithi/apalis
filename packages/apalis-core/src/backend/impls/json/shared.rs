@@ -1,7 +1,7 @@
 /// Sharable JSON based backend.
 ///
-/// The [`SharedJsonStore`] allows multiple task types to be stored 
-/// and processed concurrently using a single JSON-based in-memory backend. 
+/// The [`SharedJsonStore`] allows multiple task types to be stored
+/// and processed concurrently using a single JSON-based in-memory backend.
 /// It is useful for testing, prototyping,
 /// or sharing state between workers in a single process.
 ///
@@ -78,10 +78,10 @@ struct SharedJsonStream<T, Meta> {
 
 impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMetadata> {
     type Item = Task<Args, JsonMapMetadata>;
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         use crate::task::builder::TaskBuilder;
-        let map = self.inner.tasks.try_read().unwrap();
-        if let Some((key, mutex)) = map.find_first_with(|k, v| {
+        let map = self.inner.tasks.try_read().expect("Failed to read tasks");
+        if let Some((key, _)) = map.find_first_with(|k, _| {
             &k.namespace == std::any::type_name::<Args>() && k.status == Status::Pending
         }) {
             let task = map.get(&key).unwrap();
@@ -95,8 +95,9 @@ impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMe
             let key = key.clone();
             drop(map);
             let this = &mut self.get_mut().inner;
-            this.update_status(&key, Status::Running);
-            this.persist_to_disk();
+            this.update_status(&key, Status::Running)
+                .expect("Failed to update status");
+            this.persist_to_disk().expect("Failed to persist to disk");
             Poll::Ready(Some(task))
         } else {
             Poll::Pending
@@ -174,18 +175,20 @@ impl JsonStorage<Value> {
                     .clone()
                     .unwrap_or(TaskId::new(RandomId::default()));
                 let value = serde_json::to_value(request.args).unwrap();
-                store.insert(
-                    &TaskKey {
-                        task_id,
-                        namespace: std::any::type_name::<Args>().to_owned(),
-                        status: Status::Pending,
-                    },
-                    TaskWithMeta {
-                        args: value.clone(),
-                        meta: request.ctx.metadata.clone(),
-                        result: None,
-                    },
-                );
+                store
+                    .insert(
+                        &TaskKey {
+                            task_id,
+                            namespace: std::any::type_name::<Args>().to_owned(),
+                            status: Status::Pending,
+                        },
+                        TaskWithMeta {
+                            args: value.clone(),
+                            meta: request.ctx.metadata.clone(),
+                            result: None,
+                        },
+                    )
+                    .unwrap();
 
                 let req = Task::new_with_ctx(value, request.ctx);
                 futures_util::stream::iter(vec![Ok(req)])
@@ -211,23 +214,14 @@ impl JsonStorage<Value> {
 }
 #[cfg(test)]
 mod tests {
-    use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
+    use std::time::Duration;
 
     use crate::error::BoxDynError;
-    use futures_util::future::ready;
 
     use crate::worker::context::WorkerContext;
     use crate::{
         backend::{shared::MakeShared, TaskSink},
-        task::data::Data,
-        task_fn::{task_fn, TaskFn},
-        worker::{
-            builder::WorkerBuilder,
-            ext::{
-                ack::AcknowledgementExt, circuit_breaker::CircuitBreaker,
-                event_listener::EventListenerExt, long_running::LongRunningExt,
-            },
-        },
+        worker::{builder::WorkerBuilder, ext::event_listener::EventListenerExt},
     };
 
     use super::*;
@@ -244,21 +238,7 @@ mod tests {
             int_store.push(i).await.unwrap();
         }
 
-        #[derive(Clone, Debug, Default)]
-        struct Count(Arc<AtomicUsize>);
-
-        impl Deref for Count {
-            type Target = Arc<AtomicUsize>;
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-
-        async fn task(
-            task: u32,
-            count: Data<Count>,
-            ctx: WorkerContext,
-        ) -> Result<(), BoxDynError> {
+        async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_millis(2)).await;
             if task == ITEMS - 1 {
                 ctx.stop()?;
@@ -283,7 +263,6 @@ mod tests {
 
         let int_worker = WorkerBuilder::new("rango-tango-int")
             .backend(int_store)
-            .data(Count::default())
             .on_event(|ctx, ev| {
                 println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
             })

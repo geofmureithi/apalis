@@ -51,7 +51,7 @@ impl<Args: 'static + Send + DeserializeOwned + Unpin> Backend<Args> for JsonStor
 impl<Args: DeserializeOwned + Unpin> Stream for JsonStorage<Args> {
     type Item = Task<Args, JsonMapMetadata>;
 
-    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let map = self.tasks.try_write().unwrap();
         if let Some((key, task)) = map.find_first_with(|s, _| {
             s.namespace == std::any::type_name::<Args>() && s.status == Status::Pending
@@ -66,8 +66,8 @@ impl<Args: DeserializeOwned + Unpin> Stream for JsonStorage<Args> {
             .build();
             drop(map);
             let this = self.get_mut();
-            this.update_status(&key, Status::Running);
-            this.persist_to_disk();
+            this.update_status(&key, Status::Running).expect("Failed to update status");
+            this.persist_to_disk().expect("Failed to persist to disk");
             Poll::Ready(Some(task))
         } else {
             Poll::Pending

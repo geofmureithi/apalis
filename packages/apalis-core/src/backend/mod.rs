@@ -39,10 +39,12 @@ pub mod shared;
 
 mod impls;
 
+/// In-memory backend based on channels
 pub mod memory {
     pub use crate::backend::impls::memory::*;
 }
 
+/// File based Backend using JSON
 #[cfg(feature = "json")]
 pub mod json {
     pub use crate::backend::impls::json::*;

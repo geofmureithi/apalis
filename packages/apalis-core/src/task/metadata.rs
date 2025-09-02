@@ -22,6 +22,7 @@ pub trait MetadataExt<T> {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 mod tests {
     use std::{convert::Infallible, task::Poll, time::Duration};
 
@@ -46,7 +47,7 @@ mod tests {
                 timeout: Duration::from_secs(1),
             })
         }
-        fn inject(&mut self, value: ExampleConfig) -> Result<(), Self::Error> {
+        fn inject(&mut self, _: ExampleConfig) -> Result<(), Self::Error> {
             unreachable!()
         }
     }
@@ -57,7 +58,7 @@ mod tests {
         fn extract(&self) -> Result<T, Self::Error> {
             unimplemented!()
         }
-        fn inject(&mut self, value: T) -> Result<(), Self::Error> {
+        fn inject(&mut self, _: T) -> Result<(), Self::Error> {
             unimplemented!()
         }
     }

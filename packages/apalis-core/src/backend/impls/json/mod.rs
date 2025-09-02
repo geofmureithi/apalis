@@ -56,10 +56,9 @@ use serde_json::Value;
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
-    io::{BufRead, Read, Seek, Write},
-    marker::PhantomData,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    io::{BufRead, Write},
+    path::PathBuf,
+    sync::{Arc, RwLock},
 };
 
 use self::{
@@ -78,6 +77,8 @@ mod meta;
 mod shared;
 mod sink;
 mod util;
+
+pub use self::shared::SharedJsonStore;
 
 /// A backend that persists to a file using json encoding
 ///
@@ -104,6 +105,7 @@ struct StorageEntry {
 }
 
 impl<Args> JsonStorage<Args> {
+    /// Creates a new `JsonStorage` instance using the specified file path.
     pub fn new(path: impl Into<PathBuf>) -> std::io::Result<Self> {
         let path = path.into();
         let mut data = BTreeMap::new();
@@ -136,6 +138,7 @@ impl<Args> JsonStorage<Args> {
         })
     }
 
+    /// Creates a new temporary `JsonStorage` instance.
     pub fn new_temp() -> Result<JsonStorage<Args>, std::io::Error> {
         let p = std::env::temp_dir().join(format!("apalis-json-store-{}", RandomId::default()));
         Self::new(p)
@@ -146,6 +149,7 @@ impl<Args> JsonStorage<Args> {
         Ok(())
     }
 
+    /// Removes a task from the storage.
     pub fn remove(&mut self, key: &TaskKey) -> std::io::Result<Option<TaskWithMeta>> {
         let removed = self.tasks.try_write().unwrap().remove(key);
 
@@ -248,6 +252,7 @@ impl<Args> JsonStorage<Args> {
         }
     }
 
+    /// Retrieves a task from the storage.
     pub fn get(&self, key: &TaskKey) -> Option<TaskWithMeta> {
         let tasks = self.tasks.try_read().unwrap();
         let res = tasks.get(key);
@@ -284,27 +289,20 @@ impl<Args> Clone for JsonStorage<Args> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        future::ready,
-        ops::Deref,
-        sync::{atomic::AtomicUsize, Arc},
-        time::Duration,
-    };
+    use std::time::Duration;
 
-    use futures_channel::mpsc::SendError;
-    use futures_core::future::BoxFuture;
+    
+    
 
     use crate::{
-        backend::{json::JsonStorage, memory::MemoryStorage, TaskSink},
+        backend::{json::JsonStorage, TaskSink},
         error::BoxDynError,
-        task::ExecutionContext,
-        task_fn::{task_fn, TaskFn},
         worker::{
             builder::WorkerBuilder, context::WorkerContext, ext::event_listener::EventListenerExt,
         },
     };
 
-    use super::*;
+    
 
     const ITEMS: u32 = 100;
 
@@ -327,7 +325,7 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(json_store)
             .on_event(|ctx, ev| {
-                println!("On Event = {:?}", ev);
+                println!("On Event = {:?} from = {}", ev, ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();

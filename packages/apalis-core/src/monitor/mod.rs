@@ -114,7 +114,7 @@
 //!
 //! If any worker fails, the monitor will return a `MonitorError` containing details about the failure.
 //! You can inspect the error to see which workers failed and why.
-//! 
+//!
 //! [Worker]: crate::worker::Worker
 
 use std::{
@@ -542,17 +542,17 @@ impl std::fmt::Display for ExitError {
 mod tests {
     use super::*;
     use crate::{
-        backend::{json::JsonStorage, Backend, TaskSink},
+        backend::{json::JsonStorage, TaskSink},
         task::task_id::TaskId,
-        worker::{context::WorkerContext, event::Event, ext::event_listener::EventListenerExt},
+        worker::context::WorkerContext,
     };
     use core::panic;
     use std::{io, time::Duration};
 
-    use tokio::{runtime::Handle, time::sleep};
+    use tokio::time::sleep;
     use tower::limit::ConcurrencyLimitLayer;
 
-    use crate::{monitor::Monitor, task::Task, worker::builder::WorkerBuilder};
+    use crate::{monitor::Monitor, worker::builder::WorkerBuilder};
 
     #[tokio::test]
     async fn basic_with_workers() {

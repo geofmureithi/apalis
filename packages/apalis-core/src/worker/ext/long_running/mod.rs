@@ -219,13 +219,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{ops::Deref, sync::atomic::AtomicUsize, time::Duration};
+    use std::time::Duration;
 
     use crate::{
-        backend::{memory::MemoryStorage, Backend, TaskSink},
+        backend::{memory::MemoryStorage, TaskSink},
         error::BoxDynError,
-        task::data::Data,
-        task_fn::{task_fn, TaskFn},
         worker::{
             builder::WorkerBuilder,
             context::WorkerContext,
@@ -265,7 +263,7 @@ mod tests {
             .backend(in_memory)
             .long_running()
             .on_event(|ctx, ev| {
-                // println!("On Event = {:?}, {:?}", ev, ctx);
+                println!("On Event = {:?} from {}", ev, ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();

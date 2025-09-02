@@ -209,15 +209,15 @@ mod tests {
     use std::{io, time::Duration};
 
     use futures_util::stream;
-    use tower::limit::ConcurrencyLimitLayer;
+    
 
     use crate::{
-        backend::{json::JsonStorage, memory::MemoryStorage, TaskSink},
+        backend::json::JsonStorage,
         error::BoxDynError,
         worker::{
             builder::WorkerBuilder,
             context::WorkerContext,
-            ext::{circuit_breaker::CircuitBreaker, event_listener::EventListenerExt},
+            ext::event_listener::EventListenerExt,
         },
     };
 

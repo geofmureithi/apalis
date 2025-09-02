@@ -320,7 +320,7 @@ impl CircuitBreakerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::Infallible;
+    
 
     #[derive(Clone)]
     struct MockService {
