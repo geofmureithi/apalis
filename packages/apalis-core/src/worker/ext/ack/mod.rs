@@ -15,6 +15,9 @@
 //! # use futures_util::{future::{ready, BoxFuture}, FutureExt};
 //! # use std::fmt::Debug;
 //! # use tokio::sync::mpsc::error::SendError;
+//! # use apalis_core::worker::ext::ack::AcknowledgementExt;
+//! # use apalis_core::backend::TaskSink;
+//! # use crate::apalis_core::worker::ext::event_listener::EventListenerExt;
 //!
 //! #[tokio::main]
 //! async fn main() {

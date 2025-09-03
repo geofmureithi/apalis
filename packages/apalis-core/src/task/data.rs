@@ -62,25 +62,26 @@ use crate::{task_fn::FromRequest, task::Task};
 /// # use std::sync::Arc;
 /// # struct Email;
 /// # use apalis_core::layers::extensions::Data;
-/// # use apalis_core::service_fn::service_fn;
-/// # use crate::apalis_core::builder::WorkerFactory;
+/// # use apalis_core::task_fn::task_fn;
+
 /// # use apalis_core::builder::WorkerBuilder;
-/// # use apalis_core::memory::MemoryStorage;
+/// # use apalis_core::backend::memory::MemoryStorage;
 /// // Some shared state used throughout our application
 /// struct State {
 ///     // ...
 /// }
 ///
-/// async fn email_service(email: Email, state: Data<Arc<State>>) {
+/// async fn send_email(email: Email, state: Data<Arc<State>>) {
 ///     
 /// }
 ///
 /// let state = Arc::new(State { /* ... */ });
+/// let backend = MemoryStorage::new();
 ///
 /// let worker = WorkerBuilder::new("tasty-avocado")
+///     .backend(backend)
 ///     .data(state)
-///     .backend(MemoryStorage::new())
-///     .build(service_fn(email_service));
+///     .build(send_email);
 /// ```
 
 #[derive(Debug, Clone, Copy)]

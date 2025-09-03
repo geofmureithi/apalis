@@ -17,15 +17,13 @@
 //! # Example
 //!
 //! ```rust
-//! use apalis_core::task::Data;
-//!
+//! # use apalis_core::task::data::Data;
 //! #[derive(Clone)]
 //! struct State;
 //!
 //! async fn handler(id: u32, state: Data<State>) -> String {
 //!     format!("Got id {} with state", id)
 //! }
-//!
 //! ```
 //! # How It Works
 //!

@@ -629,7 +629,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_monitor_register_with_count() {
+    async fn test_monitor_register_multiple() {
         let mut backend = JsonStorage::new_temp().unwrap();
 
         for i in 0..10 {

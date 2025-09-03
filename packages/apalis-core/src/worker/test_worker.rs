@@ -11,8 +11,8 @@
 //!
 //! # Example
 //! ```rust
-//! # use crate::{backend::memory::MemoryStorage, task_fn::task_fn, worker::test_utils::TestWorker};
-//!
+//! # use apalis_core::{backend::memory::MemoryStorage, worker::test_worker::TestWorker};
+//! # use apalis_core::error::BoxDynError;
 //! async fn is_even(req: usize) -> Result<(), BoxDynError> {
 //!     if req % 2 == 0 {
 //!         Ok(())
@@ -54,9 +54,9 @@ use tower_service::Service;
 /// A test worker to allow you to test services.
 /// Important for testing backends and tasks
 /// # Example
-/// ```no_run
+/// ```
 /// mod tests {
-///    use crate::{error:BoxDynError, memory::MemoryStorage, service_fn::service_fn};
+///    use apalis_core::{error::BoxDynError, backend::memory::MemoryStorage};
 ///
 ///    use super::*;
 ///
@@ -72,7 +72,7 @@ use tower_service::Service;
 ///    async fn test_accepts_even() {
 ///        let mut backend = MemoryStorage::new();
 ///        backend.push(42usize).await.unwrap();
-///        let mut worker = TestWorker::new(backend, service_fn(is_even));
+///        let mut worker = TestWorker::new(backend, is_even);
 ///        let (_task_id, resp) = worker.execute_next().await.unwrap().unwrap();
 ///        assert_eq!(resp, Ok("()".to_string()));
 ///    }

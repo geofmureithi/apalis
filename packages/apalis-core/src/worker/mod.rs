@@ -37,7 +37,9 @@
 //!
 //! ## Run as a future
 //! ```rust,no_run
-//! use apalis_core::{WorkerBuilder, MemoryStorage};
+//! # use apalis_core::{worker::builder::WorkerBuilder, backend::memory::MemoryStorage};
+//! # use apalis_core::error::BoxDynError;
+//! # use apalis_core::backend::TaskSink;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), BoxDynError> {
@@ -52,7 +54,7 @@
 //!
 //!     let worker = WorkerBuilder::new("worker-1")
 //!         .backend(storage)
-//!         .build_fn(handler);
+//!         .build(handler);
 //!
 //!     worker.run().await?;
 //!     Ok(())
@@ -62,8 +64,16 @@
 //! ## Runner as a stream
 //! The `stream` interface yields worker events (e.g., `Success`, `Error`) while running:
 //! ```rust,no_run
+//! # use apalis_core::worker::builder::WorkerBuilder;
 //! # #[tokio::main]
-//! # async fn main() -> Result<(), BoxDynError> {
+//! # async fn main() {
+//! #   let mut storage = MemoryStorage::new();
+//! #   async fn handler(task: u32) {
+//! #        println!("Processing task: {task}");
+//! #    }
+//! #   let worker = WorkerBuilder::new("worker-1")
+//! #        .backend(storage)
+//! #        .build_fn(handler);
 //! let mut stream = worker.stream();
 //! while let Some(evt) = stream.next().await {
 //!     println!("Event: {:?}", evt);
@@ -109,6 +119,7 @@ pub mod test_worker;
 /// # use apalis_core::error::BoxDynError;
 /// # use apalis_core::backend::memory::MemoryStorage;
 /// # use apalis_core::worker::builder::WorkerBuilder;
+/// # use apalis_core::backend::TaskSink;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), BoxDynError> {
@@ -123,7 +134,7 @@ pub mod test_worker;
 ///
 ///     let worker = WorkerBuilder::new("worker-1")
 ///         .backend(storage)
-///         .build_fn(handler);
+///         .build(handler);
 ///
 ///     worker.run().await?;
 ///     Ok(())
@@ -198,11 +209,11 @@ where
     /// Run the worker until completion
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// # use apalis_core::error::BoxDynError;
     /// # use apalis_core::backend::memory::MemoryStorage;
-    /// # use crate::apalis_core::backend::TaskSink;
-    /// # use crate::apalis_core::worker::builder::WorkerBuilder;
+    /// # use apalis_core::backend::TaskSink;
+    /// # use apalis_core::worker::builder::WorkerBuilder;
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), BoxDynError> {
@@ -217,7 +228,7 @@ where
     ///
     ///     let worker = WorkerBuilder::new("worker-1")
     ///         .backend(storage)
-    ///         .build_fn(handler);
+    ///         .build(handler);
     ///
     ///     worker.run().await?;
     ///     Ok(())
@@ -252,6 +263,9 @@ where
     /// # use apalis_core::error::BoxDynError;
     /// # use apalis_core::backend::memory::MemoryStorage;
     /// # use apalis_core::worker::builder::WorkerBuilder;
+    /// # use apalis_core::backend::TaskSink;
+    /// # use futures_util::stream::stream::StreamExt;
+    /// # use apalis_core::backend::memory::MemoryStorage;
     /// #[tokio::main]
     /// async fn main() -> Result<(), BoxDynError> {
     ///     let mut storage = MemoryStorage::new();
@@ -263,7 +277,7 @@ where
     ///     }
     ///     let worker = WorkerBuilder::new("worker-1")
     ///         .backend(storage)
-    ///         .build_fn(handler);
+    ///         .build(handler);
     ///     let mut stream = worker.stream();
     ///     while let Some(evt) = stream.next().await {
     ///         println!("Event: {:?}", evt);

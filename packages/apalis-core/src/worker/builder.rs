@@ -15,8 +15,14 @@
 //!
 //! ## Basic usage
 //!
-//! ```rust
-//! use apalis_core::prelude::*;
+//! ```rust,no_run
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # use apalis_core::worker::context::WorkerContext;
+//! # use apalis_core::task::data::Data;
+//! 
+//! # #[tokio::main]
+//! # async fn main() {
 //! async fn task(job: u32, count: Data<usize>, ctx: WorkerContext) {
 //!     println!("Received job: {job:?}");
 //!     // Do something with count or ctx
@@ -31,6 +37,7 @@
 //!     .build_fn(task);
 //!
 //! worker.run().await.unwrap();
+//! #}
 //! ```
 //! # Order
 //!

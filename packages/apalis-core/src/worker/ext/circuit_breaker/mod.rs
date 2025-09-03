@@ -12,11 +12,12 @@
 //! # Example
 //!
 //! ```rust
-//! use apalis_core::worker::ext::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
-//! use apalis_core::worker::builder::WorkerBuilder;
-//! use apalis_core::backend::memory::MemoryStorage;
-//! use apalis_core::worker::context::WorkerContext;
-//! use tower::limit::ConcurrencyLimitLayer;
+//! # use apalis_core::worker::ext::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # use apalis_core::worker::context::WorkerContext;
+//! # use apalis_core::backend::TaskSink;
+//! # use apalis_core::error::BoxDynError;
 //! use std::time::Duration;
 //!
 //! const ITEMS: u32 = 10;
@@ -53,7 +54,6 @@
 //!     let worker = WorkerBuilder::new("rango-tango")
 //!         .backend(in_memory)
 //!         .break_circuit_with(config)
-//!         .layer(ConcurrencyLimitLayer::new(3))
 //!         .build(task);
 //!
 //!     worker.run().await.unwrap();
@@ -70,21 +70,23 @@ use crate::{
     backend::Backend,
     worker::{
         builder::WorkerBuilder,
-        ext::circuit_breaker::service::{CircuitBreakerConfig, CircuitBreakerLayer},
+        ext::circuit_breaker::service::{CircuitBreakerLayer},
+        ext::circuit_breaker::config::CircuitBreakerConfig,
     },
 };
 
 mod service;
+mod config;
 
 /// Allows breaking the circuit if an error threshold is hit
 ///
 /// See [module level documentation](self) for more details.
-pub trait CircuitBreaker<Args, Meta, Source, Middleware>: Sized {
+pub trait CircuitBreaker<Args, Ctx, Source, Middleware>: Sized {
     /// Allows the worker to break the circuit in case of failures
     /// Uses default configuration
     fn break_circuit(
         self,
-    ) -> WorkerBuilder<Args, Meta, Source, Stack<CircuitBreakerLayer, Middleware>> {
+    ) -> WorkerBuilder<Args, Ctx, Source, Stack<CircuitBreakerLayer, Middleware>> {
         self.break_circuit_with(CircuitBreakerConfig::default())
     }
 
@@ -93,10 +95,10 @@ pub trait CircuitBreaker<Args, Meta, Source, Middleware>: Sized {
     fn break_circuit_with(
         self,
         cfg: CircuitBreakerConfig,
-    ) -> WorkerBuilder<Args, Meta, Source, Stack<CircuitBreakerLayer, Middleware>>;
+    ) -> WorkerBuilder<Args, Ctx, Source, Stack<CircuitBreakerLayer, Middleware>>;
 }
 
-impl<Args, P, M, Meta> CircuitBreaker<Args, Meta, P, M> for WorkerBuilder<Args, Meta, P, M>
+impl<Args, P, M, Ctx> CircuitBreaker<Args, Ctx, P, M> for WorkerBuilder<Args, Ctx, P, M>
 where
     P: Backend<Args>,
     M: Layer<CircuitBreakerLayer>,
@@ -104,7 +106,7 @@ where
     fn break_circuit_with(
         self,
         config: CircuitBreakerConfig,
-    ) -> WorkerBuilder<Args, Meta, P, Stack<CircuitBreakerLayer, M>> {
+    ) -> WorkerBuilder<Args, Ctx, P, Stack<CircuitBreakerLayer, M>> {
         let this = self.layer(CircuitBreakerLayer::new(config));
         WorkerBuilder {
             name: this.name,

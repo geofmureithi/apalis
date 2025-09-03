@@ -21,23 +21,27 @@
 //!
 //! ```rust
 //! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::backend::memory::MemoryStorage;
 //! /// Example extension trait for WorkerBuilder that adds a custom method.
-//! pub trait MakeSuperFastExt<Args, Meta, Backend, Middleware>: Sized {
+//! pub trait MakeSuperFastExt<Args, Ctx, Backend, Middleware>: Sized {
 //!     /// Adds custom behavior to the WorkerBuilder.
-//!     fn with_super_fast(self) -> WorkerBuilder<Args, Meta, Backend, Middleware>;
+//!     fn with_super_fast(self) -> WorkerBuilder<Args, Ctx, Backend, Middleware>;
 //! }
 //!
-//! impl<Args, Meta, Backend, Middleware> MakeSuperFastExt<Args, Meta, Backend, Middleware>
-//!     for WorkerBuilder<Args, Meta, Backend, Middleware>
+//! impl<Args, Ctx, Backend, Middleware> MakeSuperFastExt<Args, Ctx, Backend, Middleware>
+//!     for WorkerBuilder<Args, Ctx, Backend, Middleware>
 //! {
-//!     fn with_super_fast(self) -> WorkerBuilder<Args, Meta, Backend, Middleware> {
+//!     fn with_super_fast(self) -> WorkerBuilder<Args, Ctx, Backend, Middleware> {
 //!         // Insert your custom logic here
 //!         // Do something with self, e.g., modify configuration, add middleware, etc.
 //!         // The method can also accept parameters if needed, e.g., specific configuration options
 //!         self
 //!     }
 //! }
-//!
+//! #    async fn task(task: u32) {
+//! #        println!("Processing task: {task}");
+//! #    }
+//! # let in_memory: MemoryStorage<()> = MemoryStorage::new();
 //! // Usage
 //! let builder = WorkerBuilder::new("my_worker")
 //!     .backend(in_memory)

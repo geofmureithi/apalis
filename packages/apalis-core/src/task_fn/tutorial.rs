@@ -72,7 +72,7 @@
 //!
 //! impl<Ctx> FromRequest<Task<Email, Ctx>> for User {
 //!     type Error = BoxDynError;
-//!     async fn from_request(req: Task<Email, Ctx>) -> Result<Self, Self::Error> {
+//!     async fn from_request(req: &Task<Email, Ctx>) -> Result<Self, Self::Error> {
 //!         let user_id = req.args.user_id.clone();
 //!         // Simulate fetching user from DB
 //!         Ok(User { id: user_id })

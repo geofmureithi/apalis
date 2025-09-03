@@ -94,13 +94,6 @@ impl TaskTrackerInner {
     }
 
     #[inline]
-    fn set_open(&self) -> bool {
-        // See `set_closed` regarding the AcqRel ordering.
-        let state = self.state.fetch_and(!1, Ordering::AcqRel);
-        (state & 1) == 1
-    }
-
-    #[inline]
     fn add_task(&self) {
         self.state.fetch_add(2, Ordering::Relaxed);
     }
@@ -188,18 +181,6 @@ impl TaskTracker {
         self.inner.set_closed()
     }
 
-    /// Reopen this `TaskTracker`.
-    ///
-    /// This prevents [`wait`] futures from completing even if the `TaskTracker` is empty.
-    ///
-    /// Returns `true` if this reopened the `TaskTracker`, or `false` if it was already open.
-    ///
-    /// [`wait`]: Self::wait
-    #[inline]
-    pub fn reopen(&self) -> bool {
-        self.inner.set_open()
-    }
-
     /// Returns `true` if this `TaskTracker` is [closed](Self::close).
     #[inline]
     #[must_use]
@@ -247,26 +228,6 @@ impl TaskTracker {
             task_tracker: self.clone(),
         }
     }
-
-    /// Returns `true` if both task trackers correspond to the same set of tasks.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use crate::worker::ext::long_running::TaskTracker;
-    ///
-    /// let tracker_1 = TaskTracker::new();
-    /// let tracker_2 = TaskTracker::new();
-    /// let tracker_1_clone = tracker_1.clone();
-    ///
-    /// assert!(TaskTracker::ptr_eq(&tracker_1, &tracker_1_clone));
-    /// assert!(!TaskTracker::ptr_eq(&tracker_1, &tracker_2));
-    /// ```
-    #[inline]
-    #[must_use]
-    pub fn ptr_eq(left: &TaskTracker, right: &TaskTracker) -> bool {
-        Arc::ptr_eq(&left.inner, &right.inner)
-    }
 }
 
 impl Default for TaskTracker {
@@ -280,37 +241,6 @@ impl Default for TaskTracker {
 }
 
 impl Clone for TaskTracker {
-    /// Returns a new `TaskTracker` that tracks the same set of tasks.
-    ///
-    /// Since the new `TaskTracker` shares the same set of tasks, changes to one set are visible in
-    /// all other clones.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use task_tracker::TaskTracker;
-    ///
-    /// async fn example() {
-    ///     let tracker = TaskTracker::new();
-    ///     let cloned = tracker.clone();
-    ///
-    ///     // Tokens created on `tracker` are visible in `cloned`.
-    ///     let _token = tracker.token();
-    ///     assert_eq!(cloned.len(), 1);
-    ///
-    ///     // Tokens created on `cloned` are visible in `tracker`.
-    ///     let _token2 = cloned.token();
-    ///     assert_eq!(tracker.len(), 2);
-    ///
-    ///     // Calling `close` is visible to `cloned`.
-    ///     tracker.close();
-    ///     assert!(cloned.is_closed());
-    ///
-    ///     // Calling `reopen` is visible to `tracker`.
-    ///     cloned.reopen();
-    ///     assert!(!tracker.is_closed());
-    /// }
-    /// ```
     #[inline]
     fn clone(&self) -> TaskTracker {
         Self {

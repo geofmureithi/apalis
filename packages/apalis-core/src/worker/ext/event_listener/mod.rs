@@ -5,11 +5,14 @@
 //!
 //! # Example
 //!
-//! ```rust
-//! use apalis_core::worker::ext::event_listener::EventListenerExt;
-//! use apalis_core::worker::{WorkerBuilder, Event, WorkerContext};
-//!
+//! ```rust,no_run
+//! # use apalis_core::worker::ext::event_listener::EventListenerExt;
+//! # use apalis_core::worker::{builder::WorkerBuilder, event::Event, context::WorkerContext};
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # let in_memory: MemoryStorage<()> = MemoryStorage::new();
+//! 
 //! let builder = WorkerBuilder::new("my-worker")
+//! #   .backend(in_memory)
 //!     .on_event(|ctx: &WorkerContext, event: &Event| {
 //!         println!("Received event: {:?}", event);
 //!     });
