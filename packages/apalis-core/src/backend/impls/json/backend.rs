@@ -26,7 +26,7 @@ use crate::{
 impl<Args: 'static + Send + DeserializeOwned + Unpin> Backend<Args> for JsonStorage<Args> {
     type IdType = RandomId;
     type Error = SendError;
-    type Meta = JsonMapMetadata;
+    type Ctx = JsonMapMetadata;
     type Stream = TaskStream<Task<Args, JsonMapMetadata>, SendError>;
     type Layer = AcknowledgeLayer<JsonAck<Args>>;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
@@ -37,8 +37,6 @@ impl<Args: 'static + Send + DeserializeOwned + Unpin> Backend<Args> for JsonStor
         stream::once(async { Ok(()) }).boxed()
     }
     fn middleware(&self) -> Self::Layer {
-        use crate::worker::ext::ack::AcknowledgeLayer;
-
         AcknowledgeLayer::new(JsonAck {
             inner: self.clone(),
         })
@@ -61,7 +59,7 @@ impl<Args: DeserializeOwned + Unpin> Stream for JsonStorage<Args> {
             let args = Args::deserialize(&task.args).unwrap();
             let task = TaskBuilder::new(args)
                 .with_task_id(key.task_id.clone())
-                .with_metadata(task.meta.clone())
+                .with_ctx(task.ctx.clone())
                 .build();
             drop(map);
             let this = self.get_mut();

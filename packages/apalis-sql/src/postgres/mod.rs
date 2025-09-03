@@ -237,8 +237,8 @@ impl<Args, Encode> PgSink<Args, CompactT, Encode> {
                         DateTime::from_timestamp(task.ctx.run_at as i64, 0)
                             .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?,
                     );
-                    priorities.push(*task.ctx.metadata.priority());
-                    max_attempts_vec.push(task.ctx.metadata.max_attempts());
+                    priorities.push(*task.ctx.backend_ctx.priority());
+                    max_attempts_vec.push(task.ctx.backend_ctx.max_attempts());
                 }
 
                 sqlx::query!(
@@ -347,10 +347,10 @@ impl<Res: Serialize> Acknowledge<Res, SqlMetadata, Ulid> for PgAck {
         parts: &ExecutionContext<SqlMetadata, Ulid>,
     ) -> Self::Future {
         let task_id = parts.task_id.clone();
-        let worker_id = parts.metadata.lock_by().clone();
+        let worker_id = parts.backend_ctx.lock_by().clone();
 
         let response = serde_json::to_string(&res.as_ref().map_err(|e| e.to_string()));
-        let status = calculate_status(&parts.metadata, res);
+        let status = calculate_status(&parts.backend_ctx, res);
         let attempt = parts.attempt.current() as i32;
         let now = Utc::now();
         let pool = self.pool.clone();
@@ -440,7 +440,7 @@ impl PgTask {
                 .run_at
                 .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?
                 .timestamp() as u64,
-            metadata: {
+            backend_ctx: {
                 let mut ctx = SqlMetadata::default();
                 ctx.set_lock_at(self.lock_at.map(|s| s.timestamp()));
                 ctx.set_lock_by(self.lock_by);

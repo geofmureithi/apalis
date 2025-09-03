@@ -322,21 +322,21 @@ pub enum BuildError {
     MissingConfig,
 }
 
-impl<Args, DB, Fetch, Sink, IdType: Clone, E, Meta: Default, Encode, Config> Backend<Args>
+impl<Args, DB, Fetch, Sink, IdType: Clone, E, Ctx: Default, Encode, Config> Backend<Args>
     for CustomBackend<Args, DB, Fetch, Sink, IdType, Encode, Config>
 where
-    Fetch: Stream<Item = Result<Option<Task<Encode::Compact, Meta, IdType>>, E>> + Send + 'static,
+    Fetch: Stream<Item = Result<Option<Task<Encode::Compact, Ctx, IdType>>, E>> + Send + 'static,
     Encode: Codec<Args> + Send + 'static,
     Encode::Error: Into<BoxDynError>,
     E: Into<BoxDynError>,
 {
     type IdType = IdType;
 
-    type Meta = Meta;
+    type Ctx = Ctx;
 
     type Error = BoxDynError;
 
-    type Stream = TaskStream<Task<Args, Meta, IdType>, BoxDynError>;
+    type Stream = TaskStream<Task<Args, Ctx, IdType>, BoxDynError>;
 
     type Codec = Encode;
 
@@ -366,10 +366,10 @@ where
     }
 }
 
-impl<Args, Meta, IdType, DB, Fetch, S, Codec, Config> Sink<Task<Args, Meta, IdType>>
+impl<Args, Ctx, IdType, DB, Fetch, S, Codec, Config> Sink<Task<Args, Ctx, IdType>>
     for CustomBackend<Args, DB, Fetch, S, IdType, Codec, Config>
 where
-    S: Sink<Task<Args, Meta, IdType>>,
+    S: Sink<Task<Args, Ctx, IdType>>,
 {
     type Error = S::Error;
 
@@ -377,7 +377,7 @@ where
         self.project().current_sink.poll_ready_unpin(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Task<Args, Meta, IdType>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Task<Args, Ctx, IdType>) -> Result<(), Self::Error> {
         self.project().current_sink.start_send_unpin(item)
     }
 

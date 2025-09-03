@@ -27,8 +27,8 @@ mod service;
 mod steps;
 
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
-type SteppedService<Compact, Meta, IdType> =
-    BoxedService<Task<Compact, Meta, IdType>, (bool, Compact)>;
+type SteppedService<Compact, Ctx, IdType> =
+    BoxedService<Task<Compact, Ctx, IdType>, (bool, Compact)>;
 
 pub trait Step<Args, FlowSink, Encode>
 where
@@ -47,7 +47,7 @@ where
     fn run(
         &mut self,
         ctx: &StepContext<FlowSink, Encode>,
-        step: Task<Args, FlowSink::Meta, FlowSink::IdType>,
+        step: Task<Args, FlowSink::Ctx, FlowSink::IdType>,
     ) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send;
 
     fn post(
@@ -80,7 +80,7 @@ where
     FlowSink: TaskSink<Compact>,
 {
     pre_hook: Arc<PreHook<FlowSink, Encode, Compact>>,
-    svc: SteppedService<Compact, FlowSink::Meta, FlowSink::IdType>,
+    svc: SteppedService<Compact, FlowSink::Ctx, FlowSink::IdType>,
 }
 
 impl<Input, FlowSink, Encode, Compact> WorkFlow<Input, Input, FlowSink, Encode, Compact>
@@ -107,7 +107,7 @@ where
     ) -> WorkFlow<Input, Res, FlowSink, Encode, Compact>
     where
         Current: std::marker::Send + 'static + Sync,
-        FlowSink::Meta: Send + 'static + Sync,
+        FlowSink::Ctx: Send + 'static + Sync,
         S: Step<Current, FlowSink, Encode, Response = Res, Error = E>
             + Sync
             + Send
@@ -143,7 +143,7 @@ where
             )
                 as PreHook<FlowSink, Encode, Compact>);
             let svc =
-                SteppedService::<Compact, FlowSink::Meta, FlowSink::IdType>::new(StepService {
+                SteppedService::<Compact, FlowSink::Ctx, FlowSink::IdType>::new(StepService {
                     codec: PhantomData::<(Encode, Current, FlowSink)>,
                     step,
                 });
@@ -163,7 +163,7 @@ pub struct StepService<Step, Encode, Args, FlowSink> {
 }
 
 impl<Args, S, Encode, Compact, FlowSink, E, CodecError>
-    Service<Task<Compact, FlowSink::Meta, FlowSink::IdType>>
+    Service<Task<Compact, FlowSink::Ctx, FlowSink::IdType>>
     for StepService<S, Encode, Args, FlowSink>
 where
     S: Step<Args, FlowSink, Encode, Error = E> + Clone + Send + 'static,
@@ -173,7 +173,7 @@ where
     S::Error: Send + 'static,
     FlowSink: Clone + Send + 'static + Sync + TaskSink<Compact>,
     Args: Send + 'static,
-    FlowSink::Meta: Send + 'static,
+    FlowSink::Ctx: Send + 'static,
     FlowSink::IdType: Send + 'static,
     Compact: Send + Sync + 'static,
     Encode: Send + Sync + 'static,
@@ -186,8 +186,8 @@ where
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
-    fn call(&mut self, req: Task<Compact, FlowSink::Meta, FlowSink::IdType>) -> Self::Future {
-        let ctx: Option<StepContext<FlowSink, Encode>> = req.get().cloned();
+    fn call(&mut self, req: Task<Compact, FlowSink::Ctx, FlowSink::IdType>) -> Self::Future {
+        let ctx: Option<StepContext<FlowSink, Encode>> = req.extract().cloned();
         match ctx {
             Some(ctx) => {
                 let req = req.try_map(|arg| Encode::decode(&arg));
@@ -246,7 +246,7 @@ impl<Input, Current, FlowSink, Encode, Compact>
         FlowSink,
         WorkFlowService<FlowSink, Encode, Compact>,
         Compact,
-        FlowSink::Meta,
+        FlowSink::Ctx,
     > for WorkFlow<Input, Current, FlowSink, Encode, Compact>
 where
     FlowSink: Clone,
@@ -283,14 +283,14 @@ where
     S: TaskSink<Compact> + Backend<Compact>,
     S::IdType: Default + Send,
     S::Codec: Codec<Args, Compact = Compact>,
-    S::Meta: MetadataExt<WorkflowRequest> + Send,
+    S::Ctx: MetadataExt<WorkflowRequest> + Send,
     S::Error: Into<BoxDynError> + Send + Sync + 'static,
     <S::Codec as Codec<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
-    <S::Meta as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    <S::Ctx as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError> + Send + Sync + 'static,
 {
     async fn push_step(&mut self, step: Args, index: usize) -> Result<(), WorkflowError> {
         let task_id = TaskId::new(S::IdType::default());
-        let mut meta = S::Meta::default();
+        let mut meta = S::Ctx::default();
         meta.inject(WorkflowRequest { step_index: index })
             .map_err(|e| WorkflowError::MetadataError(e.into()))?;
         let task = TaskBuilder::new_with_metadata(

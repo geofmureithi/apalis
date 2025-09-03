@@ -54,7 +54,7 @@ impl<Args: Unpin + Serialize> Sink<Task<Args, JsonMapMetadata>> for JsonStorage<
                 &key,
                 TaskWithMeta {
                     args: serde_json::to_value(task.args).unwrap(),
-                    meta: task.ctx.metadata,
+                    ctx: task.ctx.backend_ctx,
                     result: None,
                 },
             )

@@ -41,10 +41,10 @@ where
 }
 
 impl<FlowSink: Clone + Send + Sync + 'static + TaskSink<Compact>, Encode, Compact>
-    Service<Task<Compact, FlowSink::Meta, FlowSink::IdType>>
+    Service<Task<Compact, FlowSink::Ctx, FlowSink::IdType>>
     for WorkFlowService<FlowSink, Encode, Compact>
 where
-    FlowSink::Meta: MetadataExt<WorkflowRequest>,
+    FlowSink::Ctx: MetadataExt<WorkflowRequest>,
     Encode: Send + Sync + 'static,
     Compact: Send + 'static,
 {
@@ -75,12 +75,12 @@ where
         }
     }
 
-    fn call(&mut self, mut req: Task<Compact, FlowSink::Meta, FlowSink::IdType>) -> Self::Future {
+    fn call(&mut self, mut req: Task<Compact, FlowSink::Ctx, FlowSink::IdType>) -> Self::Future {
         assert!(
             self.not_ready.is_empty(),
             "Workflow must wait for all services to be ready. Did you forget to call poll_ready()?"
         );
-        let meta: WorkflowRequest = req.ctx.metadata.extract().unwrap_or_default();
+        let meta: WorkflowRequest = req.ctx.backend_ctx.extract().unwrap_or_default();
         let idx = meta.step_index;
         let ctx = StepContext::new(self.backend.clone(), idx);
 

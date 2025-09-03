@@ -14,7 +14,7 @@
 //!
 //! The [`Task`] struct is generic over:
 //! - `Args`: The type of arguments or payload for the task.
-//! - `Meta`: Metadata associated with the task, such as custom fields or backend-specific information.
+//! - `Ctx`: Ctxdata associated with the task, such as custom fields or backend-specific information.
 //! - `IdType`: The type used for uniquely identifying the task (defaults to [`RandomId`]).
 //!
 //! ## [`ExecutionContext`]
@@ -36,7 +36,7 @@
 //! - [`builder`]: Utilities for constructing tasks.
 //! - [`data`]: Data types for task payloads.
 //! - [`extensions`]: Extension storage for tasks.
-//! - [`metadata`]: Metadata types for tasks.
+//! - [`metadata`]: Ctxdata types for tasks.
 //! - [`status`]: Status tracking for tasks.
 //! - [`task_id`]: Types for uniquely identifying tasks.
 //!
@@ -53,8 +53,8 @@
 //! ```rust
 //! use apalis_core::task::{Task, ExecutionContext};
 //! #[derive(Default, Clone)]
-//! struct MyMeta { priority: u8 }
-//! let meta = MyMeta { priority: 5 };
+//! struct MyCtx { priority: u8 }
+//! let meta = MyCtx { priority: 5 };
 //! let task = TaskBuilder::new("important work".to_string())
 //!     .with_meta(meta)
 //!     .build();
@@ -91,7 +91,7 @@
 //! - [`IntoResponse`]: Trait for converting tasks into response types.
 //! - [`TaskBuilder`]: Fluent builder for constructing tasks with optional configuration.
 //! - [`RandomId`]: Default unique identifier type for tasks.
-//! 
+//!
 //! [TaskBuilder]: crate::task::builder::TaskBuilder
 //! [IntoResponse]: crate::task::into_response::IntoResponse
 //! [FromRequest]: crate::task::from_request::FromRequest
@@ -101,12 +101,15 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{task::{
-    attempt::Attempt,
-    extensions::Extensions,
-    status::Status,
-    task_id::{RandomId, TaskId},
-}, task_fn::FromRequest};
+use crate::{
+    task::{
+        attempt::Attempt,
+        extensions::Extensions,
+        status::Status,
+        task_id::{RandomId, TaskId},
+    },
+    task_fn::FromRequest,
+};
 
 pub mod attempt;
 pub mod builder;
@@ -120,17 +123,17 @@ pub mod task_id;
 /// Should be considered a single unit of work
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
-pub struct Task<Args, Meta, IdType = RandomId> {
+pub struct Task<Args, Ctx, IdType = RandomId> {
     /// The inner task part
     pub args: Args,
     /// Context of the task eg id, attempts and context
-    pub ctx: ExecutionContext<Meta, IdType>,
+    pub ctx: ExecutionContext<Ctx, IdType>,
 }
 
 /// Component parts of a `Task`
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Default)]
-pub struct ExecutionContext<Metadata, IdType = RandomId> {
+pub struct ExecutionContext<BackendContext, IdType = RandomId> {
     /// The task's id if allocated
     pub task_id: Option<TaskId<IdType>>,
 
@@ -143,7 +146,7 @@ pub struct ExecutionContext<Metadata, IdType = RandomId> {
     pub attempt: Attempt,
 
     /// The task specific data provided by the backend
-    pub metadata: Metadata,
+    pub backend_ctx: BackendContext,
 
     /// The task status
     pub status: Status,
@@ -152,42 +155,37 @@ pub struct ExecutionContext<Metadata, IdType = RandomId> {
     pub run_at: u64,
 }
 
-impl<Meta, IdType: Clone> Clone for ExecutionContext<Meta, IdType>
+impl<Ctx, IdType: Clone> Clone for ExecutionContext<Ctx, IdType>
 where
-    Meta: Clone,
+    Ctx: Clone,
 {
     fn clone(&self) -> Self {
         Self {
             task_id: self.task_id.clone(),
             data: self.data.clone(),
             attempt: self.attempt.clone(),
-            metadata: self.metadata.clone(),
+            backend_ctx: self.backend_ctx.clone(),
             status: self.status.clone(),
             run_at: self.run_at,
         }
     }
 }
 
-impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
+impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     /// Creates a new [Task]
     pub fn new(args: Args) -> Self
     where
-        Meta: Default,
+        Ctx: Default,
     {
-        Self::new_with_data(args, Extensions::default(), Meta::default())
+        Self::new_with_data(args, Extensions::default(), Ctx::default())
     }
 
-    /// Creates a task with all parts provided
-    pub fn new_with_ctx(args: Args, ctx: ExecutionContext<Meta, IdType>) -> Self {
-        Self { args, ctx }
-    }
-
-    /// Creates a task with metadata provided
-    pub fn new_with_meta(req: Args, meta: Meta) -> Self {
+    /// Creates a task with context provided
+    pub fn new_with_ctx(req: Args, ctx: Ctx) -> Self {
         Self {
             args: req,
             ctx: ExecutionContext {
-                metadata: meta,
+                backend_ctx: ctx,
                 task_id: Default::default(),
                 attempt: Default::default(),
                 data: Default::default(),
@@ -203,11 +201,11 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
     }
 
     /// Creates a task with data and context provided
-    pub fn new_with_data(req: Args, data: Extensions, ctx: Meta) -> Self {
+    pub fn new_with_data(req: Args, data: Extensions, ctx: Ctx) -> Self {
         Self {
             args: req,
             ctx: ExecutionContext {
-                metadata: ctx,
+                backend_ctx: ctx,
                 task_id: Default::default(),
                 attempt: Default::default(),
                 data,
@@ -223,7 +221,7 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
     }
 
     /// Take the task into its parts
-    pub fn take(self) -> (Args, ExecutionContext<Meta, IdType>) {
+    pub fn take(self) -> (Args, ExecutionContext<Ctx, IdType>) {
         (self.args, self.ctx)
     }
 
@@ -235,9 +233,9 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
     }
 }
 
-impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
+impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     /// Maps the `args` field using the provided function, consuming the task.
-    pub fn try_map<F, NewArgs, Err>(self, f: F) -> Result<Task<NewArgs, Meta, IdType>, Err>
+    pub fn try_map<F, NewArgs, Err>(self, f: F) -> Result<Task<NewArgs, Ctx, IdType>, Err>
     where
         F: FnOnce(Args) -> Result<NewArgs, Err>,
     {
@@ -247,7 +245,7 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
         })
     }
     /// Maps the `args` field using the provided function, consuming the task.
-    pub fn map<F, NewArgs>(self, f: F) -> Task<NewArgs, Meta, IdType>
+    pub fn map<F, NewArgs>(self, f: F) -> Task<NewArgs, Ctx, IdType>
     where
         F: FnOnce(Args) -> NewArgs,
     {
@@ -262,7 +260,7 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
     where
         F: FnOnce(
             Args,
-            ExecutionContext<Meta, IdType>,
+            ExecutionContext<Ctx, IdType>,
         ) -> (NewArgs, ExecutionContext<NewCtx, IdType>),
     {
         let (args, parts) = f(self.args, self.ctx);
@@ -272,7 +270,7 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
     /// Maps only the `parts` field.
     pub fn map_parts<F, NewCtx>(self, f: F) -> Task<Args, NewCtx, IdType>
     where
-        F: FnOnce(ExecutionContext<Meta, IdType>) -> ExecutionContext<NewCtx, IdType>,
+        F: FnOnce(ExecutionContext<Ctx, IdType>) -> ExecutionContext<NewCtx, IdType>,
     {
         Task {
             args: self.args,

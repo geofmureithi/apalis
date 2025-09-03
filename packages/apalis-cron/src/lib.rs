@@ -295,7 +295,7 @@ impl<Tz: TimeZone> CronTick<Tz> {
     }
 }
 
-impl<Tz: Unpin> Backend<CronTick<Tz>, CronMeta> for CronStream<Tz>
+impl<Tz: Unpin> Backend<CronTick<Tz>> for CronStream<Tz>
 where
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync + Unpin + Display,
@@ -454,7 +454,7 @@ impl TimeZoneExt for chrono::Local {
 impl<Args: Sync, IdType: Sync> FromRequest<Task<Args, CronMeta, IdType>> for CronMeta {
     type Error = Infallible;
     async fn from_request(req: &Task<Args, CronMeta, IdType>) -> Result<Self, Self::Error> {
-        Ok(req.ctx.metadata.clone())
+        Ok(req.ctx.backend_ctx.clone())
     }
 }
 

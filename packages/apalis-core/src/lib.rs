@@ -45,7 +45,7 @@
 //!
 //! The task struct provides type-safe components for task data and metadata:
 //! - [`Args`](crate::task::args::tutorial) - The primary data payload for the task
-//! - [`Meta`](crate::task::metadata) - metadata associated with the task provided by the backend
+//! - [`Metadata`](crate::task::metadata) - metadata associated with the task provided by the backend
 //! - [`ExecutionContext`](crate::task::ExecutionContext) - Contextual information for task execution
 //! - [`Status`](crate::task::Status) - Represents the current state of a task
 //! - [`TaskId`](crate::task::task_id::TaskId) - Unique identifier for task tracking
@@ -82,7 +82,7 @@
 //! - `Codec` - Determines serialization format for task data persistence
 //! - `Beat` - Heartbeat stream for worker liveness checks
 //! - `IdType` - Type used for unique task identifiers
-//! - `Meta` - Metadata type associated with tasks
+//! - `Ctx` -   Context associated with tasks
 //! - `Error` - Error type for backend operations
 //!
 //! </details>

@@ -72,9 +72,9 @@ use tower_layer::Identity;
 /// | Workflow Support   |  ✗      | Flexible enough to support workflows     |
 /// | Ack Support   |  ✗      | Allow acknowledgement of task completion   |
 /// | WaitForCompletion   |  ✗     | Wait for tasks to complete without blocking     |
-pub struct MemoryStorage<Args, Meta = Extensions> {
-    pub(super) sender: MemorySink<Args, Meta>,
-    pub(super) receiver: Pin<Box<dyn Stream<Item = Task<Args, Meta>> + Send>>,
+pub struct MemoryStorage<Args, Ctx = Extensions> {
+    pub(super) sender: MemorySink<Args, Ctx>,
+    pub(super) receiver: Pin<Box<dyn Stream<Item = Task<Args, Ctx>> + Send>>,
 }
 
 impl<Args: Send + 'static> MemoryStorage<Args, Extensions> {
@@ -92,14 +92,14 @@ impl<Args: Send + 'static> MemoryStorage<Args, Extensions> {
     }
 }
 
-impl<Args, Meta> Sink<Task<Args, Meta>> for MemoryStorage<Args, Meta> {
+impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemoryStorage<Args, Ctx> {
     type Error = SendError;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.as_mut().sender.poll_ready_unpin(cx)
     }
 
-    fn start_send(mut self: Pin<&mut Self>, item: Task<Args, Meta>) -> Result<(), Self::Error> {
+    fn start_send(mut self: Pin<&mut Self>, item: Task<Args, Ctx>) -> Result<(), Self::Error> {
         self.as_mut().sender.start_send_unpin(item)
     }
 
@@ -113,15 +113,15 @@ impl<Args, Meta> Sink<Task<Args, Meta>> for MemoryStorage<Args, Meta> {
 }
 
 /// Memory sink for sending tasks to the in-memory backend
-pub struct MemorySink<Args, Meta = Extensions> {
+pub struct MemorySink<Args, Ctx = Extensions> {
     pub(super) inner: Arc<
         futures_util::lock::Mutex<
-            Box<dyn Sink<Task<Args, Meta>, Error = SendError> + Send + Sync + Unpin + 'static>,
+            Box<dyn Sink<Task<Args, Ctx>, Error = SendError> + Send + Sync + Unpin + 'static>,
         >,
     >,
 }
 
-impl<Args, Meta> std::fmt::Debug for MemorySink<Args, Meta> {
+impl<Args, Ctx> std::fmt::Debug for MemorySink<Args, Ctx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MemorySink")
             .field("inner", &"<Sink>")
@@ -129,7 +129,7 @@ impl<Args, Meta> std::fmt::Debug for MemorySink<Args, Meta> {
     }
 }
 
-impl<Args, Meta> Clone for MemorySink<Args, Meta> {
+impl<Args, Ctx> Clone for MemorySink<Args, Ctx> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -137,7 +137,7 @@ impl<Args, Meta> Clone for MemorySink<Args, Meta> {
     }
 }
 
-impl<Args, Meta> Sink<Task<Args, Meta>> for MemorySink<Args, Meta> {
+impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemorySink<Args, Ctx> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -145,7 +145,7 @@ impl<Args, Meta> Sink<Task<Args, Meta>> for MemorySink<Args, Meta> {
         Pin::new(&mut *lock).poll_ready_unpin(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, mut item: Task<Args, Meta>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, mut item: Task<Args, Ctx>) -> Result<(), Self::Error> {
         let mut lock = self.inner.try_lock().unwrap();
         // Ensure task has id
         item.ctx
@@ -165,7 +165,7 @@ impl<Args, Meta> Sink<Task<Args, Meta>> for MemorySink<Args, Meta> {
     }
 }
 
-impl<Args, Meta> std::fmt::Debug for MemoryStorage<Args, Meta> {
+impl<Args, Ctx> std::fmt::Debug for MemoryStorage<Args, Ctx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MemoryStorage")
             .field("sender", &self.sender)
@@ -174,8 +174,8 @@ impl<Args, Meta> std::fmt::Debug for MemoryStorage<Args, Meta> {
     }
 }
 
-impl<Args, Meta> Stream for MemoryStorage<Args, Meta> {
-    type Item = Task<Args, Meta>;
+impl<Args, Ctx> Stream for MemoryStorage<Args, Ctx> {
+    type Item = Task<Args, Ctx>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.as_mut().receiver.poll_next_unpin(cx)
@@ -183,15 +183,15 @@ impl<Args, Meta> Stream for MemoryStorage<Args, Meta> {
 }
 
 // MemoryStorage as a Backend
-impl<Args: 'static + Clone + Send, Meta: 'static + Default> Backend<Args>
-    for MemoryStorage<Args, Meta>
+impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend<Args>
+    for MemoryStorage<Args, Ctx>
 {
     type IdType = RandomId;
 
-    type Meta = Meta;
+    type Ctx = Ctx;
 
     type Error = SendError;
-    type Stream = TaskStream<Task<Args, Meta>, SendError>;
+    type Stream = TaskStream<Task<Args, Ctx>, SendError>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 

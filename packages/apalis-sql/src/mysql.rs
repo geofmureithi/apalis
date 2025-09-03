@@ -254,8 +254,8 @@ where
             .bind(job)
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
-            .bind(parts.metadata.max_attempts())
-            .bind(parts.metadata.priority())
+            .bind(parts.backend_ctx.max_attempts())
+            .bind(parts.backend_ctx.priority())
             .execute(&pool)
             .await?;
         Ok(parts)
@@ -277,8 +277,8 @@ where
             .bind(job)
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
-            .bind(parts.metadata.max_attempts())
-            .bind(parts.metadata.priority())
+            .bind(parts.backend_ctx.max_attempts())
+            .bind(parts.backend_ctx.priority())
             .execute(&pool)
             .await?;
         Ok(parts)
@@ -303,9 +303,9 @@ where
             .bind(args)
             .bind(req.ctx.task_id.to_string())
             .bind(job_type)
-            .bind(req.ctx.metadata.max_attempts())
+            .bind(req.ctx.backend_ctx.max_attempts())
             .bind(on)
-            .bind(req.ctx.metadata.priority())
+            .bind(req.ctx.backend_ctx.priority())
             .execute(&pool)
             .await?;
         Ok(req.ctx)
@@ -369,7 +369,7 @@ where
 
     async fn update(&mut self, job: Task<Self::Job, SqlMetadata>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let ctx = job.ctx.metadata;
+        let ctx = job.ctx.backend_ctx;
         let status = ctx.status().to_string();
         let attempts = job.ctx.attempt;
         let done_at = *ctx.done_at();
@@ -816,7 +816,7 @@ mod tests {
         let worker = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker).await;
-        let ctx = job.ctx.metadata;
+        let ctx = job.ctx.backend_ctx;
         // TODO: Fix assertions
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
@@ -841,7 +841,7 @@ mod tests {
             .expect("failed to kill job");
 
         let job = get_job(&mut storage, job_id).await;
-        let ctx = job.ctx.metadata;
+        let ctx = job.ctx.backend_ctx;
         // TODO: Fix assertions
         assert_eq!(*ctx.status(), State::Killed);
         assert!(ctx.done_at().is_some());
@@ -872,7 +872,7 @@ mod tests {
 
         // fetch job
         let job = consume_one(&mut storage, &worker).await;
-        let ctx = job.ctx.metadata;
+        let ctx = job.ctx.backend_ctx;
 
         assert_eq!(*ctx.status(), State::Running);
 

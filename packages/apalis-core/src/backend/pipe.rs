@@ -57,13 +57,13 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 
 /// A generic Pipe that wraps an inner type along with a `RequestStream`.
-pub struct Pipe<S, Into, Args, Meta> {
+pub struct Pipe<S, Into, Args, Ctx> {
     pub(crate) from: S,
     pub(crate) into: Into,
-    pub(crate) _req: PhantomData<(Args, Meta)>,
+    pub(crate) _req: PhantomData<(Args, Ctx)>,
 }
 
-impl<S, Into, Args, Meta> Pipe<S, Into, Args, Meta> {
+impl<S, Into, Args, Ctx> Pipe<S, Into, Args, Ctx> {
     /// Create a new Pipe instance
     pub fn new(stream: S, backend: Into) -> Self {
         Pipe {
@@ -74,7 +74,7 @@ impl<S, Into, Args, Meta> Pipe<S, Into, Args, Meta> {
     }
 }
 
-impl<S: fmt::Debug, Into: fmt::Debug, Args, Meta> fmt::Debug for Pipe<S, Into, Args, Meta> {
+impl<S: fmt::Debug, Into: fmt::Debug, Args, Ctx> fmt::Debug for Pipe<S, Into, Args, Ctx> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Pipe")
             .field("inner", &self.from)
@@ -83,12 +83,12 @@ impl<S: fmt::Debug, Into: fmt::Debug, Args, Meta> fmt::Debug for Pipe<S, Into, A
     }
 }
 
-impl<Args, Meta, S, TSink, Err> Backend<Args> for Pipe<S, TSink, Args, Meta>
+impl<Args, Ctx, S, TSink, Err> Backend<Args> for Pipe<S, TSink, Args, Ctx>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    TSink: Backend<Args, Meta = Meta>
-        + Sink<Task<Args, Meta, TSink::IdType>>
-        + Clone // TODO: Remove clone
+    TSink: Backend<Args, Ctx = Ctx>
+        + Sink<Task<Args, Ctx, TSink::IdType>>
+        + Clone
         + Unpin
         + Send
         + 'static,
@@ -97,16 +97,16 @@ where
     TSink::IdType: Send + Clone + 'static,
     TSink::Stream: Send + 'static,
     Args: Send + 'static,
-    Meta: Send + 'static + Default,
+    Ctx: Send + 'static + Default,
     Err: Into<BoxDynError> + Send + Sync + 'static,
-    <TSink as Sink<Task<Args, Meta, TSink::IdType>>>::Error:
+    <TSink as Sink<Task<Args, Ctx, TSink::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
 {
     type IdType = TSink::IdType;
 
-    type Meta = Meta;
+    type Ctx = Ctx;
 
-    type Stream = BoxStream<'static, Result<Option<Task<Args, Meta, Self::IdType>>, PipeError>>;
+    type Stream = BoxStream<'static, Result<Option<Task<Args, Ctx, Self::IdType>>, PipeError>>;
 
     type Layer = TSink::Layer;
 
@@ -164,12 +164,12 @@ where
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx>;
 }
 
-impl<B, Args, Meta, Err> PipeExt<B, Args, Meta> for BoxStream<'static, Result<Args, Err>>
+impl<B, Args, Ctx, Err> PipeExt<B, Args, Ctx> for BoxStream<'static, Result<Args, Err>>
 where
     <B as Backend<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
-    B: Backend<Args> + Sink<Task<Args, Meta, B::IdType>>,
+    B: Backend<Args> + Sink<Task<Args, Ctx, B::IdType>>,
 {
-    fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Meta> {
+    fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx> {
         Pipe::new(self, backend)
     }
 }
@@ -209,15 +209,12 @@ mod tests {
     use std::{io, time::Duration};
 
     use futures_util::stream;
-    
 
     use crate::{
         backend::json::JsonStorage,
         error::BoxDynError,
         worker::{
-            builder::WorkerBuilder,
-            context::WorkerContext,
-            ext::event_listener::EventListenerExt,
+            builder::WorkerBuilder, context::WorkerContext, ext::event_listener::EventListenerExt,
         },
     };
 

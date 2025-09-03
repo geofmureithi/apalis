@@ -131,17 +131,17 @@ pub mod test_worker;
 /// ```
 /// See [module level documentation](self) for more details.
 #[must_use = "Workers must be run or streamed to execute tasks"]
-pub struct Worker<Args, Meta, Backend, Svc, Middleware> {
+pub struct Worker<Args, Ctx, Backend, Svc, Middleware> {
     pub(crate) name: String,
     pub(crate) backend: Backend,
     pub(crate) service: Svc,
     pub(crate) middleware: Middleware,
-    pub(crate) task_marker: PhantomData<(Args, Meta)>,
+    pub(crate) task_marker: PhantomData<(Args, Ctx)>,
     pub(crate) shutdown: Option<Shutdown>,
     pub(crate) event_handler: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>,
 }
 
-impl<Args, Meta, B, Svc, Middleware> fmt::Debug for Worker<Args, Meta, B, Svc, Middleware>
+impl<Args, Ctx, B, Svc, Middleware> fmt::Debug for Worker<Args, Ctx, B, Svc, Middleware>
 where
     Svc: fmt::Debug,
     B: fmt::Debug,
@@ -154,7 +154,7 @@ where
     }
 }
 
-impl<Args, Meta, B, Svc, M> Worker<Args, Meta, B, Svc, M> {
+impl<Args, Ctx, B, Svc, M> Worker<Args, Ctx, B, Svc, M> {
     /// Build a worker that is ready for execution
     pub fn new(name: String, backend: B, service: Svc, layers: M) -> Self {
         Worker {
@@ -169,29 +169,29 @@ impl<Args, Meta, B, Svc, M> Worker<Args, Meta, B, Svc, M> {
     }
 }
 
-impl<Args, S, B, M> Worker<Args, B::Meta, B, S, M>
+impl<Args, S, B, M> Worker<Args, B::Ctx, B, S, M>
 where
     B: Backend<Args>,
-    S: Service<Task<Args, B::Meta, B::IdType>> + Send + 'static,
+    S: Service<Task<Args, B::Ctx, B::IdType>> + Send + 'static,
     B::Stream: Unpin + Send + 'static,
     B::Beat: Unpin + Send + 'static,
     Args: Send + 'static,
-    B::Meta: Send + 'static,
+    B::Ctx: Send + 'static,
     B::Error: Into<BoxDynError> + Send + 'static,
     M: Layer<ReadinessService<TrackerService<S>>>,
     B::Layer: Layer<M::Service>,
     <B::Layer as Layer<M::Service>>::Service:
-        Service<Task<Args, B::Meta, B::IdType>> + Send + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Meta, B::IdType>>>::Error:
+        Service<Task<Args, B::Ctx, B::IdType>> + Send + 'static,
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Ctx, B::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Meta, B::IdType>>>::Future:
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Ctx, B::IdType>>>::Future:
         Send,
-    M::Service: Service<Task<Args, B::Meta, B::IdType>> + Send + 'static,
+    M::Service: Service<Task<Args, B::Ctx, B::IdType>> + Send + 'static,
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-        Task<Args, B::Meta, B::IdType>,
+        Task<Args, B::Ctx, B::IdType>,
     >>::Future: Send,
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-        Task<Args, B::Meta, B::IdType>,
+        Task<Args, B::Ctx, B::IdType>,
     >>::Error: Into<BoxDynError> + Send + Sync + 'static,
     B::IdType: Send + 'static,
 {
@@ -354,16 +354,16 @@ where
             });
         starter.chain(work_stream)
     }
-    fn poll_tasks<Svc, Stm, E, Meta>(
+    fn poll_tasks<Svc, Stm, E, Ctx>(
         service: Svc,
         stream: Stm,
     ) -> BoxStream<'static, Result<Event, WorkerError>>
     where
-        Svc: Service<Task<Args, Meta, B::IdType>> + Send + 'static,
-        Stm: Stream<Item = Result<Option<Task<Args, Meta, B::IdType>>, E>> + Send + Unpin + 'static,
+        Svc: Service<Task<Args, Ctx, B::IdType>> + Send + 'static,
+        Stm: Stream<Item = Result<Option<Task<Args, Ctx, B::IdType>>, E>> + Send + Unpin + 'static,
         Args: Send + 'static,
         Svc::Future: Send,
-        Meta: Send + 'static,
+        Ctx: Send + 'static,
         Svc::Error: Into<BoxDynError> + Sync + Send,
         E: Into<BoxDynError> + Send + 'static,
     {
@@ -405,9 +405,9 @@ pub struct TrackerService<S> {
     service: S,
 }
 
-impl<S, Args, Meta, IdType> Service<Task<Args, Meta, IdType>> for TrackerService<S>
+impl<S, Args, Ctx, IdType> Service<Task<Args, Ctx, IdType>> for TrackerService<S>
 where
-    S: Service<Task<Args, Meta, IdType>>,
+    S: Service<Task<Args, Ctx, IdType>>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -417,7 +417,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Task<Args, Meta, IdType>) -> Self::Future {
+    fn call(&mut self, request: Task<Args, Ctx, IdType>) -> Self::Future {
         let attempt = request.ctx.attempt.clone();
         self.ctx.track(AttemptOnPollFuture {
             attempt,

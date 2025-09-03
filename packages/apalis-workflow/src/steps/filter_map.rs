@@ -9,13 +9,13 @@ use std::{
 use apalis_core::{
     backend::{codec::Codec, TaskSink, WaitForCompletion},
     error::{BoxDynError, WorkerError},
-    task_fn::{service_fn, TaskFn},
     task::{
         builder::TaskBuilder,
         metadata::MetadataExt,
         task_id::{RandomId, TaskId},
         Task,
     },
+    task_fn::{service_fn, TaskFn},
 };
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -47,7 +47,7 @@ pub struct FilterContext<IdType> {
 impl<S, Input, Output, E, Sink, Compact, Encode, CodecError, MetadataError>
     Step<Vec<Input>, Sink, Encode> for FilterMap<S, Input, Output>
 where
-    S: Service<Task<Input, Sink::Meta, Sink::IdType>, Response = Option<Output>, Error = E>
+    S: Service<Task<Input, Sink::Ctx, Sink::IdType>, Response = Option<Output>, Error = E>
         + Sync
         + Send,
     Compact: Send + Sync,
@@ -57,7 +57,7 @@ where
     Output: Sync + Send,
     Sink: Sync + TaskSink<Compact> + Unpin + Send + WaitForCompletion<Output, Compact>,
     Input: Send + Sync,
-    Sink::Meta: Send
+    Sink::Ctx: Send
         + Sync
         + MetadataExt<WorkflowRequest, Error = MetadataError>
         + MetadataExt<FilterContext<Sink::IdType>, Error = MetadataError>
@@ -81,7 +81,7 @@ where
             let task_id = ctx.push_next_step(step).await?;
             task_ids.push(task_id);
         }
-        let mut meta = Sink::Meta::default();
+        let mut meta = Sink::Ctx::default();
         meta.inject(FilterContext { task_ids })
             .map_err(|e| WorkflowError::MetadataError(e.into()))?;
         meta.inject(WorkflowRequest {
@@ -101,11 +101,11 @@ where
     async fn run(
         &mut self,
         ctx: &StepContext<Sink, Encode>,
-        steps: Task<Vec<Input>, Sink::Meta, Sink::IdType>,
+        steps: Task<Vec<Input>, Sink::Ctx, Sink::IdType>,
     ) -> Result<Self::Response, Self::Error> {
         let filter_ctx: FilterContext<Sink::IdType> = steps
             .ctx
-            .metadata
+            .backend_ctx
             .extract()
             .map_err(|e: MetadataError| WorkflowError::MetadataError(e.into()))?;
         let res: Vec<Output> = ctx
@@ -153,7 +153,7 @@ impl<S, T, O> FilterMapStep<S, T, O> {
 
 impl<S, T, O, E, B, Compact, Encode> Step<T, B, Encode> for FilterMapStep<S, T, O>
 where
-    S: Service<Task<T, B::Meta, B::IdType>, Response = Option<O>, Error = E> + Sync + Send,
+    S: Service<Task<T, B::Ctx, B::IdType>, Response = Option<O>, Error = E> + Sync + Send,
     T: Sync,
     S::Future: Send + 'static,
     S::Error: Into<BoxDynError>,
@@ -161,7 +161,7 @@ where
     O: Sync + Send,
     B: Sync + Send + TaskSink<Compact>,
     T: Send,
-    B::Meta: Send + Sync,
+    B::Ctx: Send + Sync,
     B::IdType: Send,
     Compact: Send + Sync,
     Encode: Codec<T, Compact = Compact> + Sync,
@@ -172,7 +172,7 @@ where
     async fn run(
         &mut self,
         ctx: &StepContext<B, Encode>,
-        args: Task<T, B::Meta, B::IdType>,
+        args: Task<T, B::Ctx, B::IdType>,
     ) -> Result<Self::Response, Self::Error> {
         let res = self.inner.call(args).await.map_err(|e| e.into())?;
         Ok(res)
@@ -203,7 +203,7 @@ impl<
         SvcError,
         MetadataError,
         CodecError,
-    > Service<Task<Compact, FlowSink::Meta, FlowSink::IdType>>
+    > Service<Task<Compact, FlowSink::Ctx, FlowSink::IdType>>
     for FilterService<S, Current, FlowSink, Encode, Output, F, FnArgs>
 where
     S: Step<Current, FlowSink, Encode, Response = Option<Output>> + Clone + Send + Sync + 'static,
@@ -215,15 +215,15 @@ where
     S::Error: Into<BoxDynError> + Send + 'static,
     FlowSink: Clone + Send + 'static + Sync + WaitForCompletion<Output, Compact>,
     Current: Send + 'static + Sync,
-    FlowSink::Meta: Send
+    FlowSink::Ctx: Send
         + 'static
         + MetadataExt<FilterContext<FlowSink::IdType>, Error = MetadataError>
         + MetadataExt<WorkflowRequest, Error = MetadataError>
         + Sync
         + Default,
     FlowSink: TaskSink<Compact> + Unpin,
-    TaskFn<F, Current, FlowSink::Meta, FnArgs>: Service<
-            Task<Current, FlowSink::Meta, FlowSink::IdType>,
+    TaskFn<F, Current, FlowSink::Ctx, FnArgs>: Service<
+            Task<Current, FlowSink::Ctx, FlowSink::IdType>,
             Response = Option<Output>,
             Error = SvcError,
         > + Send
@@ -231,8 +231,8 @@ where
     SvcError: Into<BoxDynError> + Send + Sync + 'static,
     MetadataError: Into<BoxDynError> + Send + Sync,
     CodecError: std::error::Error + Sync + Send + 'static,
-    <TaskFn<F, Current, FlowSink::Meta, FnArgs> as Service<
-        Task<Current, FlowSink::Meta, FlowSink::IdType>,
+    <TaskFn<F, Current, FlowSink::Ctx, FnArgs> as Service<
+        Task<Current, FlowSink::Ctx, FlowSink::IdType>,
     >>::Future: Send + 'static,
     FlowSink::Error: Into<BoxDynError> + Send + Sync,
     Compact: Send + Sync + 'static,
@@ -246,18 +246,14 @@ where
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
-    fn call(&mut self, req: Task<Compact, FlowSink::Meta, FlowSink::IdType>) -> Self::Future {
-        let mut ctx: StepContext<FlowSink, Encode> = req.get().cloned().unwrap();
-        let filter_ctx: Result<FilterContext<FlowSink::IdType>, _> = req.ctx.metadata.extract();
+    fn call(&mut self, req: Task<Compact, FlowSink::Ctx, FlowSink::IdType>) -> Self::Future {
+        let mut ctx: StepContext<FlowSink, Encode> = req.extract().cloned().unwrap();
+        let filter_ctx: Result<FilterContext<FlowSink::IdType>, _> = req.extract();
         match filter_ctx {
             Ok(_) => {
                 let mut step = FilterMap {
                     mapper: PhantomData::<
-                        FilterMapStep<
-                            TaskFn<F, Current, FlowSink::Meta, FnArgs>,
-                            Current,
-                            Output,
-                        >,
+                        FilterMapStep<TaskFn<F, Current, FlowSink::Ctx, FnArgs>, Current, Output>,
                     >,
                 };
                 Box::pin(async move {
@@ -303,7 +299,7 @@ impl<Input, Current, FlowSink, Encode, Compact>
 where
     Current: Send + 'static,
     FlowSink: TaskSink<Compact>,
-    FlowSink::Meta: MetadataExt<FilterContext<FlowSink::IdType>> + Send + 'static,
+    FlowSink::Ctx: MetadataExt<FilterContext<FlowSink::IdType>> + Send + 'static,
 {
     /// Adds a `filter_map` step to the workflow, allowing you to filter and map items in the workflow using a predicate function.
     ///
@@ -333,21 +329,21 @@ where
     ) -> WorkFlow<Input, Vec<Output>, FlowSink, Encode, Compact>
     where
         F: Send + 'static + Sync + Clone,
-        TaskFn<F, Current, FlowSink::Meta, FnArgs>: Service<
-            Task<Current, FlowSink::Meta, FlowSink::IdType>,
+        TaskFn<F, Current, FlowSink::Ctx, FnArgs>: Service<
+            Task<Current, FlowSink::Ctx, FlowSink::IdType>,
             Response = Option<Output>,
             Error = SvcError,
         >,
         FnArgs: std::marker::Send + 'static,
         Current: std::marker::Send + 'static + Serialize + Sync + Debug,
-        FlowSink::Meta: Send
+        FlowSink::Ctx: Send
             + 'static
             + Sync
             + Default
             + MetadataExt<FilterContext<FlowSink::IdType>, Error = MetadataError>
             + MetadataExt<WorkflowRequest, Error = MetadataError>,
-        <TaskFn<F, Current, FlowSink::Meta, FnArgs> as Service<
-            Task<Current, FlowSink::Meta, FlowSink::IdType>,
+        <TaskFn<F, Current, FlowSink::Ctx, FnArgs> as Service<
+            Task<Current, FlowSink::Ctx, FlowSink::IdType>,
         >>::Future: Send + 'static,
         Output: Send + 'static + Sync,
         FnArgs: Sync,
@@ -375,7 +371,7 @@ where
                             let mut ctx = ctx.clone();
                             async move {
                                 FilterMap::<
-                                    TaskFn<F, Current, FlowSink::Meta, FnArgs>,
+                                    TaskFn<F, Current, FlowSink::Ctx, FnArgs>,
                                     Current,
                                     Output,
                                 >::pre(&mut ctx, &val)
@@ -399,7 +395,7 @@ where
                 >);
 
             let svc =
-                SteppedService::<Compact, FlowSink::Meta, FlowSink::IdType>::new(FilterService {
+                SteppedService::<Compact, FlowSink::Ctx, FlowSink::IdType>::new(FilterService {
                     step: FilterMapStep {
                         _marker: PhantomData,
                         inner: service_fn(predicate),

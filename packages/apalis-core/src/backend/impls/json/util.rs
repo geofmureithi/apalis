@@ -49,7 +49,7 @@ impl Ord for TaskKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskWithMeta {
     pub(super) args: Value,
-    pub(super) meta: JsonMapMetadata,
+    pub(super) ctx: JsonMapMetadata,
     pub(super) result: Option<Value>,
 }
 
@@ -66,7 +66,7 @@ impl<Args> Clone for JsonAck<Args> {
     }
 }
 
-impl<Args: Send + 'static + Debug, Res: Serialize, Meta: Sync> Acknowledge<Res, Meta, RandomId>
+impl<Args: Send + 'static + Debug, Res: Serialize, Ctx: Sync> Acknowledge<Res, Ctx, RandomId>
     for JsonAck<Args>
 {
     type Error = serde_json::Error;
@@ -76,7 +76,7 @@ impl<Args: Send + 'static + Debug, Res: Serialize, Meta: Sync> Acknowledge<Res, 
     fn ack(
         &mut self,
         res: &Result<Res, BoxDynError>,
-        ctx: &crate::task::ExecutionContext<Meta, RandomId>,
+        ctx: &crate::task::ExecutionContext<Ctx, RandomId>,
     ) -> Self::Future {
         let store = self.inner.clone();
         let val = serde_json::to_value(res.as_ref().map_err(|e| e.to_string())).unwrap();

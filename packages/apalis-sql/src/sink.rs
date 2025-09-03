@@ -14,17 +14,17 @@ pub enum SqlSinkError<EncodeError, DbErr> {
 use apalis_core::{backend::codec::Codec, task::Task};
 use futures::{future::BoxFuture, Sink};
 
-pub struct SqlSink<DB, Config, Fn, Args, Meta, IdType, Compact, Encode, Error> {
+pub struct SqlSink<DB, Config, Fn, Args, Ctx, IdType, Compact, Encode, Error> {
     _marker: PhantomData<(Args, Encode)>,
     pool: DB,
-    pub buffer: Vec<Task<Compact, Meta, IdType>>,
+    pub buffer: Vec<Task<Compact, Ctx, IdType>>,
     config: Config,
     flush_future: Option<Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>>,
     sink_fn: Arc<Fn>,
 }
 
-impl<DB, Config, Fn, Args, Meta, IdType, Compact, Encode, Error> Clone
-    for SqlSink<DB, Config, Fn, Args, Meta, IdType, Compact, Encode, Error>
+impl<DB, Config, Fn, Args, Ctx, IdType, Compact, Encode, Error> Clone
+    for SqlSink<DB, Config, Fn, Args, Ctx, IdType, Compact, Encode, Error>
 where
     DB: Clone,
     Config: Clone,
@@ -41,8 +41,8 @@ where
     }
 }
 
-impl<DB, Config, Fn, Args, Meta, IdType, Compact, Encode, Error>
-    SqlSink<DB, Config, Fn, Args, Meta, IdType, Compact, Encode, Error>
+impl<DB, Config, Fn, Args, Ctx, IdType, Compact, Encode, Error>
+    SqlSink<DB, Config, Fn, Args, Ctx, IdType, Compact, Encode, Error>
 {
     pub fn new(pool: DB, config: Config, sink_fn: Fn) -> Self {
         Self {
@@ -56,20 +56,20 @@ impl<DB, Config, Fn, Args, Meta, IdType, Compact, Encode, Error>
     }
 }
 
-impl<DB, Config, FnT, Args, Meta, IdType, Compact, Encode, Error> Sink<Task<Args, Meta, IdType>>
-    for SqlSink<DB, Config, FnT, Args, Meta, IdType, Compact, Encode, Error>
+impl<DB, Config, FnT, Args, Ctx, IdType, Compact, Encode, Error> Sink<Task<Args, Ctx, IdType>>
+    for SqlSink<DB, Config, FnT, Args, Ctx, IdType, Compact, Encode, Error>
 where
     Args: Unpin + Send + Sync + 'static,
     Encode: Codec<Args, Compact = Compact> + Unpin,
     Encode::Error: std::error::Error + Send + Sync + 'static,
     Compact: Unpin + Send + 'static,
-    FnT: Fn(DB, Config, Vec<Task<Compact, Meta, IdType>>) -> BoxFuture<'static, Result<(), Error>>
+    FnT: Fn(DB, Config, Vec<Task<Compact, Ctx, IdType>>) -> BoxFuture<'static, Result<(), Error>>
         + Unpin
         + Send
         + 'static,
     Config: Clone + Unpin + Send + 'static,
     DB: Clone + Unpin + Send + 'static,
-    Meta: Unpin + Send + 'static,
+    Ctx: Unpin + Send + 'static,
     IdType: Sync + Send + Unpin + 'static,
     Error: 'static,
 {
@@ -80,7 +80,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Task<Args, Meta, IdType>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: Task<Args, Ctx, IdType>) -> Result<(), Self::Error> {
         // Add the item to the buffer
         self.get_mut()
             .buffer

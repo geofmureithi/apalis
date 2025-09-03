@@ -70,9 +70,9 @@
 //! # use apalis_core::task_fn::from_request::FromRequest;
 //! # use apalis_core::task::Task;
 //!
-//! impl<Meta> FromRequest<Task<Email, Meta>> for User {
+//! impl<Ctx> FromRequest<Task<Email, Ctx>> for User {
 //!     type Error = BoxDynError;
-//!     async fn from_request(req: Task<Email, Meta>) -> Result<Self, Self::Error> {
+//!     async fn from_request(req: Task<Email, Ctx>) -> Result<Self, Self::Error> {
 //!         let user_id = req.args.user_id.clone();
 //!         // Simulate fetching user from DB
 //!         Ok(User { id: user_id })

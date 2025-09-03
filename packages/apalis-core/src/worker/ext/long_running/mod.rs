@@ -100,11 +100,11 @@ impl LongRunnerCtx {
     }
 }
 
-impl<Args: Sync, Meta: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args, Meta, IdType>>
+impl<Args: Sync, Ctx: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args, Ctx, IdType>>
     for LongRunnerCtx
 {
     type Error = MissingDataError;
-    async fn from_request(req: &Task<Args, Meta, IdType>) -> Result<Self, Self::Error> {
+    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
         let tracker: &TaskTracker = req.ctx.data.get_checked()?;
         let wrk: &WorkerContext = req.ctx.data.get_checked()?;
         Ok(LongRunnerCtx {
@@ -144,9 +144,9 @@ pub struct LongRunningService<S> {
     service: S,
 }
 
-impl<S, Args, Meta, IdType> Service<Task<Args, Meta, IdType>> for LongRunningService<S>
+impl<S, Args, Ctx, IdType> Service<Task<Args, Ctx, IdType>> for LongRunningService<S>
 where
-    S: Service<Task<Args, Meta, IdType>>,
+    S: Service<Task<Args, Ctx, IdType>>,
     S::Future: Send + 'static,
     S::Response: Send,
     S::Error: Send,
@@ -162,7 +162,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, mut request: Task<Args, Meta, IdType>) -> Self::Future {
+    fn call(&mut self, mut request: Task<Args, Ctx, IdType>) -> Self::Future {
         let tracker = TaskTracker::new();
         request.ctx.data.insert(tracker.clone());
         let worker: WorkerContext = request.ctx.data.get().cloned().unwrap();
@@ -182,21 +182,21 @@ where
 /// Helper trait for building long running workers from [`WorkerBuilder`]
 ///
 /// See [module level documentation](self) for more details.
-pub trait LongRunningExt<Args, Meta, Source, Middleware>: Sized {
+pub trait LongRunningExt<Args, Ctx, Source, Middleware>: Sized {
     /// Extension for executing long running jobs
     fn long_running(
         self,
-    ) -> WorkerBuilder<Args, Meta, Source, Stack<LongRunningLayer, Middleware>> {
+    ) -> WorkerBuilder<Args, Ctx, Source, Stack<LongRunningLayer, Middleware>> {
         self.long_running_with_cfg(Default::default())
     }
     /// Extension for executing long running jobs with a config
     fn long_running_with_cfg(
         self,
         cfg: LongRunningConfig,
-    ) -> WorkerBuilder<Args, Meta, Source, Stack<LongRunningLayer, Middleware>>;
+    ) -> WorkerBuilder<Args, Ctx, Source, Stack<LongRunningLayer, Middleware>>;
 }
 
-impl<Args, B, M, Meta> LongRunningExt<Args, Meta, B, M> for WorkerBuilder<Args, Meta, B, M>
+impl<Args, B, M, Ctx> LongRunningExt<Args, Ctx, B, M> for WorkerBuilder<Args, Ctx, B, M>
 where
     M: Layer<LongRunningLayer>,
     B: Backend<Args>,
@@ -204,7 +204,7 @@ where
     fn long_running_with_cfg(
         self,
         cfg: LongRunningConfig,
-    ) -> WorkerBuilder<Args, Meta, B, Stack<LongRunningLayer, M>> {
+    ) -> WorkerBuilder<Args, Ctx, B, Stack<LongRunningLayer, M>> {
         let this = self.layer(LongRunningLayer::new(cfg));
         WorkerBuilder {
             name: this.name,

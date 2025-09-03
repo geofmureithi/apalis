@@ -15,31 +15,31 @@ use futures::{future::BoxFuture, FutureExt, Stream};
 use log::warn;
 use pin_project::pin_project;
 
-pub enum StreamState<Args, Meta, IdType, Error> {
+pub enum StreamState<Args, Ctx, IdType, Error> {
     Ready,
     Delay(Delay),
-    Fetch(BoxFuture<'static, Result<Vec<Task<Args, Meta, IdType>>, Error>>),
-    Buffered(VecDeque<Task<Args, Meta, IdType>>),
+    Fetch(BoxFuture<'static, Result<Vec<Task<Args, Ctx, IdType>>, Error>>),
+    Buffered(VecDeque<Task<Args, Ctx, IdType>>),
     Empty,
 }
 
 /// An agnostic fetcher that can be used to build backends
 ///
 #[pin_project(PinnedDrop)]
-pub struct SqlFetcher<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error> {
+pub struct SqlFetcher<DB, Config, Fn, Args, Ctx, IdType, Compact, Decode, Error> {
     pool: DB,
     config: Config,
     wrk: WorkerContext,
     #[pin]
-    pub state: StreamState<Args, Meta, IdType, Error>,
+    pub state: StreamState<Args, Ctx, IdType, Error>,
     current_backoff: Duration,
     last_fetch_time: Option<Instant>,
     fetch_fn: Arc<Fn>,
     _marker: PhantomData<(Compact, Decode)>,
 }
 
-impl<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error> Clone
-    for SqlFetcher<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error>
+impl<DB, Config, Fn, Args, Ctx, IdType, Compact, Decode, Error> Clone
+    for SqlFetcher<DB, Config, Fn, Args, Ctx, IdType, Compact, Decode, Error>
 where
     DB: Clone,
     Config: Clone,
@@ -58,8 +58,8 @@ where
     }
 }
 
-impl<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error>
-    SqlFetcher<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error>
+impl<DB, Config, Fn, Args, Ctx, IdType, Compact, Decode, Error>
+    SqlFetcher<DB, Config, Fn, Args, Ctx, IdType, Compact, Decode, Error>
 {
     pub fn new(pool: &DB, config: &Config, wrk: &WorkerContext, fetch_fn: Fn) -> Self
     where
@@ -86,7 +86,7 @@ impl<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error>
         std::cmp::min(doubled, Duration::from_secs(60 * 5))
     }
 
-    pub fn take_pending(&mut self) -> VecDeque<Task<Args, Meta, IdType>> {
+    pub fn take_pending(&mut self) -> VecDeque<Task<Args, Ctx, IdType>> {
         match &mut self.state {
             StreamState::Buffered(tasks) => std::mem::take(tasks),
             _ => VecDeque::new(),
@@ -94,24 +94,24 @@ impl<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error>
     }
 }
 
-impl<DB, Config, TFn, Args, Meta, IdType, Compact, Decode, Error> Stream
-    for SqlFetcher<DB, Config, TFn, Args, Meta, IdType, Compact, Decode, Error>
+impl<DB, Config, TFn, Args, Ctx, IdType, Compact, Decode, Error> Stream
+    for SqlFetcher<DB, Config, TFn, Args, Ctx, IdType, Compact, Decode, Error>
 where
     Decode::Error: std::error::Error + Send + Sync + 'static,
     Args: Send + 'static + Unpin,
     Decode: Codec<Args, Compact = Compact> + 'static,
-    Meta: Unpin + 'static,
+    Ctx: Unpin + 'static,
     TFn: Fn(
         DB,
         Config,
         WorkerContext,
-    ) -> BoxFuture<'static, Result<Vec<Task<Args, Meta, IdType>>, Error>>,
+    ) -> BoxFuture<'static, Result<Vec<Task<Args, Ctx, IdType>>, Error>>,
     DB: Clone,
     Config: Clone,
     IdType: Unpin + 'static,
     Error: 'static,
 {
-    type Item = Result<Option<Task<Args, Meta, IdType>>, Error>;
+    type Item = Result<Option<Task<Args, Ctx, IdType>>, Error>;
 
     fn poll_next(
         self: Pin<&mut Self>,
@@ -179,8 +179,8 @@ where
 }
 
 #[pin_project::pinned_drop]
-impl<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error> PinnedDrop
-    for SqlFetcher<DB, Config, Fn, Args, Meta, IdType, Compact, Decode, Error>
+impl<DB, Config, Fn, Args, Ctx, IdType, Compact, Decode, Error> PinnedDrop
+    for SqlFetcher<DB, Config, Fn, Args, Ctx, IdType, Compact, Decode, Error>
 {
     fn drop(self: Pin<&mut Self>) {
         match &self.state {

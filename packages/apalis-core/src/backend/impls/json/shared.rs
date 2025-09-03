@@ -71,9 +71,9 @@ use crate::{
 };
 
 #[derive(Debug)]
-struct SharedJsonStream<T, Meta> {
+struct SharedJsonStream<T, Ctx> {
     inner: JsonStorage<Value>,
-    req_type: std::marker::PhantomData<(T, Meta)>,
+    req_type: std::marker::PhantomData<(T, Ctx)>,
 }
 
 impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMetadata> {
@@ -91,7 +91,7 @@ impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMe
             };
             let task = TaskBuilder::new(args)
                 .with_task_id(key.task_id.clone())
-                .with_metadata(task.meta.clone())
+                .with_ctx(task.ctx.clone())
                 .build();
             let key = key.clone();
             drop(map);
@@ -175,7 +175,7 @@ impl JsonStorage<Value> {
                     .task_id
                     .clone()
                     .unwrap_or(TaskId::new(RandomId::default()));
-                let value = serde_json::to_value(request.args).unwrap();
+                let request = request.map(|args| serde_json::to_value(args).unwrap());
                 store
                     .insert(
                         &TaskKey {
@@ -184,15 +184,13 @@ impl JsonStorage<Value> {
                             status: Status::Pending,
                         },
                         TaskWithMeta {
-                            args: value.clone(),
-                            meta: request.ctx.metadata.clone(),
+                            args: request.args.clone(),
+                            ctx: request.ctx.backend_ctx.clone(),
                             result: None,
                         },
                     )
                     .unwrap();
-
-                let req = Task::new_with_ctx(value, request.ctx);
-                futures_util::stream::iter(vec![Ok(req)])
+                futures_util::stream::iter(vec![Ok(request)])
             })
         };
 

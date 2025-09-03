@@ -1,11 +1,11 @@
 //! # Task Builder
 //!
 //! The `TaskBuilder` module provides a flexible builder pattern for constructing [`Task`] instances
-//! with customizable configuration options. It allows users to specify arguments, metadata, extensions,
+//! with customizable configuration options. It allows users to specify arguments, context, extensions,
 //! task identifiers, attempt information, status, and scheduling details for tasks.
 //!
 //! ## Features
-//! - Create tasks with required arguments and optional metadata.
+//! - Create tasks with required arguments and optional context.
 //! - Attach custom extensions/data to tasks.
 //! - Assign unique task identifiers.
 //! - Configure attempt and status information.
@@ -32,9 +32,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Builder for creating [`Task`] instances with optional configuration
 #[derive(Debug)]
-pub struct TaskBuilder<Args, Meta, IdType> {
+pub struct TaskBuilder<Args, Ctx, IdType> {
     args: Args,
-    metadata: Meta,
+    ctx: Ctx,
     data: Extensions,
     task_id: Option<TaskId<IdType>>,
     attempt: Option<Attempt>,
@@ -42,15 +42,15 @@ pub struct TaskBuilder<Args, Meta, IdType> {
     run_at: Option<u64>,
 }
 
-impl<Args, Meta, IdType> TaskBuilder<Args, Meta, IdType> {
+impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
     /// Create a new TaskBuilder with the required args
     pub fn new(args: Args) -> Self
     where
-        Meta: Default,
+        Ctx: Default,
     {
         Self {
             args,
-            metadata: Default::default(),
+            ctx: Default::default(),
             data: Extensions::default(),
             task_id: None,
             attempt: None,
@@ -59,13 +59,13 @@ impl<Args, Meta, IdType> TaskBuilder<Args, Meta, IdType> {
         }
     }
 
-    /// Set the task metadata
-    pub fn with_metadata(mut self, meta: Meta) -> Self {
-        self.metadata = meta;
+    /// Set the task's backend context
+    pub fn with_ctx(mut self, ctx: Ctx) -> Self {
+        self.ctx = ctx;
         self
     }
 
-    /// Set the task extensions/data
+    /// Set the task's runtime data
     pub fn with_data(mut self, data: Extensions) -> Self {
         self.data = data;
         self
@@ -77,15 +77,13 @@ impl<Args, Meta, IdType> TaskBuilder<Args, Meta, IdType> {
         self
     }
 
-    /// Insert a value into the task's metadata context
+    /// Insert a value into the task's ctx context
     pub fn meta<M>(mut self, value: M) -> Self
     where
-        Meta: MetadataExt<M>,
-        Meta::Error: std::fmt::Debug,
+        Ctx: MetadataExt<M>,
+        Ctx::Error: std::fmt::Debug,
     {
-        self.metadata
-            .inject(value)
-            .expect("Failed to inject metadata");
+        self.ctx.inject(value).expect("Failed to inject ctx");
         self
     }
 
@@ -151,7 +149,7 @@ impl<Args, Meta, IdType> TaskBuilder<Args, Meta, IdType> {
     }
 
     /// Build the Task with default context
-    pub fn build(self) -> Task<Args, Meta, IdType> {
+    pub fn build(self) -> Task<Args, Ctx, IdType> {
         let current_time = || {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -165,7 +163,7 @@ impl<Args, Meta, IdType> TaskBuilder<Args, Meta, IdType> {
                 task_id: self.task_id,
                 data: self.data,
                 attempt: self.attempt.unwrap_or_default(),
-                metadata: self.metadata,
+                backend_ctx: self.ctx,
                 status: self.status.unwrap_or(Status::Pending),
                 run_at: self.run_at.unwrap_or_else(current_time),
             },
@@ -174,9 +172,9 @@ impl<Args, Meta, IdType> TaskBuilder<Args, Meta, IdType> {
 }
 
 // Convenience methods for Task to create a builder
-impl<Args, Meta: Default, IdType> Task<Args, Meta, IdType> {
+impl<Args, Ctx: Default, IdType> Task<Args, Ctx, IdType> {
     /// Create a TaskBuilder with the given args
-    pub fn builder(args: Args) -> TaskBuilder<Args, Meta, IdType> {
+    pub fn builder(args: Args) -> TaskBuilder<Args, Ctx, IdType> {
         TaskBuilder::new(args)
     }
 }

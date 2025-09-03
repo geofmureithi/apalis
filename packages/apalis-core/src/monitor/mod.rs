@@ -239,10 +239,10 @@ impl Debug for Monitor {
 impl Monitor {
     fn run_worker<Args, S, P, M>(
         mut ctx: WorkerContext,
-        worker: Worker<Args, P::Meta, P, S, M>,
+        worker: Worker<Args, P::Ctx, P, S, M>,
     ) -> BoxFuture<'static, Result<(), WorkerError>>
     where
-        S: Service<Task<Args, P::Meta, P::IdType>> + Send + 'static,
+        S: Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Args> + Send + 'static,
@@ -250,21 +250,21 @@ impl Monitor {
         P::Stream: Unpin + Send + 'static,
         P::Beat: Unpin + Send,
         Args: Send + 'static,
-        P::Meta: Send + 'static,
+        P::Ctx: Send + 'static,
         M: Layer<ReadinessService<TrackerService<S>>> + 'static,
         P::Layer: Layer<M::Service>,
         <P::Layer as Layer<M::Service>>::Service:
-            Service<Task<Args, P::Meta, P::IdType>> + Send + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Meta, P::IdType>>>::Error:
+            Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Ctx, P::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Meta, P::IdType>>>::Future:
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Ctx, P::IdType>>>::Future:
             Send,
-        M::Service: Service<Task<Args, P::Meta, P::IdType>> + Send + 'static,
+        M::Service: Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Meta, P::IdType>,
+            Task<Args, P::Ctx, P::IdType>,
         >>::Future: Send,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Meta, P::IdType>,
+            Task<Args, P::Ctx, P::IdType>,
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
         P::IdType: Sync + Send + 'static,
     {
@@ -293,10 +293,10 @@ impl Monitor {
     /// ```
     pub fn register<Args, S, P, M>(
         mut self,
-        factory: impl Fn(usize) -> Worker<Args, P::Meta, P, S, M> + 'static + Send + Sync,
+        factory: impl Fn(usize) -> Worker<Args, P::Ctx, P, S, M> + 'static + Send + Sync,
     ) -> Self
     where
-        S: Service<Task<Args, P::Meta, P::IdType>> + Send + 'static,
+        S: Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Args> + Send + 'static,
@@ -304,21 +304,21 @@ impl Monitor {
         P::Stream: Unpin + Send + 'static,
         P::Beat: Unpin + Send,
         Args: Send + 'static,
-        P::Meta: Send + 'static,
+        P::Ctx: Send + 'static,
         M: Layer<ReadinessService<TrackerService<S>>> + 'static,
         P::Layer: Layer<M::Service>,
         <P::Layer as Layer<M::Service>>::Service:
-            Service<Task<Args, P::Meta, P::IdType>> + Send + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Meta, P::IdType>>>::Error:
+            Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Ctx, P::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Meta, P::IdType>>>::Future:
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Ctx, P::IdType>>>::Future:
             Send,
-        M::Service: Service<Task<Args, P::Meta, P::IdType>> + Send + 'static,
+        M::Service: Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Meta, P::IdType>,
+            Task<Args, P::Ctx, P::IdType>,
         >>::Future: Send,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Meta, P::IdType>,
+            Task<Args, P::Ctx, P::IdType>,
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
         P::IdType: Send + Sync + 'static,
     {
