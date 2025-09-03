@@ -136,7 +136,7 @@ use crate::{
     task::Task,
     worker::{
         context::WorkerContext,
-        event::{Event, EventHandler, EventHandlerBuilder},
+        event::{Event, EventHandlerBuilder},
         ReadinessService, TrackerService, Worker,
     },
 };

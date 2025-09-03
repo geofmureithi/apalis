@@ -89,8 +89,9 @@ impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMe
                 Ok(value) => value,
                 Err(_) => return Poll::Pending,
             };
-            let task = TaskBuilder::new_with_metadata(args, task.meta.clone())
+            let task = TaskBuilder::new(args)
                 .with_task_id(key.task_id.clone())
+                .with_metadata(task.meta.clone())
                 .build();
             let key = key.clone();
             drop(map);

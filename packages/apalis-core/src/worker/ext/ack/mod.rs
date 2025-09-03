@@ -179,7 +179,7 @@ where
 
     fn call(&mut self, req: Task<Args, Meta, IdType>) -> Self::Future {
         let parts = req.ctx.clone();
-        let worker: WorkerContext = req.get().cloned().unwrap();
+        let worker: WorkerContext = req.ctx.data.get().cloned().unwrap();
         let future = self.inner.call(req);
         let mut acknowledger = self.acknowledger.clone();
         Box::pin(async move {

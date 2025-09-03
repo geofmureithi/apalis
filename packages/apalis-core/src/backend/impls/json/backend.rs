@@ -58,15 +58,15 @@ impl<Args: DeserializeOwned + Unpin> Stream for JsonStorage<Args> {
         }) {
             use crate::task::builder::TaskBuilder;
             let key = key.clone();
-            let task = TaskBuilder::new_with_metadata(
-                Args::deserialize(&task.args).unwrap(),
-                task.meta.clone(),
-            )
-            .with_task_id(key.task_id.clone())
-            .build();
+            let args = Args::deserialize(&task.args).unwrap();
+            let task = TaskBuilder::new(args)
+                .with_task_id(key.task_id.clone())
+                .with_metadata(task.meta.clone())
+                .build();
             drop(map);
             let this = self.get_mut();
-            this.update_status(&key, Status::Running).expect("Failed to update status");
+            this.update_status(&key, Status::Running)
+                .expect("Failed to update status");
             this.persist_to_disk().expect("Failed to persist to disk");
             Poll::Ready(Some(task))
         } else {

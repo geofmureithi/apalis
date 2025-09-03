@@ -68,7 +68,7 @@ use crate::{
 pub mod tracker;
 
 /// Represents the long running middleware config
-/// 
+///
 /// See [module level documentation](self) for more details.
 #[derive(Debug, Clone, Default)]
 pub struct LongRunningConfig {
@@ -85,7 +85,7 @@ impl LongRunningConfig {
 }
 
 /// The long running middleware context
-/// 
+///
 /// See [module level documentation](self) for more details.
 #[derive(Debug, Clone)]
 pub struct LongRunnerCtx {
@@ -105,8 +105,8 @@ impl<Args: Sync, Meta: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args,
 {
     type Error = MissingDataError;
     async fn from_request(req: &Task<Args, Meta, IdType>) -> Result<Self, Self::Error> {
-        let tracker: &TaskTracker = req.get_checked()?;
-        let wrk: &WorkerContext = req.get_checked()?;
+        let tracker: &TaskTracker = req.ctx.data.get_checked()?;
+        let wrk: &WorkerContext = req.ctx.data.get_checked()?;
         Ok(LongRunnerCtx {
             tracker: tracker.clone(),
             wrk: wrk.clone(),
@@ -115,7 +115,7 @@ impl<Args: Sync, Meta: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args,
 }
 
 /// Decorates the underlying middleware with long running capabilities
-/// 
+///
 /// See [module level documentation](self) for more details.
 #[derive(Debug, Clone)]
 #[allow(unused)]
@@ -137,7 +137,7 @@ impl<S> Layer<S> for LongRunningLayer {
 }
 
 /// Decorates the underlying service with long running capabilities
-/// 
+///
 /// See [module level documentation](self) for more details.
 #[derive(Debug, Clone)]
 pub struct LongRunningService<S> {
@@ -164,8 +164,8 @@ where
 
     fn call(&mut self, mut request: Task<Args, Meta, IdType>) -> Self::Future {
         let tracker = TaskTracker::new();
-        request.insert(tracker.clone());
-        let worker: WorkerContext = request.get().cloned().unwrap();
+        request.ctx.data.insert(tracker.clone());
+        let worker: WorkerContext = request.ctx.data.get().cloned().unwrap();
         let req = self.service.call(request);
         let fut = async move {
             let res = req.await;
@@ -180,7 +180,7 @@ where
 }
 
 /// Helper trait for building long running workers from [`WorkerBuilder`]
-/// 
+///
 /// See [module level documentation](self) for more details.
 pub trait LongRunningExt<Args, Meta, Source, Middleware>: Sized {
     /// Extension for executing long running jobs

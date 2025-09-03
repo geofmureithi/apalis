@@ -108,15 +108,12 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
         Encode::Error: Into<BoxDynError>,
     {
         let task_id = TaskId::new(FlowSink::IdType::default());
-        let mut meta = FlowSink::Meta::default();
-        meta.inject(WorkflowRequest { step_index: index })
-            .map_err(|e| WorkflowError::MetadataError(e.into()))?;
-        let task = TaskBuilder::new_with_metadata(
-            Encode::encode(step).map_err(|e| WorkflowError::CodecError(e.into()))?,
-            meta,
-        )
-        .with_task_id(task_id.clone())
-        .build();
+
+        let args = Encode::encode(step).map_err(|e| WorkflowError::CodecError(e.into()))?;
+        let task = TaskBuilder::new(args)
+            .with_task_id(task_id.clone())
+            .metadata(WorkflowRequest { step_index: index })
+            .build();
         self.sink
             .push_task(task)
             .await

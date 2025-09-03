@@ -47,9 +47,9 @@
 use std::future::Future;
 
 /// A trait for extracting types from a task's context.
-pub trait FromRequest<Req>: Sized {
+pub trait FromRequest<Task>: Sized {
     /// The error type that can occur during extraction.
     type Error;
     /// Perform the extraction.
-    fn from_request(req: &Req) -> impl Future<Output = Result<Self, Self::Error>> + Send;
+    fn from_request(req: &Task) -> impl Future<Output = Result<Self, Self::Error>> + Send;
 }

@@ -10,6 +10,12 @@
 //! Implement the `MetadataExt` trait for your metadata types to enable easy extraction and injection
 //! from task contexts. This allows middleware and services to access and modify task metadata in a
 //! type-safe manner.
+use crate::task::Task;
+use crate::task_fn::FromRequest;
+
+/// Metadata wrapper for task contexts.
+#[derive(Debug, Clone)]
+pub struct Meta<T>(T);
 /// Task metadata extension trait and implementations.
 /// This trait allows for injecting and extracting metadata associated with tasks.
 pub trait MetadataExt<T> {
@@ -21,12 +27,30 @@ pub trait MetadataExt<T> {
     fn inject(&mut self, value: T) -> Result<(), Self::Error>;
 }
 
+impl<T, Args: Send + Sync, Ctx: MetadataExt<T> + Send + Sync, IdType: Send + Sync>
+    FromRequest<Task<Args, Ctx, IdType>> for Meta<T>
+{
+    type Error = Ctx::Error;
+
+    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
+        req.ctx.metadata.extract().map(Meta)
+    }
+}
+
 #[cfg(test)]
 #[allow(unused)]
 mod tests {
-    use std::{convert::Infallible, task::Poll, time::Duration};
+    use std::{convert::Infallible, fmt::Debug, task::Poll, time::Duration};
 
-    use crate::task::{metadata::MetadataExt, Task};
+    use crate::{
+        error::BoxDynError,
+        task::{
+            metadata::{Meta, MetadataExt},
+            Task,
+        },
+        task_fn::FromRequest,
+    };
+    use futures_core::future::BoxFuture;
     use tower::Service;
 
     #[derive(Debug, Clone)]
@@ -63,23 +87,34 @@ mod tests {
         }
     }
 
-    impl<S, Args, Meta, IdType> Service<Task<Args, Meta, IdType>> for ExampleService<S>
+    impl<
+            S,
+            Args: Send + Sync + 'static,
+            Ctx: Send + Sync + 'static,
+            IdType: Send + Sync + 'static,
+        > Service<Task<Args, Ctx, IdType>> for ExampleService<S>
     where
-        S: Service<Task<Args, Meta, IdType>>,
-        Meta: MetadataExt<ExampleConfig>,
+        S: Service<Task<Args, Ctx, IdType>> + Clone + Send + 'static,
+        Ctx: MetadataExt<ExampleConfig> + Send,
+        Ctx::Error: Debug,
+        S::Future: Send + 'static,
     {
         type Response = S::Response;
         type Error = S::Error;
-        type Future = S::Future;
+        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
         fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
             self.service.poll_ready(cx)
         }
 
-        fn call(&mut self, request: Task<Args, Meta, IdType>) -> Self::Future {
-            let _config = request.ctx.metadata.extract().unwrap_or_default();
+        fn call(&mut self, request: Task<Args, Ctx, IdType>) -> Self::Future {
+            let mut svc = self.service.clone();
+
             // Do something with config
-            self.service.call(request)
+            Box::pin(async move {
+                let _config: Meta<ExampleConfig> = request.extract().await.unwrap();
+                svc.call(request).await
+            })
         }
     }
 }

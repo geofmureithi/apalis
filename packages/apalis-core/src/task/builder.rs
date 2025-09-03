@@ -1,6 +1,5 @@
-
 //! # Task Builder
-//! 
+//!
 //! The `TaskBuilder` module provides a flexible builder pattern for constructing [`Task`] instances
 //! with customizable configuration options. It allows users to specify arguments, metadata, extensions,
 //! task identifiers, attempt information, status, and scheduling details for tasks.
@@ -26,8 +25,8 @@
 //! ```
 //!
 use crate::task::{
-    attempt::Attempt, extensions::Extensions, status::Status, task_id::TaskId, ExecutionContext,
-    Task,
+    attempt::Attempt, extensions::Extensions, metadata::MetadataExt, status::Status,
+    task_id::TaskId, ExecutionContext, Task,
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -36,7 +35,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub struct TaskBuilder<Args, Meta, IdType> {
     args: Args,
     metadata: Meta,
-    data: Option<Extensions>,
+    data: Extensions,
     task_id: Option<TaskId<IdType>>,
     attempt: Option<Attempt>,
     status: Option<Status>,
@@ -49,15 +48,10 @@ impl<Args, Meta, IdType> TaskBuilder<Args, Meta, IdType> {
     where
         Meta: Default,
     {
-        Self::new_with_metadata(args, Meta::default())
-    }
-
-    /// Set the task metadata
-    pub fn new_with_metadata(args: Args, meta: Meta) -> Self {
         Self {
             args,
-            metadata: meta,
-            data: None,
+            metadata: Default::default(),
+            data: Extensions::default(),
             task_id: None,
             attempt: None,
             status: None,
@@ -65,9 +59,33 @@ impl<Args, Meta, IdType> TaskBuilder<Args, Meta, IdType> {
         }
     }
 
+    /// Set the task metadata
+    pub fn with_metadata(mut self, meta: Meta) -> Self {
+        self.metadata = meta;
+        self
+    }
+
     /// Set the task extensions/data
     pub fn with_data(mut self, data: Extensions) -> Self {
-        self.data = Some(data);
+        self.data = data;
+        self
+    }
+
+    /// Insert a value into the task's data context
+    pub fn data<D: Clone + Send + Sync + 'static>(mut self, value: D) -> Self {
+        self.data.insert(value);
+        self
+    }
+
+    /// Insert a value into the task's metadata context
+    pub fn meta<M>(mut self, value: M) -> Self
+    where
+        Meta: MetadataExt<M>,
+        Meta::Error: std::fmt::Debug,
+    {
+        self.metadata
+            .inject(value)
+            .expect("Failed to inject metadata");
         self
     }
 
@@ -145,7 +163,7 @@ impl<Args, Meta, IdType> TaskBuilder<Args, Meta, IdType> {
             args: self.args,
             ctx: ExecutionContext {
                 task_id: self.task_id,
-                data: self.data.unwrap_or_default(),
+                data: self.data,
                 attempt: self.attempt.unwrap_or_default(),
                 metadata: self.metadata,
                 status: self.status.unwrap_or(Status::Pending),

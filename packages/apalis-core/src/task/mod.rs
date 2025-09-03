@@ -101,12 +101,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::task::{
+use crate::{task::{
     attempt::Attempt,
     extensions::Extensions,
     status::Status,
     task_id::{RandomId, TaskId},
-};
+}, task_fn::FromRequest};
 
 pub mod attempt;
 pub mod builder;
@@ -226,6 +226,13 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
     pub fn take(self) -> (Args, ExecutionContext<Meta, IdType>) {
         (self.args, self.ctx)
     }
+
+    /// Extract a value of type `T` from the task's context
+    ///
+    /// Uses [FromRequest] trait to extract the value.
+    pub async fn extract<T: FromRequest<Self>>(&self) -> Result<T, T::Error> {
+        T::from_request(self).await
+    }
 }
 
 impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
@@ -271,18 +278,5 @@ impl<Args, Meta, IdType> Task<Args, Meta, IdType> {
             args: self.args,
             ctx: f(self.ctx),
         }
-    }
-}
-
-impl<Args, Meta, IdType> std::ops::Deref for Task<Args, Meta, IdType> {
-    type Target = Extensions;
-    fn deref(&self) -> &Self::Target {
-        &self.ctx.data
-    }
-}
-
-impl<Args, Meta, IdType> std::ops::DerefMut for Task<Args, Meta, IdType> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.ctx.data
     }
 }

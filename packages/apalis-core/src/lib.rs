@@ -321,17 +321,17 @@ pub mod backend;
 pub mod error;
 #[macro_use]
 pub(crate) mod macros;
-/// Utilities for managing and observing workers
+/// Actively manage and observe workers
 pub mod monitor;
 pub mod task;
 pub mod task_fn;
 pub mod worker;
 
-/// Layer utilities for building middleware stacks
+/// Layers for building middleware stacks
 pub mod layers {
     pub use tower_layer::{Identity, Stack};
 }
-/// Represents timing and delaying utilities
+/// Timing and delaying utilities
 #[cfg(feature = "sleep")]
 pub mod timer {
     pub use futures_timer::Delay;
