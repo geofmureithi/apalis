@@ -1,5 +1,5 @@
 
-//! Utilities for task data extension.
+//! Utilities for task runtime data extension.
 //!
 //! The [`Data`] type and related middleware are important for sharing state across tasks or layers within the same task.
 //!

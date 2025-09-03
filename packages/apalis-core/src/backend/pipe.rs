@@ -1,4 +1,4 @@
-//! # Utilities to pipe streams to backends
+//! # Pipe streams to backends
 //!
 //! This backend allows you to pipe tasks from any stream into another backend.
 //! It is useful for connecting different backends together, such as piping tasks

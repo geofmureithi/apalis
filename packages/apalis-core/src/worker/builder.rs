@@ -1,4 +1,4 @@
-//! Utilities for composing and building workers.
+//! Builder types for composing and building workers.
 //!
 //! The `WorkerBuilder` component is the recommended
 //! way to construct [`Worker`] instances in a flexible and
@@ -92,16 +92,16 @@ use crate::{
     backend::Backend,
     monitor::shutdown::Shutdown,
     task::{data::Data, Task},
-    worker::{event::EventHandler, Worker},
+    worker::{event::EventHandlerBuilder, Worker},
 };
 
-/// Utility for building a [`Worker`]
+/// Declaratively builds a [`Worker`]
 pub struct WorkerBuilder<Args, Meta, Source, Middleware> {
     pub(crate) name: String,
     pub(crate) request: PhantomData<(Args, Meta)>,
     pub(crate) layer: Middleware,
     pub(crate) source: Source,
-    pub(crate) event_handler: EventHandler,
+    pub(crate) event_handler: EventHandlerBuilder,
     pub(crate) shutdown: Option<Shutdown>,
 }
 
@@ -126,7 +126,7 @@ impl WorkerBuilder<(), (), (), Identity> {
             layer: Identity::new(),
             source: (),
             name: name.as_ref().to_owned(),
-            event_handler: EventHandler::default(),
+            event_handler: EventHandlerBuilder::default(),
             shutdown: None,
         }
     }

@@ -50,7 +50,9 @@ pub mod json {
     pub use crate::backend::impls::json::*;
 }
 
-/// A backend represents a task source
+/// The `Backend` trait defines how workers get and manage tasks from a backend.
+/// 
+/// In other languages, this might be called a "Queue", "Broker", etc.
 pub trait Backend<Args> {
     /// The type used to uniquely identify tasks.
     type IdType: Clone;

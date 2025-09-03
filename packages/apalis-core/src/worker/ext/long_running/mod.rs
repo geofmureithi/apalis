@@ -1,4 +1,4 @@
-//! # Utilities for long running tasks
+//! # Extension traits for long running tasks
 //!
 //! It includes a tracker for monitoring task duration and a middleware layer to integrate with the worker's service stack.
 //! The long-running task support ensures that tasks exceeding a specified duration are properly tracked and managed, allowing for graceful shutdown and resource cleanup.

@@ -136,7 +136,7 @@ use crate::{
     task::Task,
     worker::{
         context::WorkerContext,
-        event::{Event, EventHandler},
+        event::{Event, EventHandler, EventHandlerBuilder},
         ReadinessService, TrackerService, Worker,
     },
 };
@@ -217,7 +217,7 @@ pub struct Monitor {
     workers: Vec<MonitoredWorker>,
     terminator: Option<BoxFuture<'static, ()>>,
     shutdown: Shutdown,
-    event_handler: EventHandler,
+    event_handler: EventHandlerBuilder,
     should_restart: Arc<
         RwLock<
             Option<

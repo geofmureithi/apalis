@@ -64,7 +64,7 @@ use crate::{
     task::{data::MissingDataError, Task},
     task_fn::FromRequest,
     worker::{
-        event::{CtxEventHandler, Event},
+        event::{EventHandler, Event},
         state::{InnerWorkerState, WorkerState},
     },
 };
@@ -78,7 +78,7 @@ pub struct WorkerContext {
     waker: Arc<Mutex<Option<Waker>>>,
     state: Arc<WorkerState>,
     pub(crate) shutdown: Option<Shutdown>,
-    event_handler: CtxEventHandler,
+    event_handler: EventHandler,
     pub(super) is_ready: Arc<AtomicBool>,
     pub(super) service: &'static str,
 }

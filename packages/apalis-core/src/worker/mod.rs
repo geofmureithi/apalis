@@ -129,6 +129,7 @@ pub mod test_worker;
 ///     Ok(())
 /// }
 /// ```
+/// See [module level documentation](self) for more details.
 #[must_use = "Workers must be run or streamed to execute tasks"]
 pub struct Worker<Args, Meta, Backend, Svc, Middleware> {
     pub(crate) name: String,

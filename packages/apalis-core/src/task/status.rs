@@ -2,7 +2,7 @@
 //!
 //! ## Overview
 //! 
-//! The `Status` enum represents the various states
+//! The `Status` enum defines the various states
 //! a task can be in, such as `Pending`, `Running`, `Done`, `Failed`, etc.
 //! 
 //! - It includes functionality for parsing a `Status` from a string and
