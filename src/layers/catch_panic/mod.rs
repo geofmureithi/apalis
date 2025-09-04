@@ -284,16 +284,9 @@ mod tests {
     use apalis_core::{
         backend::{memory::MemoryStorage, TaskSink},
         error::BoxDynError,
-        worker::{
-            builder::WorkerBuilder, context::WorkerContext, event::Event,
-            ext::event_listener::EventListenerExt,
-        },
+        worker::{builder::WorkerBuilder, event::Event, ext::event_listener::EventListenerExt},
     };
-    use core::time;
-    use std::{
-        convert::Infallible,
-        task::{Context, Poll},
-    };
+    use std::task::{Context, Poll};
     use tower::Service;
 
     #[derive(Clone, Debug)]

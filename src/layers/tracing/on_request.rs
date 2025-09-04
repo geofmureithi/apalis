@@ -30,7 +30,7 @@ impl<Args, Ctx, IdType> OnRequest<Args, Ctx, IdType> for () {
 
 impl<Args, F, Ctx, IdType> OnRequest<Args, Ctx, IdType> for F
 where
-    F: FnMut(&Task<Args, Ctx, IdType>, &Span),
+    F: for<'a> FnMut(&'a Task<Args, Ctx, IdType>, &'a Span),
 {
     fn on_request(&mut self, request: &Task<Args, Ctx, IdType>, span: &Span) {
         self(request, span)

@@ -328,6 +328,7 @@ where
 
 /// The Response from Tracing Service
 #[pin_project::pin_project]
+#[derive(Debug)]
 pub struct ResponseFuture<F, OnResponse, OnFailure> {
     #[pin]
     pub(crate) inner: F,
@@ -365,5 +366,84 @@ where
                 Poll::Ready(Err(err))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use crate::layers::WorkerBuilderExt;
+
+    use super::*;
+
+    use apalis_core::{
+        backend::{memory::MemoryStorage, TaskSink},
+        error::BoxDynError,
+        task::{extensions::Extensions, task_id::RandomId},
+        worker::{
+            builder::WorkerBuilder, context::WorkerContext, ext::event_listener::EventListenerExt,
+        },
+    };
+
+    #[tokio::test]
+    async fn basic_worker_tracing() {
+        let mut in_memory = MemoryStorage::new();
+        in_memory.push(42).await.unwrap();
+
+        async fn task(task: u32, worker: WorkerContext) -> Result<(), BoxDynError> {
+            if task == 42 {
+                println!("Stopping worker from task");
+                worker.stop().unwrap();
+            }
+            Ok(())
+        }
+
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
+            .enable_tracing()
+            .on_event(|ctx, ev| {
+                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+            })
+            .build(task);
+        worker.run().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn custom_worker_tracing() {
+        let mut in_memory = MemoryStorage::new();
+        in_memory.push(42).await.unwrap();
+
+        async fn task(task: u32, worker: WorkerContext) -> Result<(), BoxDynError> {
+            if task == 42 {
+                println!("Stopping worker from task");
+                worker.stop().unwrap();
+            }
+            Ok(())
+        }
+
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
+            .layer(
+                TraceLayer::new()
+                    .make_span_with(|req: &Task<u32, Extensions>| {
+                        tracing::span!(
+                            tracing::Level::INFO,
+                            "custom_span",
+                            task_id = req.parts.task_id.as_ref().unwrap().to_string()
+                        )
+                    })
+                    .on_request(|task: &Task<u32, Extensions>, span: &tracing::Span| {
+                        tracing::info!(parent: span, "Custom OnRequest: Received task: {:?}", task);
+                    })
+                    .on_response(|_: &() , duration: Duration, span: &tracing::Span| {
+                        tracing::info!(parent: span, "Custom OnResponse: Completed in {:?}", duration);
+                    })
+            )
+            .on_event(|ctx, ev| {
+                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+            })
+            .build(task);
+        worker.run().await.unwrap();
     }
 }
