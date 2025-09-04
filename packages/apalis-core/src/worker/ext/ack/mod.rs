@@ -59,10 +59,8 @@
 //! }
 //! ```
 use futures_util::future::BoxFuture;
-use std::{
-    future::Future,
-    task::Poll,
-};
+use futures_util::FutureExt;
+use std::{future::Future, task::Poll};
 use tower_layer::{Layer, Stack};
 use tower_service::Service;
 
@@ -97,11 +95,7 @@ pub trait Acknowledge<Res, Ctx, IdType> {
     /// The future returned by the `ack` method
     type Future: Future<Output = Result<(), Self::Error>>;
     /// Acknowledge the result of a task processing
-    fn ack(
-        &mut self,
-        res: &Result<Res, BoxDynError>,
-        ctx: &Parts<Ctx, IdType>,
-    ) -> Self::Future;
+    fn ack(&mut self, res: &Result<Res, BoxDynError>, ctx: &Parts<Ctx, IdType>) -> Self::Future;
 }
 
 impl<Res, Ctx, F, Fut, IdType, E> Acknowledge<Res, Ctx, IdType> for F
@@ -112,17 +106,13 @@ where
     type Error = E;
     type Future = Fut;
 
-    fn ack(
-        &mut self,
-        res: &Result<Res, BoxDynError>,
-        ctx: &Parts<Ctx, IdType>,
-    ) -> Self::Future {
+    fn ack(&mut self, res: &Result<Res, BoxDynError>, ctx: &Parts<Ctx, IdType>) -> Self::Future {
         (self)(res, ctx)
     }
 }
 
 /// Layer that adds acknowledgment functionality to services
-/// 
+///
 /// See [module level documentation](self) for more details.
 #[derive(Debug, Clone)]
 pub struct AcknowledgeLayer<A> {
@@ -151,7 +141,7 @@ where
 }
 
 /// Service that wraps another service and acknowledges task completion
-/// 
+///
 /// See [module level documentation](self) for more details.
 
 #[derive(Debug, Clone)]
@@ -187,7 +177,7 @@ where
         let mut acknowledger = self.acknowledger.clone();
         Box::pin(async move {
             let res = future.await.map_err(|e| e.into());
-            worker.track(acknowledger.ack(&res, &parts)).await?; // Ensure ack is gracefully shutdown
+            worker.track(acknowledger.ack(&res, &parts).boxed()).await?; // Ensure ack is gracefully shutdown
             res
         })
     }

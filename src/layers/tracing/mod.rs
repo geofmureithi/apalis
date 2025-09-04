@@ -20,7 +20,6 @@ pub use self::{
     on_response::{DefaultOnResponse, OnResponse},
 };
 use futures::Future;
-use pin_project_lite::pin_project;
 use tower::Layer;
 
 const DEFAULT_MESSAGE_LEVEL: Level = Level::DEBUG;
@@ -289,8 +288,8 @@ impl<S, MakeSpan, OnRequest, OnResponse, OnFailure>
     }
 }
 
-impl<Args, S, OnRequestT, OnResponseT, OnFailureT, MakeSpanT, F, Res, Ctx, IdType> Service<Task<Args, Ctx, IdType>>
-    for Trace<S, MakeSpanT, OnRequestT, OnResponseT, OnFailureT>
+impl<Args, S, OnRequestT, OnResponseT, OnFailureT, MakeSpanT, F, Res, Ctx, IdType>
+    Service<Task<Args, Ctx, IdType>> for Trace<S, MakeSpanT, OnRequestT, OnResponseT, OnFailureT>
 where
     S: Service<Task<Args, Ctx, IdType>, Response = Res, Future = F> + Unpin + Send + 'static,
     S::Error: fmt::Display + 'static,
@@ -327,16 +326,15 @@ where
     }
 }
 
-pin_project! {
-    /// The Response from Tracing Service
-    pub struct ResponseFuture<F, OnResponse, OnFailure> {
-        #[pin]
-        pub(crate) inner: F,
-        pub(crate) span: Span,
-        pub(crate) on_response: Option<OnResponse>,
-        pub(crate) on_failure: Option<OnFailure>,
-        pub(crate) start: Instant,
-    }
+/// The Response from Tracing Service
+#[pin_project::pin_project]
+pub struct ResponseFuture<F, OnResponse, OnFailure> {
+    #[pin]
+    pub(crate) inner: F,
+    pub(crate) span: Span,
+    pub(crate) on_response: Option<OnResponse>,
+    pub(crate) on_failure: Option<OnFailure>,
+    pub(crate) start: Instant,
 }
 
 impl<Fut, OnResponseT, OnFailureT, Res, E> Future for ResponseFuture<Fut, OnResponseT, OnFailureT>

@@ -45,7 +45,6 @@
 //! ## Types
 //! - [`WorkerContext`] — shared state container for a worker
 //! - [`Tracked`] — future wrapper for task lifecycle tracking
-use pin_project_lite::pin_project;
 use std::{
     any::type_name,
     fmt,
@@ -64,7 +63,7 @@ use crate::{
     task::{data::MissingDataError, Task},
     task_fn::FromRequest,
     worker::{
-        event::{EventHandler, Event},
+        event::{Event, EventHandler},
         state::{InnerWorkerState, WorkerState},
     },
 };
@@ -95,13 +94,14 @@ impl fmt::Debug for WorkerContext {
     }
 }
 
-pin_project! {
-    /// A future tracked by the worker
-    pub struct Tracked<F> {
-        ctx: WorkerContext,
-        #[pin]
-        task: F,
-    }
+
+/// A future tracked by the worker
+#[pin_project::pin_project(PinnedDrop)]
+#[derive(Debug)]
+pub struct Tracked<F> {
+    ctx: WorkerContext,
+    #[pin]
+    task: F,
 }
 
 impl<F: Future> Future for Tracked<F> {
@@ -111,12 +111,16 @@ impl<F: Future> Future for Tracked<F> {
         let this = self.project();
 
         match this.task.poll(cx) {
-            res @ Poll::Ready(_) => {
-                this.ctx.end_task();
-                res
-            }
+            res @ Poll::Ready(_) => res,
             Poll::Pending => Poll::Pending,
         }
+    }
+}
+
+#[pin_project::pinned_drop]
+impl<F> PinnedDrop for Tracked<F> {
+    fn drop(self: Pin<&mut Self>) {
+        self.ctx.end_task();
     }
 }
 
@@ -266,10 +270,7 @@ impl WorkerContext {
     }
 
     /// Wraps the event listener with a new function
-    pub fn wrap_listener<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
-        &mut self,
-        f: F,
-    ) {
+    pub fn wrap_listener<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(&mut self, f: F) {
         let cur = self.event_handler.clone();
         let new: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync + 'static> =
             Box::new(move |ctx, ev| {

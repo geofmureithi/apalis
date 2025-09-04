@@ -1,9 +1,89 @@
-use apalis_core::error::AbortError;
+//! # Middleware for catching panics
+//!
+//! The [`CatchPanicLayer`] allows you to catch panics in your task handlers and convert them into errors. This helps prevent panics from crashing your worker process and enables custom error handling or reporting.
+//!
+//! ## Usage
+//!
+//! ### Basic Worker Example
+//!
+//! ```rust
+//! # use apalis::layers::catch_panic::CatchPanicLayer;
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let mut in_memory = MemoryStorage::new();
+//!     in_memory.push(42).await.unwrap();
+//!
+//!     async fn task(task: u32) {
+//!         if task == 42 {
+//!             panic!("I am a panic, catch me!");
+//!         }
+//!     }
+//!
+//!     let worker = WorkerBuilder::new("rango-tango")
+//!         .backend(in_memory)
+//!         .catch_panic()
+//!         .on_event(|ctx, ev| {
+//!             if matches!(ev, apalis_core::worker::event::Event::Error(_)) {
+//!                 ctx.stop().unwrap();
+//!             }
+//!         })
+//!         .build(task);
+//!     worker.run().await.unwrap();
+//! }
+//! ```
+//!
+//! ### Worker With Custom Panic Handler
+//!
+//! ```rust
+//! # use apalis::layers::catch_panic::CatchPanicLayer;
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::error::BoxDynError;
+//! # use apalis::layers::catch_panic::PanicError;
+//! # use apalis::layers::retry::RetryPolicy;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let mut in_memory = MemoryStorage::new();
+//!     in_memory.push(42).await.unwrap();
+//!
+//!     async fn task(task: u32) {
+//!         if task == 42 {
+//!             panic!("I am a panic, catch me!");
+//!         }
+//!     }
+//!
+//!     let worker = WorkerBuilder::new("rango-tango")
+//!         .backend(in_memory)
+//!         .retry(
+//!             RetryPolicy::retries(1)
+//!                 // Do not retry panics
+//!                 .retry_if(|e: &BoxDynError| e.downcast_ref::<PanicError>().is_none()),
+//!         )
+//!         .layer(CatchPanicLayer::with_panic_handler(|e| {
+//!             println!("Caught panic: {:?}", e);
+//!             PanicError("Custom panic handler".to_string())
+//!         }))
+//!         .on_event(|ctx, ev| {
+//!             if matches!(ev, apalis_core::worker::event::Event::Error(_)) {
+//!                 ctx.stop().unwrap();
+//!             }
+//!         })
+//!         .build(task);
+//!     worker.run().await.unwrap();
+//! }
+//! ```
+use apalis_core::error::{AbortError, BoxDynError};
 use apalis_core::task::Task;
+use futures::future::CatchUnwind;
+use futures::{ready, FutureExt};
 use std::any::Any;
 use std::fmt;
 use std::future::Future;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::Layer;
@@ -16,7 +96,7 @@ pub struct CatchPanicLayer<F, Err> {
     _marker: std::marker::PhantomData<Err>,
 }
 
-impl CatchPanicLayer<fn(Box<dyn Any + Send + 'static>) -> AbortError, AbortError> {
+impl<Err> CatchPanicLayer<fn(Box<dyn Any + Send + 'static>) -> AbortError, Err> {
     /// Creates a new `CatchPanicLayer` with a default panic handler.
     pub fn new() -> Self {
         CatchPanicLayer {
@@ -26,7 +106,7 @@ impl CatchPanicLayer<fn(Box<dyn Any + Send + 'static>) -> AbortError, AbortError
     }
 }
 
-impl Default for CatchPanicLayer<fn(Box<dyn Any + Send>) -> AbortError, AbortError> {
+impl<Err> Default for CatchPanicLayer<fn(Box<dyn Any + Send>) -> AbortError, Err> {
     fn default() -> Self {
         Self::new()
     }
@@ -66,35 +146,68 @@ pub struct CatchPanicService<S, F> {
     on_panic: F,
 }
 
-impl<S, Req, Res, Ctx, F, Err> Service<Task<Req, Ctx>> for CatchPanicService<S, F>
+impl<S, Req, Res, Ctx, F, PanicErr> Service<Task<Req, Ctx>> for CatchPanicService<S, F>
 where
-    S: Service<Task<Req, Ctx>, Response = Res, Error = Err>,
-    F: FnMut(Box<dyn Any + Send>) -> Err + Clone,
+    S: Service<Task<Req, Ctx>, Response = Res>,
+    F: FnMut(Box<dyn Any + Send>) -> PanicErr + Clone,
+    S::Error: Into<BoxDynError>,
+    PanicErr: Into<BoxDynError>,
 {
     type Response = S::Response;
-    type Error = S::Error;
-    type Future = CatchPanicFuture<S::Future, F, Err>;
+    type Error = BoxDynError;
+    type Future = CatchPanicFuture<S::Future, F, PanicErr>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
+        self.service.poll_ready(cx).map_err(Into::into)
     }
 
-    fn call(&mut self, request: Task<Req, Ctx>) -> Self::Future {
-        CatchPanicFuture {
-            future: self.service.call(request),
-            on_panic: self.on_panic.clone(),
-            _marker: std::marker::PhantomData,
+    fn call(&mut self, task: Task<Req, Ctx>) -> Self::Future {
+        match std::panic::catch_unwind(AssertUnwindSafe(|| self.service.call(task))) {
+            Ok(future) => CatchPanicFuture {
+                kind: Kind::Future {
+                    future: AssertUnwindSafe(future).catch_unwind(),
+                    panic_handler: Some(self.on_panic.clone()),
+                },
+                _marker: std::marker::PhantomData,
+            },
+            Err(panic_err) => CatchPanicFuture {
+                kind: Kind::Panicked {
+                    panic_err: Some(panic_err),
+                    panic_handler: Some(self.on_panic.clone()),
+                },
+                _marker: std::marker::PhantomData,
+            },
         }
     }
 }
 
-pin_project_lite::pin_project! {
-    /// A wrapper that catches panics during execution
-    pub struct CatchPanicFuture<Fut, F, Err> {
+#[pin_project::pin_project(project = KindProj)]
+enum Kind<F, T> {
+    Panicked {
+        panic_err: Option<Box<dyn Any + Send + 'static>>,
+        panic_handler: Option<T>,
+    },
+    Future {
         #[pin]
-        future: Fut,
-        on_panic: F,
-        _marker: std::marker::PhantomData<Err>,
+        future: CatchUnwind<AssertUnwindSafe<F>>,
+        panic_handler: Option<T>,
+    },
+}
+
+/// A wrapper that catches panics during execution
+#[pin_project::pin_project]
+pub struct CatchPanicFuture<Fut, F, Err> {
+    #[pin]
+    kind: Kind<Fut, F>,
+    _marker: std::marker::PhantomData<Err>,
+}
+
+impl<Fut, F, Err> fmt::Debug for CatchPanicFuture<Fut, F, Err> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CatchPanicFuture")
+            .field("kind", &"<hidden>")
+            .field("_marker", &std::any::type_name::<Err>())
+            .finish()
     }
 }
 
@@ -110,19 +223,40 @@ impl fmt::Display for PanicError {
     }
 }
 
-impl<Fut, Res, F, Err> Future for CatchPanicFuture<Fut, F, Err>
+impl<Fut, Res, F, Err, PanicErr> Future for CatchPanicFuture<Fut, F, PanicErr>
 where
     Fut: Future<Output = Result<Res, Err>>,
-    F: FnMut(Box<dyn Any + Send>) -> Err,
+    F: FnMut(Box<dyn Any + Send>) -> PanicErr,
+    Err: Into<BoxDynError>,
+    PanicErr: Into<BoxDynError>,
 {
-    type Output = Result<Res, Err>;
+    type Output = Result<Res, BoxDynError>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.as_mut().project();
-
-        match catch_unwind(AssertUnwindSafe(|| this.future.poll(cx))) {
-            Ok(res) => res,
-            Err(e) => Poll::Ready(Err((this.on_panic)(e))),
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.project().kind.project() {
+            KindProj::Panicked {
+                panic_err,
+                panic_handler,
+            } => {
+                let mut panic_handler = panic_handler
+                    .take()
+                    .expect("future polled after completion");
+                let panic_err = panic_err.take().expect("future polled after completion");
+                Poll::Ready(Err(panic_handler(panic_err).into()))
+            }
+            KindProj::Future {
+                future,
+                panic_handler,
+            } => match ready!(future.poll(cx)) {
+                Ok(Ok(res)) => Poll::Ready(Ok(res)),
+                Ok(Err(svc_err)) => Poll::Ready(Err(svc_err.into())),
+                Err(panic_err) => {
+                    let mut panic_handler = panic_handler
+                        .take()
+                        .expect("future polled after completion");
+                    Poll::Ready(Err(panic_handler(panic_err).into()))
+                }
+            },
         }
     }
 }
@@ -142,11 +276,25 @@ fn default_handler(e: Box<dyn Any + Send>) -> AbortError {
 
 #[cfg(test)]
 mod tests {
+    use crate::layers::WorkerBuilderExt;
+
     use super::*;
 
-    use apalis_core::error::BoxDynError;
-    use std::task::{Context, Poll};
-    use tower::{Service, ServiceExt};
+    use crate::layers::retry::RetryPolicy;
+    use apalis_core::{
+        backend::{memory::MemoryStorage, TaskSink},
+        error::BoxDynError,
+        worker::{
+            builder::WorkerBuilder, context::WorkerContext, event::Event,
+            ext::event_listener::EventListenerExt,
+        },
+    };
+    use core::time;
+    use std::{
+        convert::Infallible,
+        task::{Context, Poll},
+    };
+    use tower::Service;
 
     #[derive(Clone, Debug)]
     struct TestJob;
@@ -209,5 +357,61 @@ mod tests {
             response.unwrap_err().to_string(),
             *"AbortError: PanicError: called `Option::unwrap()` on a `None` value"
         );
+    }
+
+    #[tokio::test]
+    async fn basic_worker_catch_panic() {
+        let mut in_memory = MemoryStorage::new();
+        in_memory.push(42).await.unwrap();
+
+        async fn task(task: u32) {
+            if task == 42 {
+                panic!("I am a panic, catch me!");
+            }
+        }
+
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
+            .catch_panic()
+            .on_event(|ctx, ev| {
+                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                if matches!(ev, Event::Error(_)) {
+                    ctx.stop().unwrap();
+                }
+            })
+            .build(task);
+        worker.run().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn custom_worker_catch_panic() {
+        let mut in_memory = MemoryStorage::new();
+        in_memory.push(42).await.unwrap();
+
+        async fn task(task: u32) {
+            if task == 42 {
+                panic!("I am a panic, catch me!");
+            }
+        }
+
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
+            .retry(
+                RetryPolicy::retries(1)
+                    // Do not retry panics
+                    .retry_if(|e: &BoxDynError| e.downcast_ref::<PanicError>().is_none()),
+            )
+            .layer(CatchPanicLayer::with_panic_handler(|e| {
+                println!("Caught panic: {:?}", e);
+                PanicError("Custom panic handler".to_string())
+            }))
+            .on_event(|ctx, ev| {
+                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                if matches!(ev, Event::Error(_)) {
+                    ctx.stop().unwrap();
+                }
+            })
+            .build(task);
+        worker.run().await.unwrap();
     }
 }

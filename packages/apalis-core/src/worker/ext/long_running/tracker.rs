@@ -1,8 +1,6 @@
 //! Types related to the [`TaskTracker`] collection.
 //!
 //! Extracted from the [tokio-util](https://github.com/tokio-rs/tokio/blob/master/tokio-util/src/task/task_tracker.rs) crate and modified to be runtime agnostic
-
-use pin_project_lite::pin_project;
 use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;
@@ -35,29 +33,27 @@ struct TaskTrackerInner {
     wakers: Mutex<VecDeque<Waker>>,
 }
 
-pin_project! {
-    /// A future that is tracked as a task by a [`TaskTracker`].
-    ///
-    /// The associated [`TaskTracker`] cannot complete until this future is dropped.
-    ///
-    /// This future is returned by [`TaskTracker::track_future`].
-    #[must_use = "futures do nothing unless polled"]
-    pub struct LongRunningFuture<F> {
-        #[pin]
-        future: F,
-        token: TaskTrackerToken,
-    }
+/// A future that is tracked as a task by a [`TaskTracker`].
+///
+/// The associated [`TaskTracker`] cannot complete until this future is dropped.
+///
+/// This future is returned by [`TaskTracker::track_future`].
+#[must_use = "futures do nothing unless polled"]
+#[pin_project::pin_project]
+pub struct LongRunningFuture<F> {
+    #[pin]
+    future: F,
+    token: TaskTrackerToken,
 }
 
-pin_project! {
-    /// A future that completes when the [`TaskTracker`] is empty and closed.
-    ///
-    /// This future is returned by [`TaskTracker::wait`].
-    #[must_use = "futures do nothing unless polled"]
-    pub struct TaskTrackerWaitFuture {
-        task_tracker: TaskTracker,
-        registered: bool,
-    }
+/// A future that completes when the [`TaskTracker`] is empty and closed.
+///
+/// This future is returned by [`TaskTracker::wait`].
+#[must_use = "futures do nothing unless polled"]
+#[pin_project::pin_project]
+pub struct TaskTrackerWaitFuture {
+    task_tracker: TaskTracker,
+    registered: bool,
 }
 
 impl TaskTrackerInner {

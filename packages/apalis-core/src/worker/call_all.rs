@@ -1,10 +1,9 @@
 //! Utilities for executing all tasks from a stream to a service.
-//! 
+//!
 //! A combinator for calling all requests from a stream to a service, yielding responses
 //! as they arrive. It supports both ordered and unordered response handling, allowing for flexible integration
 //! with asynchronous services.
 use futures_util::{ready, stream::FuturesUnordered, Stream};
-use pin_project_lite::pin_project;
 use std::{
     error::Error,
     fmt,
@@ -16,17 +15,16 @@ use tower_service::Service;
 
 use crate::error::BoxDynError;
 
-pin_project! {
-    /// A stream of responses received from the inner service in received order.
-    #[derive(Debug)]
-    pub(super) struct CallAllUnordered<Svc, S, T, E>
-    where
-        Svc: Service<T>,
-        S: Stream<Item = Result<Option<T>, E>>,
-    {
-        #[pin]
-        inner: CallAll<Svc, S, T, FuturesUnordered<Svc::Future>, E>,
-    }
+/// A stream of responses received from the inner service in received order.
+#[derive(Debug)]
+#[pin_project::pin_project]
+pub(super) struct CallAllUnordered<Svc, S, T, E>
+where
+    Svc: Service<T>,
+    S: Stream<Item = Result<Option<T>, E>>,
+{
+    #[pin]
+    inner: CallAll<Svc, S, T, FuturesUnordered<Svc::Future>, E>,
 }
 
 impl<Svc, S, T, E> CallAllUnordered<Svc, S, T, E>
@@ -46,7 +44,7 @@ impl<Svc, S, T, E> Stream for CallAllUnordered<Svc, S, T, E>
 where
     Svc: Service<T>,
     S: Stream<Item = Result<Option<T>, E>>,
-    E: Into<BoxDynError>
+    E: Into<BoxDynError>,
 {
     type Item = Result<Option<Svc::Response>, CallAllError<Svc::Error>>;
 
@@ -96,19 +94,18 @@ impl<F: Future> Drive<F> for FuturesUnordered<F> {
     }
 }
 
-pin_project! {
-    /// The [`Future`] returned by the [`ServiceExt::call_all`] combinator.
-    pub(crate) struct CallAll<Svc, S, T, Q, E>
-    where
-        S: Stream<Item = Result<Option<T>, E>>,
-    {
-        service: Option<Svc>,
-        #[pin]
-        stream: S,
-        queue: Q,
-        eof: bool,
-        curr_req: Option<T>
-    }
+/// The [`Future`] returned by the [`ServiceExt::call_all`] combinator.
+#[pin_project::pin_project]
+pub(crate) struct CallAll<Svc, S, T, Q, E>
+where
+    S: Stream<Item = Result<Option<T>, E>>,
+{
+    service: Option<Svc>,
+    #[pin]
+    stream: S,
+    queue: Q,
+    eof: bool,
+    curr_req: Option<T>,
 }
 
 impl<Svc, S, T, Q, E> fmt::Debug for CallAll<Svc, S, T, Q, E>
@@ -155,7 +152,7 @@ where
     Svc: Service<T>,
     S: Stream<Item = Result<Option<T>, E>>,
     Q: Drive<Svc::Future>,
-    E: Into<BoxDynError>
+    E: Into<BoxDynError>,
 {
     type Item = Result<Option<Svc::Response>, CallAllError<Svc::Error>>;
 

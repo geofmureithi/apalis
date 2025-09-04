@@ -105,31 +105,30 @@ use crate::backend::TaskStream;
 use crate::error::BoxDynError;
 use crate::{backend::Backend, task::Task, worker::context::WorkerContext};
 
-pin_project_lite::pin_project! {
-    /// A highly customizable backend for integration with any persistence engine
-    ///
-    /// This backend allows you to define how tasks are fetched from and persisted to your storage,
-    /// meaning you can use it to integrate with existing systems.
-    ///
-    /// # Example
-    /// ```rust
-    /// let backend = BackendBuilder::new()
-    ///     .database(my_db)
-    ///     .fetcher(my_fetcher_fn)
-    ///     .sink(my_sink_fn)
-    ///     .build()
-    ///     .unwrap();
-    /// ```
-    #[must_use = "Custom backends must be polled or used as a sink"]
-    pub struct CustomBackend<Args, DB, Fetch, Sink, IdType, Codec = IdentityCodec, Config = ()> {
-        _marker: PhantomData<(Args, IdType, Codec)>,
-        db: DB,
-        fetcher: Arc<Box<dyn Fn(&mut DB, &Config, &WorkerContext) -> Fetch + Send + Sync>>,
-        sinker: Arc<Box<dyn Fn(&mut DB, &Config) -> Sink + Send + Sync>>,
-        #[pin]
-        current_sink: Sink,
-        config: Config,
-    }
+/// A highly customizable backend for integration with any persistence engine
+///
+/// This backend allows you to define how tasks are fetched from and persisted to your storage,
+/// meaning you can use it to integrate with existing systems.
+///
+/// # Example
+/// ```rust
+/// let backend = BackendBuilder::new()
+///     .database(my_db)
+///     .fetcher(my_fetcher_fn)
+///     .sink(my_sink_fn)
+///     .build()
+///     .unwrap();
+/// ```
+#[pin_project::pin_project]
+#[must_use = "Custom backends must be polled or used as a sink"]
+pub struct CustomBackend<Args, DB, Fetch, Sink, IdType, Codec = IdentityCodec, Config = ()> {
+    _marker: PhantomData<(Args, IdType, Codec)>,
+    db: DB,
+    fetcher: Arc<Box<dyn Fn(&mut DB, &Config, &WorkerContext) -> Fetch + Send + Sync>>,
+    sinker: Arc<Box<dyn Fn(&mut DB, &Config) -> Sink + Send + Sync>>,
+    #[pin]
+    current_sink: Sink,
+    config: Config,
 }
 
 impl<Args, DB, Fetch, Sink, IdType, Codec, Config> Clone

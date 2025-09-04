@@ -62,9 +62,11 @@
 
 use apalis_core::error::AbortError;
 
+use apalis_core::task::builder::TaskBuilder;
 use apalis_core::task::metadata::MetadataExt;
 use apalis_core::task::Task;
 use std::any::Any;
+use std::fmt::Debug;
 use tower::retry::backoff::Backoff;
 
 /// Re-exports from [`tower::retry`]
@@ -347,6 +349,23 @@ where
     }
 }
 
+/// Retry metadata extension to include [`RetryConfig`]
+pub trait RetryMetadataExt {
+    /// Set number of retries
+    fn retries(self, retries: usize) -> Self;
+}
+
+impl<Args, Ctx, IdType> RetryMetadataExt for TaskBuilder<Args, Ctx, IdType>
+where
+    Ctx: MetadataExt<RetryConfig>,
+    Ctx::Error: Debug,
+{
+    /// Set number of retries in the metadata
+    fn retries(self, retries: usize) -> Self {
+        self.meta(RetryConfig { retries })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -370,7 +389,7 @@ mod tests {
         let mut in_memory = MemoryStorage::new();
 
         let task1 = TaskBuilder::new(1).meta(RetryConfig { retries: 3 }).build();
-        let task2 = TaskBuilder::new(2).build();
+        let task2 = TaskBuilder::new(2).retries(5).build();
         let task3 = TaskBuilder::new(3).build();
 
         in_memory.send(task1).await.unwrap();

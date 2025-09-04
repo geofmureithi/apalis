@@ -51,20 +51,16 @@ struct Request {
     namespace: String,
 }
 
-pin_project_lite::pin_project! {
-    /// The Future returned from [`SentryTaskService`].
-    pub struct SentryHttpFuture<F> {
-        on_first_poll: Option<(
-            Request,
-            sentry_core::TransactionContext
-        )>,
-        transaction: Option<(
-            sentry_core::TransactionOrSpan,
-            Option<sentry_core::TransactionOrSpan>,
-        )>,
-        #[pin]
-        future: F,
-    }
+/// The Future returned from [`SentryTaskService`].
+#[pin_project::pin_project]
+pub struct SentryHttpFuture<F> {
+    on_first_poll: Option<(Request, sentry_core::TransactionContext)>,
+    transaction: Option<(
+        sentry_core::TransactionOrSpan,
+        Option<sentry_core::TransactionOrSpan>,
+    )>,
+    #[pin]
+    future: F,
 }
 
 impl<F, Res, Err> Future for SentryHttpFuture<F>

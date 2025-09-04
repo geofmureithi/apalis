@@ -1,20 +1,20 @@
-/// Prometheus integration for apalis
+/// Prometheus middleware for telemetry
 #[cfg(feature = "prometheus")]
 #[cfg_attr(docsrs, doc(cfg(feature = "prometheus")))]
 pub mod prometheus;
-/// Retry job middleware
+/// Retry middleware for instant and backoff retries
 #[cfg(feature = "retry")]
 #[cfg_attr(docsrs, doc(cfg(feature = "retry")))]
 pub mod retry;
-/// Sentry integration for apalis.
+/// Sentry middleware for error tracking
 #[cfg(feature = "sentry")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sentry")))]
 pub mod sentry;
-/// Tracing integration for apalis
+/// Tracing middleware for observability
 #[cfg(feature = "tracing")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tracing")))]
 pub mod tracing;
-/// Rate limit middleware for apalis
+/// RateLimiting middleware for managing request rates
 #[cfg(feature = "limit")]
 #[cfg_attr(docsrs, doc(cfg(feature = "limit")))]
 pub mod limit {
@@ -23,24 +23,24 @@ pub mod limit {
     pub use tower::limit::RateLimitLayer;
 }
 
+
 #[cfg(feature = "catch-panic")]
 use apalis_core::error::AbortError;
 use apalis_core::{backend::Backend, worker::builder::WorkerBuilder};
 #[cfg(feature = "catch-panic")]
 use catch_panic::CatchPanicLayer;
 use tower::layer::util::{Identity, Stack};
-/// Timeout middleware for apalis
+/// Timeout middleware for managing request timeouts
 #[cfg(feature = "timeout")]
 #[cfg_attr(docsrs, doc(cfg(feature = "timeout")))]
 pub use tower::timeout::TimeoutLayer;
 
-/// catch panic middleware for apalis
+/// CatchPanic middleware for handling panics
 #[cfg(feature = "catch-panic")]
 #[cfg_attr(docsrs, doc(cfg(feature = "catch-panic")))]
 pub mod catch_panic;
 
-/// A trait that extends `WorkerBuilder` with additional middleware methods
-/// derived from `tower::ServiceBuilder`.
+/// An extension trait that extends `WorkerBuilder` with additional middleware methods
 pub trait WorkerBuilderExt<Args, Ctx, Source, Middleware> {
     /// Optionally adds a new layer `T` into the [`WorkerBuilder`].
     fn option_layer<T>(
@@ -59,7 +59,7 @@ pub trait WorkerBuilderExt<Args, Ctx, Source, Middleware> {
     fn concurrency(
         self,
         max: usize,
-    ) -> WorkerBuilder<Args, Source, Stack<tower::limit::ConcurrencyLimitLayer, Middleware>>;
+    ) -> WorkerBuilder<Args, Ctx, Source, Stack<tower::limit::ConcurrencyLimitLayer, Middleware>>;
 
     /// Limits requests to at most `num` per the given duration.
     #[cfg(feature = "limit")]
@@ -97,10 +97,9 @@ pub trait WorkerBuilderExt<Args, Ctx, Source, Middleware> {
         predicate: P,
     ) -> WorkerBuilder<
         Args,
+        Ctx,
         Source,
-        Srv,
         Stack<tower::filter::AsyncFilterLayer<P>, Middleware>,
-        Worker,
     >;
 
     /// Maps one request type to another.

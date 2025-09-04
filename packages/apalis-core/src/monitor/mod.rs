@@ -125,7 +125,6 @@ use std::{
 };
 
 use futures_util::{future::BoxFuture, Future, FutureExt, StreamExt};
-use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -143,15 +142,25 @@ use crate::{
 
 pub mod shutdown;
 
-pin_project! {
-    /// A worker that is monitored by the [`Monitor`].
-    pub struct MonitoredWorker {
-        factory: Box<dyn Fn(usize) -> (WorkerContext, BoxFuture<'static, Result<(), WorkerError>>) + Sync + 'static + Send>,
-        #[pin]
-        current: Option<(WorkerContext, BoxFuture<'static, Result<(), WorkerError>>)>,
-        attempt: usize,
-        should_restart: Arc<RwLock<Option<Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + Sync + 'static + Send>>>>,
-    }
+#[pin_project::pin_project]
+/// A worker that is monitored by the [`Monitor`].
+struct MonitoredWorker {
+    factory: Box<
+        dyn Fn(usize) -> (WorkerContext, BoxFuture<'static, Result<(), WorkerError>>)
+            + Sync
+            + 'static
+            + Send,
+    >,
+    #[pin]
+    current: Option<(WorkerContext, BoxFuture<'static, Result<(), WorkerError>>)>,
+    attempt: usize,
+    should_restart: Arc<
+        RwLock<
+            Option<
+                Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + Sync + 'static + Send>,
+            >,
+        >,
+    >,
 }
 
 /// Represents errors that occurred in a monitored worker, including its context and the error itself.

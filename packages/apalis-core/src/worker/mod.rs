@@ -440,14 +440,14 @@ where
     }
 }
 
-pin_project_lite::pin_project! {
-    /// A future that increments the attempt count on the first poll
-    pub struct AttemptOnPollFuture<Fut> {
-        attempt: Attempt,
-        #[pin]
-        fut: Fut,
-        polled: bool,
-    }
+/// A future that increments the attempt count on the first poll
+#[pin_project::pin_project]
+#[derive(Debug)]
+pub struct AttemptOnPollFuture<Fut> {
+    attempt: Attempt,
+    #[pin]
+    fut: Fut,
+    polled: bool,
 }
 
 impl<Fut> AttemptOnPollFuture<Fut> {

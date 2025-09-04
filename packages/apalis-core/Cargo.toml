@@ -30,7 +30,7 @@ futures-channel = { version = "0.3.30", features = [
 futures-sink = { version = "0.3.30", default-features = false }
 tower-service = "0.3.3"
 tower-layer = "0.3.3"
-pin-project-lite = "0.2.14"
+pin-project = "1"
 thiserror = "2.0.0"
 futures-timer = { version = "3.0.3", optional = true }
 tracing = { version = "0.1", default-features = false, optional = true }

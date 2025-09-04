@@ -6,7 +6,6 @@ use std::{
 
 use apalis_core::{task::Task, worker::context::WorkerContext};
 use futures::Future;
-use pin_project_lite::pin_project;
 use tower::{Layer, Service};
 
 /// A layer to support prometheus metrics
@@ -64,15 +63,14 @@ where
     }
 }
 
-pin_project! {
-    /// Response for prometheus service
-    pub struct ResponseFuture<F> {
-        #[pin]
-        pub(crate) inner: F,
-        pub(crate) start: Instant,
-        pub(crate) job_type: String,
-        pub(crate) worker: String
-    }
+/// Response for prometheus service
+#[pin_project::pin_project]
+pub struct ResponseFuture<F> {
+    #[pin]
+    pub(crate) inner: F,
+    pub(crate) start: Instant,
+    pub(crate) job_type: String,
+    pub(crate) worker: String,
 }
 
 impl<Fut, Res, Err> Future for ResponseFuture<Fut>

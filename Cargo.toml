@@ -74,7 +74,7 @@ criterion = { version = "0.5.1", features = ["async_tokio", "html_reports"] }
 pprof = { version = "0.14", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["full"] }
 
 [workspace]
 members = [
@@ -119,7 +119,7 @@ metrics = { version = "0.24.0", optional = true, default-features = false }
 metrics-exporter-prometheus = { version = "0.17", optional = true, default-features = false }
 thiserror = "2.0.0"
 futures = "0.3.30"
-pin-project-lite = "0.2.14"
+pin-project = "1"
 # Needed only for sentry reporting
 uuid = { version = "1.8", optional = true }
 ulid = { version = "1", optional = true }
