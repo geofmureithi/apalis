@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use apalis_core::{error::Error, request::Request};
+use apalis_core::{task::Task, worker::context::WorkerContext};
 use futures::Future;
 use pin_project_lite::pin_project;
 use tower::{Layer, Service};
@@ -28,10 +28,11 @@ pub struct PrometheusService<S> {
     service: S,
 }
 
-impl<Svc, Fut, Req, Ctx, Res> Service<Request<Req, Ctx>> for PrometheusService<Svc>
+impl<Svc, Fut, Args, Ctx, Res, Err, IdType> Service<Task<Args, Ctx, IdType>>
+    for PrometheusService<Svc>
 where
-    Svc: Service<Request<Req, Ctx>, Response = Res, Error = Error, Future = Fut>,
-    Fut: Future<Output = Result<Res, Error>> + 'static,
+    Svc: Service<Task<Args, Ctx, IdType>, Response = Res, Error = Err, Future = Fut>,
+    Fut: Future<Output = Result<Res, Err>> + 'static,
 {
     type Response = Svc::Response;
     type Error = Svc::Error;
@@ -41,23 +42,24 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
+    fn call(&mut self, request: Task<Args, Ctx, IdType>) -> Self::Future {
         let start = Instant::now();
-        let namespace = request
+        let worker = request
             .parts
-            .namespace
-            .as_ref()
-            .map(|ns| ns.0.to_string())
-            .unwrap_or(std::any::type_name::<Svc>().to_string());
+            .data
+            .get::<WorkerContext>()
+            .map(|w| w.name())
+            .cloned()
+            .expect("worker context not found in task data");
 
         let req = self.service.call(request);
-        let job_type = std::any::type_name::<Req>().to_string();
+        let job_type = std::any::type_name::<Args>().to_string();
 
         ResponseFuture {
             inner: req,
             start,
             job_type,
-            operation: namespace,
+            worker,
         }
     }
 }
@@ -69,15 +71,15 @@ pin_project! {
         pub(crate) inner: F,
         pub(crate) start: Instant,
         pub(crate) job_type: String,
-        pub(crate) operation: String
+        pub(crate) worker: String
     }
 }
 
-impl<Fut, Res> Future for ResponseFuture<Fut>
+impl<Fut, Res, Err> Future for ResponseFuture<Fut>
 where
-    Fut: Future<Output = Result<Res, Error>>,
+    Fut: Future<Output = Result<Res, Err>>,
 {
-    type Output = Result<Res, Error>;
+    type Output = Result<Res, Err>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -92,13 +94,13 @@ where
             .unwrap_or_else(|| "Err".to_string());
 
         let labels = [
-            ("name", this.operation.to_string()),
+            ("worker", this.worker.to_string()),
             ("namespace", this.job_type.to_string()),
             ("status", status),
         ];
-        let counter = metrics::counter!("requests_total", &labels);
+        let counter = metrics::counter!("tasks_total", &labels);
         counter.increment(1);
-        let hist = metrics::histogram!("request_duration_seconds", &labels);
+        let hist = metrics::histogram!("task_duration_seconds", &labels);
         hist.record(latency);
         Poll::Ready(response)
     }

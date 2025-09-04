@@ -23,6 +23,8 @@ pub mod limit {
     pub use tower::limit::RateLimitLayer;
 }
 
+#[cfg(feature = "catch-panic")]
+use apalis_core::error::AbortError;
 use apalis_core::{backend::Backend, worker::builder::WorkerBuilder};
 #[cfg(feature = "catch-panic")]
 use catch_panic::CatchPanicLayer;
@@ -156,7 +158,7 @@ pub trait WorkerBuilderExt<Args, Ctx, Source, Middleware> {
         Ctx,
         Source,
         Stack<
-            CatchPanicLayer<fn(Box<dyn std::any::Any + Send>) -> apalis_core::error::Error>,
+            CatchPanicLayer<fn(Box<dyn std::any::Any + Send>) -> AbortError, AbortError>,
             Middleware,
         >,
     >;
@@ -298,7 +300,7 @@ impl<Args, Ctx, Source, Middleware> WorkerBuilderExt<Args, Ctx, Source, Middlewa
         Ctx,
         Source,
         Stack<
-            CatchPanicLayer<fn(Box<dyn std::any::Any + Send>) -> apalis_core::error::BoxDynError>,
+            CatchPanicLayer<fn(Box<dyn std::any::Any + Send>) -> AbortError, AbortError>,
             Middleware,
         >,
     > {

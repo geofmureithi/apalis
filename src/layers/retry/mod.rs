@@ -62,7 +62,7 @@
 
 use apalis_core::error::AbortError;
 
-use apalis_core::task::metadata::{Meta, MetadataExt};
+use apalis_core::task::metadata::MetadataExt;
 use apalis_core::task::Task;
 use std::any::Any;
 use tower::retry::backoff::Backoff;
@@ -71,8 +71,6 @@ use tower::retry::backoff::Backoff;
 pub use tower::retry::*;
 /// Re-exports from [`tower::util`]
 pub use tower::util::rng::HasherRng;
-
-type Req<T, Ctx> = Task<T, Ctx>;
 
 /// Retries a task with backoff
 #[derive(Clone, Debug)]
@@ -103,10 +101,12 @@ impl<B> BackoffRetryPolicy<B> {
     }
 }
 
-impl<T, Res, Ctx, B, Err: Any> Policy<Req<T, Ctx>, Res, Err> for BackoffRetryPolicy<B>
+impl<T, Res, Ctx, B, Err: Any, IdType> Policy<Task<T, Ctx, IdType>, Res, Err>
+    for BackoffRetryPolicy<B>
 where
     T: Clone,
     Ctx: Clone,
+    IdType: Clone,
     B: Backoff,
     B::Future: Send + 'static,
 {
@@ -114,7 +114,7 @@ where
 
     fn retry(
         &mut self,
-        req: &mut Req<T, Ctx>,
+        req: &mut Task<T, Ctx, IdType>,
         result: &mut Result<Res, Err>,
     ) -> Option<Self::Future> {
         let attempt = req.parts.attempt.current();
@@ -140,7 +140,7 @@ where
         }
     }
 
-    fn clone_request(&mut self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
+    fn clone_request(&mut self, req: &Task<T, Ctx, IdType>) -> Option<Task<T, Ctx, IdType>> {
         let req = req.clone();
         Some(req)
     }
@@ -186,16 +186,17 @@ impl RetryPolicy {
     }
 }
 
-impl<T, Res, Ctx, Err: Any> Policy<Req<T, Ctx>, Res, Err> for RetryPolicy
+impl<T, Res, Ctx, Err: Any, IdType> Policy<Task<T, Ctx, IdType>, Res, Err> for RetryPolicy
 where
     T: Clone,
     Ctx: Clone,
+    IdType: Clone,
 {
     type Future = std::future::Ready<()>;
 
     fn retry(
         &mut self,
-        req: &mut Req<T, Ctx>,
+        req: &mut Task<T, Ctx, IdType>,
         result: &mut Result<Res, Err>,
     ) -> Option<Self::Future> {
         let attempt = req.parts.attempt.current();
@@ -220,7 +221,7 @@ where
         }
     }
 
-    fn clone_request(&mut self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
+    fn clone_request(&mut self, req: &Task<T, Ctx, IdType>) -> Option<Task<T, Ctx, IdType>> {
         let req = req.clone();
         Some(req)
     }
@@ -246,18 +247,18 @@ impl<P, F> RetryIfPolicy<P, F> {
         FromTaskConfigPolicy::new(self)
     }
 }
-impl<T, Res, Ctx, P, F, Err> Policy<Req<T, Ctx>, Res, Err> for RetryIfPolicy<P, F>
+impl<T, Res, Ctx, P, F, Err, IdType> Policy<Task<T, Ctx, IdType>, Res, Err> for RetryIfPolicy<P, F>
 where
     T: Clone,
     Ctx: Clone,
-    P: Policy<Req<T, Ctx>, Res, Err>,
+    P: Policy<Task<T, Ctx, IdType>, Res, Err>,
     F: Fn(&Err) -> bool + Send + Sync + 'static,
 {
     type Future = P::Future;
 
     fn retry(
         &mut self,
-        req: &mut Req<T, Ctx>,
+        req: &mut Task<T, Ctx, IdType>,
         result: &mut Result<Res, Err>,
     ) -> Option<Self::Future> {
         match result {
@@ -271,7 +272,7 @@ where
         }
     }
 
-    fn clone_request(&mut self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
+    fn clone_request(&mut self, req: &Task<T, Ctx, IdType>) -> Option<Task<T, Ctx, IdType>> {
         self.inner.clone_request(req)
     }
 }
@@ -293,28 +294,36 @@ impl<P> FromTaskConfigPolicy<P> {
     pub fn new(inner: P) -> Self {
         Self { inner }
     }
+
+    /// Retry the task if the predicate returns true
+    pub fn retry_if<F, Err>(self, predicate: F) -> RetryIfPolicy<Self, F>
+    where
+        F: Fn(&Err) -> bool + Send + Sync + 'static,
+    {
+        RetryIfPolicy::new(self, predicate)
+    }
 }
 
 impl Default for FromTaskConfigPolicy<RetryPolicy> {
     fn default() -> Self {
         Self {
-            inner: RetryPolicy::default(),
+            inner: RetryPolicy::retries(0),
         }
     }
 }
 
-impl<T, Res, Ctx, P, Err> Policy<Req<T, Ctx>, Res, Err> for FromTaskConfigPolicy<P>
+impl<T, Res, Ctx, P, Err, IdType> Policy<Task<T, Ctx, IdType>, Res, Err> for FromTaskConfigPolicy<P>
 where
     T: Clone,
     Ctx: Clone,
-    P: Policy<Req<T, Ctx>, Res, Err>,
+    P: Policy<Task<T, Ctx, IdType>, Res, Err>,
     Ctx: MetadataExt<RetryConfig>,
 {
     type Future = P::Future;
 
     fn retry(
         &mut self,
-        req: &mut Req<T, Ctx>,
+        req: &mut Task<T, Ctx, IdType>,
         result: &mut Result<Res, Err>,
     ) -> Option<Self::Future> {
         match result {
@@ -333,14 +342,14 @@ where
         }
     }
 
-    fn clone_request(&mut self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
+    fn clone_request(&mut self, req: &Task<T, Ctx, IdType>) -> Option<Task<T, Ctx, IdType>> {
         self.inner.clone_request(req)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{f32::consts::E, time::Duration};
+    use std::time::Duration;
 
     use apalis_core::{
         backend::memory::MemoryStorage,
@@ -355,8 +364,6 @@ mod tests {
     use crate::layers::WorkerBuilderExt;
 
     use super::*;
-
-    const ITEMS: u32 = 100;
 
     #[tokio::test]
     async fn basic_worker_retries() {
@@ -387,18 +394,18 @@ mod tests {
                 worker.stop().unwrap();
             }
             if task == 3 {
-                return Err(ShouldSkipError)?;
+                return Err(SkipRetryError)?;
             }
             Err("Always fail if not 3")?
         }
         #[derive(Debug)]
-        pub struct ShouldSkipError;
+        struct SkipRetryError;
 
-        impl std::error::Error for ShouldSkipError {}
+        impl std::error::Error for SkipRetryError {}
 
-        impl std::fmt::Display for ShouldSkipError {
+        impl std::fmt::Display for SkipRetryError {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "ShouldSkipError")
+                write!(f, "SkipRetryError")
             }
         }
 
@@ -406,8 +413,10 @@ mod tests {
             .backend(in_memory)
             .retry(
                 RetryPolicy::retries(3)
-                    .retry_if(|e: &BoxDynError| e.downcast_ref::<ShouldSkipError>().is_none())
-                    .from_task_config(),
+                    // Use task config if it exists
+                    .from_task_config()
+                    // Skip retries for SkipRetryError
+                    .retry_if(|e: &BoxDynError| e.downcast_ref::<SkipRetryError>().is_none()),
             )
             .on_event(|ctx, ev| {
                 println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);

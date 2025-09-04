@@ -1,50 +1,53 @@
+use apalis_core::error::AbortError;
+use apalis_core::task::Task;
 use std::any::Any;
 use std::fmt;
 use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
-
-use apalis_core::error::Error;
-use apalis_core::task::Task;
 use tower::Layer;
 use tower::Service;
 
 /// Apalis Layer that catches panics in the service.
 #[derive(Clone, Debug)]
-pub struct CatchPanicLayer<F> {
+pub struct CatchPanicLayer<F, Err> {
     on_panic: F,
+    _marker: std::marker::PhantomData<Err>,
 }
 
-impl CatchPanicLayer<fn(Box<dyn Any + Send>) -> Error> {
+impl CatchPanicLayer<fn(Box<dyn Any + Send + 'static>) -> AbortError, AbortError> {
     /// Creates a new `CatchPanicLayer` with a default panic handler.
     pub fn new() -> Self {
         CatchPanicLayer {
             on_panic: default_handler,
+            _marker: std::marker::PhantomData,
         }
     }
 }
 
-impl Default for CatchPanicLayer<fn(Box<dyn Any + Send>) -> Error> {
+impl Default for CatchPanicLayer<fn(Box<dyn Any + Send>) -> AbortError, AbortError> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<F> CatchPanicLayer<F>
+impl<F, Err> CatchPanicLayer<F, Err>
 where
-    F: FnMut(Box<dyn Any + Send>) -> Error + Clone,
+    F: FnMut(Box<dyn Any + Send>) -> Err + Clone,
 {
     /// Creates a new `CatchPanicLayer` with a custom panic handler.
     pub fn with_panic_handler(on_panic: F) -> Self {
-        CatchPanicLayer { on_panic }
+        CatchPanicLayer {
+            on_panic,
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
-impl<S, F> Layer<S> for CatchPanicLayer<F>
+impl<S, F, Err> Layer<S> for CatchPanicLayer<F, Err>
 where
-    F: FnMut(Box<dyn Any + Send>) -> Error + Clone,
+    F: FnMut(Box<dyn Any + Send>) -> Err + Clone,
 {
     type Service = CatchPanicService<S, F>;
 
@@ -63,33 +66,35 @@ pub struct CatchPanicService<S, F> {
     on_panic: F,
 }
 
-impl<S, Req, Res, Ctx, F> Service<Request<Req, Ctx>> for CatchPanicService<S, F>
+impl<S, Req, Res, Ctx, F, Err> Service<Task<Req, Ctx>> for CatchPanicService<S, F>
 where
-    S: Service<Request<Req, Ctx>, Response = Res, Error = Error>,
-    F: FnMut(Box<dyn Any + Send>) -> Error + Clone,
+    S: Service<Task<Req, Ctx>, Response = Res, Error = Err>,
+    F: FnMut(Box<dyn Any + Send>) -> Err + Clone,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = CatchPanicFuture<S::Future, F>;
+    type Future = CatchPanicFuture<S::Future, F, Err>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
+    fn call(&mut self, request: Task<Req, Ctx>) -> Self::Future {
         CatchPanicFuture {
             future: self.service.call(request),
             on_panic: self.on_panic.clone(),
+            _marker: std::marker::PhantomData,
         }
     }
 }
 
 pin_project_lite::pin_project! {
     /// A wrapper that catches panics during execution
-    pub struct CatchPanicFuture<Fut, F> {
+    pub struct CatchPanicFuture<Fut, F, Err> {
         #[pin]
         future: Fut,
         on_panic: F,
+        _marker: std::marker::PhantomData<Err>,
     }
 }
 
@@ -105,12 +110,12 @@ impl fmt::Display for PanicError {
     }
 }
 
-impl<Fut, Res, F> Future for CatchPanicFuture<Fut, F>
+impl<Fut, Res, F, Err> Future for CatchPanicFuture<Fut, F, Err>
 where
-    Fut: Future<Output = Result<Res, Error>>,
-    F: FnMut(Box<dyn Any + Send>) -> Error,
+    Fut: Future<Output = Result<Res, Err>>,
+    F: FnMut(Box<dyn Any + Send>) -> Err,
 {
-    type Output = Result<Res, Error>;
+    type Output = Result<Res, Err>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().project();
@@ -122,7 +127,7 @@ where
     }
 }
 
-fn default_handler(e: Box<dyn Any + Send>) -> Error {
+fn default_handler(e: Box<dyn Any + Send>) -> AbortError {
     let panic_info = if let Some(s) = e.downcast_ref::<&str>() {
         s.to_string()
     } else if let Some(s) = e.downcast_ref::<String>() {
@@ -132,15 +137,16 @@ fn default_handler(e: Box<dyn Any + Send>) -> Error {
     };
     // apalis assumes service functions are pure
     // therefore a panic should ideally abort
-    Error::Abort(Arc::new(Box::new(PanicError(panic_info))))
+    AbortError::new(PanicError(panic_info))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use apalis_core::error::BoxDynError;
     use std::task::{Context, Poll};
-    use tower::Service;
+    use tower::{Service, ServiceExt};
 
     #[derive(Clone, Debug)]
     struct TestJob;
@@ -148,16 +154,16 @@ mod tests {
     #[derive(Clone)]
     struct TestService;
 
-    impl Service<Request<TestJob, ()>> for TestService {
+    impl Service<Task<TestJob, ()>> for TestService {
         type Response = usize;
-        type Error = Error;
+        type Error = AbortError;
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
         fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
 
-        fn call(&mut self, _req: Request<TestJob, ()>) -> Self::Future {
+        fn call(&mut self, _req: Task<TestJob, ()>) -> Self::Future {
             Box::pin(async { Ok(42) })
         }
     }
@@ -167,7 +173,7 @@ mod tests {
         let layer = CatchPanicLayer::new();
         let mut service = layer.layer(TestService);
 
-        let request = Request::new(TestJob);
+        let request = Task::new(TestJob);
         let response = service.call(request).await;
 
         assert!(response.is_ok());
@@ -177,16 +183,16 @@ mod tests {
     async fn test_catch_panic_layer_panics() {
         struct PanicService;
 
-        impl Service<Request<TestJob, ()>> for PanicService {
+        impl Service<Task<TestJob, ()>> for PanicService {
             type Response = usize;
-            type Error = Error;
+            type Error = AbortError;
             type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
             fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
                 Poll::Ready(Ok(()))
             }
 
-            fn call(&mut self, _req: Request<TestJob, ()>) -> Self::Future {
+            fn call(&mut self, _req: Task<TestJob, ()>) -> Self::Future {
                 Box::pin(async { None.unwrap() })
             }
         }
@@ -194,7 +200,7 @@ mod tests {
         let layer = CatchPanicLayer::new();
         let mut service = layer.layer(PanicService);
 
-        let request = Request::new(TestJob);
+        let request = Task::new(TestJob);
         let response = service.call(request).await;
 
         assert!(response.is_err());
