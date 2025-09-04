@@ -26,7 +26,7 @@
 //!
 use crate::task::{
     attempt::Attempt, extensions::Extensions, metadata::MetadataExt, status::Status,
-    task_id::TaskId, ExecutionContext, Task,
+    task_id::TaskId, Parts, Task,
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -159,11 +159,11 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
 
         Task {
             args: self.args,
-            ctx: ExecutionContext {
+            parts: Parts {
                 task_id: self.task_id,
                 data: self.data,
                 attempt: self.attempt.unwrap_or_default(),
-                backend_ctx: self.ctx,
+                ctx: self.ctx,
                 status: self.status.unwrap_or(Status::Pending),
                 run_at: self.run_at.unwrap_or_else(current_time),
             },

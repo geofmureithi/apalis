@@ -10,7 +10,7 @@ use apalis_core::response::Response;
 use apalis_core::storage::Storage;
 use apalis_core::task::namespace::Namespace;
 use apalis_core::task::task_id::TaskId;
-use apalis_core::task::{ExecutionContext, RequestStream, State, Task};
+use apalis_core::task::{Parts, RequestStream, State, Task};
 use apalis_core::worker::{Event, SimpleWorker, WorkerContext, WorkerId};
 use apalis_core::{backend::Backend, codec::Codec};
 use async_stream::try_stream;
@@ -241,7 +241,7 @@ where
     async fn push_request(
         &mut self,
         job: Task<Self::Job, SqlMetadata>,
-    ) -> Result<ExecutionContext<SqlMetadata>, sqlx::Error> {
+    ) -> Result<Parts<SqlMetadata>, sqlx::Error> {
         let (args, parts) = job.take();
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL, ?)";
@@ -254,8 +254,8 @@ where
             .bind(job)
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
-            .bind(parts.backend_ctx.max_attempts())
-            .bind(parts.backend_ctx.priority())
+            .bind(parts.ctx.max_attempts())
+            .bind(parts.ctx.priority())
             .execute(&pool)
             .await?;
         Ok(parts)
@@ -264,7 +264,7 @@ where
     async fn push_raw_request(
         &mut self,
         job: Task<Self::Compact, SqlMetadata>,
-    ) -> Result<ExecutionContext<SqlMetadata>, sqlx::Error> {
+    ) -> Result<Parts<SqlMetadata>, sqlx::Error> {
         let (args, parts) = job.take();
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, now(), NULL, NULL, NULL, NULL, ?)";
@@ -277,8 +277,8 @@ where
             .bind(job)
             .bind(parts.task_id.to_string())
             .bind(job_type.to_string())
-            .bind(parts.backend_ctx.max_attempts())
-            .bind(parts.backend_ctx.priority())
+            .bind(parts.ctx.max_attempts())
+            .bind(parts.ctx.priority())
             .execute(&pool)
             .await?;
         Ok(parts)
@@ -288,7 +288,7 @@ where
         &mut self,
         req: Task<Self::Job, SqlMetadata>,
         on: i64,
-    ) -> Result<ExecutionContext<Self::Context>, sqlx::Error> {
+    ) -> Result<Parts<Self::Context>, sqlx::Error> {
         let query =
             "INSERT INTO jobs VALUES (?, ?, ?, 'Pending', 0, ?, ?, NULL, NULL, NULL, NULL, ?)";
         let pool = self.pool.clone();
@@ -303,9 +303,9 @@ where
             .bind(args)
             .bind(req.ctx.task_id.to_string())
             .bind(job_type)
-            .bind(req.ctx.backend_ctx.max_attempts())
+            .bind(req.ctx.ctx.max_attempts())
             .bind(on)
-            .bind(req.ctx.backend_ctx.priority())
+            .bind(req.ctx.ctx.priority())
             .execute(&pool)
             .await?;
         Ok(req.ctx)
@@ -369,7 +369,7 @@ where
 
     async fn update(&mut self, job: Task<Self::Job, SqlMetadata>) -> Result<(), sqlx::Error> {
         let pool = self.pool.clone();
-        let ctx = job.ctx.backend_ctx;
+        let ctx = job.ctx.ctx;
         let status = ctx.status().to_string();
         let attempts = job.ctx.attempt;
         let done_at = *ctx.done_at();
@@ -631,7 +631,7 @@ impl<T, C: Codec> MysqlStorage<T, C> {
 impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExpose<J>
     for MysqlStorage<J>
 {
-    type Request = Task<J, ExecutionContext<SqlMetadata>>;
+    type Request = Task<J, Parts<SqlMetadata>>;
     type Error = SqlError;
     async fn stats(&self) -> Result<Stat, Self::Error> {
         let fetch_query = "SELECT
@@ -816,7 +816,7 @@ mod tests {
         let worker = register_worker(&mut storage).await;
 
         let job = consume_one(&mut storage, &worker).await;
-        let ctx = job.ctx.backend_ctx;
+        let ctx = job.ctx.ctx;
         // TODO: Fix assertions
         assert_eq!(*ctx.status(), State::Running);
         assert_eq!(*ctx.lock_by(), Some(worker.id().clone()));
@@ -841,7 +841,7 @@ mod tests {
             .expect("failed to kill job");
 
         let job = get_job(&mut storage, job_id).await;
-        let ctx = job.ctx.backend_ctx;
+        let ctx = job.ctx.ctx;
         // TODO: Fix assertions
         assert_eq!(*ctx.status(), State::Killed);
         assert!(ctx.done_at().is_some());
@@ -872,7 +872,7 @@ mod tests {
 
         // fetch job
         let job = consume_one(&mut storage, &worker).await;
-        let ctx = job.ctx.backend_ctx;
+        let ctx = job.ctx.ctx;
 
         assert_eq!(*ctx.status(), State::Running);
 

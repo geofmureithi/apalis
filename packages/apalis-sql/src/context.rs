@@ -121,6 +121,6 @@ impl<Args: Sync, IdType: Send + Sync, Value: Clone + Sync>
     async fn from_request(
         req: &Task<Args, SqlMetadata<Value>, IdType>,
     ) -> Result<Self, Infallible> {
-        Ok(req.ctx.backend_ctx.clone())
+        Ok(req.ctx.ctx.clone())
     }
 }

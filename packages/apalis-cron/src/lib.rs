@@ -156,7 +156,7 @@ use apalis_core::task::builder::TaskBuilder;
 use apalis_core::task::data::MissingDataError;
 use apalis_core::task::extensions::Extensions;
 use apalis_core::task::task_id::{TaskId, Ulid};
-use apalis_core::task::{ExecutionContext, Task};
+use apalis_core::task::{Parts, Task};
 use apalis_core::timer::Delay;
 use apalis_core::worker::context::WorkerContext;
 use chrono::{DateTime, Days, NaiveDateTime, Offset, OutOfRangeError, TimeDelta, TimeZone, Utc};
@@ -210,7 +210,7 @@ impl<Tz: TimeZone + Unpin> Stream for CronStream<Tz>
 where
     Tz::Offset: Unpin,
 {
-    type Item = Result<CronTick<Tz>, CronStreamError<Tz>>;
+    type Item = Result<Tick<Tz>, CronStreamError<Tz>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -243,7 +243,7 @@ where
                             let mut upcoming = self.schedule.upcoming(self.timezone.clone());
                             self.next_tick = upcoming.find(|dt| *dt > fired);
                             self.delay = None;
-                            return Poll::Ready(Some(Ok(CronTick { timestamp: fired })));
+                            return Poll::Ready(Some(Ok(Tick { timestamp: fired })));
                         }
                     }
                 }
@@ -260,19 +260,19 @@ where
     }
 }
 
-impl<Ctx, Tz, B> PipeExt<B, CronTick<Tz>, Ctx> for CronStream<Tz>
+impl<Ctx, Tz, B> PipeExt<B, Tick<Tz>, Ctx> for CronStream<Tz>
 where
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync,
-    B: Backend<CronTick<Tz>, Ctx>,
+    B: Backend<Tick<Tz>>,
     B::Error: Into<BoxDynError> + Send + Sync + 'static,
 {
-    fn pipe_to(self, backend: B) -> Pipe<Self, B, CronTick<Tz>, Ctx> {
+    fn pipe_to(self, backend: B) -> Pipe<Self, B, Tick<Tz>, Ctx> {
         Pipe::new(self, backend)
     }
 }
 
-impl<Tz: TimeZone> Default for CronTick<Tz>
+impl<Tz: TimeZone> Default for Tick<Tz>
 where
     DateTime<Tz>: Default,
 {
@@ -283,7 +283,7 @@ where
     }
 }
 
-impl<Tz: TimeZone> CronTick<Tz> {
+impl<Tz: TimeZone> Tick<Tz> {
     /// Create a new context provided a timestamp
     pub fn new(timestamp: DateTime<Tz>) -> Self {
         Self { timestamp }
@@ -295,13 +295,15 @@ impl<Tz: TimeZone> CronTick<Tz> {
     }
 }
 
-impl<Tz: Unpin> Backend<CronTick<Tz>> for CronStream<Tz>
+impl<Tz: Unpin> Backend<Tick<Tz>> for CronStream<Tz>
 where
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync + Unpin + Display,
 {
+    type Ctx = CronContext;
+    type Codec = ();
     type Error = CronStreamError<Tz>;
-    type Stream = TaskStream<Task<CronTick<Tz>, CronMeta, Ulid>, CronStreamError<Tz>>;
+    type Stream = TaskStream<Task<Tick<Tz>, CronContext, Ulid>, CronStreamError<Tz>>;
 
     type Layer = Identity;
 
@@ -317,7 +319,7 @@ where
     }
 
     fn poll(self, _: &WorkerContext) -> Self::Stream {
-        let meta = CronMeta {
+        let meta = CronContext {
             schedule: Arc::new(self.schedule.clone()),
         };
         let stream = self.and_then(move |tick| {
@@ -391,18 +393,18 @@ impl<Tz: TimeZone> fmt::Debug for CronStreamError<Tz> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CronTick<Tz: TimeZone = Utc> {
+pub struct Tick<Tz: TimeZone = Utc> {
     pub timestamp: DateTime<Tz>,
 }
 
 #[derive(Debug, Clone)]
-pub struct CronMeta {
+pub struct CronContext {
     schedule: Arc<Schedule>,
 }
 
 const FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
-impl<Tz> Serialize for CronTick<Tz>
+impl<Tz> Serialize for Tick<Tz>
 where
     Tz: TimeZone,
     Tz::Offset: std::fmt::Display,
@@ -416,7 +418,7 @@ where
     }
 }
 
-impl<'de, Tz> Deserialize<'de> for CronTick<Tz>
+impl<'de, Tz> Deserialize<'de> for Tick<Tz>
 where
     Tz: TimeZone + TimeZoneExt,
 {
@@ -428,7 +430,7 @@ where
         let naive = NaiveDateTime::parse_from_str(&s, FORMAT).map_err(serde::de::Error::custom)?;
         let datetime =
             Tz::from_utc_datetime(&Tz::from_offset(&Tz::utc_offset_from_naive(&naive)), &naive);
-        Ok(CronTick {
+        Ok(Tick {
             timestamp: datetime,
         })
     }
@@ -451,10 +453,10 @@ impl TimeZoneExt for chrono::Local {
     }
 }
 
-impl<Args: Sync, IdType: Sync> FromRequest<Task<Args, CronMeta, IdType>> for CronMeta {
+impl<Args: Sync, IdType: Sync> FromRequest<Task<Args, CronContext, IdType>> for CronContext {
     type Error = Infallible;
-    async fn from_request(req: &Task<Args, CronMeta, IdType>) -> Result<Self, Self::Error> {
-        Ok(req.ctx.backend_ctx.clone())
+    async fn from_request(req: &Task<Args, CronContext, IdType>) -> Result<Self, Self::Error> {
+        Ok(req.ctx.ctx.clone())
     }
 }
 
@@ -476,7 +478,7 @@ mod tests {
         let schedule = Schedule::from_str("1/1 * * * * *").unwrap();
         let stream = CronStream::new_with_timezone(schedule, Utc);
 
-        async fn send_reminder(tick: CronTick<Utc>, meta: CronMeta) -> Result<(), BoxDynError> {
+        async fn send_reminder(tick: Tick<Utc>, meta: CronContext) -> Result<(), BoxDynError> {
             tokio::time::sleep(Duration::from_secs(1)).await;
             println!(
                 "Running cronjob for timestamp: {} with meta: {:?}",
@@ -512,7 +514,7 @@ mod tests {
 
         let backend = stream.pipe_to(in_memory);
 
-        async fn send_reminder(job: CronTick, id: TaskId) -> Result<(), BoxDynError> {
+        async fn send_reminder(job: Tick, id: TaskId) -> Result<(), BoxDynError> {
             println!("Running cronjob for timestamp: {:?} with id {}", job, id);
             tokio::time::sleep(Duration::from_secs(1)).await;
             Err("All failing".into())

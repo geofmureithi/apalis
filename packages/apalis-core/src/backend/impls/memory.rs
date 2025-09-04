@@ -38,7 +38,6 @@
 //! - [`WorkerContext`](crate::worker::context::WorkerContext)
 
 use crate::task::extensions::Extensions;
-
 use crate::{
     backend::{Backend, TaskStream},
     task::{
@@ -148,7 +147,7 @@ impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemorySink<Args, Ctx> {
     fn start_send(self: Pin<&mut Self>, mut item: Task<Args, Ctx>) -> Result<(), Self::Error> {
         let mut lock = self.inner.try_lock().unwrap();
         // Ensure task has id
-        item.ctx
+        item.parts
             .task_id
             .get_or_insert_with(|| TaskId::new(RandomId::default()));
         Pin::new(&mut *lock).start_send_unpin(item)

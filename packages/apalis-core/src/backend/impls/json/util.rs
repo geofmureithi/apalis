@@ -76,7 +76,7 @@ impl<Args: Send + 'static + Debug, Res: Serialize, Ctx: Sync> Acknowledge<Res, C
     fn ack(
         &mut self,
         res: &Result<Res, BoxDynError>,
-        ctx: &crate::task::ExecutionContext<Ctx, RandomId>,
+        ctx: &crate::task::Parts<Ctx, RandomId>,
     ) -> Self::Future {
         let store = self.inner.clone();
         let val = serde_json::to_value(res.as_ref().map_err(|e| e.to_string())).unwrap();

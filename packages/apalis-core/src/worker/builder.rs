@@ -179,8 +179,8 @@ where
     }
     /// Allows adding a single layer [tower] middleware
     pub fn layer<U>(self, layer: U) -> WorkerBuilder<Args, Ctx, B, Stack<U, M>>
-    where
-        M: Layer<U>,
+    // where
+    //     M: Layer<U>,
     {
         WorkerBuilder {
             request: self.request,

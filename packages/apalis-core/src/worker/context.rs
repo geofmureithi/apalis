@@ -343,8 +343,8 @@ impl<Args: Sync, Ctx: Sync, IdType: Sync + Send> FromRequest<Task<Args, Ctx, IdT
     for WorkerContext
 {
     type Error = MissingDataError;
-    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        req.ctx.data.get_checked().cloned()
+    async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
+        task.parts.data.get_checked().cloned()
     }
 }
 
@@ -356,7 +356,7 @@ impl Drop for WorkerContext {
         }
         if self.is_running() {
             eprintln!(
-                "WorkerContext for worker '{}' with remaining tasks: `{}` is being dropped while still running. Consider calling stop() before dropping.",
+                "Worker '{}' is being dropped with `{}` tasks still running. Consider calling stop() before dropping.",
                 self.name(),
                 self.task_count()
             );

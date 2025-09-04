@@ -239,7 +239,6 @@ where
         self.run_with_ctx(&mut ctx).await
     }
 
-
     /// Run the worker with the given context.
     ///
     /// See [`run`](Self::run) for an example.
@@ -256,7 +255,7 @@ where
     }
 
     /// Returns a stream that will yield events as they occur within the worker's lifecycle
-    /// 
+    ///
     /// # Example
     ///
     /// ```rust,no_run
@@ -292,7 +291,7 @@ where
 
     /// Returns a stream that will yield events as they occur within the worker's lifecycle when provided
     /// with a [`WorkerContext`].
-    /// 
+    ///
     /// See [`stream`](Self::stream) for an example.
     pub fn stream_with_ctx(
         self,
@@ -431,11 +430,11 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Task<Args, Ctx, IdType>) -> Self::Future {
-        let attempt = request.ctx.attempt.clone();
+    fn call(&mut self, task: Task<Args, Ctx, IdType>) -> Self::Future {
+        let attempt = task.parts.attempt.clone();
         self.ctx.track(AttemptOnPollFuture {
             attempt,
-            fut: self.service.call(request),
+            fut: self.service.call(task),
             polled: false,
         })
     }
@@ -448,6 +447,17 @@ pin_project_lite::pin_project! {
         #[pin]
         fut: Fut,
         polled: bool,
+    }
+}
+
+impl<Fut> AttemptOnPollFuture<Fut> {
+    /// Create a new attempt on poll future
+    pub fn new(attempt: Attempt, fut: Fut) -> Self {
+        Self {
+            attempt,
+            fut,
+            polled: false,
+        }
     }
 }
 
@@ -537,7 +547,7 @@ mod tests {
             TaskSink,
             {json::JsonStorage, memory::MemoryStorage},
         },
-        task::ExecutionContext,
+        task::Parts,
         worker::{
             builder::WorkerBuilder,
             ext::{
@@ -593,7 +603,7 @@ mod tests {
             fn ack(
                 &mut self,
                 res: &Result<(), BoxDynError>,
-                parts: &ExecutionContext<Ctx, IdType>,
+                parts: &Parts<Ctx, IdType>,
             ) -> Self::Future {
                 println!("{res:?}, {parts:?}");
                 ready(Ok(())).boxed()

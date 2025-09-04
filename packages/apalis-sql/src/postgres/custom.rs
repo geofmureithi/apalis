@@ -130,7 +130,7 @@ mod tests {
         task_fn::{self, service_fn, TaskFn},
         task::{
             task_id::{TaskId, Ulid},
-            ExecutionContext,
+            Parts,
         },
         worker::{
             builder::WorkerBuilder,
@@ -319,7 +319,7 @@ mod tests {
             .backend(backend)
             .layer(ConcurrencyLimitLayer::new(1))
             .ack_with(
-                move |res: &Result<(), BoxDynError>, meta: &ExecutionContext<SqlMetadata, String>| {
+                move |res: &Result<(), BoxDynError>, meta: &Parts<SqlMetadata, String>| {
                     let p = pool.clone();
                     let id = meta.task_id.as_ref().unwrap().to_string();
                     let status = match res {

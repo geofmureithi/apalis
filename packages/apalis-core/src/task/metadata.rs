@@ -32,8 +32,8 @@ impl<T, Args: Send + Sync, Ctx: MetadataExt<T> + Send + Sync, IdType: Send + Syn
 {
     type Error = Ctx::Error;
 
-    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        req.ctx.backend_ctx.extract().map(Meta)
+    async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
+        task.parts.ctx.extract().map(Meta)
     }
 }
 

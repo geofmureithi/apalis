@@ -60,7 +60,7 @@ use apalis_core::{
         attempt::Attempt,
         status::Status,
         task_id::{TaskId, Ulid},
-        ExecutionContext, Task,
+        Parts, Task,
     },
     worker::{
         context::WorkerContext,
@@ -93,7 +93,7 @@ const JOB_META_HASH: &str = "{queue}:meta";
 const SCHEDULED_JOBS_SET: &str = "{queue}:scheduled";
 const SIGNAL_LIST: &str = "{queue}:signal";
 
-pub type RedisContext = ExecutionContext<RedisMetadata, Ulid>;
+pub type RedisContext = Parts<RedisMetadata, Ulid>;
 
 /// The context for a redis storage job
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -116,7 +116,7 @@ impl Default for RedisMetadata {
 impl<Args: Sync> FromRequest<Task<Args, RedisMetadata, Ulid>> for RedisMetadata {
     type Error = Infallible;
     async fn from_request(req: &Task<Args, RedisMetadata, Ulid>) -> Result<Self, Self::Error> {
-        Ok(req.ctx.backend_ctx.clone())
+        Ok(req.ctx.ctx.clone())
     }
 }
 
@@ -351,13 +351,13 @@ where
                         max_attempts: task.max_attempts,
                         ..Default::default()
                     };
-                    let mut ctx = ExecutionContext::default();
+                    let mut ctx = Parts::default();
                     ctx.attempt = Attempt::new_with_value(task.attempts as usize);
-                    ctx.backend_ctx = context;
+                    ctx.ctx = context;
                     ctx.status = task.status;
                     ctx.task_id = Some(task.task_id);
                     let mut task: Task<Args, RedisMetadata, Ulid> = Task::new_with_ctx(args, ctx);
-                    task.ctx.backend_ctx.lock_by = Some(worker.name().to_owned());
+                    task.ctx.ctx.lock_by = Some(worker.name().to_owned());
                     processed.push(task)
                 }
                 Ok(processed)
@@ -578,11 +578,11 @@ where
     fn ack(
         &mut self,
         res: &Result<Res, BoxDynError>,
-        parts: &ExecutionContext<RedisMetadata, Ulid>,
+        parts: &Parts<RedisMetadata, Ulid>,
     ) -> Self::Future {
         let task_id = parts.task_id.unwrap().to_string();
         let attempt = parts.attempt.current();
-        let worker_id = &parts.backend_ctx.lock_by.as_ref().unwrap();
+        let worker_id = &parts.ctx.lock_by.as_ref().unwrap();
         let inflight_set = format!("{}:{}", self.config.inflight_jobs_set(), worker_id);
         let done_jobs_set = self.config.done_jobs_set();
         let dead_jobs_set = self.config.dead_jobs_set();
@@ -639,7 +639,7 @@ async fn push_tasks<Conn: ConnectionLike>(
             .map(|s| s.to_string())
             .unwrap_or(Ulid::new().to_string());
         let attempts = request.ctx.attempt.current() as u32;
-        let max_attempts = request.ctx.backend_ctx.max_attempts;
+        let max_attempts = request.ctx.ctx.max_attempts;
         let job = request.args;
         script = script.arg(task_id).arg(job).arg(attempts).arg(max_attempts);
     }

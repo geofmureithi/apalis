@@ -10,7 +10,7 @@ use tracing::Span;
 /// `on_request` callback is called.
 ///
 /// [`Trace`]: super::Trace
-pub trait OnRequest<B, Ctx> {
+pub trait OnRequest<Args, Ctx, IdType> {
     /// Do the thing.
     ///
     /// `span` is the `tracing` [`Span`], corresponding to this request, produced by the closure
@@ -20,19 +20,19 @@ pub trait OnRequest<B, Ctx> {
     /// [`Span`]: https://docs.rs/tracing/latest/tracing/span/index.html
     /// [record]: https://docs.rs/tracing/latest/tracing/span/struct.Span.html#method.record
     /// [`TraceLayer::make_span_with`]: crate::layers::tracing::TraceLayer::make_span_with
-    fn on_request(&mut self, request: &Request<B, Ctx>, span: &Span);
+    fn on_request(&mut self, request: &Task<Args, Ctx, IdType>, span: &Span);
 }
 
-impl<B, Ctx> OnRequest<B, Ctx> for () {
+impl<Args, Ctx, IdType> OnRequest<Args, Ctx, IdType> for () {
     #[inline]
-    fn on_request(&mut self, _: &Request<B, Ctx>, _: &Span) {}
+    fn on_request(&mut self, _: &Task<Args, Ctx, IdType>, _: &Span) {}
 }
 
-impl<B, F, Ctx> OnRequest<B, Ctx> for F
+impl<Args, F, Ctx, IdType> OnRequest<Args, Ctx, IdType> for F
 where
-    F: FnMut(&Request<B, Ctx>, &Span),
+    F: FnMut(&Task<Args, Ctx, IdType>, &Span),
 {
-    fn on_request(&mut self, request: &Request<B, Ctx>, span: &Span) {
+    fn on_request(&mut self, request: &Task<Args, Ctx, IdType>, span: &Span) {
         self(request, span)
     }
 }
@@ -76,8 +76,8 @@ impl DefaultOnRequest {
     }
 }
 
-impl<B, Ctx> OnRequest<B, Ctx> for DefaultOnRequest {
-    fn on_request(&mut self, _: &Request<B, Ctx>, _: &Span) {
+impl<Args, Ctx, IdType> OnRequest<Args, Ctx, IdType> for DefaultOnRequest {
+    fn on_request(&mut self, _: &Task<Args, Ctx, IdType>, _: &Span) {
         match self.level {
             Level::ERROR => {
                 tracing::event!(Level::ERROR, "task.start",);

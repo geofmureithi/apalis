@@ -8,7 +8,7 @@
 //!
 //! In `apalis`, tasks are designed to represent discrete units of work that can be scheduled, retried, and tracked
 //! throughout their lifecycle. Each task consists of arguments (`args`) describing the work to be performed,
-//! and an [`ExecutionContext`] (`ctx`) containing metadata and control information.
+//! and an [`ExecutionContext`] (`parts`) containing metadata and control information.
 //!
 //! ## [`Task`]
 //!
@@ -65,8 +65,8 @@
 //! ```rust
 //! use apalis_core::task::{Task, ExecutionContext, Status};
 //! let mut task = Task::<String, (), _>::new("work".to_string());
-//! task.ctx.status = Status::Running;
-//! task.ctx.attempt.increment();
+//! task.parts.status = Status::Running;
+//! task.parts.attempt.increment();
 //! ```
 //!
 //! ## Using Extensions for per-task data
@@ -76,7 +76,7 @@
 //! let mut extensions = Extensions::default();
 //! extensions.insert("trace_id", "abc123");
 //! let task = TaskBuilder::new("work".to_string()).with_data(extensions).build();
-//! assert_eq!(task.ctx.data.get::<&str>("trace_id"), Some(&"abc123"));
+//! assert_eq!(task.parts.data.get::<&str>("trace_id"), Some(&"abc123"));
 //! ```
 //!
 //! # See Also
@@ -123,17 +123,17 @@ pub mod task_id;
 /// Should be considered a single unit of work
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
-pub struct Task<Args, Ctx, IdType = RandomId> {
-    /// The inner task part
+pub struct Task<Args, Context, IdType = RandomId> {
+    /// The argument task part
     pub args: Args,
-    /// Context of the task eg id, attempts and context
-    pub ctx: ExecutionContext<Ctx, IdType>,
+    /// Parts of the task eg id, attempts and context
+    pub parts: Parts<Context, IdType>,
 }
 
 /// Component parts of a `Task`
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Default)]
-pub struct ExecutionContext<BackendContext, IdType = RandomId> {
+pub struct Parts<Context, IdType = RandomId> {
     /// The task's id if allocated
     pub task_id: Option<TaskId<IdType>>,
 
@@ -146,7 +146,7 @@ pub struct ExecutionContext<BackendContext, IdType = RandomId> {
     pub attempt: Attempt,
 
     /// The task specific data provided by the backend
-    pub backend_ctx: BackendContext,
+    pub ctx: Context,
 
     /// The task status
     pub status: Status,
@@ -155,7 +155,7 @@ pub struct ExecutionContext<BackendContext, IdType = RandomId> {
     pub run_at: u64,
 }
 
-impl<Ctx, IdType: Clone> Clone for ExecutionContext<Ctx, IdType>
+impl<Ctx, IdType: Clone> Clone for Parts<Ctx, IdType>
 where
     Ctx: Clone,
 {
@@ -164,7 +164,7 @@ where
             task_id: self.task_id.clone(),
             data: self.data.clone(),
             attempt: self.attempt.clone(),
-            backend_ctx: self.backend_ctx.clone(),
+            ctx: self.ctx.clone(),
             status: self.status.clone(),
             run_at: self.run_at,
         }
@@ -184,8 +184,8 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     pub fn new_with_ctx(req: Args, ctx: Ctx) -> Self {
         Self {
             args: req,
-            ctx: ExecutionContext {
-                backend_ctx: ctx,
+            parts: Parts {
+                ctx,
                 task_id: Default::default(),
                 attempt: Default::default(),
                 data: Default::default(),
@@ -204,8 +204,8 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     pub fn new_with_data(req: Args, data: Extensions, ctx: Ctx) -> Self {
         Self {
             args: req,
-            ctx: ExecutionContext {
-                backend_ctx: ctx,
+            parts: Parts {
+                ctx,
                 task_id: Default::default(),
                 attempt: Default::default(),
                 data,
@@ -221,8 +221,8 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     }
 
     /// Take the task into its parts
-    pub fn take(self) -> (Args, ExecutionContext<Ctx, IdType>) {
-        (self.args, self.ctx)
+    pub fn take(self) -> (Args, Parts<Ctx, IdType>) {
+        (self.args, self.parts)
     }
 
     /// Extract a value of type `T` from the task's context
@@ -241,7 +241,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     {
         Ok(Task {
             args: f(self.args)?,
-            ctx: self.ctx,
+            parts: self.parts,
         })
     }
     /// Maps the `args` field using the provided function, consuming the task.
@@ -251,7 +251,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     {
         Task {
             args: f(self.args),
-            ctx: self.ctx,
+            parts: self.parts,
         }
     }
 
@@ -260,21 +260,21 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     where
         F: FnOnce(
             Args,
-            ExecutionContext<Ctx, IdType>,
-        ) -> (NewArgs, ExecutionContext<NewCtx, IdType>),
+            Parts<Ctx, IdType>,
+        ) -> (NewArgs, Parts<NewCtx, IdType>),
     {
-        let (args, parts) = f(self.args, self.ctx);
-        Task { args, ctx: parts }
+        let (args, parts) = f(self.args, self.parts);
+        Task { args, parts: parts }
     }
 
     /// Maps only the `parts` field.
     pub fn map_parts<F, NewCtx>(self, f: F) -> Task<Args, NewCtx, IdType>
     where
-        F: FnOnce(ExecutionContext<Ctx, IdType>) -> ExecutionContext<NewCtx, IdType>,
+        F: FnOnce(Parts<Ctx, IdType>) -> Parts<NewCtx, IdType>,
     {
         Task {
             args: self.args,
-            ctx: f(self.ctx),
+            parts: f(self.parts),
         }
     }
 }

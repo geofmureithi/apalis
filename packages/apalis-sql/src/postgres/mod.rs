@@ -21,7 +21,7 @@ use apalis_core::{
         attempt::Attempt,
         status::Status,
         task_id::{TaskId, Ulid},
-        ExecutionContext, Task,
+        Parts, Task,
     },
     layers::Identity,
     worker::{
@@ -237,8 +237,8 @@ impl<Args, Encode> PgSink<Args, CompactT, Encode> {
                         DateTime::from_timestamp(task.ctx.run_at as i64, 0)
                             .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?,
                     );
-                    priorities.push(*task.ctx.backend_ctx.priority());
-                    max_attempts_vec.push(task.ctx.backend_ctx.max_attempts());
+                    priorities.push(*task.ctx.ctx.priority());
+                    max_attempts_vec.push(task.ctx.ctx.max_attempts());
                 }
 
                 sqlx::query!(
@@ -344,13 +344,13 @@ impl<Res: Serialize> Acknowledge<Res, SqlMetadata, Ulid> for PgAck {
     fn ack(
         &mut self,
         res: &Result<Res, BoxDynError>,
-        parts: &ExecutionContext<SqlMetadata, Ulid>,
+        parts: &Parts<SqlMetadata, Ulid>,
     ) -> Self::Future {
         let task_id = parts.task_id.clone();
-        let worker_id = parts.backend_ctx.lock_by().clone();
+        let worker_id = parts.ctx.lock_by().clone();
 
         let response = serde_json::to_string(&res.as_ref().map_err(|e| e.to_string()));
-        let status = calculate_status(&parts.backend_ctx, res);
+        let status = calculate_status(&parts.ctx, res);
         let attempt = parts.attempt.current() as i32;
         let now = Utc::now();
         let pool = self.pool.clone();
@@ -419,7 +419,7 @@ impl PgTask {
         D::Error: std::error::Error + Send + Sync + 'static,
     {
         let args = D::decode(&self.job).map_err(|e| sqlx::Error::Decode(e.into()))?;
-        let parts = ExecutionContext {
+        let parts = Parts {
             attempt: Attempt::new_with_value(
                 self.attempts
                     .ok_or(sqlx::Error::ColumnNotFound("attempts".to_owned()))?
@@ -440,7 +440,7 @@ impl PgTask {
                 .run_at
                 .ok_or(sqlx::Error::ColumnNotFound("run_at".to_owned()))?
                 .timestamp() as u64,
-            backend_ctx: {
+            ctx: {
                 let mut ctx = SqlMetadata::default();
                 ctx.set_lock_at(self.lock_at.map(|s| s.timestamp()));
                 ctx.set_lock_by(self.lock_by);

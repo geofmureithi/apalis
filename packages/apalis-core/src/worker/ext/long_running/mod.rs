@@ -104,9 +104,9 @@ impl<Args: Sync, Ctx: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args, 
     for LongRunnerCtx
 {
     type Error = MissingDataError;
-    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        let tracker: &TaskTracker = req.ctx.data.get_checked()?;
-        let wrk: &WorkerContext = req.ctx.data.get_checked()?;
+    async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
+        let tracker: &TaskTracker = task.parts.data.get_checked()?;
+        let wrk: &WorkerContext = task.parts.data.get_checked()?;
         Ok(LongRunnerCtx {
             tracker: tracker.clone(),
             wrk: wrk.clone(),
@@ -162,11 +162,11 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, mut request: Task<Args, Ctx, IdType>) -> Self::Future {
+    fn call(&mut self, mut task: Task<Args, Ctx, IdType>) -> Self::Future {
         let tracker = TaskTracker::new();
-        request.ctx.data.insert(tracker.clone());
-        let worker: WorkerContext = request.ctx.data.get().cloned().unwrap();
-        let req = self.service.call(request);
+        task.parts.data.insert(tracker.clone());
+        let worker: WorkerContext = task.parts.data.get().cloned().unwrap();
+        let req = self.service.call(task);
         let fut = async move {
             let res = req.await;
             tracker.close();

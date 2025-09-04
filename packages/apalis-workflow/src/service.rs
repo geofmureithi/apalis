@@ -80,7 +80,7 @@ where
             self.not_ready.is_empty(),
             "Workflow must wait for all services to be ready. Did you forget to call poll_ready()?"
         );
-        let meta: WorkflowRequest = req.ctx.backend_ctx.extract().unwrap_or_default();
+        let meta: WorkflowRequest = req.ctx.ctx.extract().unwrap_or_default();
         let idx = meta.step_index;
         let ctx = StepContext::new(self.backend.clone(), idx);
 

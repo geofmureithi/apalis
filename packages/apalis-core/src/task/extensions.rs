@@ -27,6 +27,7 @@ use std::fmt;
 use std::hash::{BuildHasherDefault, Hasher};
 
 use crate::task::data::MissingDataError;
+use crate::task::metadata::MetadataExt;
 
 type AnyMap = HashMap<TypeId, Box<dyn AnyClone + Send + Sync>, BuildHasherDefault<IdHasher>>;
 
@@ -287,6 +288,18 @@ impl<T: Clone + Send + Sync + 'static> AnyClone for T {
 impl Clone for Box<dyn AnyClone + Send + Sync> {
     fn clone(&self) -> Self {
         (**self).clone_box()
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static> MetadataExt<T> for Extensions {
+    type Error = MissingDataError;
+    fn inject(&mut self, value: T) -> Result<(), Self::Error> {
+        self.insert(value);
+        Ok(())
+    }
+    fn extract(&self) -> Result<T, Self::Error> {
+
+        Ok(self.get_checked::<T>()?.clone())
     }
 }
 

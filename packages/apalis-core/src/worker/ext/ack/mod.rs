@@ -69,7 +69,7 @@ use tower_service::Service;
 use crate::{
     backend::Backend,
     error::BoxDynError,
-    task::{ExecutionContext, Task},
+    task::{Parts, Task},
     worker::{builder::WorkerBuilder, context::WorkerContext},
 };
 
@@ -100,13 +100,13 @@ pub trait Acknowledge<Res, Ctx, IdType> {
     fn ack(
         &mut self,
         res: &Result<Res, BoxDynError>,
-        ctx: &ExecutionContext<Ctx, IdType>,
+        ctx: &Parts<Ctx, IdType>,
     ) -> Self::Future;
 }
 
 impl<Res, Ctx, F, Fut, IdType, E> Acknowledge<Res, Ctx, IdType> for F
 where
-    F: FnMut(&Result<Res, BoxDynError>, &ExecutionContext<Ctx, IdType>) -> Fut,
+    F: FnMut(&Result<Res, BoxDynError>, &Parts<Ctx, IdType>) -> Fut,
     Fut: Future<Output = Result<(), E>>,
 {
     type Error = E;
@@ -115,7 +115,7 @@ where
     fn ack(
         &mut self,
         res: &Result<Res, BoxDynError>,
-        ctx: &ExecutionContext<Ctx, IdType>,
+        ctx: &Parts<Ctx, IdType>,
     ) -> Self::Future {
         (self)(res, ctx)
     }
@@ -180,10 +180,10 @@ where
         self.inner.poll_ready(cx).map_err(|e| e.into())
     }
 
-    fn call(&mut self, req: Task<Args, Ctx, IdType>) -> Self::Future {
-        let parts = req.ctx.clone();
-        let worker: WorkerContext = req.ctx.data.get().cloned().unwrap();
-        let future = self.inner.call(req);
+    fn call(&mut self, task: Task<Args, Ctx, IdType>) -> Self::Future {
+        let parts = task.parts.clone();
+        let worker: WorkerContext = task.parts.data.get().cloned().unwrap();
+        let future = self.inner.call(task);
         let mut acknowledger = self.acknowledger.clone();
         Box::pin(async move {
             let res = future.await.map_err(|e| e.into());

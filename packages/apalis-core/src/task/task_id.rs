@@ -66,8 +66,8 @@ impl<Args: Sync, Ctx: Sync, IdType: Sync + Send + Clone> FromRequest<Task<Args, 
     for TaskId<IdType>
 {
     type Error = MissingDataError;
-    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        Ok(req.ctx.task_id.clone().ok_or(MissingDataError::NotFound(
+    async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
+        Ok(task.parts.task_id.clone().ok_or(MissingDataError::NotFound(
             std::any::type_name::<TaskId<IdType>>().to_string(),
         ))?)
     }

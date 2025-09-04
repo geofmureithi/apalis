@@ -1,17 +1,78 @@
-use futures::{future::BoxFuture, FutureExt};
-use std::fmt;
-use std::sync::Arc;
-use tower::retry::backoff::Backoff;
+//! Retry Policies for Apalis
+//!
+//! This module provides flexible retry strategies for tasks in Apalis workers.
+//!
+//! # Approaches
+//!
+//! ## 1. Fixed Retry Count
+//!
+//! Use [`RetryPolicy`] to retry a task a fixed number of times.
+//!
+//! ```rust
+//! use apalis::layers::retry::RetryPolicy;
+//!
+//! let policy = RetryPolicy::retries(3);
+//! ```
+//!
+//! ## 2. Retry with Backoff
+//!
+//! Use [`BackoffRetryPolicy`] to retry with a backoff strategy (e.g., exponential).
+//!
+//! ```rust
+//! use apalis::layers::retry::{RetryPolicy, BackoffRetryPolicy};
+//! use tower::retry::backoff::ExponentialBackoff;
+//!
+//! let backoff = ExponentialBackoff::from_millis(100);
+//! let policy = RetryPolicy::retries(5).with_backoff(backoff);
+//! ```
+//!
+//! ## 3. Conditional Retry
+//!
+//! Use [`RetryIfPolicy`] to retry only if a predicate matches the error.
+//!
+//! ```rust
+//! use apalis::layers::retry::RetryPolicy;
+//!
+//! let policy = RetryPolicy::retries(3).retry_if(|err: &MyError| err.is_transient());
+//! ```
+//!
+//! ## 4. Retry Based on Task Metadata
+//!
+//! Use [`WithTaskConfig`] to respect per-task retry configuration or else default to the underlying policy.
+//!
+//! ```rust
+//! use apalis::layers::retry::{RetryPolicy, RetryConfig};
+//!
+//! let policy = RetryPolicy::default().with_task_config();
+//! // Attach RetryConfig to your task's metadata
+//! ```
+//!
+//! # Example: Worker with Retry Policy
+//!
+//! ```rust
+//! use apalis::layers::retry::RetryPolicy;
+//! use apalis::worker::builder::WorkerBuilder;
+//!
+//! let worker = WorkerBuilder::new("my-worker")
+//!     .retry(RetryPolicy::retries(3))
+//!     .build(my_task_fn);
+//! ```
+//!
+//! See individual types for more details.
 
-use apalis_core::{error::Error, request::Request};
+use apalis_core::error::AbortError;
+
+use apalis_core::task::metadata::{Meta, MetadataExt};
+use apalis_core::task::Task;
+use std::any::Any;
+use tower::retry::backoff::Backoff;
 
 /// Re-exports from [`tower::retry`]
 pub use tower::retry::*;
 /// Re-exports from [`tower::util`]
 pub use tower::util::rng::HasherRng;
 
-type Req<T, Ctx> = Request<T, Ctx>;
-type Err = Error;
+type Req<T, Ctx> = Task<T, Ctx>;
 
 /// Retries a task with backoff
 #[derive(Clone, Debug)]
@@ -26,22 +87,30 @@ impl<B> BackoffRetryPolicy<B> {
         Self { retries, backoff }
     }
 
-     pub fn retry_if<F>(self, predicate: F) -> RetryIfPolicy<Self, F>
+    /// Retry the task if the predicate returns true
+    pub fn retry_if<F, Err>(self, predicate: F) -> RetryIfPolicy<Self, F>
     where
-        F: Fn(&Error) -> bool + Send + Sync + 'static,
+        F: Fn(&Err) -> bool + Send + Sync + 'static,
     {
         RetryIfPolicy::new(self, predicate)
     }
+
+    /// Retry the task based on [`RetryConfig`] metadata if exists
+    ///
+    /// Falls back to the [`RetryPolicy`] if no metadata is found.
+    pub fn from_task_config(self) -> FromTaskConfigPolicy<Self> {
+        FromTaskConfigPolicy::new(self)
+    }
 }
 
-impl<T, Res, Ctx, B> Policy<Req<T, Ctx>, Res, Err> for BackoffRetryPolicy<B>
+impl<T, Res, Ctx, B, Err: Any> Policy<Req<T, Ctx>, Res, Err> for BackoffRetryPolicy<B>
 where
     T: Clone,
     Ctx: Clone,
     B: Backoff,
     B::Future: Send + 'static,
 {
-    type Future = BoxFuture<'static, ()>;
+    type Future = B::Future;
 
     fn retry(
         &mut self,
@@ -55,25 +124,18 @@ where
                 // so don't retry...
                 None
             }
-            Err(Err::Abort(_)) => return None,
-            Err(err) => {
-                if self.retries == 0 {
-                    *err = Err::Abort(Arc::new(Box::new(RetryPolicyError::ZeroRetries(
-                        err.clone(),
-                    ))));
-                    return None;
-                } else if self.retries >= attempt {
-                    let counter = req.parts.attempt.clone();
-                    return Some(Box::pin(self.backoff.next_backoff().map(move |_| {
-                        counter.increment();
-                    })));
-                } else {
-                    *err = Err::Abort(Arc::new(Box::new(RetryPolicyError::OutOfRetries {
-                        current_attempt: attempt,
-                        inner: err.clone(),
-                    })));
-                    return None;
-                }
+            Err(_) if self.retries == 0 => {
+                return None;
+            }
+            Err(err) if (err as &dyn Any).downcast_ref::<AbortError>().is_some() => {
+                return None;
+            }
+
+            Err(_) if self.retries >= attempt => {
+                return Some(self.backoff.next_backoff());
+            }
+            Err(_) => {
+                return None;
             }
         }
     }
@@ -109,15 +171,22 @@ impl RetryPolicy {
             backoff,
         }
     }
-    pub fn retry_if<F>(self, predicate: F) -> RetryIfPolicy<Self, F>
+    /// Retry the task if the predicate returns true
+    pub fn retry_if<F, Err>(self, predicate: F) -> RetryIfPolicy<Self, F>
     where
-        F: Fn(&Error) -> bool + Send + Sync + 'static,
+        F: Fn(&Err) -> bool + Send + Sync + 'static,
     {
         RetryIfPolicy::new(self, predicate)
     }
+    /// Retry the task based on [`RetryConfig`] metadata if exists
+    ///
+    /// Falls back to the [`RetryPolicy`] if no metadata is found.
+    pub fn from_task_config(self) -> FromTaskConfigPolicy<Self> {
+        FromTaskConfigPolicy::new(self)
+    }
 }
 
-impl<T, Res, Ctx> Policy<Req<T, Ctx>, Res, Err> for RetryPolicy
+impl<T, Res, Ctx, Err: Any> Policy<Req<T, Ctx>, Res, Err> for RetryPolicy
 where
     T: Clone,
     Ctx: Clone,
@@ -136,23 +205,17 @@ where
                 // so don't retry...
                 None
             }
-            Err(Err::Abort(_)) => return None,
-            Err(err) => {
-                if self.retries == 0 {
-                    *err = Err::Abort(Arc::new(Box::new(RetryPolicyError::ZeroRetries(
-                        err.clone(),
-                    ))));
-                    return None;
-                } else if self.retries >= attempt {
-                    req.parts.attempt.increment();
-                    return Some(std::future::ready(()));
-                } else {
-                    *err = Err::Abort(Arc::new(Box::new(RetryPolicyError::OutOfRetries {
-                        current_attempt: attempt,
-                        inner: err.clone(),
-                    })));
-                    return None;
-                }
+            Err(_) if self.retries == 0 => {
+                return None;
+            }
+            Err(err) if (err as &dyn Any).downcast_ref::<AbortError>().is_some() => {
+                return None;
+            }
+            Err(_) if self.retries >= attempt => {
+                return Some(std::future::ready(()));
+            }
+            Err(_) => {
+                return None;
             }
         }
     }
@@ -163,66 +226,32 @@ where
     }
 }
 
-/// The error returned if the [RetryPolicy] forces the task to abort
-/// Works by wrapping the inner error [Error::Abort]
-#[derive(Debug)]
-pub enum RetryPolicyError {
-    /// Attempted all the retries allocated
-    OutOfRetries {
-        /// The current attempt
-        current_attempt: usize,
-        /// The last error to occur
-        inner: Error,
-    },
-    /// Retries forbidden
-    ZeroRetries(Error),
-}
-
-impl fmt::Display for RetryPolicyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RetryPolicyError::OutOfRetries {
-                current_attempt,
-                inner,
-            } => {
-                write!(
-                    f,
-                    "RetryPolicyError: Out of retries after {} attempts: {}",
-                    current_attempt, inner
-                )
-            }
-            RetryPolicyError::ZeroRetries(inner) => {
-                write!(f, "RetryPolicyError: Zero retries allowed: {}", inner)
-            }
-        }
-    }
-}
-
-impl std::error::Error for RetryPolicyError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            RetryPolicyError::OutOfRetries { inner, .. } => inner.source(),
-            RetryPolicyError::ZeroRetries(inner) => inner.source(),
-        }
-    }
-}
-
+/// Retry the task if the predicate returns true
+#[derive(Debug, Clone)]
 pub struct RetryIfPolicy<P, F> {
     inner: P,
     predicate: F,
 }
 
 impl<P, F> RetryIfPolicy<P, F> {
+    /// Build a new retry if policy
     pub fn new(inner: P, predicate: F) -> Self {
         Self { inner, predicate }
     }
+
+    /// Retry the task based on [`RetryConfig`] metadata
+    ///
+    /// Falls back to the [`RetryIfPolicy`] if no metadata is found.
+    pub fn from_task_config(self) -> FromTaskConfigPolicy<Self> {
+        FromTaskConfigPolicy::new(self)
+    }
 }
-impl<T, Res, Ctx, P, F> Policy<Req<T, Ctx>, Res, Err> for RetryIfPolicy<P, F>
+impl<T, Res, Ctx, P, F, Err> Policy<Req<T, Ctx>, Res, Err> for RetryIfPolicy<P, F>
 where
     T: Clone,
     Ctx: Clone,
     P: Policy<Req<T, Ctx>, Res, Err>,
-    F: Fn(&Error) -> bool + Send + Sync + 'static,
+    F: Fn(&Err) -> bool + Send + Sync + 'static,
 {
     type Future = P::Future;
 
@@ -244,5 +273,146 @@ where
 
     fn clone_request(&mut self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
         self.inner.clone_request(req)
+    }
+}
+/// Retry configuration for tasks
+#[derive(Debug, Clone)]
+pub struct RetryConfig {
+    /// The maximum number of retries
+    pub retries: usize,
+}
+
+/// Retry the task based on the [`RetryConfig`] metadata
+#[derive(Debug, Clone)]
+pub struct FromTaskConfigPolicy<P> {
+    inner: P,
+}
+
+impl<P> FromTaskConfigPolicy<P> {
+    /// Build a policy with metadata configuration
+    pub fn new(inner: P) -> Self {
+        Self { inner }
+    }
+}
+
+impl Default for FromTaskConfigPolicy<RetryPolicy> {
+    fn default() -> Self {
+        Self {
+            inner: RetryPolicy::default(),
+        }
+    }
+}
+
+impl<T, Res, Ctx, P, Err> Policy<Req<T, Ctx>, Res, Err> for FromTaskConfigPolicy<P>
+where
+    T: Clone,
+    Ctx: Clone,
+    P: Policy<Req<T, Ctx>, Res, Err>,
+    Ctx: MetadataExt<RetryConfig>,
+{
+    type Future = P::Future;
+
+    fn retry(
+        &mut self,
+        req: &mut Req<T, Ctx>,
+        result: &mut Result<Res, Err>,
+    ) -> Option<Self::Future> {
+        match result {
+            Ok(_) => None,
+            Err(_) => {
+                let attempt = req.parts.attempt.current();
+                // If we have a retry config, we need to respect it
+                if let Ok(cfg) = req.parts.ctx.extract() {
+                    if cfg.retries <= attempt {
+                        return None;
+                    }
+                };
+
+                self.inner.retry(req, result)
+            }
+        }
+    }
+
+    fn clone_request(&mut self, req: &Req<T, Ctx>) -> Option<Req<T, Ctx>> {
+        self.inner.clone_request(req)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{f32::consts::E, time::Duration};
+
+    use apalis_core::{
+        backend::memory::MemoryStorage,
+        error::BoxDynError,
+        task::{attempt::Attempt, builder::TaskBuilder},
+        worker::{
+            builder::WorkerBuilder, context::WorkerContext, ext::event_listener::EventListenerExt,
+        },
+    };
+    use futures::SinkExt;
+
+    use crate::layers::WorkerBuilderExt;
+
+    use super::*;
+
+    const ITEMS: u32 = 100;
+
+    #[tokio::test]
+    async fn basic_worker_retries() {
+        let mut in_memory = MemoryStorage::new();
+
+        let task1 = TaskBuilder::new(1).meta(RetryConfig { retries: 3 }).build();
+        let task2 = TaskBuilder::new(2).build();
+        let task3 = TaskBuilder::new(3).build();
+
+        in_memory.send(task1).await.unwrap();
+        in_memory.send(task2).await.unwrap();
+        in_memory.send(task3).await.unwrap();
+
+        async fn task(
+            task: u32,
+            worker: WorkerContext,
+            attempts: Attempt,
+        ) -> Result<(), BoxDynError> {
+            if task == 1 && attempts.current() == 4 {
+                unreachable!("Task 1 reached 4 attempts");
+            }
+            if task == 3 && attempts.current() == 2 {
+                unreachable!("Task 3 reached retried");
+            }
+            println!("Task {task} attempt {attempts:?}");
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            if task == 2 && attempts.current() == 4 {
+                worker.stop().unwrap();
+            }
+            if task == 3 {
+                return Err(ShouldSkipError)?;
+            }
+            Err("Always fail if not 3")?
+        }
+        #[derive(Debug)]
+        pub struct ShouldSkipError;
+
+        impl std::error::Error for ShouldSkipError {}
+
+        impl std::fmt::Display for ShouldSkipError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "ShouldSkipError")
+            }
+        }
+
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
+            .retry(
+                RetryPolicy::retries(3)
+                    .retry_if(|e: &BoxDynError| e.downcast_ref::<ShouldSkipError>().is_none())
+                    .from_task_config(),
+            )
+            .on_event(|ctx, ev| {
+                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+            })
+            .build(task);
+        worker.run().await.unwrap();
     }
 }

@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use apalis_core::task::Task;
 use tracing::{Level, Span};
 
@@ -8,22 +10,22 @@ use super::DEFAULT_MESSAGE_LEVEL;
 ///
 /// [`Span`]: tracing::Span
 /// [`Trace`]: super::Trace
-pub trait MakeSpan<B, Ctx> {
+pub trait MakeSpan<Args, Ctx, IdType> {
     /// Make a span from a request.
-    fn make_span(&mut self, request: &Request<B, Ctx>) -> Span;
+    fn make_span(&mut self, request: &Task<Args, Ctx, IdType>) -> Span;
 }
 
-impl<B, Ctx> MakeSpan<B, Ctx> for Span {
-    fn make_span(&mut self, _request: &Request<B, Ctx>) -> Span {
+impl<Args, Ctx, IdType> MakeSpan<Args, Ctx, IdType> for Span {
+    fn make_span(&mut self, _request: &Task<Args, Ctx, IdType>) -> Span {
         self.clone()
     }
 }
 
-impl<F, B, Ctx> MakeSpan<B, Ctx> for F
+impl<F, Args, Ctx, IdType> MakeSpan<Args, Ctx, IdType> for F
 where
-    F: FnMut(&Request<B, Ctx>) -> Span,
+    F: FnMut(&Task<Args, Ctx, IdType>) -> Span,
 {
-    fn make_span(&mut self, request: &Request<B, Ctx>) -> Span {
+    fn make_span(&mut self, request: &Task<Args, Ctx, IdType>) -> Span {
         self(request)
     }
 }
@@ -62,12 +64,17 @@ impl Default for DefaultMakeSpan {
     }
 }
 
-impl<B, Ctx> MakeSpan<B, Ctx> for DefaultMakeSpan {
-    fn make_span(&mut self, req: &Request<B, Ctx>) -> Span {
+impl<Args, Ctx, IdType: Display> MakeSpan<Args, Ctx, IdType> for DefaultMakeSpan {
+    fn make_span(&mut self, req: &Task<Args, Ctx, IdType>) -> Span {
         // This ugly macro is needed, unfortunately, because `tracing::span!`
         // required the level argument to be static. Meaning we can't just pass
         // `self.level`.
-        let task_id = req.parts.task_id.to_string();
+        let task_id = req
+            .parts
+            .task_id
+            .as_ref()
+            .expect("A task must have an ID")
+            .to_string();
         let attempt = &req.parts.attempt;
         let span = Span::current();
         macro_rules! make_span {

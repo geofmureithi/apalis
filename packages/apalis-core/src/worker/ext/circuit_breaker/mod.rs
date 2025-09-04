@@ -12,7 +12,7 @@
 //! # Example
 //!
 //! ```rust
-//! # use apalis_core::worker::ext::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
+//! # use apalis_core::worker::ext::circuit_breaker::{CircuitBreaker, config::CircuitBreakerConfig};
 //! # use apalis_core::worker::builder::WorkerBuilder;
 //! # use apalis_core::backend::memory::MemoryStorage;
 //! # use apalis_core::worker::context::WorkerContext;

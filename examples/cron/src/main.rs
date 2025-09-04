@@ -1,6 +1,6 @@
 use apalis::prelude::*;
 
-use apalis_cron::CronTick;
+use apalis_cron::Tick;
 use apalis_cron::CronStream;
 use apalis_cron::Schedule;
 use chrono::Local;
@@ -11,7 +11,7 @@ use tower::load_shed::LoadShedLayer;
 #[derive(Debug, Default)]
 struct Reminder;
 
-async fn send_reminder(_job: Reminder, ctx: CronTick<Local>) {
+async fn send_reminder(_job: Reminder, ctx: Tick<Local>) {
     println!("Running cronjob for timestamp: {}", ctx.get_timestamp())
     // Do something
 }

@@ -105,7 +105,7 @@ where
     ) -> Result<Self::Response, Self::Error> {
         let filter_ctx: FilterContext<Sink::IdType> = steps
             .ctx
-            .backend_ctx
+            .ctx
             .extract()
             .map_err(|e: MetadataError| WorkflowError::MetadataError(e.into()))?;
         let res: Vec<Output> = ctx

@@ -168,14 +168,14 @@ impl JsonStorage<Value> {
         let wrapped_sender = {
             let mut store = self.clone();
 
-            sender.with_flat_map(move |request: Task<Args, JsonMapMetadata>| {
+            sender.with_flat_map(move |task: Task<Args, JsonMapMetadata>| {
                 use crate::task::task_id::RandomId;
-                let task_id = request
-                    .ctx
+                let task_id = task
+                    .parts
                     .task_id
                     .clone()
                     .unwrap_or(TaskId::new(RandomId::default()));
-                let request = request.map(|args| serde_json::to_value(args).unwrap());
+                let task = task.map(|args| serde_json::to_value(args).unwrap());
                 store
                     .insert(
                         &TaskKey {
@@ -184,13 +184,13 @@ impl JsonStorage<Value> {
                             status: Status::Pending,
                         },
                         TaskWithMeta {
-                            args: request.args.clone(),
-                            ctx: request.ctx.backend_ctx.clone(),
+                            args: task.args.clone(),
+                            ctx: task.parts.ctx.clone(),
                             result: None,
                         },
                     )
                     .unwrap();
-                futures_util::stream::iter(vec![Ok(request)])
+                futures_util::stream::iter(vec![Ok(task)])
             })
         };
 

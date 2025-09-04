@@ -64,7 +64,7 @@
 //! [`Layer`]: https://docs.rs/tower/latest/tower/trait.Layer.html
 //! [`Stream`]: https://docs.rs/futures/latest/futures/stream/trait.Stream.html
 /// apalis fully supports middleware via [`Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html)
-// pub mod layers;
+pub mod layers;
 
 /// Common imports
 pub mod prelude {

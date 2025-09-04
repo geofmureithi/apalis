@@ -135,9 +135,9 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: Task<Args, Ctx, IdType>) -> Self::Future {
-        req.ctx.data.insert(self.value.clone());
-        self.inner.call(req)
+    fn call(&mut self, mut task: Task<Args, Ctx, IdType>) -> Self::Future {
+        task.parts.data.insert(self.value.clone());
+        self.inner.call(task)
     }
 }
 
@@ -153,7 +153,7 @@ impl<T: Clone + Send + Sync + 'static, Args: Sync, Ctx: Sync, IdType: Sync + Sen
     for Data<T>
 {
     type Error = MissingDataError;
-    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        req.ctx.data.get_checked().cloned().map(Data::new)
+    async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
+        task.parts.data.get_checked().cloned().map(Data::new)
     }
 }

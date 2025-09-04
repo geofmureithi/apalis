@@ -40,7 +40,7 @@ impl<Args: Unpin + Serialize> Sink<Task<Args, JsonMapMetadata>> for JsonStorage<
             use crate::task::task_id::RandomId;
 
             let task_id = task
-                .ctx
+                .parts
                 .task_id
                 .clone()
                 .unwrap_or(TaskId::new(RandomId::default()));
@@ -54,7 +54,7 @@ impl<Args: Unpin + Serialize> Sink<Task<Args, JsonMapMetadata>> for JsonStorage<
                 &key,
                 TaskWithMeta {
                     args: serde_json::to_value(task.args).unwrap(),
-                    ctx: task.ctx.backend_ctx,
+                    ctx: task.parts.ctx,
                     result: None,
                 },
             )

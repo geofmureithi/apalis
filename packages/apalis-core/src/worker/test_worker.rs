@@ -250,10 +250,10 @@ where
             .map_err(|e| e.into().to_string())
     }
 
-    fn call(&mut self, req: Task<Args, Ctx, IdType>) -> Self::Future {
-        let task_id = req.ctx.task_id.clone().unwrap();
+    fn call(&mut self, task: Task<Args, Ctx, IdType>) -> Self::Future {
+        let task_id = task.parts.task_id.clone().unwrap();
         let mut tx = Clone::clone(&self.tx);
-        let fut = self.service.call(req);
+        let fut = self.service.call(task);
         Box::pin(async move {
             let res = fut.await;
             match res {

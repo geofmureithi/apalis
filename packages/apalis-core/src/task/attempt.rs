@@ -49,8 +49,8 @@ impl<Args: Sync, Ctx: Sync, IdType: Sync + Send> FromRequest<Task<Args, Ctx, IdT
     for Attempt
 {
     type Error = Infallible;
-    async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        Ok(req.ctx.attempt.clone())
+    async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
+        Ok(task.parts.attempt.clone())
     }
 }
 
