@@ -151,7 +151,7 @@
 //! Learn more about workers in the [`worker`](crate::worker) and [`worker::builder`](crate::worker::builder) modules.
 //!
 //! #### Relevant Tutorials:
-//! - [**Creating task handlers**](crate::task_fn::tutorial) - Defining task processing functions using the [`TaskFn`] trait
+//! - [**Creating task handlers**](crate::task_fn::guide) - Defining task processing functions using the [`TaskFn`] trait
 //! - [**Testing task handlers with `TestWorker`**](crate::worker::test_worker) - Specialized worker implementation for unit and integration testing
 //!
 //! ## Monitor
@@ -280,7 +280,7 @@
 //! - Task tracking: Workers keep track of how many tasks are running.
 //! - Shutdown control: The system waits until all tasks are finished before shutting down.
 //! - Monitor coordination: A shared [`Shutdown`] token helps all workers stop together.
-//! - Timeout: You can set a time limit for shutdown using [`with_terminator()`].
+//! - Timeout: You can set a time limit for shutdown using [`with_terminator`](crate::monitor::Monitor::with_terminator).
 //!
 //! Learn more about the graceful shutdown process in the [`monitor`](crate::monitor#graceful-shutdown-with-timeout) module.
 //!
@@ -295,7 +295,7 @@
 //!  Beyond there one may want to dive deeper into the following topics:
 //!
 //! - [**Using CustomBackend**](crate::backend::custom) - using custom backend to integrate with already existing systems
-//! - [**Implementing Backends**](crate::backend::tutorial) - implementing the [`Backend`] trait from scratch
+//! - [**Implementing Backends**](crate::backend::guide) - implementing the [`Backend`] trait from scratch
 //! - [**Extending Workers using extension traits**](crate::worker::ext#creating-a-custom-worker-extension-trait) - implementing custom worker functionality via extension traits
 //!
 //! [`Backend`]: crate::backend::Backend
@@ -306,22 +306,22 @@
 //! [`Worker`]: crate::worker
 //! [`Monitor`]: crate::monitor
 //! [`AcknowledgmentLayer`]: crate::worker::ext::ack
-//! [`TrackerLayer`]: crate::worker::ext::tracker::TrackerLayer
 //! [`EventListenerLayer`]: crate::worker::ext::event_listener
 //! [`CircuitBreakerLayer`]: crate::worker::ext::circuit_breaker
 //! [`LongRunningLayer`]: crate::worker::ext::long_running
 //! [`AbortError`]: crate::error::AbortError
 //! [`RetryAfterError`]: crate::error::RetryAfterError
 //! [`DeferredError`]: crate::error::DeferredError
-//! [`WorkerContext`]: crate::worker::WorkerContext
-//! [`Event`]: crate::worker::Event
+//! [`WorkerContext`]: crate::worker::context::WorkerContext
+//! [`Event`]: crate::worker::event::Event
 //! [`Parts`]: crate::task::Parts
 //! [`Status`]: crate::task::status::Status
 //! [`TaskId`]: crate::task::task_id::TaskId
 //! [`Attempt`]: crate::task::attempt::Attempt
-//! [`Extensions`]: crate::task::data::Extensions
-//! [`FromRequest`]: crate::util::FromRequest
+//! [`FromRequest`]: crate::task_fn::FromRequest
 //! [`TestWorker`]: crate::worker::test_worker::TestWorker
+//! [`Shutdown`]: crate::monitor::shutdown::Shutdown
+
 pub mod backend;
 /// Includes internal error types.
 pub mod error;

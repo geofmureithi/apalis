@@ -10,7 +10,7 @@
 //! The module includes several implementations of the `Codec` trait, such as `IdentityCodec`
 //! and `NoopCodec`, as well as a JSON codec when the `json` feature is enabled.
 /// A trait for converting values between a type `T` and a more compact or
-/// transport-friendly representation for a [`Backend`]. Examples include json
+/// transport-friendly representation for a `Backend`. Examples include json
 /// and bytes.
 ///
 /// This is useful when you need to serialize/deserialize, compress/expand,

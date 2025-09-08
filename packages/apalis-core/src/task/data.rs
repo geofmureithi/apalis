@@ -10,7 +10,7 @@
 //!
 //! # Usage
 //!
-//! Use [`Data`] to share application state (such as database connections, configuration, etc.) across tasks and layers. The [`Layer`] implementation allows easy integration with middleware stacks.
+//! Use [`Data`] to share application state (such as database connections, configuration, etc.) across tasks and layers. Apply this middleware using [`WorkerBuilder::data`](crate::worker::builder::WorkerBuilder::data).
 //!
 //! ## Example
 //!

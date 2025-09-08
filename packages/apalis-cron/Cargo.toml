@@ -11,17 +11,18 @@ description = "A simple yet extensible library for cron-like job scheduling for 
 
 [features]
 default = ["cron"]
+## Enable support for `cron` crate
 cron = ["dep:cron"]
 docsrs = ["dep:document-features"]
 ## Enable serde support
 serde = ["dep:serde", "chrono/serde", "apalis-core/serde"]
-## Enable `english-to-cron` support
+## Enable support for `english-to-cron` crate
 english = ["dep:english-to-cron", "dep:cron"]
 
 [dependencies]
 apalis-core = { path = "../../packages/apalis-core", version = "0.7.1", default-features = false, features = [
     "sleep",
-]}
+] }
 cron = { version = "0.15.0", optional = true }
 futures-util = { version = "0.3.30", default-features = false }
 chrono = { version = "0.4.38", default-features = false, features = ["clock"] }

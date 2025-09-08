@@ -74,9 +74,9 @@ use crate::{
     },
 };
 
-mod config;
+/// Configuration options for the circuit breaker.
+pub mod config;
 mod service;
-
 /// Allows breaking the circuit if an error threshold is hit
 ///
 /// See [module level documentation](self) for more details.

@@ -88,19 +88,17 @@ pub use self::shared::SharedJsonStore;
 #[doc = features_table! {
     setup = JsonStorage::new_temp().unwrap();,
     TaskSink => supported("Ability to push new tasks"),
-    Codec => limited("Serialization support for arguments. Only accepts `json`", false),
-    Acknowledge => supported("In-built acknowledgement after task completion"),
+    Serialization => limited("Serialization support for arguments. Only accepts `json`", false),
     FetchById => not_implemented("Allow fetching a task by its ID"),
     RegisterWorker => not_supported("Allow registering a worker with the backend"),
-    PipeExt => supported("Allow other backends to pipe to this backend"),
-    Sharable => supported("Share the same JSON storage across multiple workers", false),
+    PipeExt => supported("Allow other backends to pipe to this backend", false),
+    MakeShared => supported("Share the same JSON storage across multiple workers", false),
     Workflow => supported("Flexible enough to support workflows", false),
     WaitForCompletion => supported("Wait for tasks to complete without blocking", false),
     ResumeById => not_implemented("Resume a task by its ID"),
     ResumeAbandoned => not_implemented("Resume abandoned tasks"),
     ListWorkers => not_supported("List all workers registered with the backend"),
     ListTasks => not_implemented("List all tasks in the backend"),
-    BatchCommit => not_implemented("Batch commit multiple tasks"),
 }]
 #[derive(Debug)]
 pub struct JsonStorage<Args> {

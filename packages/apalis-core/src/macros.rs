@@ -50,7 +50,7 @@ macro_rules! error {
 /// features_table! {
 ///     setup = MemoryStorage::new();,
 ///     TaskSink => supported("Ability to push new tasks", true),
-///     Codec => limited("Serialization support for arguments. Only accepts `json`"),
+///     Serialization => limited("Serialization support for arguments. Only accepts `json`"),
 ///     Acknowledge => supported("In-built acknowledgement after task completion", true),
 ///     FetchById => not_implemented("Allow fetching a task by its ID"),
 ///     RegisterWorker => not_supported("Allow registering a worker with the backend"),
@@ -91,8 +91,12 @@ macro_rules! features_table {
     };
 
     // Format feature names ONLY - no code, just name and link
+    (@format_feature_name Workflow) => {
+        concat!("[`Workflow`](https://docs.rs/apalis-workflow/)")
+    };
+
     (@format_feature_name $feature:ident) => {
-        concat!("[`", stringify!($feature), "`](apalis_core::backend::", stringify!($feature), ")")
+        concat!("[`", stringify!($feature), "`](https://docs.rs/apalis-core/latest/apalis_core/backend/trait.", stringify!($feature), ".html)")
     };
     (@format_feature_name $feature:literal) => {
         concat!("[`", $feature, "`]")
@@ -137,7 +141,7 @@ macro_rules! features_table {
         concat!(
             "#### ", stringify!($feature), " Example\n\n",
             "```rust\n",
-            "use crate::backend::", stringify!($feature), ";\n",
+            "use apalis_core::backend::", stringify!($feature), ";\n",
             "#[tokio::main]\n",
             "async fn main() {\n",
             "    let mut backend = ", stringify!($setup), ";\n\n",
@@ -146,8 +150,7 @@ macro_rules! features_table {
         )
     };
 
-    // Standardized assert function mapping for identifiers
-    (@assert_function TaskSink) => { concat!(
+    (@assert_function Backend) => { concat!(
         "    async fn task(task: u32, worker: WorkerContext) {\n",
         "        tokio::time::sleep(Duration::from_secs(1)).await;\n",
         "        worker.stop().unwrap();\n",
@@ -158,8 +161,24 @@ macro_rules! features_table {
         "    worker.run().await.unwrap();\n",
         "}\n"
     ) };
-    (@assert_function Codec) => { "assert_codec(backend);" };
-    (@assert_function Acknowledge) => { "assert_acknowledge(backend);" };
+    (@assert_function Vacuum) => { "assert_vacuum(backend);" };
+    (@assert_function Update) => { "assert_update(backend);" };
+    (@assert_function Reschedule) => { "assert_reschedule(backend);" };
+    (@assert_function MakeShared) => { "assert_make_shared(backend);" };
+    // Standardized assert function mapping for identifiers
+    (@assert_function TaskSink) => { concat!(
+        "    backend.push(42).await.unwrap();\n\n",
+        "    async fn task(task: u32, worker: WorkerContext) {\n",
+        "        tokio::time::sleep(Duration::from_secs(1)).await;\n",
+        "        worker.stop().unwrap();\n",
+        "    }\n",
+        "    let worker = WorkerBuilder::new(\"rango-tango\")\n",
+        "        .backend(backend)\n",
+        "        .build(task);\n",
+        "    worker.run().await.unwrap();\n",
+        "}\n"
+    ) };
+    (@assert_function Serialization) => { "assert_codec(backend);" };
     (@assert_function FetchById) => { "assert_fetch_by_id(backend);" };
     (@assert_function RegisterWorker) => { "assert_register_worker(backend);" };
     (@assert_function PipeExt) => { "assert_pipe_ext(backend);" };
@@ -181,8 +200,7 @@ mod tests {
         let table = features_table! {
             setup = MemoryStorage::new();,
             TaskSink => supported("Ability to push new tasks", true),
-            Codec => limited("Serialization support for arguments. Only accepts `json`", false),
-            Acknowledge => supported("In-built acknowledgement after task completion"),
+            Serialization => limited("Serialization support for arguments. Only accepts `json`", false),
             FetchById => not_implemented("Allow fetching a task by its ID"),
             RegisterWorker => not_supported("Allow registering a worker with the backend"),
         };
@@ -196,16 +214,14 @@ mod tests {
 
         // Table rows should contain ONLY name, status, description
         assert!(table.contains(
-            "| [`TaskSink`](crate::backend::TaskSink) | ✅ | Ability to push new tasks |"
+            "| ✅ | Ability to push new tasks |"
         ));
-        assert!(table.contains("| [`Codec`](crate::backend::Codec) | ✅ ❗ | Serialization support for arguments. Only accepts `json` |"));
 
         // Code examples should be in separate sections for features with true flag or no flag (default)
         assert!(table.contains("#### TaskSink Example"));
-        assert!(table.contains("#### Acknowledge Example"));
 
-        // Codec should NOT have example because it has explicit false flag
-        assert!(!table.contains("#### Codec Example"));
+        // Serialization should NOT have example because it has explicit false flag
+        assert!(!table.contains("#### Serialization Example"));
 
         // Non-supported features should NOT have example sections
         assert!(!table.contains("#### FetchById Example"));
@@ -230,12 +246,10 @@ mod tests {
         let table = features_table! {
             setup = MemoryStorage::new();,
             TaskSink => supported("Ability to push new tasks", false),
-            Acknowledge => limited("In-built acknowledgement", false),
         };
 
         // Should not contain any examples
         assert!(!table.contains("#### TaskSink Example"));
-        assert!(!table.contains("#### Acknowledge Example"));
         assert!(!table.contains("```rust"));
     }
 
@@ -244,11 +258,11 @@ mod tests {
         let table = features_table! {
             setup = MemoryStorage::new();,
             TaskSink => supported("Ability to push new tasks", true),
-            Codec => limited("Serialization support", true),
+            Serialization => limited("Serialization support", true),
         };
 
         // Should contain examples for both
         assert!(table.contains("#### TaskSink Example"));
-        assert!(table.contains("#### Codec Example"));
+        assert!(table.contains("#### Serialization Example"));
     }
 }

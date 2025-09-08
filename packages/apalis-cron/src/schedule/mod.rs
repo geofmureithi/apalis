@@ -7,7 +7,9 @@ mod cron;
 #[cfg(feature = "english")]
 mod english;
 
-pub trait Schedule<Timezone: chrono::TimeZone>: Sized {
+/// A trait representing a schedule that can compute the next tick (event) based on a given timezone.
+pub trait Schedule<Timezone: chrono::TimeZone> {
+    /// Returns the next scheduled tick as a `DateTime` in the specified timezone, or `None` if there are no more ticks.
     fn next_tick(&self, timezone: &Timezone) -> Option<DateTime<Timezone>>;
 }
 

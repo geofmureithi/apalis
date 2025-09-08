@@ -92,9 +92,9 @@
 //! - [`TaskBuilder`]: Fluent builder for constructing tasks with optional configuration.
 //! - [`RandomId`]: Default unique identifier type for tasks.
 //!
-//! [TaskBuilder]: crate::task::builder::TaskBuilder
-//! [IntoResponse]: crate::task::into_response::IntoResponse
-//! [FromRequest]: crate::task::from_request::FromRequest
+//! [`TaskBuilder`]: crate::task::builder::TaskBuilder
+//! [`IntoResponse`]: crate::task_fn::into_response::IntoResponse
+//! [`FromRequest`]: crate::task_fn::from_request::FromRequest
 
 use std::{
     fmt::Debug,

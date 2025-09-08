@@ -1,6 +1,6 @@
 pub(super) mod memory;
-
-pub(super) mod tutorial;
+/// A guide to using the implementing a backend
+pub mod guide;
 
 #[cfg(feature = "json")]
 pub(super) mod json;

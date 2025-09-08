@@ -15,7 +15,7 @@
 //!
 //! The [`IntoWorkerService`] trait can be used to convert a function or a service into a worker service. The following implementations are provided:
 //! - For async functions via [`task_fn`](crate::task_fn::task_fn)
-//! - For any type that implements the [`Service`](tower::Service) trait for `T: Task`
+//! - For any type that implements the [`Service`] trait for `T: Task`
 //! - For workflows via [`apalis-workflow`](https://docs.rs/apalis-workflow)
 //!
 //! ## Basic usage

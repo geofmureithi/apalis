@@ -36,8 +36,6 @@ struct TaskTrackerInner {
 /// A future that is tracked as a task by a [`TaskTracker`].
 ///
 /// The associated [`TaskTracker`] cannot complete until this future is dropped.
-///
-/// This future is returned by [`TaskTracker::track_future`].
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
 pub struct LongRunningFuture<F> {

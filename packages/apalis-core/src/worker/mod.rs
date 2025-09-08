@@ -545,7 +545,6 @@ mod tests {
     use crate::{
         backend::{json::JsonStorage, memory::MemoryStorage, TaskSink},
         task::Parts,
-        task_fn::task_fn,
         worker::{
             builder::WorkerBuilder,
             ext::{

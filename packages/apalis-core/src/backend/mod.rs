@@ -15,9 +15,9 @@
 //! ## Default Implementations
 //!
 //! The module includes several default backend implementations, such as:
-//! - [`memory::MemoryStorage`]: An in-memory backend for testing and lightweight use cases
-//! - [`pipe::PipeBackend`]: A simple pipe-based backend for inter-thread communication
-//! - [`custom::CustomBackend`]: A flexible backend allowing custom functions for task management
+//! - [`MemoryStorage`](memory::MemoryStorage): An in-memory backend for testing and lightweight use cases
+//! - [`Pipe`](pipe::Pipe): A simple pipe-based backend for inter-thread communication
+//! - [`CustomBackend`](custom::CustomBackend): A flexible backend allowing custom functions for task management
 use std::{future::Future, time::Duration};
 
 use futures_sink::Sink;
@@ -38,6 +38,8 @@ pub mod pipe;
 pub mod shared;
 
 mod impls;
+
+pub use impls::guide;
 
 /// In-memory backend based on channels
 pub mod memory {

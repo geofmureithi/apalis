@@ -66,17 +66,26 @@ use tower_layer::Identity;
 ///
 #[doc = features_table! {
     setup = MemoryStorage::new();,
+
+    Backend => supported("Basic Backend functionality", true),
     TaskSink => supported("Ability to push new tasks", true),
-    Codec => not_supported("Serialization support for arguments"),
-    Acknowledge => not_supported("In-built acknowledgement after task completion"),
-    FetchById => not_supported("Allow fetching a task by its ID"),
-    RegisterWorker => not_supported("Allow registering a worker with the backend"),
+    Serialization => not_supported("Serialization support for arguments"),
+
     PipeExt => not_implemented("Allow other backends to pipe to this backend"), // Would require Clone,
-    Sharable => not_supported("Share the same JSON storage across multiple workers"),
-    Workflow => not_implemented("Flexible enough to support workflows"),
-    WaitForCompletion => not_implemented("Wait for tasks to complete without blocking"), // Would require Clone
+    MakeShared => not_supported("Share the same JSON storage across multiple workers"),
+
+    Update => not_supported("Allow updating a task"),
+    FetchById => not_supported("Allow fetching a task by its ID"),
+    Reschedule => not_supported("Reschedule a task"),
+
     ResumeById => not_supported("Resume a task by its ID"),
     ResumeAbandoned => not_supported("Resume abandoned tasks"),
+    Vacuum => not_supported("Vacuum the task storage"),
+
+    Workflow => not_implemented("Flexible enough to support workflows"),
+    WaitForCompletion => not_implemented("Wait for tasks to complete without blocking"), // Would require Clone
+    
+    RegisterWorker => not_supported("Allow registering a worker with the backend"),
     ListWorkers => not_supported("List all workers registered with the backend"),
     ListTasks => not_supported("List all tasks in the backend"),
 }]

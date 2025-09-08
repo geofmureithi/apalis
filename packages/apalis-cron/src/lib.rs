@@ -6,145 +6,14 @@
     unreachable_pub
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-
-//! # apalis-cron
+#![doc = include_str!("../README.md")]
 //!
-//! A cron-like job scheduling library for `apalis` that is simple yet extensible.
-//!
-//! `apalis-cron` is built on top of `apalis` and integrates seamlessly with the `apalis` ecosystem.
-//! This means you can leverage the full power of workers and middleware, including:
-//!
-//! - **Tracing**: For observing the execution of your cron jobs.
-//! - **Retries**: To handle transient failures with configurable backoff strategies.
-//! - **Concurrency**: To control how many instances of a job can run simultaneously.
-//! - **Load-shedding**: To prevent your system from being overloaded.
-//!
-//! ## Features
-//!
-//! - **Cron-based Scheduling**: Use standard cron expressions to define your job schedules.
-//! - **Timezone Support**: Schedule jobs in any timezone.
-//! - **Persistence**: Persist cron jobs to a storage backend (e.g., Postgres, MySQL, SQLite) to ensure they are not lost on restart and can be distributed across multiple workers.
-//! - **Extensibility**: Easily add custom middleware and services.
-//!
-//! ## Getting Started
-//!
-//! To use `apalis-cron`, you'll need to add it to your `Cargo.toml`:
-//!
-//! ```toml
-//! [dependencies]
-//! apalis-cron = "1"
-//! apalis = { version = "1", features = ["limit"] }
-//! tokio = { version = "1", features = ["full"] }
-//! chrono = "0.4"
-//! ```
-//!
-//! ## Example
-//!
-//! Here's a basic example of how to schedule a cron job that runs every day:
-//!
-//! ```rust,no_run
-//! use apalis::{prelude::*, layers::retry::RetryPolicy};
-//! use std::str::FromStr;
-//! use apalis_cron::{CronStream, Schedule, CronContext};
-//! use chrono::Local;
-//!
-//! // The handler for the cron tick
-//! async fn handle_reminder(tick: Tick, data: Data<usize>) {
-//!     println!(
-//!         "Good morning! It's time for your daily reminder at {}. Data: {}",
-//!         tick.get_timestamp(),
-//!         data.0,
-//!     );
-//! }
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     // The cron schedule for the job. This runs every day at midnight.
-//!     let schedule = Schedule::from_str("@daily").unwrap();
-//!
-//!     // Create a worker that executes the job.
-//!     let worker = WorkerBuilder::new("daily-reminder")
-//!         .retry(RetryPolicy::retries(5))
-//!         .data(42usize)
-//!         .backend(CronStream::new(schedule))
-//!         .build_fn(handle_reminder);
-//!
-//!     worker.run().await;
-//! }
-//! ```
-//!
-//! ## Timezones
-//!
-//! By default, `apalis-cron` uses `Utc`. However, you can specify a different timezone.
-//!
-//! ```rust,no_run
-//! # use apalis::prelude::*;
-//! # use std::str::FromStr;
-//! # use apalis_cron::{CronStream, Schedule, CronContext};
-//! # use chrono::Local;
-//! async fn handle_reminder(tick: Tick<Local>) {
-//!     println!("Reminder for timezone: {}", tick.get_timestamp());
-//! }
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     let schedule = Schedule::from_str("0 0 * * * *").unwrap(); // Every hour
-//!
-//!     let worker = WorkerBuilder::new("new-york-reminder")
-//!         .backend(CronStream::new_with_timezone(schedule, Local))
-//!         .build_fn(handle_reminder);
-//!
-//!     worker.run().await;
-//! }
-//! ```
-//!
-//! ## Persisting Cron Jobs
-//!
-//! In a production environment, you might want to persist cron jobs for several reasons:
-//!
-//! - **Distribution**: Distribute cron jobs across multiple servers for high availability.
-//! - **Durability**: Ensure that jobs are not lost if the application restarts.
-//! - **Observability**: Store the results and history of cron jobs for auditing or debugging.
-//!
-//! `apalis-cron` makes this easy by allowing you to pipe cron events to any backend that implements `TaskSink`.
-//!
-//! ```rust,no_run
-//! # use apalis::{prelude::*};
-//! # use apalis_sql::sqlite::{SqliteStorage, SqlitePool};
-//! # use std::str::FromStr;
-//! # use apalis_cron::{CronStream, Schedule, CronContext};
-//! # use chrono::Local;
-//! async fn handle_reminder(tick: Tick<Local>) {
-//!     // Your job logic here
-//! }
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     let schedule = Schedule::from_str("@daily").unwrap();
-//!     let cron_stream = CronStream::new(schedule);
-//!
-//!     // Create a storage for our cron jobs (e.g., SQLite)
-//!     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-//!     SqliteStorage::setup(&pool)
-//!         .await
-//!         .expect("unable to run migrations for sqlite");
-//!     let storage = SqliteStorage::new(pool);
-//!
-//!     // Pipe the cron stream to the storage backend
-//!     let backend = cron_stream.pipe_to(storage);
-//!
-//!     let worker = WorkerBuilder::new("persistent-reminder")
-//!         .backend(backend)
-//!         .build_fn(handle_reminder);
-//!
-//!     worker.run().await;
-//! }
-//! ```
-//! # Feature flags
+//! ## Feature flags
 #![cfg_attr(
     feature = "docsrs",
     cfg_attr(doc, doc = ::document_features::document_features!())
 )]
+
 mod backend;
 mod context;
 mod error;
@@ -153,6 +22,8 @@ mod tick;
 mod timezone;
 
 const FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+
+pub use {backend::*, context::*, error::*, schedule::*, tick::*, timezone::*};
 
 #[cfg(test)]
 mod tests {

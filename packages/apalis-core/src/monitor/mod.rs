@@ -1,6 +1,6 @@
 //! # Monitor
 //!
-//! `Monitor` provides centralized coordination and lifecycle management for multiple [`Worker`] instances.
+//! `Monitor` provides centralized coordination and lifecycle management for multiple workers.
 //! It is responsible for executing, monitoring, and gracefully shutting down all registered workers in a robust and customizable manner.
 //!
 //! ## Features
