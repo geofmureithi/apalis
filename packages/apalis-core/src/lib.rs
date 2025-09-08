@@ -44,13 +44,14 @@
 //! ## Tasks
 //!
 //! The task struct provides type-safe components for task data and metadata:
-//! - [`Args`](crate::task::args::tutorial) - The primary data payload for the task
-//! - [`Metadata`](crate::task::metadata) - metadata associated with the task provided by the backend
-//! - [`ExecutionContext`](crate::task::ExecutionContext) - Contextual information for task execution
-//! - [`Status`](crate::task::Status) - Represents the current state of a task
+//! - [`Args`](crate::task_fn::guide) - The primary structure for the task
+//! - [`Parts`](crate::task::Parts) - Wrapper type for information for task execution includes context, status, attempts, task_id and metadata
+//! - [`Context`](crate::backend::Backend#required-associated-types) - contextual information with the task provided by the backend
+//! - [`Status`](crate::task::status::Status) - Represents the current state of a task
 //! - [`TaskId`](crate::task::task_id::TaskId) - Unique identifier for task tracking
 //! - [`Attempt`](crate::task::attempt::Attempt) - Retry tracking and attempt information
-//! - [`Extensions`](crate::task::data::Extensions) - Type-safe storage for additional task data
+//! - [`Extensions`](crate::task::data) - Type-safe storage for additional task data
+//! - [`Metadata`](crate::task::metadata) - metadata associated with the task
 //!
 //! ### Example: Using `TaskBuilder`
 //!
@@ -59,15 +60,15 @@
 //!
 //! let task: Task<String, ()> = TaskBuilder::new("my-task".to_string())
 //!     .id("task-123".into())
-//!     .with_status(Status::Pending)
+//!     .attempts(3)
+//!     .timeout(Duration::from_secs(30))
 //!     .run_in_minutes(10)
 //!     .build();
 //! ```
-//! Specific documentation for tasks can be found in the [`task`](crate::task) and [`task::builder`](crate::task::builder) modules.
+//! Specific documentation for tasks can be found in the [`task`] and [`task::builder`] modules.
 //!
-//! #### Relevant tutorials:
-//! - [**Defining Task arguments**](crate::task::args::tutorial) - Creating effective task arguments that are scalable and type-safe
-
+//! #### Relevant Guides:
+//! - [**Defining Task arguments**](crate::task_fn::guide) - Creating effective task arguments that are scalable and type-safe
 //!
 //! ## Backends
 //!
@@ -87,12 +88,17 @@
 //!
 //! </details>
 //!
+//! ### Inbuilt Implementations
+//! - [`MemoryStorage`](crate::backend::memory::MemoryStorage) : In-memory storage based on channels
+//! - [`Pipe`](crate::backend::pipe) : Pipe-based backend for a stream-to-backend pipeline
+//! - [`CustomBackend`](crate::backend::custom) : Flexible backend composition allowing custom functions for task management
+//!
 //! Backends handle task persistence, distribution, and reliability concerns while providing
 //! a uniform interface for worker consumption.
 //!
 //! ## Workers
 //!
-//! The [`Worker`](crate::worker::Worker) is the core runtime component responsible for task polling, execution, and lifecycle management:
+//! The [`Worker`](crate::worker) is the core runtime component responsible for task polling, execution, and lifecycle management:
 //!
 //! ### Worker Lifecycle
 //!
@@ -295,21 +301,21 @@
 //! [`Backend`]: crate::backend::Backend
 //! [`TaskFn`]: crate::task_fn::TaskFn
 //! [`Service`]: tower_service::Service
-//! [`Task`]: crate::task::Task
-//! [`WorkerBuilder`]: crate::worker::builder::WorkerBuilder
-//! [`Worker`]: crate::worker::Worker
-//! [`Monitor`]: crate::monitor::Monitor
-//! [`AcknowledgmentLayer`]: crate::worker::ext::ack::AcknowledgeLayer
+//! [`Task`]: crate::task
+//! [`WorkerBuilder`]: crate::worker::builder
+//! [`Worker`]: crate::worker
+//! [`Monitor`]: crate::monitor
+//! [`AcknowledgmentLayer`]: crate::worker::ext::ack
 //! [`TrackerLayer`]: crate::worker::ext::tracker::TrackerLayer
-//! [`EventListenerLayer`]: crate::worker::ext::event_listener::EventListenerLayer
-//! [`CircuitBreakerLayer`]: crate::worker::ext::circuit_breaker::CircuitBreakerLayer
-//! [`LongRunningLayer`]: crate::worker::ext::long_running::LongRunningLayer
+//! [`EventListenerLayer`]: crate::worker::ext::event_listener
+//! [`CircuitBreakerLayer`]: crate::worker::ext::circuit_breaker
+//! [`LongRunningLayer`]: crate::worker::ext::long_running
 //! [`AbortError`]: crate::error::AbortError
 //! [`RetryAfterError`]: crate::error::RetryAfterError
 //! [`DeferredError`]: crate::error::DeferredError
 //! [`WorkerContext`]: crate::worker::WorkerContext
 //! [`Event`]: crate::worker::Event
-//! [`ExecutionContext`]: crate::task::ExecutionContext
+//! [`Parts`]: crate::task::Parts
 //! [`Status`]: crate::task::status::Status
 //! [`TaskId`]: crate::task::task_id::TaskId
 //! [`Attempt`]: crate::task::attempt::Attempt
@@ -335,7 +341,7 @@ pub mod layers {
 #[cfg(feature = "sleep")]
 pub mod timer {
     pub use futures_timer::Delay;
-    /// shorthand future for sleeping
+    /// Runtime agnostic sleep function based on [Delay]
     pub async fn sleep(duration: std::time::Duration) {
         futures_timer::Delay::new(duration).await;
     }

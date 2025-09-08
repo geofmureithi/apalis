@@ -1,14 +1,14 @@
 //! Utilities for creating and managing tasks.
 //!
 //! The [`Task`] component encapsulates a unit of work to be executed,
-//! along with its associated context, metadata, and execution status. The [`ExecutionContext`]
+//! along with its associated context, metadata, and execution status. The [`Parts`]
 //! struct contains metadata, attempt tracking, extensions, and scheduling information for each task.
 //!
 //! # Overview
 //!
 //! In `apalis`, tasks are designed to represent discrete units of work that can be scheduled, retried, and tracked
 //! throughout their lifecycle. Each task consists of arguments (`args`) describing the work to be performed,
-//! and an [`ExecutionContext`] (`parts`) containing metadata and control information.
+//! and an [`Parts`] (`parts`) containing metadata and control information.
 //!
 //! ## [`Task`]
 //!
@@ -17,9 +17,9 @@
 //! - `Ctx`: Ctxdata associated with the task, such as custom fields or backend-specific information.
 //! - `IdType`: The type used for uniquely identifying the task (defaults to [`RandomId`]).
 //!
-//! ## [`ExecutionContext`]
+//! ## [`Parts`]
 //!
-//! The [`ExecutionContext`] struct provides the following:
+//! The [`Parts`] struct provides the following:
 //! - `task_id`: Optionally stores a unique identifier for the task.
 //! - `data`: An [`Extensions`] container for storing arbitrary per-task data (e.g., middleware extensions).
 //! - `attempt`: Tracks how many times the task has been attempted.
@@ -51,7 +51,7 @@
 //! ## Creating a task with custom metadata
 //!
 //! ```rust
-//! use apalis_core::task::{Task, ExecutionContext};
+//! use apalis_core::task::{Task, Parts};
 //! #[derive(Default, Clone)]
 //! struct MyCtx { priority: u8 }
 //! let meta = MyCtx { priority: 5 };
@@ -63,7 +63,7 @@
 //! ## Accessing and modifying the execution context
 //!
 //! ```rust
-//! use apalis_core::task::{Task, ExecutionContext, Status};
+//! use apalis_core::task::{Task, Parts, Status};
 //! let mut task = Task::<String, (), _>::new("work".to_string());
 //! task.parts.status = Status::Running;
 //! task.parts.attempt.increment();
@@ -82,7 +82,7 @@
 //! # See Also
 //!
 //! - [`Task`]: Represents a unit of work to be executed.
-//! - [`ExecutionContext`]: Holds metadata, status, and control information for a task.
+//! - [`Parts`]: Holds metadata, status, and control information for a task.
 //! - [`Extensions`]: Type-safe storage for per-task data.
 //! - [`Status`]: Enum representing the lifecycle state of a task.
 //! - [`Attempt`]: Tracks the number of execution attempts for a task.
@@ -104,6 +104,7 @@ use std::{
 use crate::{
     task::{
         attempt::Attempt,
+        builder::TaskBuilder,
         extensions::Extensions,
         status::Status,
         task_id::{RandomId, TaskId},
@@ -231,6 +232,19 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     pub async fn extract<T: FromRequest<Self>>(&self) -> Result<T, T::Error> {
         T::from_request(self).await
     }
+
+    /// Converts the task into a builder pattern.
+    pub fn into_builder(self) -> TaskBuilder<Args, Ctx, IdType> {
+        TaskBuilder {
+            args: self.args,
+            ctx: self.parts.ctx,
+            attempt: Some(self.parts.attempt),
+            data: self.parts.data,
+            status: Some(self.parts.status),
+            run_at: Some(self.parts.run_at),
+            task_id: self.parts.task_id,
+        }
+    }
 }
 
 impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
@@ -258,10 +272,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
     /// Maps both `args` and `parts` together.
     pub fn map_all<F, NewArgs, NewCtx>(self, f: F) -> Task<NewArgs, NewCtx, IdType>
     where
-        F: FnOnce(
-            Args,
-            Parts<Ctx, IdType>,
-        ) -> (NewArgs, Parts<NewCtx, IdType>),
+        F: FnOnce(Args, Parts<Ctx, IdType>) -> (NewArgs, Parts<NewCtx, IdType>),
     {
         let (args, parts) = f(self.args, self.parts);
         Task { args, parts: parts }

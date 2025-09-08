@@ -10,10 +10,13 @@ use crate::{
     backend::{
         impls::json::{meta::JsonMapMetadata, JsonStorage},
         TaskResult, WaitForCompletion,
-    }, error::BoxDynError, task::{
+    },
+    error::BoxDynError,
+    task::{
         status::Status,
         task_id::{RandomId, TaskId},
-    }, worker::ext::ack::Acknowledge
+    },
+    worker::ext::ack::Acknowledge,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

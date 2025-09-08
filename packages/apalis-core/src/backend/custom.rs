@@ -103,6 +103,7 @@ use crate::backend::codec::Codec;
 use crate::backend::codec::IdentityCodec;
 use crate::backend::TaskStream;
 use crate::error::BoxDynError;
+use crate::features_table;
 use crate::{backend::Backend, task::Task, worker::context::WorkerContext};
 
 /// A highly customizable backend for integration with any persistence engine
@@ -119,6 +120,22 @@ use crate::{backend::Backend, task::Task, worker::context::WorkerContext};
 ///     .build()
 ///     .unwrap();
 /// ```
+#[doc = features_table! {
+    setup = unreachable!();,
+    TaskSink => supported("Ability to push new tasks", false),
+    Codec => supported("Serialization support for arguments", false),
+    Acknowledge => not_supported("Can fall back to [`ack_with`](crate::worker::ext::AcknowledgeExt::ack_with)"),
+    FetchById => not_supported("Allow fetching a task by its ID"),
+    RegisterWorker => not_implemented("Allow registering a worker with the backend"),
+    PipeExt => limited("Allow other backends to pipe to this backend", false), // Would require Clone,
+    Sharable => limited("Share the same [`CustomBackend`] across multiple workers", false),
+    Workflow => not_implemented("Flexible enough to support workflows"),
+    WaitForCompletion => not_implemented("Wait for tasks to complete without blocking"), // Would require Clone
+    ResumeById => not_supported("Resume a task by its ID"),
+    ResumeAbandoned => not_supported("Resume abandoned tasks"),
+    ListWorkers => not_implemented("List all workers registered with the backend"),
+    ListTasks => not_implemented("List all tasks in the backend"),
+}]
 #[pin_project::pin_project]
 #[must_use = "Custom backends must be polled or used as a sink"]
 pub struct CustomBackend<Args, DB, Fetch, Sink, IdType, Codec = IdentityCodec, Config = ()> {

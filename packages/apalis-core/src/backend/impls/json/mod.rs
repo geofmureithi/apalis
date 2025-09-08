@@ -65,10 +65,13 @@ use self::{
     meta::JsonMapMetadata,
     util::{TaskKey, TaskWithMeta},
 };
-use crate::task::{
-    status::Status,
-    task_id::{RandomId, TaskId},
-    Task,
+use crate::{
+    features_table,
+    task::{
+        status::Status,
+        task_id::{RandomId, TaskId},
+        Task,
+    },
 };
 use std::io::{BufReader, BufWriter};
 
@@ -82,14 +85,23 @@ pub use self::shared::SharedJsonStore;
 
 /// A backend that persists to a file using json encoding
 ///
-/// ## Features
-/// | Feature | Status | Description            |
-/// |---------|--------|------------------------|
-/// | Sink support    | ✓      | Ability to push new tasks  |
-/// | Codec Support   | ✓      | Serialization support for arguments. Uses `json`  |
-/// | Workflow Support   | ✓      | Flexible enough to support workflows     |
-/// | Ack Support   | ✓      | Allow acknowledgement of task completion     |
-/// | WaitForCompletion   | ✓      | Wait for tasks to complete without blocking     |
+#[doc = features_table! {
+    setup = JsonStorage::new_temp().unwrap();,
+    TaskSink => supported("Ability to push new tasks"),
+    Codec => limited("Serialization support for arguments. Only accepts `json`", false),
+    Acknowledge => supported("In-built acknowledgement after task completion"),
+    FetchById => not_implemented("Allow fetching a task by its ID"),
+    RegisterWorker => not_supported("Allow registering a worker with the backend"),
+    PipeExt => supported("Allow other backends to pipe to this backend"),
+    Sharable => supported("Share the same JSON storage across multiple workers", false),
+    Workflow => supported("Flexible enough to support workflows", false),
+    WaitForCompletion => supported("Wait for tasks to complete without blocking", false),
+    ResumeById => not_implemented("Resume a task by its ID"),
+    ResumeAbandoned => not_implemented("Resume abandoned tasks"),
+    ListWorkers => not_supported("List all workers registered with the backend"),
+    ListTasks => not_implemented("List all tasks in the backend"),
+    BatchCommit => not_implemented("Batch commit multiple tasks"),
+}]
 #[derive(Debug)]
 pub struct JsonStorage<Args> {
     tasks: Arc<RwLock<BTreeMap<TaskKey, TaskWithMeta>>>,
@@ -291,9 +303,6 @@ impl<Args> Clone for JsonStorage<Args> {
 mod tests {
     use std::time::Duration;
 
-    
-    
-
     use crate::{
         backend::{json::JsonStorage, TaskSink},
         error::BoxDynError,
@@ -301,8 +310,6 @@ mod tests {
             builder::WorkerBuilder, context::WorkerContext, ext::event_listener::EventListenerExt,
         },
     };
-
-    
 
     const ITEMS: u32 = 100;
 

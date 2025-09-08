@@ -46,10 +46,10 @@ impl<Args: Unpin + Serialize> Sink<Task<Args, JsonMapMetadata>> for JsonStorage<
                 .unwrap_or(TaskId::new(RandomId::default()));
 
             let key = TaskKey {
-                    task_id,
-                    namespace: std::any::type_name::<Args>().to_owned(),
-                    status: crate::task::status::Status::Pending,
-                };
+                task_id,
+                namespace: std::any::type_name::<Args>().to_owned(),
+                status: crate::task::status::Status::Pending,
+            };
             this.insert(
                 &key,
                 TaskWithMeta {

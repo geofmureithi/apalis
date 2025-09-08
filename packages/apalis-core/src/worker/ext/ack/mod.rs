@@ -10,7 +10,7 @@
 //! # use apalis_core::worker::{builder::WorkerBuilder, ext::ack::{Acknowledge, AcknowledgeLayer}};
 //! # use apalis_core::backend::memory::MemoryStorage;
 //! # use apalis_core::worker::context::WorkerContext;
-//! # use apalis_core::task::ExecutionContext;
+//! # use apalis_core::task::Parts;
 //! # use apalis_core::error::BoxDynError;
 //! # use futures_util::{future::{ready, BoxFuture}, FutureExt};
 //! # use std::fmt::Debug;
@@ -41,7 +41,7 @@
 //!         fn ack(
 //!             &mut self,
 //!             res: &Result<(), BoxDynError>,
-//!             parts: &ExecutionContext<Ctx, IdType>,
+//!             parts: &Parts<Ctx, IdType>,
 //!         ) -> Self::Future {
 //!             println!("{res:?}, {parts:?}");
 //!             ready(Ok(())).boxed()

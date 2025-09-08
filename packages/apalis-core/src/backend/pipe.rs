@@ -46,6 +46,7 @@
 //! - [`apalis-cron`](https://docs.rs/apalis-cron)
 
 use crate::error::BoxDynError;
+use crate::features_table;
 use crate::task::Task;
 use crate::{backend::Backend, worker::context::WorkerContext};
 use futures_sink::Sink;
@@ -55,12 +56,42 @@ use futures_util::{SinkExt, Stream, TryStreamExt};
 use std::fmt;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
 /// A generic Pipe that wraps an inner type along with a `RequestStream`.
+#[doc = features_table! {
+    setup = unreachable!();,
+    TaskSink => supported("Ability to push new tasks", false),
+    InheritsFeatures => limited("Inherits features from the underlying backend", false),
+}]
 pub struct Pipe<S, Into, Args, Ctx> {
     pub(crate) from: S,
     pub(crate) into: Into,
     pub(crate) _req: PhantomData<(Args, Ctx)>,
+}
+
+impl<S: Clone, Into: Clone, Args, Ctx> Clone for Pipe<S, Into, Args, Ctx> {
+    fn clone(&self) -> Self {
+        Pipe {
+            from: self.from.clone(),
+            into: self.into.clone(),
+            _req: PhantomData,
+        }
+    }
+}
+
+impl<S, Into, Args, Ctx> Deref for Pipe<S, Into, Args, Ctx> {
+    type Target = Into;
+
+    fn deref(&self) -> &Self::Target {
+        &self.into
+    }
+}
+
+impl<S, Into, Args, Ctx> DerefMut for Pipe<S, Into, Args, Ctx> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.into
+    }
 }
 
 impl<S, Into, Args, Ctx> Pipe<S, Into, Args, Ctx> {
@@ -164,8 +195,9 @@ where
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx>;
 }
 
-impl<B, Args, Ctx, Err> PipeExt<B, Args, Ctx> for BoxStream<'static, Result<Args, Err>>
+impl<B, Args, Ctx, Err, S> PipeExt<B, Args, Ctx> for S
 where
+    S: Stream<Item = Result<Args, Err>> + Send + 'static,
     <B as Backend<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
     B: Backend<Args> + Sink<Task<Args, Ctx, B::IdType>>,
 {

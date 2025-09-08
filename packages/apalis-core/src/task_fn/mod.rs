@@ -43,7 +43,7 @@
 use crate::backend::Backend;
 use crate::error::BoxDynError;
 use crate::task::Task;
-use crate::worker::builder::WorkerServiceBuilder;
+use crate::worker::builder::IntoWorkerService;
 use futures_util::future::Map;
 use futures_util::FutureExt;
 use std::fmt;
@@ -56,7 +56,7 @@ pub mod from_request;
 pub mod into_response;
 
 // #[doc(hidden)]
-pub mod tutorial;
+pub mod guide;
 
 pub use self::{from_request::FromRequest, into_response::IntoResponse};
 
@@ -167,18 +167,22 @@ macro_rules! impl_service_fn {
 
         #[allow(unused_parens)]
         impl<T, Args, Ctx, F, R, B, $($K),+>
-            WorkerServiceBuilder<B, TaskFn<T, Args, Ctx, ($($K),+)>, Args, Ctx> for T
+            IntoWorkerService<B, TaskFn<T, Args, Ctx, ($($K),+)>, Args, Ctx> for T
         where
-            B: Backend<Args>,
-            T: FnMut(Args, $($K),+) -> F,
-            F: Future,
+            B: Backend<Args, Ctx = Ctx>,
+            T: FnMut(Args, $($K),+) -> F + Send + Clone + 'static,
+            F: Future + Send,
+            Args: Send + 'static,
+            Ctx: Send + Sync + 'static,
+            B::IdType: Send + 'static,
+            // TaskFn<F, Args, Ctx, FnArgs>: Service<Task<Args, Ctx, B::IdType>, Response = R>,
             F::Output: IntoResponse<Output = R>,
             $(
                 $K: FromRequest<Task<Args, Ctx, B::IdType>> + Send,
                 < $K as FromRequest<Task<Args, Ctx, B::IdType>> >::Error: std::error::Error + 'static + Send + Sync,
             )+
         {
-            fn build(self, _: &B) -> TaskFn<T, Args, Ctx, ($($K),+)> {
+            fn into_service(self, _: &B) -> TaskFn<T, Args, Ctx, ($($K),+)> {
                 task_fn(self)
             }
         }
@@ -206,24 +210,26 @@ where
     }
 }
 
-impl<T, Args, Ctx, F, R, Backend>
-    WorkerServiceBuilder<Backend, TaskFn<T, Args, Ctx, ()>, Args, Ctx> for T
+impl<T, Args, Ctx, F, R, Backend> IntoWorkerService<Backend, TaskFn<T, Args, Ctx, ()>, Args, Ctx>
+    for T
 where
     T: FnMut(Args) -> F,
     F: Future,
     F::Output: IntoResponse<Output = R>,
+    Backend: crate::backend::Backend<Args, Ctx = Ctx>,
+    Args: Send,
 {
-    fn build(self, _: &Backend) -> TaskFn<T, Args, Ctx, ()> {
+    fn into_service(self, _: &Backend) -> TaskFn<T, Args, Ctx, ()> {
         task_fn(self)
     }
 }
 
-impl<Args, Ctx, S, B> WorkerServiceBuilder<B, S, Args, Ctx> for S
+impl<Args, Ctx, S, B> IntoWorkerService<B, S, Args, Ctx> for S
 where
     S: Service<Task<Args, Ctx, B::IdType>>,
-    B: Backend<Args>,
+    B: Backend<Args, Ctx = Ctx>,
 {
-    fn build(self, _: &B) -> S {
+    fn into_service(self, _: &B) -> S {
         self
     }
 }

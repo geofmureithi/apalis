@@ -28,11 +28,10 @@ use std::{num::TryFromIntError, time::Duration};
 
 /// The context of the sql job
 pub mod context;
+pub mod fetcher;
 /// Util for fetching rows
 // pub mod from_row;
-
 pub mod sink;
-pub mod fetcher;
 
 /// Postgres storage for apalis. Uses `NOTIFY` and `SKIP LOCKED`
 #[cfg(feature = "postgres")]

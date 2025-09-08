@@ -1,9 +1,9 @@
-use std::{fmt::Debug, marker::PhantomData};
+use std::{f32::consts::E, fmt::Debug, marker::PhantomData, time::Duration};
 
 use apalis_core::{
     backend::{codec::Codec, TaskSink},
-    error::BoxDynError,
-    task::{metadata::MetadataExt, Task},
+    error::{BoxDynError, DeferredError, RetryAfterError},
+    task::{self, builder::TaskBuilder, metadata::MetadataExt, Task},
     task_fn::{task_fn, TaskFn},
 };
 use tower::Service;
@@ -11,40 +11,33 @@ use tower::Service;
 use crate::{context::StepContext, Step, WorkFlow, WorkflowError, WorkflowRequest};
 
 #[derive(Debug)]
-pub struct ThenStep<S, T> {
-    inner: S,
+pub struct DelayStep<S, T> {
+    duration: S,
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<S: Clone, T> Clone for ThenStep<S, T> {
+impl<S: Clone, T> Clone for DelayStep<S, T> {
     fn clone(&self) -> Self {
-        ThenStep {
-            inner: self.inner.clone(),
+        DelayStep {
+            duration: self.duration.clone(),
             _marker: PhantomData,
         }
     }
 }
 
-impl<S, T> ThenStep<S, T> {
+impl<S, T> DelayStep<S, T> {
     pub fn new(inner: S) -> Self {
         Self {
-            inner,
+            duration: inner,
             _marker: std::marker::PhantomData,
         }
     }
 }
 
-impl<S, Current, O, E, FlowSink, Encode, Compact> Step<Current, FlowSink, Encode>
-    for ThenStep<S, Current>
+impl<Current, FlowSink, Encode, Compact> Step<Current, FlowSink, Encode>
+    for DelayStep<Duration, Current>
 where
-    S: Service<Task<Current, FlowSink::Ctx, FlowSink::IdType>, Response = O, Error = E>
-        + Sync
-        + Send,
     Current: Sync + Send + 'static,
-    S::Future: Send + 'static,
-    S::Error: Into<BoxDynError>,
-    E: Into<BoxDynError>,
-    O: Sync,
     FlowSink: Sync + Unpin + TaskSink<Compact> + Send,
     Current: Send,
     FlowSink::Ctx: Send + Sync + Default + MetadataExt<WorkflowRequest>,
@@ -56,8 +49,8 @@ where
     <FlowSink::Ctx as MetadataExt<WorkflowRequest>>::Error:
         std::error::Error + Sync + Send + 'static,
 {
-    type Response = S::Response;
-    type Error = WorkflowError;
+    type Response = Current;
+    type Error = RetryAfterError;
     async fn pre(
         ctx: &mut StepContext<FlowSink, Encode>,
         step: &Current,
@@ -68,15 +61,12 @@ where
 
     async fn run(
         &mut self,
-        _: &StepContext<FlowSink, Encode>,
-        args: Task<Current, FlowSink::Ctx, FlowSink::IdType>,
+        ctx: &StepContext<FlowSink, Encode>,
+        task: Task<Current, FlowSink::Ctx, FlowSink::IdType>,
     ) -> Result<Self::Response, Self::Error> {
-        let res = self
-            .inner
-            .call(args)
-            .await
-            .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
-        Ok(res)
+        apalis_core::timer::sleep(self.duration).await;
+
+        Ok(task.args)
     }
 }
 
@@ -85,37 +75,23 @@ where
     Current: Send + 'static,
     FlowSink: Send + Clone + Sync + 'static + Unpin + TaskSink<Compact>,
 {
-    pub fn then<F, O, E, FnArgs, CodecError>(
+    pub fn delay_for<CodecError>(
         self,
-        then: F,
-    ) -> WorkFlow<Input, O, FlowSink, Encode, Compact>
+        duration: Duration,
+    ) -> WorkFlow<Input, Current, FlowSink, Encode, Compact>
     where
-        O: Sync + Send + 'static,
-        E: Into<BoxDynError> + Send + Sync + 'static,
-        F: Send + 'static + Sync + Clone,
-        TaskFn<F, Current, FlowSink::Ctx, FnArgs>:
-            Service<Task<Current, FlowSink::Ctx, FlowSink::IdType>, Response = O, Error = E>,
-        FnArgs: std::marker::Send + 'static + Sync,
         Current: std::marker::Send + 'static + Sync,
         FlowSink::Ctx: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
         FlowSink::Error: Into<BoxDynError> + Send + 'static,
-        <TaskFn<F, Current, FlowSink::Ctx, FnArgs> as Service<
-            Task<Current, FlowSink::Ctx, FlowSink::IdType>,
-        >>::Future: Send + 'static,
-        <TaskFn<F, Current, FlowSink::Ctx, FnArgs> as Service<
-            Task<Current, FlowSink::Ctx, FlowSink::IdType>,
-        >>::Error: Into<BoxDynError>,
         FlowSink::IdType: Send + Default,
         Compact: Sync + Send + 'static,
-        Encode: Codec<Current, Compact = Compact, Error = CodecError> + Send + Sync,
+        Encode: Codec<Current, Compact = Compact, Error = CodecError> + Send + Sync + 'static,
         CodecError: Send + Sync + std::error::Error + 'static,
-        E: Into<BoxDynError>,
-        Encode: Codec<O, Compact = Compact, Error = CodecError> + 'static,
         <FlowSink::Ctx as MetadataExt<WorkflowRequest>>::Error:
             std::error::Error + Sync + Send + 'static,
     {
-        self.add_step::<_, O, _, _>(ThenStep {
-            inner: task_fn::<F, Current, FlowSink::Ctx, FnArgs>(then),
+        self.add_step::<_, Current, _, _>(DelayStep {
+            duration,
             _marker: PhantomData,
         })
     }

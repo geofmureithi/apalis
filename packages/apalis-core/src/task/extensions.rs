@@ -298,7 +298,6 @@ impl<T: Clone + Send + Sync + 'static> MetadataExt<T> for Extensions {
         Ok(())
     }
     fn extract(&self) -> Result<T, Self::Error> {
-
         Ok(self.get_checked::<T>()?.clone())
     }
 }

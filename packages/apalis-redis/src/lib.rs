@@ -895,8 +895,8 @@ mod tests {
 
     use apalis_core::{
         backend::{memory::MemoryStorage, TaskSink},
-        task_fn::{self, service_fn, TaskFn},
         task::{builder::TaskBuilder, data::Data},
+        task_fn::{self, service_fn, TaskFn},
         worker::{
             builder::WorkerBuilder,
             ext::{
@@ -943,7 +943,6 @@ mod tests {
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(backend)
-            
             .on_event(|ctx, ev| {
                 // println!("CTX {:?}, On Event = {:?}", ctx.get_service(), ev);
             })
@@ -1084,7 +1083,7 @@ mod tests {
     //     async fn task3(
     //         job: usize,
     //         wrk: WorkerContext,
-    //         ctx: Data<ExecutionContext<RedisMetadata>>,
+    //         ctx: Data<Parts<RedisMetadata>>,
     //     ) -> Result<GoTo<()>, io::Error> {
     //         wrk.stop().unwrap();
     //         println!("{job}");

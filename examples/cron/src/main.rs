@@ -1,8 +1,8 @@
 use apalis::prelude::*;
 
-use apalis_cron::Tick;
 use apalis_cron::CronStream;
 use apalis_cron::Schedule;
+use apalis_cron::Tick;
 use chrono::Local;
 use std::str::FromStr;
 use std::time::Duration;

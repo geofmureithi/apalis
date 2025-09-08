@@ -33,13 +33,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Builder for creating [`Task`] instances with optional configuration
 #[derive(Debug)]
 pub struct TaskBuilder<Args, Ctx, IdType> {
-    args: Args,
-    ctx: Ctx,
-    data: Extensions,
-    task_id: Option<TaskId<IdType>>,
-    attempt: Option<Attempt>,
-    status: Option<Status>,
-    run_at: Option<u64>,
+    pub(super) args: Args,
+    pub(super) ctx: Ctx,
+    pub(super) data: Extensions,
+    pub(super) task_id: Option<TaskId<IdType>>,
+    pub(super) attempt: Option<Attempt>,
+    pub(super) status: Option<Status>,
+    pub(super) run_at: Option<u64>,
 }
 
 impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
@@ -81,9 +81,10 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
     pub fn meta<M>(mut self, value: M) -> Self
     where
         Ctx: MetadataExt<M>,
-        Ctx::Error: std::fmt::Debug,
     {
-        self.ctx.inject(value).expect("Failed to inject ctx");
+        self.ctx
+            .inject(value)
+            .unwrap_or_else(|_| panic!("Failed to inject item into context"));
         self
     }
 

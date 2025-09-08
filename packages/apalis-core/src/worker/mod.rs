@@ -543,11 +543,9 @@ mod tests {
     use futures_core::future::BoxFuture;
 
     use crate::{
-        backend::{
-            TaskSink,
-            {json::JsonStorage, memory::MemoryStorage},
-        },
+        backend::{json::JsonStorage, memory::MemoryStorage, TaskSink},
         task::Parts,
+        task_fn::task_fn,
         worker::{
             builder::WorkerBuilder,
             ext::{
@@ -606,6 +604,7 @@ mod tests {
                 parts: &Parts<Ctx, IdType>,
             ) -> Self::Future {
                 println!("{res:?}, {parts:?}");
+                // Call webhook with the result and parts?
                 ready(Ok(())).boxed()
             }
         }

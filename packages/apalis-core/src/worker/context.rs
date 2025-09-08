@@ -68,8 +68,12 @@ use crate::{
     },
 };
 
-/// Stores the Workers context
-/// Most fields are wrapped inside [`Arc`] so it should be cheap to clone
+/// Utility for managing a worker's context
+///
+/// A worker context is created for each worker thread and is responsible for managing
+/// the worker's state, task tracking, and event handling.
+///
+///  **Tip**: All fields are wrapped inside [`Arc`] so it should be cheap to clone
 #[derive(Clone)]
 pub struct WorkerContext {
     pub(super) name: Arc<String>,
@@ -93,7 +97,6 @@ impl fmt::Debug for WorkerContext {
             .finish()
     }
 }
-
 
 /// A future tracked by the worker
 #[pin_project::pin_project(PinnedDrop)]
@@ -357,7 +360,7 @@ impl Drop for WorkerContext {
         }
         if self.is_running() {
             eprintln!(
-                "Worker '{}' is being dropped with `{}` tasks still running. Consider calling stop() before dropping.",
+                "Worker '{}' is being dropped while running with `{}` tasks. Consider calling stop() before dropping.",
                 self.name(),
                 self.task_count()
             );

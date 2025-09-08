@@ -184,9 +184,7 @@ where
 /// See [module level documentation](self) for more details.
 pub trait LongRunningExt<Args, Ctx, Source, Middleware>: Sized {
     /// Extension for executing long running jobs
-    fn long_running(
-        self,
-    ) -> WorkerBuilder<Args, Ctx, Source, Stack<LongRunningLayer, Middleware>> {
+    fn long_running(self) -> WorkerBuilder<Args, Ctx, Source, Stack<LongRunningLayer, Middleware>> {
         self.long_running_with_cfg(Default::default())
     }
     /// Extension for executing long running jobs with a config

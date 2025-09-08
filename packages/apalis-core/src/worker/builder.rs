@@ -5,13 +5,18 @@
 //! composable manner.
 //!
 //! The builder pattern enables customization of various parts of a worker,
-//! including:
+//! in the following order:
 //!
-//! - Setting a backend that implements the [`Backend`] trait
-//! - Adding application state (shared [`Data`])
-//! - Decorating the service pipeline using [`tower`] middleware
-//! - Handling lifecycle events with `on_event`
-//! - Providing task processing logic using either a [`Service`] or an async function via `build_fn`
+//! 1. Setting a backend that implements the [`Backend`] trait
+//! 2. Adding application state via [`Data`](crate::task::data)
+//! 3. Decorating the service pipeline with middleware
+//! 4. Handling lifecycle events with `on_event`
+//! 5. Providing task processing logic using [`build`](WorkerBuilder::build) that implements [`IntoWorkerService`].
+//!
+//! The [`IntoWorkerService`] trait can be used to convert a function or a service into a worker service. The following implementations are provided:
+//! - For async functions via [`task_fn`](crate::task_fn::task_fn)
+//! - For any type that implements the [`Service`](tower::Service) trait for `T: Task`
+//! - For workflows via [`apalis-workflow`](https://docs.rs/apalis-workflow)
 //!
 //! ## Basic usage
 //!
@@ -20,7 +25,7 @@
 //! # use apalis_core::backend::memory::MemoryStorage;
 //! # use apalis_core::worker::context::WorkerContext;
 //! # use apalis_core::task::data::Data;
-//! 
+//!
 //! # #[tokio::main]
 //! # async fn main() {
 //! async fn task(job: u32, count: Data<usize>, ctx: WorkerContext) {
@@ -37,61 +42,35 @@
 //!     .build_fn(task);
 //!
 //! worker.run().await.unwrap();
-//! #}
-//! ```
-//! # Order
-//!
-//! The order in which layers are added impacts how requests are handled. Layers
-//! that are added first will be called with the request first. The argument to
-//! `service` will be last to see the request.
-//!
-//! ```
-//! # // this (and other) doctest is ignored because we don't have a way
-//! # // to say that it should only be run with cfg(feature = "...")
-//! # use tower_service::Service;
-//! # use tower::builder::ServiceBuilder;
-//! # #[cfg(all(feature = "buffer", feature = "limit"))]
-//! # async fn wrap<S>(svc: S) where S: Service<(), Error = &'static str> + 'static + Send, S::Future: Send {
-//! WorkerBuilder::new()
-//!     .buffer(100)
-//!     .concurrency_limit(10)
-//!     .build(svc)
-//! # ;
 //! # }
 //! ```
+//! ## Order
 //!
-//! In the above example, the buffer layer receives the request first followed
-//! by `concurrency_limit`. `buffer` enables up to 100 request to be in-flight
-//! **on top of** the requests that have already been forwarded to the next
-//! layer. Combined with `concurrency_limit`, this allows up to 110 requests to be
-//! in-flight.
+//! The order in which you add layers affects how tasks are processed. Layers added earlier are wrapped by those added later.
 //!
-//! ```
-//! # use tower_service::Service;
-//! # use tower::builder::ServiceBuilder;
-//! # #[cfg(all(feature = "buffer", feature = "limit"))]
-//! # async fn wrap<S>(svc: S) where S: Service<(), Error = &'static str> + 'static + Send, S::Future: Send {
+//! ### Why does order matter?
+//! Each layer wraps the previous one, so the outermost layer is applied last. This means that middleware added later can observe or modify the effects of earlier layers. For example, tracing added before retry will see all retries as a single operation, while tracing added after retry will log each retry attempt separately.
+//!
+//! For example:
+//! ```ignore
 //! WorkerBuilder::new()
-//!     .concurrency_limit(10)
-//!     .buffer(100)
-//!     .build(svc)
-//! # ;
-//! # }
+//!     .enable_tracing()
+//!     .retry(RetryPolicy::retries(3))
+//!     .build(task);
 //! ```
+//! In this case, tracing is applied before retry. The tracing span may not reflect the correct attempt count.
 //!
-//! The above example is similar, but the order of layers is reversed. Now,
-//! `concurrency_limit` applies first and only allows 10 requests to be in-flight
-//! total.
+//! Reversing the order:
+//! ```ignore
+//! WorkerBuilder::new()
+//!     .retry(RetryPolicy::retries(3))
+//!     .enable_tracing()
+//!     .build(task);
+//! ```
+//! Now, retry is applied first, and tracing wraps around it. The tracing span will correctly capture retries.
 //!
-//! ## Features
-//!
-//! - [`WorkerBuilder`] starts empty (`new(name)`), and then can be extended using:
-//!     - `.backend(...)`: Sets the task source.
-//!     - `.data(...)`: Injects shared application data.
-//!     - `.layer(...)`: Adds custom middleware.
-//!     - `.build(service)`: Consumes the builder and a [`Service`] to construct the final [`Worker`].
+//! **Tip:** Add layers in the order you want them to wrap task processing.
 use std::marker::PhantomData;
-
 use tower_layer::{Identity, Layer, Stack};
 use tower_service::Service;
 
@@ -99,6 +78,7 @@ use crate::{
     backend::Backend,
     monitor::shutdown::Shutdown,
     task::{data::Data, Task},
+    task_fn::{FromRequest, TaskFn},
     worker::{event::EventHandlerBuilder, Worker},
 };
 
@@ -141,10 +121,10 @@ impl WorkerBuilder<(), (), (), Identity> {
 
 impl WorkerBuilder<(), (), (), Identity> {
     /// Set the source to a backend that implements [Backend]
-    pub fn backend<NB: Backend<NJ>, NJ, Ctx>(
-        self,
-        backend: NB,
-    ) -> WorkerBuilder<NJ, Ctx, NB, Identity> {
+    pub fn backend<NB, NJ, Ctx>(self, backend: NB) -> WorkerBuilder<NJ, Ctx, NB, Identity>
+    where
+        NB: Backend<NJ, Ctx = Ctx>,
+    {
         WorkerBuilder {
             request: PhantomData,
             layer: self.layer,
@@ -177,11 +157,8 @@ where
             event_handler: self.event_handler,
         }
     }
-    /// Allows adding a single layer [tower] middleware
-    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Args, Ctx, B, Stack<U, M>>
-    // where
-    //     M: Layer<U>,
-    {
+    /// Allows adding middleware to the layer stack
+    pub fn layer<U>(self, layer: U) -> WorkerBuilder<Args, Ctx, B, Stack<U, M>> {
         WorkerBuilder {
             request: self.request,
             source: self.source,
@@ -210,53 +187,72 @@ where
 
     #[inline]
     /// A helper for checking that the builder can build a worker with the provided service
-    pub fn build_check<W, Svc>(self, service: Svc)
-    where
-        Svc: WorkerBuilderExt<Args, Ctx, W, B, M> + Service<Task<Args, Ctx, B::IdType>>,
-        // M::Service: Service<Task<Args, Ctx, IdType>, Response = U, Error = E>,
+    pub fn build_check_fn<
+        F,
+        A1: FromRequest<Task<Args, Ctx, B::IdType>>,
+        A2: FromRequest<Task<Args, Ctx, B::IdType>>,
+    >(
+        self,
+        _: F,
+    ) where
+        TaskFn<F, Args, Ctx, (A1, A2)>: Service<Task<Args, Ctx, B::IdType>>,
     {
-        WorkerServiceBuilder::<B, Svc, Args, Ctx>::build(service, &self.source);
-        // assert_worker(worker);
-        // fn assert_worker<Args, Ctx, B, W, M>(_: Worker<Args, Ctx, B, W, M>) {
     }
 }
 
 /// Finalizes the builder and constructs a [`Worker`] with the provided service
-impl<Args, Ctx, B, M> WorkerBuilder<Args, Ctx, B, M> {
+impl<Args, Ctx, B, M> WorkerBuilder<Args, Ctx, B, M>
+where
+    B: Backend<Args>,
+{
     /// Consumes the builder and a service to construct the final worker
-    pub fn build<W: WorkerBuilderExt<Args, Ctx, Svc, B, M>, Svc>(
+    pub fn build<W: IntoWorkerServiceExt<Args, Ctx, Svc, B, M>, Svc>(
         self,
         service: W,
-    ) -> Worker<Args, Ctx, B, Svc, M> {
-        service.with_builder(self)
+    ) -> Worker<Args, Ctx, B, Svc, M>
+    where
+        Svc: Service<Task<Args, Ctx, B::IdType>>,
+        B: Backend<Args, Ctx = Ctx>,
+    {
+        service.build_with(self)
     }
 }
 
 /// Trait for building a worker service provided a backend
-pub trait WorkerServiceBuilder<Backend, Svc, Args, Ctx> {
+pub trait IntoWorkerService<Backend, Svc, Args, Ctx>
+where
+    Backend: crate::backend::Backend<Args, Ctx = Ctx>,
+    Svc: Service<Task<Args, Ctx, Backend::IdType>>,
+{
     /// Build the service from the backend
-    fn build(self, backend: &Backend) -> Svc;
+    fn into_service(self, backend: &Backend) -> Svc;
 }
 
 /// Extension trait for building a worker from a builder
-pub trait WorkerBuilderExt<Args, Ctx, Svc, Backend, M>: Sized {
+pub trait IntoWorkerServiceExt<Args, Ctx, Svc, Backend, M>: Sized
+where
+    Backend: crate::backend::Backend<Args, Ctx = Ctx>,
+    Svc: Service<Task<Args, Ctx, Backend::IdType>>,
+{
     /// Consumes the builder and returns a worker
-    fn with_builder(
+    fn build_with(
         self,
         builder: WorkerBuilder<Args, Ctx, Backend, M>,
     ) -> Worker<Args, Ctx, Backend, Svc, M>;
 }
 
-impl<T, Args, Ctx, Svc, B, M> WorkerBuilderExt<Args, Ctx, Svc, B, M> for T
+/// Implementation of the IntoWorkerServiceExt trait for any type
+///
+/// Rust doest offer specialization yet, the [`IntoWorkerServiceExt`] and [`IntoWorkerService`]
+/// traits are used to allow the [build](WorkerBuilder::build) method to be more flexible.
+impl<T, Args, Ctx, Svc, B, M> IntoWorkerServiceExt<Args, Ctx, Svc, B, M> for T
 where
-    T: WorkerServiceBuilder<B, Svc, Args, Ctx>,
-    B: Backend<Args>,
+    T: IntoWorkerService<B, Svc, Args, Ctx>,
+    B: Backend<Args, Ctx = Ctx>,
+    Svc: Service<Task<Args, Ctx, B::IdType>>,
 {
-    fn with_builder(
-        self,
-        builder: WorkerBuilder<Args, Ctx, B, M>,
-    ) -> Worker<Args, Ctx, B, Svc, M> {
-        let svc = self.build(&builder.source);
+    fn build_with(self, builder: WorkerBuilder<Args, Ctx, B, M>) -> Worker<Args, Ctx, B, Svc, M> {
+        let svc = self.into_service(&builder.source);
         let mut worker = Worker::new(builder.name, builder.source, svc, builder.layer);
         worker.event_handler = builder
             .event_handler

@@ -1,12 +1,12 @@
 //! Utilities for encoding and decoding task arguments and results
-//! 
+//!
 //! # Overview
-//! 
+//!
 //! The `Codec` trait allows for converting values
 //! between a type `T` and a more compact or transport-friendly representation.
 //! This is particularly useful for serializing/deserializing, compressing/expanding,
 //! or otherwise encoding/decoding values in a custom format.
-//! 
+//!
 //! The module includes several implementations of the `Codec` trait, such as `IdentityCodec`
 //! and `NoopCodec`, as well as a JSON codec when the `json` feature is enabled.
 /// A trait for converting values between a type `T` and a more compact or
@@ -48,7 +48,7 @@ pub trait Codec<T> {
 
 /// A codec that performs no transformation, returning the input value as-is.
 #[derive(Debug, Clone, Default)]
-pub struct IdentityCodec;   
+pub struct IdentityCodec;
 
 impl<T> Codec<T> for IdentityCodec
 where

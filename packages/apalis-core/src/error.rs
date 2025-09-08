@@ -14,9 +14,7 @@ pub struct AbortError {
 impl AbortError {
     /// Create a new abort error
     pub fn new<E: Into<BoxDynError>>(err: E) -> Self {
-        AbortError {
-            source: err.into(),
-        }
+        AbortError { source: err.into() }
     }
 }
 

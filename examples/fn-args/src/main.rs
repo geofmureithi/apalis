@@ -24,7 +24,7 @@ async fn simple_job(
     _sqlite: Data<SqliteStorage<SimpleJob>>, // The source, added by storage
     task_id: TaskId,       // The task id, added by storage
     attempt: Attempt,      // The current attempt
-    ctx: SqlMetadata,       // The task context provided by the backend
+    ctx: SqlMetadata,      // The task context provided by the backend
     count: Data<Count>,    // Our custom data added via layer
 ) {
     // increment the counter

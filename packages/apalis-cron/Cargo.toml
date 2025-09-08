@@ -9,25 +9,35 @@ description = "A simple yet extensible library for cron-like job scheduling for 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["cron"]
+cron = ["dep:cron"]
+docsrs = ["dep:document-features"]
+## Enable serde support
+serde = ["dep:serde", "chrono/serde", "apalis-core/serde"]
+## Enable `english-to-cron` support
+english = ["dep:english-to-cron", "dep:cron"]
+
 [dependencies]
 apalis-core = { path = "../../packages/apalis-core", version = "0.7.1", default-features = false, features = [
     "sleep",
-] }
-cron = "0.15.0"
-futures = "0.3.30"
-tower = { version = "0.5" }
-chrono = { version = "0.4.38", default-features = false, features = [
-    "clock",
-    "serde",
-] }
-async-stream = "0.3.5"
-async-std = { version = "1.13.0", optional = true }
-serde = { version = "1.0", features = ["derive"] }
+]}
+cron = { version = "0.15.0", optional = true }
+futures-util = { version = "0.3.30", default-features = false }
+chrono = { version = "0.4.38", default-features = false, features = ["clock"] }
+serde = { version = "1.0", features = ["derive"], optional = true }
+ulid = { version = "1" }
+english-to-cron = { version = "0.1.6", optional = true }
+
+[dependencies.document-features]
+version = "0.2"
+optional = true
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["full"] }
 apalis-core = { path = "../../packages/apalis-core", version = "0.7.1", default-features = false, features = [
-    "serde", "json",
+    "json",
 ] }
 
 

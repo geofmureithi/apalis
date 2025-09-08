@@ -24,7 +24,7 @@
 //!         .backend(int_store)
 //!         .data(Count::default())
 //!         .build(task);
-//! 
+//!
 //!     int_worker.run().await.unwrap();
 //! }
 //! ```
@@ -37,6 +37,8 @@
 //! - [`Backend`]
 //! - [`WorkerContext`](crate::worker::context::WorkerContext)
 
+use crate::backend::codec::IdentityCodec;
+use crate::features_table;
 use crate::task::extensions::Extensions;
 use crate::{
     backend::{Backend, TaskStream},
@@ -53,7 +55,6 @@ use futures_util::{
     stream::{self, BoxStream},
     FutureExt, SinkExt, Stream, StreamExt,
 };
-
 use std::{
     pin::Pin,
     sync::Arc,
@@ -63,14 +64,22 @@ use tower_layer::Identity;
 
 /// In-memory queue that is based on channels
 ///
-/// ## Capabilities
-/// | Feature | Status | Description            |
-/// |---------|--------|------------------------|
-/// | Sink support    | ✓      | Ability to push new tasks  |
-/// | Codec Support   |  ✗      | Serialization support for arguments. Uses `json`  |
-/// | Workflow Support   |  ✗      | Flexible enough to support workflows     |
-/// | Ack Support   |  ✗      | Allow acknowledgement of task completion   |
-/// | WaitForCompletion   |  ✗     | Wait for tasks to complete without blocking     |
+#[doc = features_table! {
+    setup = MemoryStorage::new();,
+    TaskSink => supported("Ability to push new tasks", true),
+    Codec => not_supported("Serialization support for arguments"),
+    Acknowledge => not_supported("In-built acknowledgement after task completion"),
+    FetchById => not_supported("Allow fetching a task by its ID"),
+    RegisterWorker => not_supported("Allow registering a worker with the backend"),
+    PipeExt => not_implemented("Allow other backends to pipe to this backend"), // Would require Clone,
+    Sharable => not_supported("Share the same JSON storage across multiple workers"),
+    Workflow => not_implemented("Flexible enough to support workflows"),
+    WaitForCompletion => not_implemented("Wait for tasks to complete without blocking"), // Would require Clone
+    ResumeById => not_supported("Resume a task by its ID"),
+    ResumeAbandoned => not_supported("Resume abandoned tasks"),
+    ListWorkers => not_supported("List all workers registered with the backend"),
+    ListTasks => not_supported("List all tasks in the backend"),
+}]
 pub struct MemoryStorage<Args, Ctx = Extensions> {
     pub(super) sender: MemorySink<Args, Ctx>,
     pub(super) receiver: Pin<Box<dyn Stream<Item = Task<Args, Ctx>> + Send>>,
@@ -194,7 +203,7 @@ impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend<Args>
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
-    type Codec = ();
+    type Codec = IdentityCodec;
 
     fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()

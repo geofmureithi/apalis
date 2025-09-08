@@ -1,10 +1,10 @@
 //! The status of a task
 //!
 //! ## Overview
-//! 
+//!
 //! The `Status` enum defines the various states
 //! a task can be in, such as `Pending`, `Running`, `Done`, `Failed`, etc.
-//! 
+//!
 //! - It includes functionality for parsing a `Status` from a string and
 //! formatting it for display.
 //! - This is useful for tracking the lifecycle of tasks.

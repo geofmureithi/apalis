@@ -1,6 +1,7 @@
 # apalis-cron
 
 A simple yet extensible library for cron-like job scheduling for rust.
+
 Since apalis-cron is build on top of apalis which supports tower middleware, you should be able to easily add middleware such as tracing, retries, load shed, concurrency etc.
 
 ## Example
@@ -11,14 +12,7 @@ use std::str::FromStr;
 use apalis_cron::{CronStream, Schedule};
 use chrono::{DateTime, Utc};
 
-#[derive(Default, Debug, Clone)]
-struct Reminder(DateTime<Utc>);
-impl From<DateTime<Utc>> for Reminder {
-   fn from(t: DateTime<Utc>) -> Self {
-       Reminder(t)
-   }
-}
-async fn handle_tick(job: Reminder, data: Data<usize>) {
+async fn handle_tick(tick: Tick, data: Data<usize>) {
     // Do something with the current tick
 }
 
@@ -57,7 +51,7 @@ async fn main() {
         .expect("unable to run migrations for sqlite");
     let sqlite = SqliteStorage::new(pool);
 
-    let backend = cron_stream.pipe_to_storage(sqlite);
+    let backend = cron_stream.pipe_to(sqlite);
 
     let worker = WorkerBuilder::new("morning-cereal")
         .backend(backend)

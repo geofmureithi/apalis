@@ -33,12 +33,12 @@
 //! ```
 //!
 //! This module is intended for use in tests and local development.
-//! [`Service`]: tower_service::Service
+
 use crate::backend::Backend;
 use crate::error::BoxDynError;
 use crate::task::task_id::{RandomId, TaskId};
 use crate::task::Task;
-use crate::worker::builder::{WorkerBuilder, WorkerServiceBuilder};
+use crate::worker::builder::{IntoWorkerService, WorkerBuilder};
 use crate::worker::{Event, ReadinessService, TrackerService, WorkerError};
 use futures_channel::mpsc::{self, channel};
 use futures_core::future::BoxFuture;
@@ -121,7 +121,7 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
     /// Create a new test worker
     pub fn new<Args, Ctx, W>(backend: B, factory: W) -> TestWorker<B, S, Res, B::IdType>
     where
-        W: WorkerServiceBuilder<B, S, Args, Ctx>,
+        W: IntoWorkerService<B, S, Args, Ctx>,
         B: Backend<Args, Ctx = Ctx> + 'static,
         S: Service<Task<Args, Ctx, B::IdType>, Response = Res> + Send + 'static,
         B::Stream: Unpin + Send + 'static,
@@ -139,8 +139,7 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
         >>::Service: Service<Task<Args, Ctx, B::IdType>>,
         <<<B as Backend<Args>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
-        >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Error:
-            Into<BoxDynError> + Sync + Send,
+        >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Error: Into<BoxDynError> + Sync + Send,
         <<<B as Backend<Args>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Future: Send,
@@ -149,7 +148,7 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
         >>::Service: std::marker::Send + 'static,
         B::IdType: Send + Clone + 'static,
     {
-        let service = factory.build(&backend);
+        let service = factory.into_service(&backend);
         TestWorker::new_with_svc(backend, service)
     }
 
@@ -173,8 +172,7 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
         >>::Service: Service<Task<Args, Ctx, B::IdType>>,
         <<<B as Backend<Args>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
-        >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Error:
-            Into<BoxDynError> + Sync + Send,
+        >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Error: Into<BoxDynError> + Sync + Send,
         <<<B as Backend<Args>>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Future: Send,
@@ -229,8 +227,7 @@ pub struct TestEmitService<S, Response, IdType> {
     service: S,
 }
 
-impl<S, Args, Ctx, Res, IdType> Service<Task<Args, Ctx, IdType>>
-    for TestEmitService<S, Res, IdType>
+impl<S, Args, Ctx, Res, IdType> Service<Task<Args, Ctx, IdType>> for TestEmitService<S, Res, IdType>
 where
     S: Service<Task<Args, Ctx, IdType>, Response = Res> + Send + 'static,
     S::Future: Send + 'static,

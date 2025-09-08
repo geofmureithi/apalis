@@ -1,4 +1,3 @@
-
 //! Utilities for task runtime data extension.
 //!
 //! The [`Data`] type and related middleware are important for sharing state across tasks or layers within the same task.
@@ -53,7 +52,7 @@ use std::{
 
 use tower_service::Service;
 
-use crate::{task_fn::FromRequest, task::Task};
+use crate::{task::Task, task_fn::FromRequest};
 
 /// Extension data for tasks.
 /// This is commonly used to share state across tasks. or across layers within the same tasks
@@ -149,8 +148,8 @@ pub enum MissingDataError {
     NotFound(String),
 }
 
-impl<T: Clone + Send + Sync + 'static, Args: Sync, Ctx: Sync, IdType: Sync + Send> FromRequest<Task<Args, Ctx, IdType>>
-    for Data<T>
+impl<T: Clone + Send + Sync + 'static, Args: Sync, Ctx: Sync, IdType: Sync + Send>
+    FromRequest<Task<Args, Ctx, IdType>> for Data<T>
 {
     type Error = MissingDataError;
     async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {

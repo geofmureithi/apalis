@@ -11,7 +11,7 @@ use apalis_core::{
     backend::{codec::Codec, Backend, TaskSink},
     error::BoxDynError,
     task::{builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId, Task},
-    worker::builder::WorkerServiceBuilder,
+    worker::builder::IntoWorkerService,
 };
 use futures::{
     future::{ready, BoxFuture},
@@ -140,8 +140,7 @@ where
                         Err(e) => ready(Err(e.into())).boxed(),
                     }
                 },
-            )
-                as PreHook<FlowSink, Encode, Compact>);
+            ) as PreHook<FlowSink, Encode, Compact>);
             let svc =
                 SteppedService::<Compact, FlowSink::Ctx, FlowSink::IdType>::new(StepService {
                     codec: PhantomData::<(Encode, Current, FlowSink)>,
@@ -187,14 +186,15 @@ where
         Poll::Ready(Ok(()))
     }
     fn call(&mut self, req: Task<Compact, FlowSink::Ctx, FlowSink::IdType>) -> Self::Future {
-        let ctx: Option<StepContext<FlowSink, Encode>> = req.extract().cloned();
+        let ctx: Option<&StepContext<FlowSink, Encode>> = req.parts.data.get();
         match ctx {
             Some(ctx) => {
+                let ctx = ctx.clone();
                 let req = req.try_map(|arg| Encode::decode(&arg));
-
                 match req {
                     Ok(task) => {
                         let mut step = self.step.clone();
+
                         Box::pin(async move {
                             let res = step
                                 .run(&ctx, task)
@@ -236,24 +236,20 @@ pub enum WorkflowError {
     MetadataError(BoxDynError),
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WorkflowRequest {
     pub step_index: usize,
 }
 
 impl<Input, Current, FlowSink, Encode, Compact>
-    WorkerServiceBuilder<
-        FlowSink,
-        WorkFlowService<FlowSink, Encode, Compact>,
-        Compact,
-        FlowSink::Ctx,
-    > for WorkFlow<Input, Current, FlowSink, Encode, Compact>
+    IntoWorkerService<FlowSink, WorkFlowService<FlowSink, Encode, Compact>, Compact, FlowSink::Ctx>
+    for WorkFlow<Input, Current, FlowSink, Encode, Compact>
 where
     FlowSink: Clone,
     Compact: Send,
     FlowSink: TaskSink<Compact, Codec = Encode>,
 {
-    fn build(self, b: &FlowSink) -> WorkFlowService<FlowSink, Encode, Compact> {
+    fn into_service(self, b: &FlowSink) -> WorkFlowService<FlowSink, Encode, Compact> {
         let services: HashMap<usize, _> = self
             .steps
             .into_iter()
@@ -290,15 +286,11 @@ where
 {
     async fn push_step(&mut self, step: Args, index: usize) -> Result<(), WorkflowError> {
         let task_id = TaskId::new(S::IdType::default());
-        let mut meta = S::Ctx::default();
-        meta.inject(WorkflowRequest { step_index: index })
-            .map_err(|e| WorkflowError::MetadataError(e.into()))?;
-        let task = TaskBuilder::new_with_metadata(
-            S::Codec::encode(&step).map_err(|e| WorkflowError::CodecError(e.into()))?,
-            meta,
-        )
-        .with_task_id(task_id.clone())
-        .build();
+        let args = S::Codec::encode(&step).map_err(|e| WorkflowError::CodecError(e.into()))?;
+        let task = TaskBuilder::new(args)
+            .meta(WorkflowRequest { step_index: index })
+            .with_task_id(task_id.clone())
+            .build();
         self.push_task(task)
             .await
             .map_err(|e| WorkflowError::SinkError(e.into()))
@@ -309,44 +301,27 @@ where
 mod tests {
 
     use apalis_core::{
-        backend::memory::MemoryStorage,
-        worker::{
-            builder::WorkerBuilder, context::WorkerContext, event::Event,
-            ext::event_listener::EventListenerExt,
-        },
+        backend::json::JsonStorage,
+        worker::{builder::WorkerBuilder, event::Event, ext::event_listener::EventListenerExt},
     };
 
-    use tower::limit::ConcurrencyLimitLayer;
+    use std::time::Duration;
 
     use crate::{TaskFlowSink, WorkFlow, WorkflowError};
 
     #[tokio::test]
     async fn simple_workflow() {
         let workflow = WorkFlow::new("odd-numbers-workflow")
-            .then(|a: usize| async move { Ok::<_, WorkflowError>((a..10).collect::<Vec<_>>()) })
-            .filter_map(|a| async move {
-                if a % 2 == 1 {
-                    Some(a)
-                } else {
-                    None
-                }
-            })
-            .then(|res: Vec<usize>, wrk: WorkerContext| async move {
-                assert_eq!(
-                    res.len(),
-                    5,
-                    "There should be 5 odd numbers between 0 and 10"
-                );
-                wrk.stop().unwrap();
-            });
+            .then(|a: usize| async move { Ok::<_, WorkflowError>(a / 2) })
+            .delay_for(Duration::from_millis(1000))
+            .then(|a| async move { Ok::<_, WorkflowError>(a * 3) });
 
-        let mut in_memory = MemoryStorage::new_with_json();
+        let mut in_memory = JsonStorage::new_temp().unwrap();
 
-        in_memory.push_step(5, 0).await.unwrap();
+        in_memory.push_start(usize::MAX).await.unwrap();
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)
-            .layer(ConcurrencyLimitLayer::new(2)) // Using 1 will deadlock the workflow because of the filter_map step
             .on_event(|ctx, ev| {
                 println!("On Event = {:?}", ev);
                 if matches!(ev, Event::Error(_)) {

@@ -2,9 +2,9 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use apalis_core::backend::{Backend, BackendWithSink};
+use apalis_core::layers::Identity;
 use apalis_core::task::task_id::Ulid;
 use apalis_core::task::Task;
-use apalis_core::layers::Identity;
 use apalis_core::worker::context::WorkerContext;
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
@@ -127,11 +127,11 @@ mod tests {
     use apalis_core::{
         backend::{codec::json::JsonCodec, memory::MemoryStorage, BackendWithSink, TaskSink},
         error::BoxDynError,
-        task_fn::{self, service_fn, TaskFn},
         task::{
             task_id::{TaskId, Ulid},
             Parts,
         },
+        task_fn::{self, service_fn, TaskFn},
         worker::{
             builder::WorkerBuilder,
             context::WorkerContext,
@@ -298,12 +298,14 @@ mod tests {
             .unwrap();
         let mut sink = backend.sink();
         for i in 0..ITEMS {
-            let _ = sink.push(Email {
-                to: "one@gmail.com".to_owned(),
-                subject: i.to_string(),
-                message: "Not spam".to_owned(),
-            })
-            .await.unwrap();
+            let _ = sink
+                .push(Email {
+                    to: "one@gmail.com".to_owned(),
+                    subject: i.to_string(),
+                    message: "Not spam".to_owned(),
+                })
+                .await
+                .unwrap();
         }
 
         async fn task(task: Email, ctx: WorkerContext) -> Result<(), BoxDynError> {

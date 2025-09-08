@@ -2,8 +2,6 @@
 
 use crate::error::BoxDynError;
 
-
-
 /// Trait for generating responses.
 ///
 /// Types that implement `IntoResponse` can be returned from a task fn.
@@ -34,7 +32,7 @@ use crate::error::BoxDynError;
 ///         }
 ///    }    
 /// }
-/// 
+///
 /// async fn my_task() -> CustomResult {
 ///     CustomResult::Success("All good".to_string())
 /// }

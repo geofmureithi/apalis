@@ -30,7 +30,7 @@ impl TryFrom<usize> for InnerWorkerState {
 
 /// Represents the state of a worker
 #[derive(Debug, Default)]
-pub (super) struct WorkerState {
+pub(super) struct WorkerState {
     inner: AtomicUsize,
 }
 

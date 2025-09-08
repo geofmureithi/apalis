@@ -17,13 +17,13 @@ use apalis_core::{
         Backend, BackendWithSink, TaskSink,
     },
     error::{BoxDynError, WorkerError},
+    layers::Identity,
     task::{
         attempt::Attempt,
         status::Status,
         task_id::{TaskId, Ulid},
         Parts, Task,
     },
-    layers::Identity,
     worker::{
         context::WorkerContext,
         ext::ack::{Acknowledge, AcknowledgeLayer},

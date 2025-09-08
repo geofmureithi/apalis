@@ -23,7 +23,6 @@ pub mod limit {
     pub use tower::limit::RateLimitLayer;
 }
 
-
 #[cfg(feature = "catch-panic")]
 use apalis_core::error::AbortError;
 use apalis_core::{backend::Backend, worker::builder::WorkerBuilder};
@@ -95,12 +94,7 @@ pub trait WorkerBuilderExt<Args, Ctx, Source, Middleware> {
     fn filter_async<P>(
         self,
         predicate: P,
-    ) -> WorkerBuilder<
-        Args,
-        Ctx,
-        Source,
-        Stack<tower::filter::AsyncFilterLayer<P>, Middleware>,
-    >;
+    ) -> WorkerBuilder<Args, Ctx, Source, Stack<tower::filter::AsyncFilterLayer<P>, Middleware>>;
 
     /// Maps one request type to another.
     fn map_request<F, R1, R2>(
@@ -170,7 +164,9 @@ pub trait WorkerBuilderExt<Args, Ctx, Source, Middleware> {
 }
 
 impl<Args, Ctx, Source, Middleware> WorkerBuilderExt<Args, Ctx, Source, Middleware>
-    for WorkerBuilder<Args, Ctx, Source, Middleware> where Source: Backend<Args>
+    for WorkerBuilder<Args, Ctx, Source, Middleware>
+where
+    Source: Backend<Args>,
 {
     fn option_layer<T>(
         self,

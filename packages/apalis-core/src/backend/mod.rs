@@ -51,7 +51,7 @@ pub mod json {
 }
 
 /// The `Backend` trait defines how workers get and manage tasks from a backend.
-/// 
+///
 /// In other languages, this might be called a "Queue", "Broker", etc.
 pub trait Backend<Args> {
     /// The type used to uniquely identify tasks.
@@ -271,6 +271,11 @@ impl<T> TaskResult<T> {
     /// Get the result of the task
     pub fn result(&self) -> &Result<T, String> {
         &self.result
+    }
+
+    /// Take the result of the task
+    pub fn take(self) -> Result<T, String> {
+        self.result
     }
 }
 

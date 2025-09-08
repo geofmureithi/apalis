@@ -112,7 +112,7 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
         let args = Encode::encode(step).map_err(|e| WorkflowError::CodecError(e.into()))?;
         let task = TaskBuilder::new(args)
             .with_task_id(task_id.clone())
-            .metadata(WorkflowRequest { step_index: index })
+            .meta(WorkflowRequest { step_index: index })
             .build();
         self.sink
             .push_task(task)

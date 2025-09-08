@@ -1,21 +1,15 @@
 use std::{
     fmt::Debug,
     marker::PhantomData,
-    process::Output,
     sync::Arc,
     task::{Context, Poll},
 };
 
 use apalis_core::{
     backend::{codec::Codec, TaskSink, WaitForCompletion},
-    error::{BoxDynError, WorkerError},
-    task::{
-        builder::TaskBuilder,
-        metadata::MetadataExt,
-        task_id::{RandomId, TaskId},
-        Task,
-    },
-    task_fn::{service_fn, TaskFn},
+    error::BoxDynError,
+    task::{builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId, Task},
+    task_fn::{task_fn, TaskFn},
 };
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -81,18 +75,13 @@ where
             let task_id = ctx.push_next_step(step).await?;
             task_ids.push(task_id);
         }
-        let mut meta = Sink::Ctx::default();
-        meta.inject(FilterContext { task_ids })
-            .map_err(|e| WorkflowError::MetadataError(e.into()))?;
-        meta.inject(WorkflowRequest {
-            step_index: ctx.current_step + 1,
-        })
-        .map_err(|e| WorkflowError::MetadataError(e.into()))?;
-        let task = TaskBuilder::new_with_metadata(
-            Encode::encode(steps).map_err(|e| WorkflowError::CodecError(e.into()))?,
-            meta,
-        )
-        .build();
+        let args = Encode::encode(steps).map_err(|e| WorkflowError::CodecError(e.into()))?;
+        let task = TaskBuilder::new(args)
+            .meta(WorkflowRequest {
+                step_index: ctx.current_step + 1,
+            })
+            .meta(FilterContext { task_ids })
+            .build();
 
         ctx.push_compact_task(task).await?;
         Ok(())
@@ -104,7 +93,7 @@ where
         steps: Task<Vec<Input>, Sink::Ctx, Sink::IdType>,
     ) -> Result<Self::Response, Self::Error> {
         let filter_ctx: FilterContext<Sink::IdType> = steps
-            .ctx
+            .parts
             .ctx
             .extract()
             .map_err(|e: MetadataError| WorkflowError::MetadataError(e.into()))?;
@@ -114,7 +103,7 @@ where
             .map_err(|e| WorkflowError::SingleStepError(e.into()))?
             .into_iter()
             .filter_map(|res| {
-                res.result
+                res.take()
                     .map_err(|e| WorkflowError::SingleStepError(e.into()))
                     .ok()
             })
@@ -171,7 +160,7 @@ where
 
     async fn run(
         &mut self,
-        ctx: &StepContext<B, Encode>,
+        _: &StepContext<B, Encode>,
         args: Task<T, B::Ctx, B::IdType>,
     ) -> Result<Self::Response, Self::Error> {
         let res = self.inner.call(args).await.map_err(|e| e.into())?;
@@ -179,8 +168,8 @@ where
     }
     async fn post(
         &self,
-        ctx: &StepContext<B, Encode>,
-        res: &Self::Response,
+        _: &StepContext<B, Encode>,
+        _: &Self::Response,
     ) -> Result<bool, Self::Error> {
         Ok(false) // The parent task will handle the collection
     }
@@ -247,8 +236,8 @@ where
         Poll::Ready(Ok(()))
     }
     fn call(&mut self, req: Task<Compact, FlowSink::Ctx, FlowSink::IdType>) -> Self::Future {
-        let mut ctx: StepContext<FlowSink, Encode> = req.extract().cloned().unwrap();
-        let filter_ctx: Result<FilterContext<FlowSink::IdType>, _> = req.extract();
+        let mut ctx: StepContext<FlowSink, Encode> = req.parts.data.get_checked().cloned().unwrap();
+        let filter_ctx: Result<FilterContext<FlowSink::IdType>, _> = req.parts.ctx.extract();
         match filter_ctx {
             Ok(_) => {
                 let mut step = FilterMap {
@@ -398,7 +387,7 @@ where
                 SteppedService::<Compact, FlowSink::Ctx, FlowSink::IdType>::new(FilterService {
                     step: FilterMapStep {
                         _marker: PhantomData,
-                        inner: service_fn(predicate),
+                        inner: task_fn(predicate),
                     },
                     _marker: PhantomData::<(Current, FlowSink, Encode, Output, F, FnArgs)>,
                 });

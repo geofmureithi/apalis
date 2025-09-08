@@ -1,4 +1,4 @@
-use apalis_core::task::ExecutionContext;
+use apalis_core::task::Parts;
 use apalis_core::task::Task;
 
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,7 @@ impl<'r, T: Decode<'r, sqlx::Sqlite> + Type<sqlx::Sqlite>>
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut parts = ExecutionContext::<SqlMetadata>::default();
+        let mut parts = Parts::<SqlMetadata>::default();
         parts.task_id = task_id;
 
         let attempt: i32 = row.try_get("attempts").unwrap_or(0);
@@ -98,7 +98,7 @@ impl<'r, T: Decode<'r, sqlx::Postgres> + Type<sqlx::Postgres>>
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut parts = ExecutionContext::<SqlMetadata>::default();
+        let mut parts = Parts::<SqlMetadata>::default();
         parts.task_id = Some(task_id);
 
         let attempt: i32 = row.try_get("attempts").unwrap_or(0);
@@ -147,7 +147,7 @@ impl<'r, T: Decode<'r, sqlx::MySql> + Type<sqlx::MySql>> sqlx::FromRow<'r, sqlx:
                 index: "id".to_string(),
                 source: Box::new(e),
             })?;
-        let mut parts = ExecutionContext::<SqlMetadata>::default();
+        let mut parts = Parts::<SqlMetadata>::default();
         parts.task_id = task_id;
 
         let attempt: i32 = row.try_get("attempts").unwrap_or(0);

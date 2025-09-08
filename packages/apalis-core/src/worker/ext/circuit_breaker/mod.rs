@@ -69,14 +69,13 @@ use tower_layer::{Layer, Stack};
 use crate::{
     backend::Backend,
     worker::{
-        builder::WorkerBuilder,
-        ext::circuit_breaker::service::{CircuitBreakerLayer},
-        ext::circuit_breaker::config::CircuitBreakerConfig,
+        builder::WorkerBuilder, ext::circuit_breaker::config::CircuitBreakerConfig,
+        ext::circuit_breaker::service::CircuitBreakerLayer,
     },
 };
 
-mod service;
 mod config;
+mod service;
 
 /// Allows breaking the circuit if an error threshold is hit
 ///

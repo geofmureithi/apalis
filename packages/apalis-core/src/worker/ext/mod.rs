@@ -1,7 +1,7 @@
 //! Extension traits for building and extending workers
 //!
 //! Extension traits can be used for enhancing worker builder functionality that is not provided by default.
-//! 
+//!
 //! # Available extension traits
 //!
 //! The available extensions include:

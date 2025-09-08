@@ -1,7 +1,5 @@
 use std::{
     collections::{HashMap, VecDeque},
-    fmt::Debug,
-    marker::PhantomData,
     task::{Context, Poll},
 };
 
@@ -11,10 +9,9 @@ use apalis_core::{
     task::{metadata::MetadataExt, Task},
 };
 use futures::future::BoxFuture;
-use serde_json::Value;
 use tower::Service;
 
-use crate::{CompositeService, StepContext, SteppedService, WorkflowRequest};
+use crate::{CompositeService, StepContext, WorkflowRequest};
 
 pub struct WorkFlowService<FlowSink, Encode, Compact>
 where
@@ -80,7 +77,7 @@ where
             self.not_ready.is_empty(),
             "Workflow must wait for all services to be ready. Did you forget to call poll_ready()?"
         );
-        let meta: WorkflowRequest = req.ctx.ctx.extract().unwrap_or_default();
+        let meta: WorkflowRequest = req.parts.ctx.extract().unwrap_or_default();
         let idx = meta.step_index;
         let ctx = StepContext::new(self.backend.clone(), idx);
 
@@ -92,7 +89,7 @@ where
             .expect("Attempted to run a step that doesn't exist");
         let svc = &mut cl.svc;
 
-        req.insert(ctx.clone());
+        req.parts.data.insert(ctx.clone());
 
         self.not_ready.push_back(idx);
         let fut = svc.call(req);
