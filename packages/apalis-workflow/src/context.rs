@@ -55,12 +55,12 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
 
     pub async fn push_compact_task<Compact>(
         &mut self,
-        task: Task<Compact, FlowSink::Ctx, FlowSink::IdType>,
+        task: Task<Compact, FlowSink::Context, FlowSink::IdType>,
     ) -> Result<(), WorkflowError>
     where
         FlowSink: Sync + TaskSink<Compact>,
         Compact: Send,
-        FlowSink::Ctx: Send + Default + MetadataExt<WorkflowRequest>,
+        FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
         FlowSink::Error: Into<BoxDynError>,
         FlowSink::IdType: Default,
     {
@@ -72,12 +72,12 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
 
     pub async fn push_task<Args, Compact>(
         &mut self,
-        task: Task<Args, FlowSink::Ctx, FlowSink::IdType>,
+        task: Task<Args, FlowSink::Context, FlowSink::IdType>,
     ) -> Result<(), WorkflowError>
     where
         FlowSink: Sync + TaskSink<Compact>,
         Args: Send,
-        FlowSink::Ctx: Send + Default + MetadataExt<WorkflowRequest>,
+        FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
         FlowSink::Error: Into<BoxDynError>,
         FlowSink::IdType: Default,
         Encode: Codec<Args, Compact = Compact>,
@@ -100,9 +100,9 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
     where
         FlowSink: Sync + TaskSink<Compact>,
         T: Send + Sync,
-        FlowSink::Ctx: Send + Default + MetadataExt<WorkflowRequest>,
+        FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
         FlowSink::Error: Into<BoxDynError>,
-        <FlowSink::Ctx as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
+        <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
         FlowSink::IdType: Default,
         Encode: Codec<T, Compact = Compact>,
         Encode::Error: Into<BoxDynError>,
@@ -128,11 +128,11 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
     where
         FlowSink: Sync + TaskSink<Compact>,
         T: Send + Sync,
-        FlowSink::Ctx: Send + Default + MetadataExt<WorkflowRequest>,
+        FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
         FlowSink::Error: Into<BoxDynError>,
         FlowSink::IdType: Default,
         Encode: Codec<T, Compact = Compact>,
-        <FlowSink::Ctx as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
+        <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
         Encode::Error: Into<BoxDynError>,
     {
         self.push_step_with_index(self.current_step + 1, step).await

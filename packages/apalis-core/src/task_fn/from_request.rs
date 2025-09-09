@@ -11,6 +11,17 @@
 //!
 //! Say we have a basic task for sending emails given the user id
 //! ```rust
+//! # use apalis_core::error::BoxDynError;
+//! # struct User {
+//! #     id: String,
+//! #     // other fields...
+//! # }
+//! # impl User {
+//! #     async fn find_by_id(id: String) -> Result<Self, BoxDynError> {
+//! #         // Simulate fetching user from DB
+//! #         Ok(User { id })
+//! #     }
+//! # }
 //! struct Email {
 //!     user_id: String,
 //!     subject: String,
@@ -20,15 +31,31 @@
 //!     let user_id = email.user_id;
 //!     let user = User::find_by_id(user_id).await?;
 //!     // Do something with user
+//! 
+//!     Ok(())
 //! }
 //! ```
 //!
 //! With [`FromRequest`] you can improve the experience by:
 //! ```rust
-//! impl <Ctx> FromRequest<Request<Email, Ctx>> for User {
+//! # use apalis_core::task::Task;
+//! # use apalis_core::error::BoxDynError;
+//! # use apalis_core::task_fn::FromRequest;
+//! # struct User {
+//! #     id: String,
+//! #     // other fields...
+//! # }
+//! # impl User {
+//! #     async fn find_by_id(id: &String) -> Result<Self, BoxDynError> {
+//! #         // Simulate fetching user from DB
+//! #         Ok(User { id: id.clone() })
+//! #     }
+//! # }
+//! # struct Email { user_id: String };
+//! impl <Ctx: Sync> FromRequest<Task<Email, Ctx>> for User {
 //!     type Error = BoxDynError;
-//!     async fn from_request(req: Request<Email, Ctx>) -> Result<Self, BoxDynError> {
-//!         let user_id = req.args.user_id;
+//!     async fn from_request(req: &Task<Email, Ctx>) -> Result<Self, BoxDynError> {
+//!         let user_id = &req.args.user_id;
 //!         let user = User::find_by_id(user_id).await?;
 //!         Ok(user)
 //!     }
@@ -36,6 +63,7 @@
 //!
 //! async fn send_email(email: Email, user: User) -> Result<(), BoxDynError> {
 //!     // Do something with user
+//!     Ok(())
 //! }
 //! ```
 //! [`FromRequest`]: crate::task_fn::FromRequest

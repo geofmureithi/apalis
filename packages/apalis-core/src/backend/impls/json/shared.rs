@@ -12,31 +12,28 @@
 /// # use apalis_core::task::Task;
 /// # use apalis_core::worker::context::WorkerContext;
 /// # use apalis_core::worker::builder::WorkerBuilder;
+/// # use apalis_core::backend::json::SharedJsonStore;
+/// # use apalis_core::error::BoxDynError;
 /// # use std::time::Duration;
+/// # use apalis_core::backend::TaskSink;
 ///
 /// #[tokio::main]
 /// async fn main() {
 ///     let mut store = SharedJsonStore::new();
 ///     let mut int_store = store.make_shared().unwrap();
-///
-///     for i in 0..10 {
-///         int_store.push(i).await.unwrap();
-///     }
+///     int_store.push(42).await.unwrap();
 ///
 ///     async fn task(
 ///         task: u32,
 ///         ctx: WorkerContext,
 ///     ) -> Result<(), BoxDynError> {
 ///         tokio::time::sleep(Duration::from_millis(2)).await;
-///         if task == 9 {
-///             ctx.stop()?;
-///         }
+///         ctx.stop()?;
 ///         Ok(())
 ///     }
 ///
-///     let int_worker = WorkerBuilder::new("example-int-worker")
+///     let int_worker = WorkerBuilder::new("int-worker")
 ///         .backend(int_store)
-///         .data(Count::default())
 ///         .build(task)
 ///         .run();
 ///
@@ -107,10 +104,11 @@ impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMe
 }
 /// Sharable JSON based backend.
 ///
-/// # Capabilities
-///     - Concurrent processing of multiple task types
-///     - In-memory storage with optional disk persistence
-///     - Metadata support for tasks
+/// # Features
+/// 
+/// - Concurrent processing of multiple task types
+/// - In-memory storage with optional disk persistence
+/// - Metadata support for tasks
 #[derive(Debug)]
 pub struct SharedJsonStore {
     inner: JsonStorage<serde_json::Value>,

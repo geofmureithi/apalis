@@ -17,20 +17,19 @@
 //! # use apalis_core::worker::builder::WorkerBuilder;
 //! # use std::time::Duration;
 //! # use apalis_core::worker::context::WorkerContext;
+//! # use apalis_core::backend::TaskSink;
+//! # use apalis_core::error::BoxDynError;
+//! # use apalis_core::worker::ext::event_listener::EventListenerExt;
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     let mut json_store = JsonStorage::new_temp().unwrap();
-//!     for i in 0..100 {
-//!         json_store.push(i).await.unwrap();
-//!     }
+//!     json_store.push(42).await.unwrap();
+
 //!
 //!     async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
 //!         tokio::time::sleep(Duration::from_secs(1)).await;
-//!         if task == 99 {
-//!             ctx.stop().unwrap();
-//!             return Err("Worker stopped!")?;
-//!         }
+//!         ctx.stop().unwrap();
 //!         Ok(())
 //!     }
 //!
@@ -86,7 +85,10 @@ pub use self::shared::SharedJsonStore;
 /// A backend that persists to a file using json encoding
 ///
 #[doc = features_table! {
-    setup = JsonStorage::new_temp().unwrap();,
+    setup = {
+        use apalis_core::backend::json::JsonStorage;
+        JsonStorage::new_temp().unwrap()
+    };,
     TaskSink => supported("Ability to push new tasks"),
     Serialization => limited("Serialization support for arguments. Only accepts `json`", false),
     FetchById => not_implemented("Allow fetching a task by its ID"),

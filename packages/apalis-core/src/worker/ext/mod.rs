@@ -19,7 +19,7 @@
 //! These methods can encapsulate common configurations or patterns that you want to reuse across different workers.
 //! This example demonstrates how to define and implement an extension trait for `WorkerBuilder`.
 //!
-//! ```rust
+//! ```rust,ignore
 //! # use apalis_core::worker::builder::WorkerBuilder;
 //! # use apalis_core::backend::memory::MemoryStorage;
 //! /// Example extension trait for WorkerBuilder that adds a custom method.

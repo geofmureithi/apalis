@@ -14,18 +14,19 @@
 //! ```rust
 //! # use apalis_core::backend::memory::MemoryStorage;
 //! # use apalis_core::worker::context::WorkerContext;
-//!
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::backend::TaskSink;
+//! # async fn task(_: u32, ctx: WorkerContext) { ctx.stop().unwrap();}
 //! #[tokio::main]
 //! async fn main() {
-//!     let mut storage = MemoryStorage::new();
-//!     storage.push(42).await.unwrap();
+//!     let mut store = MemoryStorage::new();
+//!     store.push(42).await.unwrap();
 //!
-//!     let int_worker = WorkerBuilder::new("rango-tango-int")
-//!         .backend(int_store)
-//!         .data(Count::default())
+//!     let worker = WorkerBuilder::new("int-worker")
+//!         .backend(store)
 //!         .build(task);
 //!
-//!     int_worker.run().await.unwrap();
+//!     worker.run().await.unwrap();
 //! }
 //! ```
 //!
@@ -65,13 +66,17 @@ use tower_layer::Identity;
 /// In-memory queue that is based on channels
 ///
 #[doc = features_table! {
-    setup = MemoryStorage::new();,
+    setup = {
+        use apalis_core::backend::memory::MemoryStorage;
+        // No migrations
+        MemoryStorage::new()
+    };,
 
     Backend => supported("Basic Backend functionality", true),
     TaskSink => supported("Ability to push new tasks", true),
     Serialization => not_supported("Serialization support for arguments"),
 
-    PipeExt => not_implemented("Allow other backends to pipe to this backend"), // Would require Clone,
+    PipeExt => not_implemented("Allow other backends to pipe to this backend"),
     MakeShared => not_supported("Share the same JSON storage across multiple workers"),
 
     Update => not_supported("Allow updating a task"),
@@ -83,8 +88,8 @@ use tower_layer::Identity;
     Vacuum => not_supported("Vacuum the task storage"),
 
     Workflow => not_implemented("Flexible enough to support workflows"),
-    WaitForCompletion => not_implemented("Wait for tasks to complete without blocking"), // Would require Clone
-    
+    WaitForCompletion => not_implemented("Wait for tasks to complete without blocking"), // Requires Clone
+
     RegisterWorker => not_supported("Allow registering a worker with the backend"),
     ListWorkers => not_supported("List all workers registered with the backend"),
     ListTasks => not_supported("List all tasks in the backend"),
@@ -195,7 +200,7 @@ impl<Args, Ctx> Stream for MemoryStorage<Args, Ctx> {
     type Item = Task<Args, Ctx>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.as_mut().receiver.poll_next_unpin(cx)
+        self.receiver.poll_next_unpin(cx)
     }
 }
 
@@ -205,7 +210,7 @@ impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend<Args>
 {
     type IdType = RandomId;
 
-    type Ctx = Ctx;
+    type Context = Ctx;
 
     type Error = SendError;
     type Stream = TaskStream<Task<Args, Ctx>, SendError>;
@@ -222,7 +227,7 @@ impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend<Args>
     }
 
     fn poll(self, _worker: &WorkerContext) -> Self::Stream {
-        let stream = self.receiver.map(|r| Ok(Some(r))).boxed();
+        let stream = self.receiver.boxed().map(|r| Ok(Some(r))).boxed();
         stream
     }
 }

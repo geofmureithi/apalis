@@ -65,6 +65,8 @@
 //! The `stream` interface yields worker events (e.g., `Success`, `Error`) while running:
 //! ```rust,no_run
 //! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # use futures_util::StreamExt;
 //! # #[tokio::main]
 //! # async fn main() {
 //! #   let mut storage = MemoryStorage::new();
@@ -73,7 +75,7 @@
 //! #    }
 //! #   let worker = WorkerBuilder::new("worker-1")
 //! #        .backend(storage)
-//! #        .build_fn(handler);
+//! #        .build(handler);
 //! let mut stream = worker.stream();
 //! while let Some(evt) = stream.next().await {
 //!     println!("Event: {:?}", evt);
@@ -180,29 +182,29 @@ impl<Args, Ctx, B, Svc, M> Worker<Args, Ctx, B, Svc, M> {
     }
 }
 
-impl<Args, S, B, M> Worker<Args, B::Ctx, B, S, M>
+impl<Args, S, B, M> Worker<Args, B::Context, B, S, M>
 where
     B: Backend<Args>,
-    S: Service<Task<Args, B::Ctx, B::IdType>> + Send + 'static,
+    S: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
     B::Stream: Unpin + Send + 'static,
     B::Beat: Unpin + Send + 'static,
     Args: Send + 'static,
-    B::Ctx: Send + 'static,
+    B::Context: Send + 'static,
     B::Error: Into<BoxDynError> + Send + 'static,
     M: Layer<ReadinessService<TrackerService<S>>>,
     B::Layer: Layer<M::Service>,
     <B::Layer as Layer<M::Service>>::Service:
-        Service<Task<Args, B::Ctx, B::IdType>> + Send + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Ctx, B::IdType>>>::Error:
+        Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Ctx, B::IdType>>>::Future:
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future:
         Send,
-    M::Service: Service<Task<Args, B::Ctx, B::IdType>> + Send + 'static,
+    M::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-        Task<Args, B::Ctx, B::IdType>,
+        Task<Args, B::Context, B::IdType>,
     >>::Future: Send,
     <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-        Task<Args, B::Ctx, B::IdType>,
+        Task<Args, B::Context, B::IdType>,
     >>::Error: Into<BoxDynError> + Send + Sync + 'static,
     B::IdType: Send + 'static,
 {
@@ -263,8 +265,7 @@ where
     /// # use apalis_core::backend::memory::MemoryStorage;
     /// # use apalis_core::worker::builder::WorkerBuilder;
     /// # use apalis_core::backend::TaskSink;
-    /// # use futures_util::stream::stream::StreamExt;
-    /// # use apalis_core::backend::memory::MemoryStorage;
+    /// # use futures_util::StreamExt;
     /// #[tokio::main]
     /// async fn main() -> Result<(), BoxDynError> {
     ///     let mut storage = MemoryStorage::new();

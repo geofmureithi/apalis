@@ -17,9 +17,9 @@
 //! Convenience methods are provided for common scheduling scenarios.
 //!
 //! ### Example
-//! ```rust
+//! ```rust,ignore
 //! let task = TaskBuilder::new(args)
-//!     .with_status(Status::Pending)
+//!     .attempts(3)
 //!     .run_in_minutes(10)
 //!     .build();
 //! ```

@@ -115,10 +115,10 @@ where
     Tz: TimeZone + Send + Sync + 'static,
     Tz::Offset: Send + Sync + Unpin + Display,
 {
-    type Ctx = CronContext<S>;
+    type Context = CronContext<S>;
     type Codec = ();
     type Error = CronStreamError<Tz>;
-    type Stream = TaskStream<Task<Tick<Tz>, Self::Ctx, Ulid>, CronStreamError<Tz>>;
+    type Stream = TaskStream<Task<Tick<Tz>, Self::Context, Ulid>, CronStreamError<Tz>>;
 
     type Layer = Identity;
 

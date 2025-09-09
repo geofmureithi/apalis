@@ -9,23 +9,24 @@
 //!
 //! ```rust
 //! # use futures_util::stream;
-//! # use apalis_core::backend::pipe::Pipe;
-//! # use apalis_core::backend::memory::MemoryStorage;
-//! # use apalis_core::worker::{WorkerBuilder, context::WorkerContext};
+//! # use apalis_core::backend::pipe::PipeExt;
+//! # use apalis_core::backend::json::JsonStorage;
+//! # use apalis_core::worker::{builder::WorkerBuilder, context::WorkerContext};
 //! # use apalis_core::error::BoxDynError;
 //! # use std::time::Duration;
+//! # use futures_util::StreamExt;
+//! # use crate::apalis_core::worker::ext::event_listener::EventListenerExt;
 //! #[tokio::main]
 //! async fn main() {
 //!     let stm = stream::iter(0..10).map(|s| Ok::<_, std::io::Error>(s));
 //!
-//!     let in_memory = MemoryStorage::new();
-//!     let backend = Pipe::new(stm, in_memory);
+//!     let in_memory = JsonStorage::new_temp().unwrap();
+//!     let backend = stm.pipe_to(in_memory);
 //!
 //!     async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
 //!         tokio::time::sleep(Duration::from_secs(1)).await;
 //! #        if task == 9 {
 //! #            ctx.stop().unwrap();
-//! #            return Err("Graceful Exit".into());
 //! #        }
 //!         Ok(())
 //!     }
@@ -58,7 +59,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
-/// A generic Pipe that wraps an inner type along with a `RequestStream`.
+/// A generic pipe that wraps a [`Stream`] and passes it to a backend
 #[doc = features_table! {
     setup = unreachable!();,
     TaskSink => supported("Ability to push new tasks", false),
@@ -117,7 +118,7 @@ impl<S: fmt::Debug, Into: fmt::Debug, Args, Ctx> fmt::Debug for Pipe<S, Into, Ar
 impl<Args, Ctx, S, TSink, Err> Backend<Args> for Pipe<S, TSink, Args, Ctx>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    TSink: Backend<Args, Ctx = Ctx>
+    TSink: Backend<Args, Context = Ctx>
         + Sink<Task<Args, Ctx, TSink::IdType>>
         + Clone
         + Unpin
@@ -135,7 +136,7 @@ where
 {
     type IdType = TSink::IdType;
 
-    type Ctx = Ctx;
+    type Context = Ctx;
 
     type Stream = BoxStream<'static, Result<Option<Task<Args, Ctx, Self::IdType>>, PipeError>>;
 
@@ -150,9 +151,7 @@ where
     fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat {
         self.into
             .heartbeat(worker)
-            .map_err(|e| PipeError {
-                kind: PipeErrorKind::Inner(e.into()),
-            })
+            .map_err(|e| PipeError::Inner(e.into()))
             .boxed()
     }
 
@@ -173,14 +172,10 @@ where
         select(
             once(async move {
                 let fut = sink.send_all(&mut sink_stream);
-                fut.await.map_err(|e| PipeError {
-                    kind: PipeErrorKind::Inner(e.into()),
-                })?;
+                fut.await.map_err(|e| PipeError::Inner(e.into()))?;
                 Ok(None)
             }),
-            sender_stream.map_err(|e| PipeError {
-                kind: PipeErrorKind::Inner(e.into()),
-            }),
+            sender_stream.map_err(|e| PipeError::Inner(e.into())),
         )
         .boxed()
     }
@@ -206,34 +201,15 @@ where
     }
 }
 
-/// A pipe error
+/// Error encountered while piping streams
 #[derive(Debug, thiserror::Error)]
-pub struct PipeError {
-    kind: PipeErrorKind,
-}
-
-/// The kind of pipe error that occurred
-#[derive(Debug)]
-pub enum PipeErrorKind {
+pub enum PipeError {
     /// The cron stream provided a None
+    #[error("The inner stream provided a None")]
     EmptyStream,
     /// An inner stream error occurred
+    #[error("The inner stream error: {0}")]
     Inner(BoxDynError),
-}
-
-impl fmt::Display for PipeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            PipeErrorKind::EmptyStream => write!(f, "The inner stream provided a None",),
-            PipeErrorKind::Inner(e) => write!(f, "The inner stream error {}", e),
-        }
-    }
-}
-
-impl From<PipeErrorKind> for PipeError {
-    fn from(kind: PipeErrorKind) -> PipeError {
-        PipeError { kind }
-    }
 }
 
 #[cfg(test)]

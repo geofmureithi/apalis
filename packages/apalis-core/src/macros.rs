@@ -47,14 +47,17 @@ macro_rules! error {
 ///
 /// Usage:
 /// ```rust
+/// use apalis_core::features_table;
+/// # fn example() -> &'static str {
 /// features_table! {
 ///     setup = MemoryStorage::new();,
 ///     TaskSink => supported("Ability to push new tasks", true),
 ///     Serialization => limited("Serialization support for arguments. Only accepts `json`"),
-///     Acknowledge => supported("In-built acknowledgement after task completion", true),
 ///     FetchById => not_implemented("Allow fetching a task by its ID"),
 ///     RegisterWorker => not_supported("Allow registering a worker with the backend"),
 /// }
+/// # }
+/// 
 /// ```
 #[macro_export]
 macro_rules! features_table {
@@ -142,6 +145,8 @@ macro_rules! features_table {
             "#### ", stringify!($feature), " Example\n\n",
             "```rust\n",
             "use apalis_core::backend::", stringify!($feature), ";\n",
+            "use apalis_core::worker::context::WorkerContext;\n",
+            "use apalis_core::worker::builder::WorkerBuilder;\n",
             "#[tokio::main]\n",
             "async fn main() {\n",
             "    let mut backend = ", stringify!($setup), ";\n\n",
@@ -151,14 +156,15 @@ macro_rules! features_table {
     };
 
     (@assert_function Backend) => { concat!(
+        "    # use futures_util::StreamExt; \n",
         "    async fn task(task: u32, worker: WorkerContext) {\n",
-        "        tokio::time::sleep(Duration::from_secs(1)).await;\n",
+        "        // Do some work \n",
         "        worker.stop().unwrap();\n",
         "    }\n",
         "    let worker = WorkerBuilder::new(\"rango-tango\")\n",
         "        .backend(backend)\n",
         "        .build(task);\n",
-        "    worker.run().await.unwrap();\n",
+        "    # let _ = worker.stream().take(1).collect::<Vec<_>>().await;\n",
         "}\n"
     ) };
     (@assert_function Vacuum) => { "assert_vacuum(backend);" };
@@ -167,9 +173,9 @@ macro_rules! features_table {
     (@assert_function MakeShared) => { "assert_make_shared(backend);" };
     // Standardized assert function mapping for identifiers
     (@assert_function TaskSink) => { concat!(
+        "    use apalis_core::backend::TaskSink;\n",
         "    backend.push(42).await.unwrap();\n\n",
         "    async fn task(task: u32, worker: WorkerContext) {\n",
-        "        tokio::time::sleep(Duration::from_secs(1)).await;\n",
         "        worker.stop().unwrap();\n",
         "    }\n",
         "    let worker = WorkerBuilder::new(\"rango-tango\")\n",
@@ -213,9 +219,7 @@ mod tests {
         assert!(table.contains("|---------|--------|------------------------"));
 
         // Table rows should contain ONLY name, status, description
-        assert!(table.contains(
-            "| ✅ | Ability to push new tasks |"
-        ));
+        assert!(table.contains("| ✅ | Ability to push new tasks |"));
 
         // Code examples should be in separate sections for features with true flag or no flag (default)
         assert!(table.contains("#### TaskSink Example"));

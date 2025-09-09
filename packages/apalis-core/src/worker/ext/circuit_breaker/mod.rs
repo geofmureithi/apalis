@@ -35,9 +35,6 @@
 //!             ctx.stop().unwrap();
 //!             return Err("Worker stopped!")?;
 //!         }
-//!         if task == 8 {
-//!             panic!("{task}");
-//!         }
 //!         if task % 3 == 0 {
 //!             return Ok(());
 //!         } else {

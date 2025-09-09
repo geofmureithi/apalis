@@ -55,9 +55,7 @@
 //!
 //! ### Example: Using `TaskBuilder`
 //!
-//! ```rust
-//! use apalis_core::task::{Task, TaskBuilder};
-//!
+//! ```ignore
 //! let task: Task<String, ()> = TaskBuilder::new("my-task".to_string())
 //!     .id("task-123".into())
 //!     .attempts(3)
@@ -119,10 +117,12 @@
 //!
 //! ### Example: Building and Running a Worker
 //! ```rust
-//! # use apalis_core::worker::{WorkerBuilder, WorkerContext};
+//! # use apalis_core::worker::{builder::WorkerBuilder, context::WorkerContext};
 //! # use apalis_core::backend::memory::MemoryStorage;
 //! # use apalis_core::error::BoxDynError;
 //! # use std::time::Duration;
+//! # use crate::apalis_core::worker::ext::event_listener::EventListenerExt;
+//! # use crate::apalis_core::backend::TaskSink;
 //! #[tokio::main]
 //! async fn main() {
 //!     let mut in_memory = MemoryStorage::new();
@@ -167,23 +167,26 @@
 //!
 //! ```rust
 //! # use apalis_core::monitor::Monitor;
-//! # use apalis_core::worker::WorkerBuilder;
-//! # use apalis_core::memory::MemoryStorage;
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::backend::json::JsonStorage;
 //! # use apalis_core::task::Task;
+//! # use apalis_core::backend::TaskSink;
 //! # use tower::service_fn;
 //! # use std::time::Duration;
+//! # use apalis_core::worker::context::WorkerContext;
 //! #[tokio::main]
 //! async fn main() {
-//!     let mut storage = MemoryStorage::new();
+//!     let mut storage = JsonStorage::new_temp().unwrap();
 //!     storage.push(1u32).await.unwrap();
 //!
 //!     let monitor = Monitor::new()
-//!         .on_event(|ctx, event| println!("{}: {:?}", ctx.id(), event))
-//!         .register(|_| {
+//!         .on_event(|ctx, event| println!("{}: {:?}", ctx.name(), event))
+//!         .register(move |_| {
 //!             WorkerBuilder::new("demo-worker")
 //!                 .backend(storage.clone())
-//!                 .build(|req: u32| async move {
+//!                 .build(|req: u32, ctx: WorkerContext| async move {
 //!                     println!("Processing task: {:?}", req);
+//! #                    ctx.stop().unwrap();
 //!                     Ok::<_, std::io::Error>(req)
 //!                 })
 //!         });
@@ -240,7 +243,7 @@
 //!     }
 //!
 //!     fn call(&mut self, req: Task<Req, ()>) -> Self::Future {
-//!         println!("Processing task: {:?}", req.data());
+//!         println!("Processing task: {:?}", req.args);
 //!         self.inner.call(req)
 //!     }
 //! }

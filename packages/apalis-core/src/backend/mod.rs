@@ -59,14 +59,14 @@ pub trait Backend<Args> {
     /// The type used to uniquely identify tasks.
     type IdType: Clone;
     /// Context associated with each task.
-    type Ctx: Default;
+    type Context: Default;
     /// The error type returned by backend operations
     type Error;
     /// The codec used for serialization/deserialization of tasks.
     type Codec;
 
     /// A stream of tasks provided by the backend.
-    type Stream: Stream<Item = Result<Option<Task<Args, Self::Ctx, Self::IdType>>, Self::Error>>;
+    type Stream: Stream<Item = Result<Option<Task<Args, Self::Context, Self::IdType>>, Self::Error>>;
     /// A stream representing heartbeat signals.
     type Beat: Stream<Item = Result<(), Self::Error>>;
     /// The type representing backend middleware layer.
@@ -103,18 +103,18 @@ pub trait TaskSink<Args>: Backend<Args> {
     /// Allows pushing a fully constructed task into the backend
     fn push_task(
         &mut self,
-        task: Task<Args, Self::Ctx, Self::IdType>,
+        task: Task<Args, Self::Context, Self::IdType>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 impl<Args, S, E> TaskSink<Args> for S
 where
-    S: Sink<Task<Args, Self::Ctx, Self::IdType>, Error = E>
+    S: Sink<Task<Args, Self::Context, Self::IdType>, Error = E>
         + Unpin
         + Backend<Args, Error = E>
         + Send,
     Args: Send,
-    S::Ctx: Send + Default,
+    S::Context: Send + Default,
     S::IdType: Send + 'static,
     E: Send,
 {
@@ -147,7 +147,7 @@ where
 
     async fn push_task(
         &mut self,
-        task: Task<Args, Self::Ctx, Self::IdType>,
+        task: Task<Args, Self::Context, Self::IdType>,
     ) -> Result<(), Self::Error> {
         use futures_util::SinkExt;
         self.send(task).await
@@ -160,7 +160,7 @@ pub trait FetchById<Args>: Backend<Args> {
     fn fetch_by_id(
         &mut self,
         task_id: &TaskId<Self::IdType>,
-    ) -> impl Future<Output = Result<Option<Task<Args, Self::Ctx>>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Option<Task<Args, Self::Context>>, Self::Error>> + Send;
 }
 
 /// Allows updating an existing task
@@ -168,7 +168,7 @@ pub trait Update<Args>: Backend<Args> {
     /// Update the given task
     fn update(
         &mut self,
-        task: Task<Args, Self::Ctx, Self::IdType>,
+        task: Task<Args, Self::Context, Self::IdType>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
@@ -177,7 +177,7 @@ pub trait Reschedule<Args>: Backend<Args> {
     /// Reschedule the task after a specified duration
     fn reschedule(
         &mut self,
-        task: Task<Args, Self::Ctx, Self::IdType>,
+        task: Task<Args, Self::Context, Self::IdType>,
         wait: Duration,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
@@ -239,7 +239,7 @@ pub trait ListTasks<Args>: Backend<Args> {
     fn list_tasks(
         &self,
         filter: &Self::Filter,
-    ) -> impl Future<Output = Result<Vec<Task<Args, Self::Ctx, Self::IdType>>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Vec<Task<Args, Self::Context, Self::IdType>>, Self::Error>> + Send;
 }
 
 /// Represents the result of a task execution

@@ -15,14 +15,14 @@ use crate::error::BoxDynError;
 /// to return from a task fn:
 ///
 /// ```rust
-/// # use apalis_core::service_fn::into_response::IntoResponse;
+/// # use apalis_core::task_fn::into_response::IntoResponse;
 /// # use apalis_core::error::BoxDynError;
 /// enum CustomResult {
 ///     Success(String),
 ///     Recoverable(BoxDynError),
 ///     Failure(BoxDynError),
 /// }
-/// impl IntoResponse for MyError {
+/// impl IntoResponse for CustomResult {
 ///     type Output = String;
 ///     fn into_response(self) -> Result<Self::Output, BoxDynError> {
 ///         match self {

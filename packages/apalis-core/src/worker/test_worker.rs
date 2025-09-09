@@ -122,7 +122,7 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
     pub fn new<Args, Ctx, W>(backend: B, factory: W) -> TestWorker<B, S, Res, B::IdType>
     where
         W: IntoWorkerService<B, S, Args, Ctx>,
-        B: Backend<Args, Ctx = Ctx> + 'static,
+        B: Backend<Args, Context = Ctx> + 'static,
         S: Service<Task<Args, Ctx, B::IdType>, Response = Res> + Send + 'static,
         B::Stream: Unpin + Send + 'static,
         B::Beat: Unpin + Send + 'static,
@@ -155,7 +155,7 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
     /// Create a new test worker with a service
     pub fn new_with_svc<Args, Ctx>(backend: B, service: S) -> TestWorker<B, S, Res, B::IdType>
     where
-        B: Backend<Args, Ctx = Ctx> + 'static,
+        B: Backend<Args, Context = Ctx> + 'static,
         S: Service<Task<Args, Ctx, B::IdType>, Response = Res> + Send + 'static,
         B::Stream: Unpin + Send + 'static,
         B::Beat: Unpin + Send + 'static,

@@ -37,7 +37,7 @@ impl<S, T> ThenStep<S, T> {
 impl<S, Current, O, E, FlowSink, Encode, Compact> Step<Current, FlowSink, Encode>
     for ThenStep<S, Current>
 where
-    S: Service<Task<Current, FlowSink::Ctx, FlowSink::IdType>, Response = O, Error = E>
+    S: Service<Task<Current, FlowSink::Context, FlowSink::IdType>, Response = O, Error = E>
         + Sync
         + Send,
     Current: Sync + Send + 'static,
@@ -47,13 +47,13 @@ where
     O: Sync,
     FlowSink: Sync + Unpin + TaskSink<Compact> + Send,
     Current: Send,
-    FlowSink::Ctx: Send + Sync + Default + MetadataExt<WorkflowRequest>,
+    FlowSink::Context: Send + Sync + Default + MetadataExt<WorkflowRequest>,
     FlowSink::Error: Into<BoxDynError> + Send + 'static,
     FlowSink::IdType: Default + Send,
     Compact: Sync + Send,
     Encode: Codec<Current, Compact = Compact> + Sync + Send + 'static,
     Encode::Error: std::error::Error + Sync + Send + 'static,
-    <FlowSink::Ctx as MetadataExt<WorkflowRequest>>::Error:
+    <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
         std::error::Error + Sync + Send + 'static,
 {
     type Response = S::Response;
@@ -69,7 +69,7 @@ where
     async fn run(
         &mut self,
         _: &StepContext<FlowSink, Encode>,
-        args: Task<Current, FlowSink::Ctx, FlowSink::IdType>,
+        args: Task<Current, FlowSink::Context, FlowSink::IdType>,
     ) -> Result<Self::Response, Self::Error> {
         let res = self
             .inner
@@ -93,17 +93,17 @@ where
         O: Sync + Send + 'static,
         E: Into<BoxDynError> + Send + Sync + 'static,
         F: Send + 'static + Sync + Clone,
-        TaskFn<F, Current, FlowSink::Ctx, FnArgs>:
-            Service<Task<Current, FlowSink::Ctx, FlowSink::IdType>, Response = O, Error = E>,
+        TaskFn<F, Current, FlowSink::Context, FnArgs>:
+            Service<Task<Current, FlowSink::Context, FlowSink::IdType>, Response = O, Error = E>,
         FnArgs: std::marker::Send + 'static + Sync,
         Current: std::marker::Send + 'static + Sync,
-        FlowSink::Ctx: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
+        FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
         FlowSink::Error: Into<BoxDynError> + Send + 'static,
-        <TaskFn<F, Current, FlowSink::Ctx, FnArgs> as Service<
-            Task<Current, FlowSink::Ctx, FlowSink::IdType>,
+        <TaskFn<F, Current, FlowSink::Context, FnArgs> as Service<
+            Task<Current, FlowSink::Context, FlowSink::IdType>,
         >>::Future: Send + 'static,
-        <TaskFn<F, Current, FlowSink::Ctx, FnArgs> as Service<
-            Task<Current, FlowSink::Ctx, FlowSink::IdType>,
+        <TaskFn<F, Current, FlowSink::Context, FnArgs> as Service<
+            Task<Current, FlowSink::Context, FlowSink::IdType>,
         >>::Error: Into<BoxDynError>,
         FlowSink::IdType: Send + Default,
         Compact: Sync + Send + 'static,
@@ -111,11 +111,11 @@ where
         CodecError: Send + Sync + std::error::Error + 'static,
         E: Into<BoxDynError>,
         Encode: Codec<O, Compact = Compact, Error = CodecError> + 'static,
-        <FlowSink::Ctx as MetadataExt<WorkflowRequest>>::Error:
+        <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
             std::error::Error + Sync + Send + 'static,
     {
         self.add_step::<_, O, _, _>(ThenStep {
-            inner: task_fn::<F, Current, FlowSink::Ctx, FnArgs>(then),
+            inner: task_fn::<F, Current, FlowSink::Context, FnArgs>(then),
             _marker: PhantomData,
         })
     }

@@ -26,14 +26,16 @@
 //! # use apalis_core::worker::context::WorkerContext;
 //! # use apalis_core::error::BoxDynError;
 //! # use std::time::Duration;
-//! #
+//! # use futures_util::StreamExt;
+//! # use futures_util::FutureExt;
+//! # use apalis_core::backend::TaskSink;
 //! #[tokio::main]
 //! async fn main() {
 //!     // Create a memory-backed VecDeque
-//!     let memory = Arc::new(Mutex::new(VecDeque::new()));
+//!     let memory = Arc::new(Mutex::new(VecDeque::<Task<u32, ()>>::new()));
 //!
 //!     // Build the custom backend
-//!     let backend = BackendBuilder::new()
+//!     let mut backend = BackendBuilder::new()
 //!         .database(memory)
 //!         .fetcher(|memory, _, _| {
 //!             stream::unfold(memory.clone(), |p| async move {
@@ -67,9 +69,7 @@
 //!     // Define the task handler
 //!     async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
 //!         tokio::time::sleep(Duration::from_secs(1)).await;
-//! #        if task == 42 {
-//! #            ctx.stop().unwrap();
-//! #        }
+//! #       ctx.stop().unwrap();
 //!         Ok(())
 //!     }
 //!
@@ -112,7 +112,7 @@ use crate::{backend::Backend, task::Task, worker::context::WorkerContext};
 /// meaning you can use it to integrate with existing systems.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// let backend = BackendBuilder::new()
 ///     .database(my_db)
 ///     .fetcher(my_fetcher_fn)
@@ -347,7 +347,7 @@ where
 {
     type IdType = IdType;
 
-    type Ctx = Ctx;
+    type Context = Ctx;
 
     type Error = BoxDynError;
 

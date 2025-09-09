@@ -15,30 +15,28 @@
 //! ## Example
 //!
 //! ```rust
-//! use std::sync::Arc;
-//! use apalis_core::layers::extensions::Data;
-//! use apalis_core::service_fn::service_fn;
-//! use apalis_core::builder::WorkerBuilder;
-//! use apalis_core::memory::MemoryStorage;
+//! # use std::sync::Arc;
+//! # use apalis_core::task::data::Data;
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::backend::memory::MemoryStorage;
 //!
 //! struct State { /* ... */ }
-//! struct Email;
 //!
-//! async fn email_service(email: Email, state: Data<Arc<State>>) {
+//! async fn email_service(email: String, state: Data<Arc<State>>) {
 //!     // Use shared state here
 //! }
 //!
 //! let state = Arc::new(State { /* ... */ });
 //! let worker = WorkerBuilder::new("tasty-avocado")
-//!     .data(state)
 //!     .backend(MemoryStorage::new())
-//!     .build(service_fn(email_service));
+//!     .data(state)
+//!     .build(email_service);
 //! ```
 //!
 //! # Features
 //!
 //! - Type-safe access to shared data.
-//! - Middleware integration via [`tower_layer::Layer`].
+//! - Integrated as middleware. 
 //! - Error handling for missing data.
 //!
 //! # See Also
@@ -59,18 +57,15 @@ use crate::{task::Task, task_fn::FromRequest};
 ///
 /// ```rust
 /// # use std::sync::Arc;
-/// # struct Email;
-/// # use apalis_core::layers::extensions::Data;
-/// # use apalis_core::task_fn::task_fn;
-
-/// # use apalis_core::builder::WorkerBuilder;
+/// # use apalis_core::task::data::Data;
+/// # use apalis_core::worker::builder::WorkerBuilder;
 /// # use apalis_core::backend::memory::MemoryStorage;
 /// // Some shared state used throughout our application
 /// struct State {
 ///     // ...
 /// }
 ///
-/// async fn send_email(email: Email, state: Data<Arc<State>>) {
+/// async fn send_email(email: String, state: Data<Arc<State>>) {
 ///     
 /// }
 ///
@@ -141,7 +136,7 @@ where
 }
 
 /// Error type for missing data in a task's context.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum MissingDataError {
     /// The type was not found in the task's data map
     #[error("the type for key `{0}` is not available")]

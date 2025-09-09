@@ -26,7 +26,7 @@ use crate::{
 impl<Args: 'static + Send + DeserializeOwned + Unpin> Backend<Args> for JsonStorage<Args> {
     type IdType = RandomId;
     type Error = SendError;
-    type Ctx = JsonMapMetadata;
+    type Context = JsonMapMetadata;
     type Stream = TaskStream<Task<Args, JsonMapMetadata>, SendError>;
     type Layer = AcknowledgeLayer<JsonAck<Args>>;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;

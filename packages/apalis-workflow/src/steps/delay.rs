@@ -40,13 +40,13 @@ where
     Current: Sync + Send + 'static,
     FlowSink: Sync + Unpin + TaskSink<Compact> + Send,
     Current: Send,
-    FlowSink::Ctx: Send + Sync + Default + MetadataExt<WorkflowRequest>,
+    FlowSink::Context: Send + Sync + Default + MetadataExt<WorkflowRequest>,
     FlowSink::Error: Into<BoxDynError> + Send + 'static,
     FlowSink::IdType: Default + Send,
     Compact: Sync + Send,
     Encode: Codec<Current, Compact = Compact> + Sync + Send + 'static,
     Encode::Error: std::error::Error + Sync + Send + 'static,
-    <FlowSink::Ctx as MetadataExt<WorkflowRequest>>::Error:
+    <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
         std::error::Error + Sync + Send + 'static,
 {
     type Response = Current;
@@ -62,7 +62,7 @@ where
     async fn run(
         &mut self,
         ctx: &StepContext<FlowSink, Encode>,
-        task: Task<Current, FlowSink::Ctx, FlowSink::IdType>,
+        task: Task<Current, FlowSink::Context, FlowSink::IdType>,
     ) -> Result<Self::Response, Self::Error> {
         apalis_core::timer::sleep(self.duration).await;
 
@@ -81,13 +81,13 @@ where
     ) -> WorkFlow<Input, Current, FlowSink, Encode, Compact>
     where
         Current: std::marker::Send + 'static + Sync,
-        FlowSink::Ctx: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
+        FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
         FlowSink::Error: Into<BoxDynError> + Send + 'static,
         FlowSink::IdType: Send + Default,
         Compact: Sync + Send + 'static,
         Encode: Codec<Current, Compact = Compact, Error = CodecError> + Send + Sync + 'static,
         CodecError: Send + Sync + std::error::Error + 'static,
-        <FlowSink::Ctx as MetadataExt<WorkflowRequest>>::Error:
+        <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
             std::error::Error + Sync + Send + 'static,
     {
         self.add_step::<_, Current, _, _>(DelayStep {

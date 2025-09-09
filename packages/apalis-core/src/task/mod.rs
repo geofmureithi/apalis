@@ -45,26 +45,30 @@
 //! ## Creating a new task with default metadata
 //!
 //! ```rust
-//! let task = TaskBuilder::new("my work".to_string()).build();
+//! # use apalis_core::task::{Task, Parts};
+//! # use apalis_core::task::builder::TaskBuilder;
+//! let task: Task<String, ()> = TaskBuilder::new("my work".to_string()).build();
 //! ```
 //!
 //! ## Creating a task with custom metadata
 //!
 //! ```rust
-//! use apalis_core::task::{Task, Parts};
+//! # use apalis_core::task::{Task, Parts};
+//! # use apalis_core::task::builder::TaskBuilder;
+//! # use apalis_core::task::extensions::Extensions;
+//! 
 //! #[derive(Default, Clone)]
 //! struct MyCtx { priority: u8 }
-//! let meta = MyCtx { priority: 5 };
-//! let task = TaskBuilder::new("important work".to_string())
-//!     .with_meta(meta)
+//! let task: Task<String, Extensions> = TaskBuilder::new("important work".to_string())
+//!     .meta(MyCtx { priority: 5 })
 //!     .build();
 //! ```
 //!
 //! ## Accessing and modifying the execution context
 //!
 //! ```rust
-//! use apalis_core::task::{Task, Parts, Status};
-//! let mut task = Task::<String, (), _>::new("work".to_string());
+//! use apalis_core::task::{Task, Parts, status::Status};
+//! let mut task = Task::<String, ()>::new("work".to_string());
 //! task.parts.status = Status::Running;
 //! task.parts.attempt.increment();
 //! ```
@@ -72,11 +76,14 @@
 //! ## Using Extensions for per-task data
 //!
 //! ```rust
-//! use apalis_core::task::{Task, Extensions};
+//! # use apalis_core::task::builder::TaskBuilder;
+//! use apalis_core::task::{Task, extensions::Extensions};
+//! #[derive(Debug, Clone, PartialEq)]
+//! pub struct TracingId(String);
 //! let mut extensions = Extensions::default();
-//! extensions.insert("trace_id", "abc123");
-//! let task = TaskBuilder::new("work".to_string()).with_data(extensions).build();
-//! assert_eq!(task.parts.data.get::<&str>("trace_id"), Some(&"abc123"));
+//! extensions.insert(TracingId("abc123".to_owned()));
+//! let task: Task<String, ()> = TaskBuilder::new("work".to_string()).with_data(extensions).build();
+//! assert_eq!(task.parts.data.get::<TracingId>(), Some(&TracingId("abc123".to_owned())));
 //! ```
 //!
 //! # See Also

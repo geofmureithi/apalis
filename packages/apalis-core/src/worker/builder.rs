@@ -25,12 +25,16 @@
 //! # use apalis_core::backend::memory::MemoryStorage;
 //! # use apalis_core::worker::context::WorkerContext;
 //! # use apalis_core::task::data::Data;
+//! # use apalis_core::backend::TaskSink;
+//! # use apalis_core::worker::ext::event_listener::EventListenerExt;
 //!
 //! # #[tokio::main]
 //! # async fn main() {
+//! # let mut in_memory = MemoryStorage::new();
+//! # in_memory.push(24).await.unwrap();
 //! async fn task(job: u32, count: Data<usize>, ctx: WorkerContext) {
 //!     println!("Received job: {job:?}");
-//!     // Do something with count or ctx
+//!     ctx.stop().unwrap();
 //! }
 //!
 //! let worker = WorkerBuilder::new("rango-tango")
@@ -39,7 +43,7 @@
 //!     .on_event(|ctx, ev| {
 //!         println!("On Event = {:?}", ev);
 //!     })
-//!     .build_fn(task);
+//!     .build(task);
 //!
 //! worker.run().await.unwrap();
 //! # }
@@ -123,7 +127,7 @@ impl WorkerBuilder<(), (), (), Identity> {
     /// Set the source to a backend that implements [Backend]
     pub fn backend<NB, NJ, Ctx>(self, backend: NB) -> WorkerBuilder<NJ, Ctx, NB, Identity>
     where
-        NB: Backend<NJ, Ctx = Ctx>,
+        NB: Backend<NJ, Context = Ctx>,
     {
         WorkerBuilder {
             request: PhantomData,
@@ -212,7 +216,7 @@ where
     ) -> Worker<Args, Ctx, B, Svc, M>
     where
         Svc: Service<Task<Args, Ctx, B::IdType>>,
-        B: Backend<Args, Ctx = Ctx>,
+        B: Backend<Args, Context = Ctx>,
     {
         service.build_with(self)
     }
@@ -221,7 +225,7 @@ where
 /// Trait for building a worker service provided a backend
 pub trait IntoWorkerService<Backend, Svc, Args, Ctx>
 where
-    Backend: crate::backend::Backend<Args, Ctx = Ctx>,
+    Backend: crate::backend::Backend<Args, Context = Ctx>,
     Svc: Service<Task<Args, Ctx, Backend::IdType>>,
 {
     /// Build the service from the backend
@@ -231,7 +235,7 @@ where
 /// Extension trait for building a worker from a builder
 pub trait IntoWorkerServiceExt<Args, Ctx, Svc, Backend, M>: Sized
 where
-    Backend: crate::backend::Backend<Args, Ctx = Ctx>,
+    Backend: crate::backend::Backend<Args, Context = Ctx>,
     Svc: Service<Task<Args, Ctx, Backend::IdType>>,
 {
     /// Consumes the builder and returns a worker
@@ -248,7 +252,7 @@ where
 impl<T, Args, Ctx, Svc, B, M> IntoWorkerServiceExt<Args, Ctx, Svc, B, M> for T
 where
     T: IntoWorkerService<B, Svc, Args, Ctx>,
-    B: Backend<Args, Ctx = Ctx>,
+    B: Backend<Args, Context = Ctx>,
     Svc: Service<Task<Args, Ctx, B::IdType>>,
 {
     fn build_with(self, builder: WorkerBuilder<Args, Ctx, B, M>) -> Worker<Args, Ctx, B, Svc, M> {

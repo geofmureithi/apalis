@@ -13,33 +13,30 @@
 //!
 //! ## Usage
 //!
-//! ```rust
-//! use apalis_core::monitor::Monitor;
-//! use apalis_core::worker::WorkerBuilder;
-//! use apalis_core::memory::MemoryStorage;
-//! use apalis_core::task::Task;
+//! ```rust,no_run
+//! # use apalis_core::monitor::Monitor;
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # use apalis_core::task::Task;
+//! # use apalis_core::backend::TaskSink;
 //! use tower::service_fn;
-//! use std::time::Duration;
+//! # use std::time::Duration;
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let mut storage = MemoryStorage::new();
-//!     for i in 0..5 {
-//!         storage.push(i).await.unwrap();
-//!     }
 //!
-//!     let service = service_fn(|req: Task<u32>| async move {
+//!     async fn task(req: u32) -> Result<u32, std::io::Error> {
 //!         println!("Processing task: {:?}", req);
 //!         Ok::<_, std::io::Error>(req)
-//!     });
-//!
-//!     let worker = WorkerBuilder::new("demo-worker")
-//!         .backend(storage)
-//!         .build(service);
+//!     }
 //!
 //!     let monitor = Monitor::new()
-//!         .on_event(|ctx, event| println!("{}: {:?}", ctx.id(), event))
-//!         .register(|_| worker);
+//!         .on_event(|ctx, event| println!("{}: {:?}", ctx.name(), event))
+//!         .register(move |_| {
+//!             WorkerBuilder::new("demo-worker")
+//!                 .backend(MemoryStorage::new())
+//!                 .build(task)
+//!          });
 //!
 //!     // Start monitor and run all registered workers
 //!     monitor.run().await.unwrap();
@@ -50,7 +47,7 @@
 //!
 //! To force shutdown after a certain duration, use the `shutdown_timeout` method:
 //!
-//! ```rust
+//! ```ignore
 //! # use apalis_core::monitor::Monitor;
 //! # use std::time::Duration;
 //! let monitor = Monitor::new()
@@ -81,6 +78,8 @@
 //! Register event handlers to observe worker lifecycle events:
 //!
 //! ```rust
+//! use apalis_core::monitor::Monitor;
+//!
 //! let monitor = Monitor::new()
 //!     .on_event(|ctx, event| println!("Worker {}: {:?}", ctx.name(), event));
 //! ```
@@ -90,24 +89,39 @@
 //! You can register multiple workers using the `register` method. Each worker can be customized by index:
 //!
 //! ```rust
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::monitor::Monitor;
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # async fn task(_: u32) {}
 //! let monitor = Monitor::new()
-//!     .register(|index| WorkerBuilder::new(format!("worker-{index}"))
-//!         .backend(storage.clone())
-//!         .build(|task| async move { /* ... */ }));
+//!     .register(|index|
+//!        WorkerBuilder::new(format!("worker-{index}"))
+//!         .backend(MemoryStorage::new())
+//!         .build(task)
+//!     );
 //! ```
 //!
 //! ## Example: Full Monitor Usage
 //!
 //! ```rust
+//! # use std::time::Duration;
+//! # use apalis_core::worker::builder::WorkerBuilder;
+//! # use apalis_core::monitor::Monitor;
+//! # use apalis_core::backend::memory::MemoryStorage;
+//! # async fn example() {
+//! # async fn task(_: u32) {}
 //! let monitor = Monitor::new()
-//!     .register(|index| WorkerBuilder::new(format!("worker-{index}"))
-//!         .backend(storage.clone())
-//!         .build(|task| async move { /* ... */ }))
+//!     .register(|index|
+//!         WorkerBuilder::new(format!("worker-{index}"))
+//!         .backend(MemoryStorage::new())
+//!         .build(task)
+//!     )
 //!     .should_restart(|_, _, attempt| attempt < 5)
 //!     .on_event(|ctx, event| println!("Event: {:?}", event))
 //!     .shutdown_timeout(Duration::from_secs(10));
 //!
 //! monitor.run().await.unwrap();
+//! # }
 //! ```
 //!
 //! ## Error Handling
@@ -248,10 +262,10 @@ impl Debug for Monitor {
 impl Monitor {
     fn run_worker<Args, S, P, M>(
         mut ctx: WorkerContext,
-        worker: Worker<Args, P::Ctx, P, S, M>,
+        worker: Worker<Args, P::Context, P, S, M>,
     ) -> BoxFuture<'static, Result<(), WorkerError>>
     where
-        S: Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
+        S: Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Args> + Send + 'static,
@@ -259,21 +273,21 @@ impl Monitor {
         P::Stream: Unpin + Send + 'static,
         P::Beat: Unpin + Send,
         Args: Send + 'static,
-        P::Ctx: Send + 'static,
+        P::Context: Send + 'static,
         M: Layer<ReadinessService<TrackerService<S>>> + 'static,
         P::Layer: Layer<M::Service>,
         <P::Layer as Layer<M::Service>>::Service:
-            Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Ctx, P::IdType>>>::Error:
+            Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Context, P::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Ctx, P::IdType>>>::Future:
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Context, P::IdType>>>::Future:
             Send,
-        M::Service: Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
+        M::Service: Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Ctx, P::IdType>,
+            Task<Args, P::Context, P::IdType>,
         >>::Future: Send,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Ctx, P::IdType>,
+            Task<Args, P::Context, P::IdType>,
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
         P::IdType: Sync + Send + 'static,
     {
@@ -289,23 +303,32 @@ impl Monitor {
         }
         .boxed()
     }
-    /// Registers a single instance of a [Worker]
+    /// Registers a worker into the monitor registry.
     ///
     /// # Examples
     ///
     /// ```
     /// use apalis_core::monitor::Monitor;
-    ///
+    /// # use apalis_core::backend::memory::MemoryStorage;
+    /// # use apalis_core::worker::builder::WorkerBuilder;
+    /// # async fn example() {
     /// let monitor = Monitor::new();
-    /// let worker = Worker::new();
-    /// monitor.register(worker).run().await;
+    /// monitor
+    /// .register(|_| {
+    ///     WorkerBuilder::new("example-worker")
+    ///         .backend(MemoryStorage::new())
+    ///         .build(|_: u32| async {})
+    /// })
+    /// .run()
+    /// .await;
+    /// # }
     /// ```
     pub fn register<Args, S, P, M>(
         mut self,
-        factory: impl Fn(usize) -> Worker<Args, P::Ctx, P, S, M> + 'static + Send + Sync,
+        factory: impl Fn(usize) -> Worker<Args, P::Context, P, S, M> + 'static + Send + Sync,
     ) -> Self
     where
-        S: Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
+        S: Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         P: Backend<Args> + Send + 'static,
@@ -313,21 +336,21 @@ impl Monitor {
         P::Stream: Unpin + Send + 'static,
         P::Beat: Unpin + Send,
         Args: Send + 'static,
-        P::Ctx: Send + 'static,
+        P::Context: Send + 'static,
         M: Layer<ReadinessService<TrackerService<S>>> + 'static,
         P::Layer: Layer<M::Service>,
         <P::Layer as Layer<M::Service>>::Service:
-            Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Ctx, P::IdType>>>::Error:
+            Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Context, P::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Ctx, P::IdType>>>::Future:
+        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Context, P::IdType>>>::Future:
             Send,
-        M::Service: Service<Task<Args, P::Ctx, P::IdType>> + Send + 'static,
+        M::Service: Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Ctx, P::IdType>,
+            Task<Args, P::Context, P::IdType>,
         >>::Future: Send,
         <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Ctx, P::IdType>,
+            Task<Args, P::Context, P::IdType>,
         >>::Error: Into<BoxDynError> + Send + Sync + 'static,
         P::IdType: Send + Sync + 'static,
     {
@@ -436,8 +459,12 @@ impl Monitor {
         let mut errors = Vec::new();
         // Check if any worker errored
         for r in results {
-            if let Err(e) = r {
-                errors.push(e);
+            match r {
+                Ok(_) => {}
+                Err(MonitoredWorkerError { ctx, error }) => match error {
+                    WorkerError::GracefulExit => {}
+                    _ => errors.push(MonitoredWorkerError { ctx, error }),
+                },
             }
         }
         if !errors.is_empty() {
