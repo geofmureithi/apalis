@@ -30,18 +30,6 @@ async fn produce_jobs(storage: &SqliteStorage<Email>) {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum ServiceError {
-    #[error("data store disconnected")]
-    Disconnect(#[from] std::io::Error),
-    #[error("the data for key `{0}` is not available")]
-    Redaction(String),
-    #[error("invalid header (expected {expected:?}, found {found:?})")]
-    InvalidHeader { expected: String, found: String },
-    #[error("unknown data store error")]
-    Unknown,
-}
-
-#[derive(thiserror::Error, Debug)]
 pub enum PanicError {
     #[error("{0}")]
     Panic(String),
@@ -54,7 +42,7 @@ async fn send_email(
     svc: Data<EmailService>,
     worker: WorkerContext,
     cache: Data<ValidEmailCache>,
-) -> Result<(), ServiceError> {
+) -> Result<(), BoxDynError> {
     info!("Job started in worker {:?}", worker.id());
     let cache_clone = cache.clone();
     let email_to = email.to.clone();

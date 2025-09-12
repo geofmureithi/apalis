@@ -1,6 +1,6 @@
 [package]
 name = "apalis-cron"
-version = "0.7.1"
+version = "0.7.3"
 edition.workspace = true
 repository.workspace = true
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
@@ -20,7 +20,7 @@ serde = ["dep:serde", "chrono/serde", "apalis-core/serde"]
 english = ["dep:english-to-cron", "dep:cron"]
 
 [dependencies]
-apalis-core = { path = "../../packages/apalis-core", version = "0.7.1", default-features = false, features = [
+apalis-core = { path = "../../packages/apalis-core", version = "0.7.3", default-features = false, features = [
     "sleep",
 ] }
 cron = { version = "0.15.0", optional = true }

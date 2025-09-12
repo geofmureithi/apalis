@@ -4,7 +4,7 @@ repository = "https://github.com/geofmureithi/apalis"
 
 [package]
 name = "apalis"
-version = "0.7.1"
+version = "0.7.3"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
 description = "Simple, extensible multithreaded background job processing for Rust"
 edition.workspace = true
@@ -54,7 +54,7 @@ layers = [
 docsrs = ["document-features"]
 
 [dependencies.apalis-core]
-version = "0.7.1"
+version = "0.7.3"
 default-features = false
 path = "./packages/apalis-core"
 
@@ -70,8 +70,8 @@ all-features = true
 
 
 [dev-dependencies]
-criterion = { version = "0.5.1", features = ["async_tokio", "html_reports"] }
-pprof = { version = "0.14", features = ["flamegraph"] }
+criterion = { version = "0.7.0", features = ["async_tokio", "html_reports"] }
+pprof = { version = "0.15", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
 tokio = { version = "1", features = ["full"] }
@@ -114,7 +114,7 @@ members = [
 [dependencies]
 tower = { version = "0.5", features = ["util"], default-features = false }
 tracing-futures = { version = "0.2.5", optional = true, default-features = false }
-sentry-core = { version = "0.37.0", optional = true, default-features = false }
+sentry-core = { version = "0.42.0", optional = true, default-features = false }
 metrics = { version = "0.24.0", optional = true, default-features = false }
 metrics-exporter-prometheus = { version = "0.17", optional = true, default-features = false }
 thiserror = "2.0.0"

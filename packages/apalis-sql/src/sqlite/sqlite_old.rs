@@ -220,20 +220,25 @@ where
                     .fetch_all(&pool)
                     .await?;
 
-                for id in ids {
-                    let res = fetch_next(&pool, worker_id, id.0, &config).await?;
-                    yield match res {
-                        None => None::<Task<T, SqlContext>>,
-                        Some(job) => {
-                            let (req, parts) = job.req.take();
-                            let args = C::decode(req)
-                                .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-                            let mut req = Task::new_with_parts(args, parts);
-                            req.meta.namespace = Some(namespace.clone());
-                            Some(req)
-                        }
+                if ids.is_empty() {
+                    yield None::<Request<T, SqlContext>>;
+                } else {
+                    for id in ids {
+                        let res = fetch_next(&pool, worker_id, id.0, &config).await?;
+                        yield match res {
+                            None => None::<Request<T, SqlContext>>,
+                            Some(job) => {
+                                let (req, parts) = job.req.take_parts();
+                                let args = C::decode(req)
+                                    .map_err(|e| sqlx::Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+                                let mut req = Request::new_with_parts(args, parts);
+                                req.parts.namespace = Some(namespace.clone());
+                                Some(req)
+                            }
+                        };
+
                     }
-                };
+                }
             }
         }
     }
@@ -590,7 +595,7 @@ impl<J: 'static + Serialize + DeserializeOwned + Unpin + Send + Sync> BackendExp
                             COUNT(1) FILTER (WHERE status = 'Killed') AS killed
                         FROM Jobs WHERE job_type = ?";
 
-        let res: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
+        let res: (i64, i64, i64, i64, i64) = sqlx::query_as(fetch_query)
             .bind(self.get_config().namespace())
             .fetch_one(self.pool())
             .await?;
