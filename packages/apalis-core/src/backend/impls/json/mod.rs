@@ -50,7 +50,6 @@
 //! - Data is atomically persisted to disk to avoid corruption.
 //! - Supports temporary storage for testing and ephemeral use cases.
 //!
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
@@ -109,7 +108,8 @@ pub struct JsonStorage<Args> {
     path: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone)]
 struct StorageEntry {
     task_id: TaskId,
     status: Status,

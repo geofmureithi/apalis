@@ -298,7 +298,32 @@ impl WeekdayBuilder {
     }
 }
 
-// Main schedule function to start the builder
+pub struct ScheduleIterator<Tz = Utc> {
+    schedule: ScheduleBuilder,
+    current: Option<DateTime<Tz>>,
+}
+
+impl<Tz: chrono::TimeZone> ScheduleIterator<Tz> {
+    pub fn new(schedule: ScheduleBuilder) -> Self {
+        Self {
+            schedule,
+            current: None,
+        }
+    }
+}
+
+impl Iterator for ScheduleIterator {
+    type Item = DateTime<Utc>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.current.unwrap_or_default();
+        let next = self.schedule.calculate_next_execution(current);
+        self.current = next;
+        next
+    }
+}
+
+/// Builder for creating schedules via a fluent API
 pub fn schedule() -> ScheduleBuilder {
     ScheduleBuilder::new()
 }

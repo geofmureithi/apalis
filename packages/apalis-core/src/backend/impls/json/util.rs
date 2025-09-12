@@ -1,16 +1,11 @@
 use std::{cmp::Ordering, collections::BTreeMap, fmt::Debug};
 
-use futures_channel::mpsc::SendError;
-use futures_core::stream::BoxStream;
-use futures_util::{stream, FutureExt, StreamExt};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use futures_util::FutureExt;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    backend::{
-        impls::json::{meta::JsonMapMetadata, JsonStorage},
-        TaskResult, WaitForCompletion,
-    },
+    backend::impls::json::{meta::JsonMapMetadata, JsonStorage},
     error::BoxDynError,
     task::{
         status::Status,
@@ -19,7 +14,8 @@ use crate::{
     worker::ext::ack::Acknowledge,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone)]
 pub struct TaskKey {
     pub(super) task_id: TaskId,
     pub(super) namespace: String,
@@ -101,17 +97,22 @@ impl<Args: Send + 'static + Debug, Res: Serialize, Ctx: Sync> Acknowledge<Res, C
     }
 }
 
-impl<Res: 'static + DeserializeOwned + Send, Compact: 'static + Sync>
-    WaitForCompletion<Res, Compact> for JsonStorage<Compact>
+#[cfg(feature = "sleep")]
+impl<Res: 'static + serde::de::DeserializeOwned + Send, Compact: 'static + Sync>
+    crate::backend::WaitForCompletion<Res, Compact> for JsonStorage<Compact>
 where
-    Compact: Send + DeserializeOwned + 'static + Unpin,
+    Compact: Send + serde::de::DeserializeOwned + 'static + Unpin,
 {
-    type ResultStream = BoxStream<'static, Result<TaskResult<Res>, SendError>>;
+    type ResultStream = futures_core::stream::BoxStream<
+        'static,
+        Result<crate::backend::TaskResult<Res>, futures_channel::mpsc::SendError>,
+    >;
     fn wait_for(
         &self,
         task_ids: impl IntoIterator<Item = TaskId<Self::IdType>>,
     ) -> Self::ResultStream {
         use std::{collections::HashSet, time::Duration};
+        use futures_util::StreamExt;
 
         let task_ids: HashSet<_> = task_ids.into_iter().collect();
         struct PollState<T, Compact> {
@@ -128,7 +129,7 @@ where
             poll_interval: Duration::from_millis(100),
             _phantom: std::marker::PhantomData,
         };
-        stream::unfold(state, |mut state: PollState<Res, Compact>| {
+        futures_util::stream::unfold(state, |mut state: PollState<Res, Compact>| {
             async move {
                 // panic!( "{}", state.pending_tasks.len());
                 // If no pending tasks, we're done
@@ -155,7 +156,7 @@ where
                         state.pending_tasks.remove(&task_id);
                         let result: Result<Res, String> = serde_json::from_value(result).unwrap();
                         return Some((
-                            Ok(TaskResult {
+                            Ok(crate::backend::TaskResult {
                                 task_id: task_id,
                                 status: Status::Done,
                                 result,
@@ -175,7 +176,7 @@ where
     async fn check_status(
         &self,
         task_ids: impl IntoIterator<Item = TaskId<Self::IdType>> + Send,
-    ) -> Result<Vec<TaskResult<Res>>, Self::Error> {
+    ) -> Result<Vec<crate::backend::TaskResult<Res>>, Self::Error> {
         use crate::task::status::Status;
         use std::collections::HashSet;
         let task_ids: HashSet<_> = task_ids.into_iter().collect();
@@ -189,12 +190,12 @@ where
             if let Some(value) = self.get(&key) {
                 let result =
                     match serde_json::from_value::<Result<Res, String>>(value.result.unwrap()) {
-                        Ok(result) => TaskResult {
+                        Ok(result) => crate::backend::TaskResult {
                             task_id: task_id.clone(),
                             status: Status::Done,
                             result,
                         },
-                        Err(e) => TaskResult {
+                        Err(e) => crate::backend::TaskResult {
                             task_id: task_id.clone(),
                             status: Status::Failed,
                             result: Err(format!("Deserialization error: {}", e)),

@@ -31,7 +31,7 @@ use crate::{context::CronContext, error::CronStreamError, schedule::Schedule, ti
 }]
 #[derive(Debug)]
 pub struct CronStream<S: Schedule<Timezone>, Timezone: chrono::TimeZone> {
-    schedule: Arc<S>,
+    schedule: S,
     timezone: Timezone,
     next_tick: Option<DateTime<Timezone>>,
     delay: Option<Delay>,
@@ -48,7 +48,7 @@ impl<S: Schedule<Tz>, Tz: chrono::TimeZone> CronStream<S, Tz> {
     /// Build a new cron stream from a schedule and timezone
     pub fn new_with_timezone(schedule: S, timezone: Tz) -> Self {
         Self {
-            schedule: Arc::new(schedule),
+            schedule,
             timezone,
             next_tick: None,
             delay: None,

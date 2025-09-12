@@ -1,7 +1,6 @@
 use chrono::DateTime;
-
-use crate::tick::Tick;
-mod builder;
+/// Builder for creating schedules via a fluent API
+pub mod builder;
 #[cfg(feature = "cron")]
 mod cron;
 #[cfg(feature = "english")]
@@ -10,7 +9,7 @@ mod english;
 /// A trait representing a schedule that can compute the next tick (event) based on a given timezone.
 pub trait Schedule<Timezone: chrono::TimeZone> {
     /// Returns the next scheduled tick as a `DateTime` in the specified timezone, or `None` if there are no more ticks.
-    fn next_tick(&self, timezone: &Timezone) -> Option<DateTime<Timezone>>;
+    fn next_tick(&mut self, timezone: &Timezone) -> Option<DateTime<Timezone>>;
 }
 
 #[cfg(test)]
