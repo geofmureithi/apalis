@@ -1,7 +1,5 @@
 use std::{
-    pin::Pin,
-    task::{Context, Poll},
-    time::Instant,
+    fmt, pin::Pin, task::{Context, Poll}, time::Instant
 };
 
 use apalis_core::{task::Task, worker::context::WorkerContext};
@@ -71,6 +69,22 @@ pub struct ResponseFuture<F> {
     pub(crate) start: Instant,
     pub(crate) job_type: String,
     pub(crate) worker: String,
+}
+
+impl<F> fmt::Debug for ResponseFuture<F>
+where
+    F: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let elapsed = self.start.elapsed();
+
+        f.debug_struct("ResponseFuture")
+            .field("inner", &self.inner)
+            .field("elapsed_since_start", &elapsed)
+            .field("job_type", &self.job_type)
+            .field("worker", &self.worker)
+            .finish()
+    }
 }
 
 impl<Fut, Res, Err> Future for ResponseFuture<Fut>

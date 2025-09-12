@@ -1,5 +1,5 @@
 use sentry_core::protocol;
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -61,6 +61,31 @@ pub struct SentryHttpFuture<F> {
     )>,
     #[pin]
     future: F,
+}
+
+impl<F> fmt::Debug for SentryHttpFuture<F>
+where
+    F: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SentryHttpFuture")
+            .field(
+                "on_first_poll",
+                &"<Request, TransactionContext>",
+            )
+            .field(
+                "transaction",
+                &self.transaction.as_ref().map(|(_, maybe_span)| {
+                    let has_child = maybe_span.is_some();
+                    format!(
+                        "<TransactionOrSpan, child: {}>",
+                        if has_child { "Some" } else { "None" }
+                    )
+                }),
+            )
+            .field("future", &self.future)
+            .finish()
+    }
 }
 
 impl<F, Res, Err> Future for SentryHttpFuture<F>
