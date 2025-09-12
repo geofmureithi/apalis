@@ -24,6 +24,6 @@ async fn main() {
         .layer(LoadShedLayer::new()) // Important when you have layers that block the service
         .rate_limit(1, Duration::from_secs(2))
         .backend(CronStream::new_with_timezone(schedule, Local))
-        .build_fn(send_reminder);
+        .build(send_reminder);
     worker.run().await;
 }

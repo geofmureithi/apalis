@@ -1,12 +1,12 @@
 [workspace.package]
-edition = "2021"
+edition = "2024"
 repository = "https://github.com/geofmureithi/apalis"
 
 [package]
 name = "apalis"
-version = "0.7.3"
+version = "1.0.0-alpha.1"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
-description = "Simple, extensible multithreaded background job processing for Rust"
+description = "Simple, extensible multithreaded background task processing for Rust"
 edition.workspace = true
 repository.workspace = true
 documentation = "https://docs.rs/apalis"
@@ -29,13 +29,13 @@ tracing = ["dep:tracing", "dep:tracing-futures"]
 sentry = ["dep:sentry-core", "dep:ulid", "ulid?/uuid", "dep:uuid"]
 ## Support Prometheus metrics
 prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
-## Support direct retrying jobs
+## Support direct retrying tasks
 retry = ["tower/retry"]
-## Support timeouts on jobs
+## Support timeouts on tasks
 timeout = ["tower/timeout"]
-## 💪 Limit the amount of jobs
+## 💪 Limit the amount of tasks
 limit = ["tower/limit"]
-## Support filtering jobs based on a predicate
+## Support filtering tasks based on a predicate
 filter = ["tower/filter"]
 ## Captures panics in executions and convert them to errors
 catch-panic = []
@@ -54,7 +54,7 @@ layers = [
 docsrs = ["document-features"]
 
 [dependencies.apalis-core]
-version = "0.7.3"
+version = "1.0.0-alpha.1"
 default-features = false
 path = "./packages/apalis-core"
 

@@ -109,7 +109,7 @@ async fn main() -> Result<(), std::io::Error> {
                 .data(EmailService::new())
                 .data(ValidEmailCache::new())
                 .backend(sqlite)
-                .build_fn(send_email)
+                .build(send_email)
         })
         .shutdown_timeout(Duration::from_secs(5))
         // Use .run() if you don't want without signals

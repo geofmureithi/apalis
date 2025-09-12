@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
         .timeout(Duration::from_millis(500))
         .concurrency(2)
         .backend(storage)
-        .build_fn(send_email);
+        .build(send_email);
 
     Monitor::new()
         .register(worker)

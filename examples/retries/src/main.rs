@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
                 .retry(RetryPolicy::retries(3))
                 .enable_tracing()
                 .backend(pg_with_retry)
-                .build_fn(send_email)
+                .build(send_email)
         })
         .register({
             let backoff = ExponentialBackoffMaker::new(
@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
                 .retry(RetryPolicy::retries(3).with_backoff(backoff))
                 .enable_tracing()
                 .backend(pg_with_backoff)
-                .build_fn(send_email)
+                .build(send_email)
         })
         .on_event(|e| debug!("{e}"))
         .run_with_signal(async {

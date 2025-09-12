@@ -27,7 +27,7 @@
 //!     let storage = RedisStorage::new(conn);
 //!     let worker = WorkerBuilder::new("tasty-pear")
 //!         .backend(storage.clone())
-//!         .build_fn(send_email);
+//!         .build(send_email);
 //!
 //!     worker.run().await;
 //! }

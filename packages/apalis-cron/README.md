@@ -1,13 +1,6 @@
 # apalis-cron
 
-`apalis-cron` is built on top of `apalis` and integrates seamlessly with the `apalis` ecosystem.
-
-This means you can leverage the full power of workers and middleware, including:
-
-- **Tracing**: For observing the execution of your cron jobs.
-- **Retries**: To handle transient failures with configurable backoff strategies.
-- **Concurrency**: To control how many instances of a job can run simultaneously.
-- **Load-shedding**: To prevent your system from being overloaded.
+`apalis-cron` is a flexible and extensible Rust library for scheduling and running cron jobs within the `apalis` ecosystem. It enables developers to define jobs using cron expressions, natural language routines, or custom schedules, and provides robust features for persistence, retries, concurrency, and observability.
 
 ## Features
 
@@ -15,6 +8,16 @@ This means you can leverage the full power of workers and middleware, including:
 - **Timezone Support**: Schedule jobs in any timezone.
 - **Persistence**: Persist cron jobs to a storage backend (e.g., Postgres, MySQL, SQLite) to ensure they are not lost on restart and can be distributed across multiple workers.
 - **Extensibility**: Easily add custom middleware and services.
+
+### Middleware support
+
+`apalis-cron` is built on top of `apalis` and `tower`.
+This means you can leverage the full power of workers and middleware, including:
+
+- **Tracing**: For observing the execution of your cron jobs.
+- **Retries**: To handle transient failures with configurable backoff strategies.
+- **Concurrency**: To control how many instances of a job can run simultaneously.
+- **Load-shedding**: To prevent your system from being overloaded by slow cron jobs.
 
 ## Examples
 
@@ -36,10 +39,10 @@ async fn main() {
     let schedule = Schedule::from_str("@daily").unwrap();
 
     let worker = WorkerBuilder::new("morning-cereal")
+        .backend(CronStream::new(schedule))
         .retry(RetryPolicy::retries(5))
         .data(42usize)
-        .backend(CronStream::new(schedule))
-        .build_fn(handle_tick);
+        .build(handle_tick);
 
     worker.run().await;
 }
@@ -61,7 +64,7 @@ async fn main() {
         .retry(RetryPolicy::retries(5))
         .data(42usize)
         .backend(CronStream::new(schedule))
-        .build_fn(handle_tick);
+        .build(handle_tick);
 
     worker.run().await;
 }
@@ -83,7 +86,7 @@ async fn main() {
         .retry(RetryPolicy::retries(5))
         .data(42usize)
         .backend(CronStream::new(schedule))
-        .build_fn(handle_tick);
+        .build(handle_tick);
 
     worker.run().await;
 }
@@ -114,7 +117,7 @@ async fn main() {
 
     let worker = WorkerBuilder::new("morning-cereal")
         .backend(backend)
-        .build_fn(handle_tick);
+        .build(handle_tick);
 
     worker.run().await;
 }
@@ -139,8 +142,8 @@ impl Schedule<Local> for MyDailyRoutine {
 
         // Combine tomorrow's date with 8:00 AM in local time zone
         let tomorrow_eight_am = tomorrow.and_time(eight_am).and_local_timezone(Local).unwrap();
-        
-        
+
+
         Some(tomorrow_eight_am)
     }
 }
@@ -150,7 +153,7 @@ async fn main() {
     let cron_stream = CronStream::new(MyDailyRoutine);
     let worker = WorkerBuilder::new("morning-cereal")
         .backend(cron_stream)
-        .build_fn(handle_tick);
+        .build(handle_tick);
 
     worker.run().await;
 }

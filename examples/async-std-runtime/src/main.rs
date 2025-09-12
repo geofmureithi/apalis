@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
         .retry(RetryPolicy::retries(5))
         .layer(TraceLayer::new().make_span_with(ReminderSpan::new()))
         .backend(CronStream::new(schedule))
-        .build_fn(send_reminder);
+        .build(send_reminder);
 
     Monitor::new()
         .register(worker)

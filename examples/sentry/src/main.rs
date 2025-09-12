@@ -140,7 +140,7 @@ async fn main() -> Result<()> {
                 .enable_tracing()
                 .concurrency(2)
                 .backend(storage.clone())
-                .build_fn(email_service)
+                .build(email_service)
         })
         .run()
         .await?;

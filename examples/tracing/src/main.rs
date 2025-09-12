@@ -70,7 +70,7 @@ async fn main() -> Result<()> {
             WorkerBuilder::new("tasty-avocado")
                 .enable_tracing()
                 .backend(storage)
-                .build_fn(email_service),
+                .build(email_service),
         )
         .run()
         .await?;

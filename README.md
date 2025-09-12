@@ -1,7 +1,7 @@
 <h1 align="center">apalis</h1>
 <div align="center">
  <strong>
-   Simple, extensible multithreaded background job and messages processing library for Rust
+   Simple, extensible multithreaded background task and messages processing library for Rust
  </strong>
 </div>
 
@@ -41,10 +41,9 @@
 - Inbuilt concurrency and parallelism.
 - Worker monitoring and graceful shutdown.
 - Ability to painlessly expose tasks and workers via APIs
-- Persisted cron jobs. Pipe your cronjobs to other backends and distribute them.
-- Optional Web interface to help you manage your jobs.
+- Persisted cronjobs. Pipe your cronjobs to other backends and distribute them.
+- Optional Web interface to help you manage your tasks.
 
-apalis job processing is powered by [`tower::Service`] which means you have access to the [`tower`] middleware.
 
 apalis has support for:
 
@@ -64,7 +63,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "0.7", features = "limit" } # Limit for concurrency
+apalis = { version = "1.0.0-alpha.1", features = "limit" } # Limit for concurrency
 apalis-redis = { version = "0.7" } # Use redis for persistence
 ```
 
@@ -80,9 +79,9 @@ struct Email {
     to: String,
 }
 
-/// A function called for every job
-async fn send_email(job: Email, data: Data<usize>) -> Result<(), Error> {
-  /// execute job
+/// A function called for every task
+async fn send_email(task: Email, data: Data<usize>) -> Result<(), Error> {
+  /// execute task
   Ok(())
 }
 
@@ -97,7 +96,7 @@ async fn main() -> {
       .concurrency(2)
       .data(0usize)
       .backend(storage)
-      .build_fn(send_email)
+      .build(send_email)
       .run()
       .await;
 }
@@ -105,7 +104,7 @@ async fn main() -> {
 Then
 ```rust
 //This can be in another part of the program or another application eg a http server
-async fn produce_route_jobs(storage: &mut RedisStorage<Email>) -> Result<()> {
+async fn produce_route_tasks(storage: &mut RedisStorage<Email>) -> Result<()> {
     storage
         .push(Email {
             to: "test@example.com".to_string(),
@@ -114,54 +113,15 @@ async fn produce_route_jobs(storage: &mut RedisStorage<Email>) -> Result<()> {
 }
 ```
 
-### Stepped Tasks
-
-Apalis has beta support for stepped tasks. See [complete example](https://github.com/geofmureithi/apalis/tree/main/examples/stepped-tasks) 
-
-```rs
-#[tokio::main]
-async fn main() -> Result<(), std::io::Error> {
-    std::env::set_var("RUST_LOG", "debug");
-    tracing_subscriber::fmt::init();
-    let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
-    let conn = apalis_redis::connect(redis_url).await.unwrap();
-    let config = apalis_redis::Config::default().set_namespace("stepped-email-task");
-
-
-    let mut storage = RedisStorage::new_with_config(conn, config);
-    storage
-        .start_stepped(WelcomeEmail { user_id: 1 })
-        .await
-        .unwrap();
-
-    // Build steps
-    let steps = StepBuilder::new()
-        .step_fn(welcome) // Steps are tower services
-        .step_fn(campaign)
-        .step_fn(complete_campaign);
-
-    WorkerBuilder::new("tasty-banana")
-        .data(()) // Shared data for all steps
-        .enable_tracing()
-        .concurrency(2)
-        .backend(storage)
-        .build_stepped(steps)
-        .on_event(|e| info!("{e}"))
-        .run()
-        .await;
-    Ok(())
-}
-```
-
 ## Feature flags
 
 - _tracing_ (enabled by default) — Support Tracing 👀
 - _sentry_ — Support for Sentry exception and performance monitoring
 - _prometheus_ — Support Prometheus metrics
-- _retry_ — Support direct retrying jobs
-- _timeout_ — Support timeouts on jobs
+- _retry_ — Support direct retrying tasks
+- _timeout_ — Support timeouts on tasks
 - _limit_ — 💪 Support for concurrency and rate-limiting
-- _filter_ — Support filtering jobs based on a predicate
+- _filter_ — Support filtering tasks based on a predicate
 - _catch-panic_ - Catch panics that occur during execution
 
 ## Storage Comparison
@@ -170,10 +130,10 @@ Since we provide a few storage solutions, here is a table comparing them:
 
 | Feature         | Redis | Sqlite | Postgres | Sled | Mysql | Mongo | Cron |
 | :-------------- | :---: | :----: | :------: | :--: | :---: | :---: | :--: |
-| Scheduled jobs  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
-| Retry jobs      |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
+| Scheduled tasks  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
+| Retry tasks      |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
 | Persistence     |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   | BYO  |
-| Rerun Dead jobs |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  x   |
+| Rerun Dead tasks |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  x   |
 
 ## How apalis works
 
@@ -185,14 +145,14 @@ sequenceDiagram
     participant Worker
     participant Backend
 
-    App->>+Backend: Add job to queue
+    App->>+Backend: Add task to queue
     Backend-->>+Worker: Job data
-    Worker->>+Backend: Update job status to 'Running'
-    Worker->>+App: Started job
-    loop job execution
-        Worker-->>-App: Report job progress
+    Worker->>+Backend: Update task status to 'Running'
+    Worker->>+App: Started task
+    loop task execution
+        Worker-->>-App: Report task progress
     end
-    Worker->>+Backend: Update job status to 'completed'
+    Worker->>+Backend: Update task status to 'completed'
 ```
 
 ## External examples

@@ -102,7 +102,7 @@ async fn main() -> Result<()> {
             WorkerBuilder::new("tasty-avocado")
                 .enable_tracing()
                 .backend(storage)
-                .build_fn(send_email)
+                .build(send_email)
         })
         .run_with_signal(signal::ctrl_c());
 

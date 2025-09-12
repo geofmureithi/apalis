@@ -219,7 +219,7 @@ async fn main() -> anyhow::Result<()> {
     let worker = WorkerBuilder::new("rango-tango")
         .enable_tracing()
         .backend(mq)
-        .build_fn(send_email);
+        .build(send_email);
 
     Monitor::new()
         .register(worker)

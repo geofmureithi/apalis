@@ -32,7 +32,7 @@
 //!              WorkerBuilder::new(&format!("tasty-avocado"))
 //!                  .data(0usize)
 //!                  .backend(pg)
-//!                  .build_fn(send_email)
+//!                  .build(send_email)
 //!          })
 //!          .run()
 //!          .await

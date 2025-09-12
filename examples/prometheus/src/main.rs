@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
                 WorkerBuilder::new("tasty-banana")
                     .layer(PrometheusLayer::default())
                     .backend(storage.clone())
-                    .build_fn(send_email)
+                    .build(send_email)
             })
             .run()
             .await

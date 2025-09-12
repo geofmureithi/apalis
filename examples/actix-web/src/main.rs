@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
                 .enable_tracing()
                 // .concurrency(2)
                 .backend(storage)
-                .build_fn(send_email)
+                .build(send_email)
         })
         .run_with_signal(signal::ctrl_c());
 

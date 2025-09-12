@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
                 .enable_tracing()
                 .concurrency(2)
                 .backend(email_storage)
-                .build_fn(send_email)
+                .build(send_email)
         })
         .on_event(|e| tracing::info!("{e:?}"))
         .run()

@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     let worker = WorkerBuilder::new("rango-tango")
         .data(pool)
         .backend(storage)
-        .build_fn(send_email);
+        .build(send_email);
 
     Monitor::new()
         .register(worker)

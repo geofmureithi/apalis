@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
                 .retry(RetryPolicy::retries(5))
                 .enable_tracing()
                 .backend(pg)
-                .build_fn(send_email)
+                .build(send_email)
         })
         .on_event(|e| debug!("{e}"))
         .run_with_signal(async {

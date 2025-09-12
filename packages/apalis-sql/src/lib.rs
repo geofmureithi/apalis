@@ -337,7 +337,7 @@ macro_rules! sql_storage_tests {
                 "Job well done"
             }
             let worker = WorkerBuilder::new("rango-tango").backend(storage);
-            let worker = worker.build_fn(task);
+            let worker = worker.build(task);
             let wkr = worker.run();
 
             let w = wkr.get_handle();

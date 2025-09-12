@@ -41,7 +41,7 @@
 //!                 .concurrency(2)
 //!                 .data(0usize)
 //!                 .backend(storage.clone())
-//!                 .build_fn(send_email)
+//!                 .build(send_email)
 //!         })
 //!         .run()
 //!         .await

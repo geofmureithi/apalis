@@ -65,7 +65,7 @@ async fn main() -> Result<(), std::io::Error> {
                 .data(sqlite.clone())
                 .concurrency(2)
                 .backend(sqlite)
-                .build_fn(simple_job)
+                .build(simple_job)
         })
         .run()
         .await?;
