@@ -1,14 +1,14 @@
 use std::{f32::consts::E, fmt::Debug, marker::PhantomData, time::Duration};
 
 use apalis_core::{
-    backend::{codec::Codec, TaskSink},
+    backend::{TaskSink, codec::Codec},
     error::{BoxDynError, DeferredError, RetryAfterError},
-    task::{self, builder::TaskBuilder, metadata::MetadataExt, Task},
-    task_fn::{task_fn, TaskFn},
+    task::{self, Task, builder::TaskBuilder, metadata::MetadataExt},
+    task_fn::{TaskFn, task_fn},
 };
 use tower::Service;
 
-use crate::{context::StepContext, Step, WorkFlow, WorkflowError, WorkflowRequest};
+use crate::{Step, WorkFlow, WorkflowError, WorkflowRequest, context::StepContext};
 
 #[derive(Debug)]
 pub struct DelayStep<S, T> {
@@ -52,10 +52,11 @@ where
     type Response = Current;
     type Error = RetryAfterError;
     async fn pre(
+        &self,
         ctx: &mut StepContext<FlowSink, Encode>,
         step: &Current,
     ) -> Result<(), Self::Error> {
-        ctx.push_next_step(step).await?;
+        ctx.push_next_step(step).await.unwrap();
         Ok(())
     }
 
@@ -64,9 +65,13 @@ where
         ctx: &StepContext<FlowSink, Encode>,
         task: Task<Current, FlowSink::Context, FlowSink::IdType>,
     ) -> Result<Self::Response, Self::Error> {
-        apalis_core::timer::sleep(self.duration).await;
-
-        Ok(task.args)
+        Err(RetryAfterError::new(
+            format!(
+                "Delaying for {:?} before continuing workflow",
+                self.duration
+            ),
+            self.duration,
+        ))
     }
 }
 

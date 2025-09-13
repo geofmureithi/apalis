@@ -59,10 +59,10 @@ where
     type Response = S::Response;
     type Error = WorkflowError;
     async fn pre(
+        &self,
         ctx: &mut StepContext<FlowSink, Encode>,
         step: &Current,
     ) -> Result<(), Self::Error> {
-        ctx.push_next_step(step).await?;
         Ok(())
     }
 

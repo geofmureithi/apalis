@@ -4,14 +4,14 @@ use std::{
 };
 
 use apalis_core::{
-    backend::{self, TaskSink},
+    backend::{self, codec::Codec, TaskSink},
     error::BoxDynError,
     task::{metadata::MetadataExt, Task},
 };
 use futures::future::BoxFuture;
 use tower::Service;
 
-use crate::{CompositeService, StepContext, WorkflowRequest};
+use crate::{CompositeService, Step, StepContext, WorkflowRequest};
 
 pub struct WorkFlowService<FlowSink, Encode, Compact>
 where
@@ -44,6 +44,14 @@ where
     FlowSink::Context: MetadataExt<WorkflowRequest>,
     Encode: Send + Sync + 'static,
     Compact: Send + 'static,
+    FlowSink: Sync + TaskSink<Compact>,
+    Compact: Send + Sync,
+    FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
+    FlowSink::Error: Into<BoxDynError>,
+    FlowSink::IdType: Default + Send + 'static,
+    Encode: Codec<Compact, Compact = Compact>,
+    <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
+    Encode::Error: Into<BoxDynError>,
 {
     type Response = Compact;
     type Error = BoxDynError;
@@ -72,21 +80,27 @@ where
         }
     }
 
-    fn call(&mut self, mut req: Task<Compact, FlowSink::Context, FlowSink::IdType>) -> Self::Future {
+    fn call(
+        &mut self,
+        mut req: Task<Compact, FlowSink::Context, FlowSink::IdType>,
+    ) -> Self::Future {
         assert!(
             self.not_ready.is_empty(),
             "Workflow must wait for all services to be ready. Did you forget to call poll_ready()?"
         );
         let meta: WorkflowRequest = req.parts.ctx.extract().unwrap_or_default();
         let idx = meta.step_index;
-        let ctx = StepContext::new(self.backend.clone(), idx);
-
-        let next_hook = self.services.get(&(&idx + 1)).map(|s| s.pre_hook.clone());
-
+        let mut ctx: StepContext<FlowSink, Encode> = StepContext::new(self.backend.clone(), idx);
+        let has_next = self
+            .services
+            .get(&(idx+1))
+            .is_some();
+        
         let cl = self
             .services
             .get_mut(&idx)
             .expect("Attempted to run a step that doesn't exist");
+        
         let svc = &mut cl.svc;
 
         req.parts.data.insert(ctx.clone());
@@ -95,10 +109,8 @@ where
         let fut = svc.call(req);
         Box::pin(async move {
             let (should_next, res) = fut.await?;
-            if let Some(next_hook) = next_hook {
-                if should_next {
-                    next_hook(&ctx, &res).await?;
-                }
+            if should_next && has_next {
+                ctx.push_next_step(&res).await?;
             }
             Ok(res)
         })

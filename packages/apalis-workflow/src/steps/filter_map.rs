@@ -6,19 +6,19 @@ use std::{
 };
 
 use apalis_core::{
-    backend::{codec::Codec, TaskSink, WaitForCompletion},
+    backend::{TaskSink, WaitForCompletion, codec::Codec},
     error::BoxDynError,
-    task::{builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId, Task},
-    task_fn::{task_fn, TaskFn},
+    task::{Task, builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId},
+    task_fn::{TaskFn, task_fn},
 };
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use tower::Service;
 
 use crate::{
-    context::StepContext, CompositeService, Step, SteppedService, WorkFlow, WorkflowError,
-    WorkflowRequest,
+    CompositeService, Step, SteppedService, WorkFlow, WorkflowError, WorkflowRequest,
+    context::StepContext,
 };
 
 pub struct FilterMap<Step, Input, Output> {
@@ -67,6 +67,7 @@ where
     type Response = Vec<Output>;
     type Error = WorkflowError;
     async fn pre(
+        &self,
         ctx: &mut StepContext<Sink, Encode>,
         steps: &Vec<Input>,
     ) -> Result<(), Self::Error> {
@@ -181,18 +182,18 @@ pub struct FilterService<Step, Current, FlowSink, Encode, Output, F, FnArgs> {
 }
 
 impl<
-        Current,
-        S,
-        Encode,
-        Compact,
-        FlowSink,
-        Output,
-        F: 'static,
-        FnArgs: 'static,
-        SvcError,
-        MetadataError,
-        CodecError,
-    > Service<Task<Compact, FlowSink::Context, FlowSink::IdType>>
+    Current,
+    S,
+    Encode,
+    Compact,
+    FlowSink,
+    Output,
+    F: 'static,
+    FnArgs: 'static,
+    SvcError,
+    MetadataError,
+    CodecError,
+> Service<Task<Compact, FlowSink::Context, FlowSink::IdType>>
     for FilterService<S, Current, FlowSink, Encode, Output, F, FnArgs>
 where
     S: Step<Current, FlowSink, Encode, Response = Option<Output>> + Clone + Send + Sync + 'static,
@@ -242,7 +243,11 @@ where
             Ok(_) => {
                 let mut step = FilterMap {
                     mapper: PhantomData::<
-                        FilterMapStep<TaskFn<F, Current, FlowSink::Context, FnArgs>, Current, Output>,
+                        FilterMapStep<
+                            TaskFn<F, Current, FlowSink::Context, FnArgs>,
+                            Current,
+                            Output,
+                        >,
                     >,
                 };
                 Box::pin(async move {
@@ -319,10 +324,10 @@ where
     where
         F: Send + 'static + Sync + Clone,
         TaskFn<F, Current, FlowSink::Context, FnArgs>: Service<
-            Task<Current, FlowSink::Context, FlowSink::IdType>,
-            Response = Option<Output>,
-            Error = SvcError,
-        >,
+                Task<Current, FlowSink::Context, FlowSink::IdType>,
+                Response = Option<Output>,
+                Error = SvcError,
+            >,
         FnArgs: std::marker::Send + 'static,
         Current: std::marker::Send + 'static + Serialize + Sync + Debug,
         FlowSink::Context: Send
@@ -352,46 +357,16 @@ where
         FlowSink::IdType: Default + Sync + Send,
     {
         self.steps.insert(self.steps.len(), {
-            let pre_hook = Arc::new(Box::new(
-                move |ctx: &StepContext<FlowSink, Encode>, step: &Compact| {
-                    let val = Encode::decode(step);
-                    match val {
-                        Ok(val) => {
-                            let mut ctx = ctx.clone();
-                            async move {
-                                FilterMap::<
-                                    TaskFn<F, Current, FlowSink::Context, FnArgs>,
-                                    Current,
-                                    Output,
-                                >::pre(&mut ctx, &val)
-                                .await?;
-                                Ok(())
-                            }
-                            .boxed()
-                        }
-                        Err(_) => async move { Ok(()) }.boxed(),
-                    }
-                },
-            )
-                as Box<
-                    dyn Fn(
-                            &StepContext<FlowSink, Encode>,
-                            &Compact,
-                        ) -> BoxFuture<'static, Result<(), BoxDynError>>
-                        + Send
-                        + Sync
-                        + 'static,
-                >);
-
-            let svc =
-                SteppedService::<Compact, FlowSink::Context, FlowSink::IdType>::new(FilterService {
+            let svc = SteppedService::<Compact, FlowSink::Context, FlowSink::IdType>::new(
+                FilterService {
                     step: FilterMapStep {
                         _marker: PhantomData,
                         inner: task_fn(predicate),
                     },
                     _marker: PhantomData::<(Current, FlowSink, Encode, Output, F, FnArgs)>,
-                });
-            CompositeService { pre_hook, svc }
+                },
+            );
+            CompositeService { svc, _marker: PhantomData}
         });
         WorkFlow {
             name: self.name,

@@ -8,14 +8,14 @@ use std::{
 };
 
 use apalis_core::{
-    backend::{codec::Codec, Backend, TaskSink},
+    backend::{Backend, TaskSink, codec::Codec},
     error::BoxDynError,
-    task::{builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId, Task},
+    task::{Task, builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId},
     worker::builder::IntoWorkerService,
 };
 use futures::{
-    future::{ready, BoxFuture},
     FutureExt, TryFutureExt,
+    future::{BoxFuture, ready},
 };
 use serde::{Deserialize, Serialize};
 use tower::Service;
@@ -38,6 +38,7 @@ where
     type Response;
     type Error: Send;
     fn pre(
+        &self,
         ctx: &mut StepContext<FlowSink, Encode>,
         step: &Args,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
@@ -68,20 +69,29 @@ where
     _marker: PhantomData<(Input, Current, FlowSink)>,
 }
 
-type PreHook<FlowSink, Encode, Compact> = Box<
-    dyn Fn(&StepContext<FlowSink, Encode>, &Compact) -> BoxFuture<'static, Result<(), BoxDynError>>
-        + Send
-        + Sync
-        + 'static,
->;
+// type PreHook<FlowSink, Encode, Compact> = Box<
+//     dyn Fn(&StepContext<FlowSink, Encode>, &Compact) -> BoxFuture<'static, Result<(), BoxDynError>>
+//         + Send
+//         + Sync
+//         + 'static,
+// >;
 
 pub struct CompositeService<FlowSink, Encode, Compact>
 where
     FlowSink: TaskSink<Compact>,
 {
-    pre_hook: Arc<PreHook<FlowSink, Encode, Compact>>,
     svc: SteppedService<Compact, FlowSink::Context, FlowSink::IdType>,
+    _marker: PhantomData<(FlowSink, Encode)>,
 }
+
+// impl<FlowSink, Encode, Compact> CompositeService<FlowSink, Encode, Compact> {
+//     fn new(svc: SteppedService<Compact, FlowSink::Context, FlowSink::IdType>) -> Self {
+//         Self {
+//             svc,
+//             _marker: PhantomData,
+//         }
+//     }
+// }
 
 impl<Input, FlowSink, Encode, Compact> WorkFlow<Input, Input, FlowSink, Encode, Compact>
 where
@@ -125,28 +135,15 @@ where
         CodecError: std::error::Error + Send + 'static + Sync,
     {
         self.steps.insert(self.steps.len(), {
-            let pre_hook = Arc::new(Box::new(
-                move |ctx: &StepContext<FlowSink, Encode>, step: &Compact| {
-                    let val = Encode::decode(step);
-                    match val {
-                        Ok(val) => {
-                            let mut ctx = ctx.clone();
-                            async move {
-                                S::pre(&mut ctx, &val).await.map_err(|e| e.into())?;
-                                Ok(())
-                            }
-                            .boxed()
-                        }
-                        Err(e) => ready(Err(e.into())).boxed(),
-                    }
-                },
-            ) as PreHook<FlowSink, Encode, Compact>);
             let svc =
                 SteppedService::<Compact, FlowSink::Context, FlowSink::IdType>::new(StepService {
                     codec: PhantomData::<(Encode, Current, FlowSink)>,
                     step,
                 });
-            CompositeService { pre_hook, svc }
+            CompositeService {
+                svc,
+                _marker: PhantomData,
+            }
         });
         WorkFlow {
             name: self.name,
@@ -189,13 +186,17 @@ where
         let ctx: Option<&StepContext<FlowSink, Encode>> = req.parts.data.get();
         match ctx {
             Some(ctx) => {
-                let ctx = ctx.clone();
+                let mut ctx = ctx.clone();
                 let req = req.try_map(|arg| Encode::decode(&arg));
                 match req {
                     Ok(task) => {
                         let mut step = self.step.clone();
 
                         Box::pin(async move {
+                            let pre = step
+                                .pre(&mut ctx, &task.args)
+                                .await
+                                .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
                             let res = step
                                 .run(&ctx, task)
                                 .await
@@ -242,12 +243,28 @@ pub struct WorkflowRequest {
 }
 
 impl<Input, Current, FlowSink, Encode, Compact>
-    IntoWorkerService<FlowSink, WorkFlowService<FlowSink, Encode, Compact>, Compact, FlowSink::Context>
-    for WorkFlow<Input, Current, FlowSink, Encode, Compact>
+    IntoWorkerService<
+        FlowSink,
+        WorkFlowService<FlowSink, Encode, Compact>,
+        Compact,
+        FlowSink::Context,
+    > for WorkFlow<Input, Current, FlowSink, Encode, Compact>
 where
-    FlowSink: Clone,
+    FlowSink: Clone + Send + Sync + 'static,
     Compact: Send,
     FlowSink: TaskSink<Compact, Codec = Encode>,
+    FlowSink::Context: MetadataExt<WorkflowRequest> + Send + Sync + 'static,
+    Encode: Send + Sync + 'static + Codec<Compact, Compact = Compact>,
+    Compact: Send + Sync + 'static,
+    FlowSink::IdType: Send + 'static + Default,
+    FlowSink: Sync + TaskSink<Compact>,
+    Compact: Send + Sync,
+    FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
+    FlowSink::Error: Into<BoxDynError>,
+    FlowSink::IdType: Default,
+    Encode: Codec<Compact, Compact = Compact>,
+    <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
+    Encode::Error: Into<BoxDynError>,
 {
     fn into_service(self, b: &FlowSink) -> WorkFlowService<FlowSink, Encode, Compact> {
         let services: HashMap<usize, _> = self
@@ -312,9 +329,9 @@ mod tests {
     #[tokio::test]
     async fn simple_workflow() {
         let workflow = WorkFlow::new("odd-numbers-workflow")
-            .then(|a: usize| async move { Ok::<_, WorkflowError>(a / 2) })
+            .then(|a: usize| async move { Ok::<_, WorkflowError>(a - 2) })
             .delay_for(Duration::from_millis(1000))
-            .then(|a| async move { Ok::<_, WorkflowError>(a * 3) });
+            .then(|a| async move { Ok::<_, WorkflowError>(a + 3) });
 
         let mut in_memory = JsonStorage::new_temp().unwrap();
 

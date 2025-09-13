@@ -28,6 +28,21 @@ pub struct RetryAfterError {
     duration: Duration,
 }
 
+impl RetryAfterError {
+    /// Create a new retry after error
+    pub fn new<E: Into<BoxDynError>>(err: E, duration: Duration) -> Self {
+        RetryAfterError {
+            source: err.into(),
+            duration,
+        }
+    }
+
+    /// Get the duration after which the task should be retried
+    pub fn get_duration(&self) -> Duration {
+        self.duration
+    }
+}
+
 /// Execution should be deferred, will be retried instantly
 #[derive(Error, Debug)]
 #[error("DeferredError: {source}")]
