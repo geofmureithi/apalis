@@ -416,10 +416,7 @@ mod tests {
     use apalis_core::{
         error::BoxDynError,
         task::task_id::TaskId,
-        worker::{
-            builder::WorkerBuilder, event::Event,
-            ext::event_listener::EventListenerExt,
-        },
+        worker::{builder::WorkerBuilder, event::Event, ext::event_listener::EventListenerExt},
     };
     use ulid::Ulid;
 

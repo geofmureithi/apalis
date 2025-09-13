@@ -1,7 +1,5 @@
 use chrono::{DateTime, TimeZone, Utc};
 
-
-
 /// Represents a single tick in the cron schedule
 #[derive(Debug, Clone)]
 pub struct Tick<Tz: TimeZone = Utc> {
@@ -35,7 +33,7 @@ impl<Tz: TimeZone> Tick<Tz> {
 #[cfg(feature = "serde")]
 mod serde_impl {
     use super::*;
-    use crate::{timezone::TimeZoneExt, FORMAT};
+    use crate::{FORMAT, timezone::TimeZoneExt};
     use chrono::NaiveDateTime;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     impl<Tz> Serialize for Tick<Tz>

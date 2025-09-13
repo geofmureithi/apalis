@@ -10,7 +10,7 @@ pub mod cron;
 #[cfg(feature = "english")]
 pub mod english;
 
-/// A trait representing a schedule that can compute the next tick (event) based on a given timezone.
+/// A trait representing a schedule that can compute the next tick.
 pub trait Schedule<Timezone: chrono::TimeZone> {
     /// Returns the next scheduled tick as a `DateTime` in the specified timezone, or `None` if there are no more ticks.
     fn next_tick(&mut self, timezone: &Timezone) -> Option<DateTime<Timezone>>;
