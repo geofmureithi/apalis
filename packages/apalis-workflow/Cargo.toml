@@ -3,6 +3,9 @@ name = "apalis-workflow"
 version = "0.1.0-alpha.1"
 edition.workspace = true
 repository.workspace = true
+authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
+license = "MIT"
+description = "A flexible and composable workflow engine for rust."
 
 [dependencies]
 petgraph = { version = "0.8.2", features = ["serde-1"] }
