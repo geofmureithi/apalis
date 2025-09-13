@@ -31,6 +31,7 @@ impl<Schedule> CronContext<Schedule> {
         }
     }
 
+    /// Returns a reference to the schedule, if it exists.
     pub fn schedule(&self) -> Option<&Schedule> {
         self.schedule.as_deref()
     }

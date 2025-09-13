@@ -1,10 +1,14 @@
 use chrono::DateTime;
 /// Builder for creating schedules via a fluent API
 pub mod builder;
+
+/// Schedule using the `cron` crate
 #[cfg(feature = "cron")]
-mod cron;
+pub mod cron;
+
+/// Schedule using `english-to-cron` crate
 #[cfg(feature = "english")]
-mod english;
+pub mod english;
 
 /// A trait representing a schedule that can compute the next tick (event) based on a given timezone.
 pub trait Schedule<Timezone: chrono::TimeZone> {
@@ -15,14 +19,13 @@ pub trait Schedule<Timezone: chrono::TimeZone> {
 #[cfg(test)]
 mod tests {
     use apalis_core::{
-        backend::{self, memory::MemoryStorage},
+        backend::memory::MemoryStorage,
         error::BoxDynError,
         task::{builder::TaskBuilder, task_id::TaskId},
         worker::{builder::WorkerBuilder, event::Event, ext::event_listener::EventListenerExt},
     };
     use cron::Schedule;
-    use futures_util::{stream, SinkExt, StreamExt};
-    use ulid::Ulid;
+    use futures_util::{SinkExt, stream};
 
     use crate::tick::Tick;
 

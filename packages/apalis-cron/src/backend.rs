@@ -2,7 +2,6 @@ use std::{
     fmt::Display,
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::SystemTime,
 };
@@ -11,14 +10,14 @@ use apalis_core::{
     backend::{Backend, TaskStream},
     features_table,
     layers::Identity,
-    task::{builder::TaskBuilder, task_id::TaskId, Task},
+    task::{Task, builder::TaskBuilder, task_id::TaskId},
     timer::Delay,
     worker::context::WorkerContext,
 };
 use chrono::{DateTime, TimeZone, Utc};
 use futures_util::{
-    stream::{self, BoxStream},
     Stream, StreamExt, TryStreamExt,
+    stream::{self, BoxStream},
 };
 use ulid::Ulid;
 
@@ -77,7 +76,7 @@ where
                                 return Poll::Ready(Some(Err(CronStreamError::OutOfRangeError {
                                     inner: e,
                                     tick: next.clone(),
-                                })))
+                                })));
                             }
                         };
                         this.delay = Some(Delay::new(duration));
@@ -109,7 +108,7 @@ where
     }
 }
 
-impl<S: Schedule<Tz> + Unpin + Send + Sync + 'static, Tz: Unpin> Backend<Tick<Tz>>
+impl<S: Schedule<Tz> + Unpin + Send + Sync + 'static + Clone, Tz: Unpin> Backend<Tick<Tz>>
     for CronStream<S, Tz>
 where
     Tz: TimeZone + Send + Sync + 'static,
@@ -134,7 +133,7 @@ where
     }
 
     fn poll(self, _: &WorkerContext) -> Self::Stream {
-        let ctx = CronContext::new(self.schedule.clone());
+        let ctx = CronContext::new(self.schedule.clone().into());
         let stream = TryStreamExt::and_then(self, move |tick| {
             let ctx = ctx.clone();
             async move {

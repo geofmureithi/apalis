@@ -6,6 +6,7 @@ use english_to_cron::Cron;
 
 use crate::schedule::Schedule;
 
+/// Represents an English routine for scheduling tasks.
 #[derive(Debug, Clone)]
 pub struct EnglishRoutine {
     schedule: cron::Schedule,
@@ -63,9 +64,12 @@ impl TryFrom<Cow<'_, str>> for EnglishRoutine {
     }
 }
 
+/// Errors that can occur while parsing or using an English routine
 #[derive(Debug)]
 pub enum EnglishRoutineError {
+    /// Error related to the cron expression
     InvalidStatement(english_to_cron::Error),
+    /// Error related to the schedule
     ScheduleError(cron::error::Error),
 }
 
@@ -93,7 +97,7 @@ impl From<cron::error::Error> for EnglishRoutineError {
 }
 
 impl<Tz: chrono::TimeZone> Schedule<Tz> for EnglishRoutine {
-    fn next_tick(&self, timezone: &Tz) -> Option<DateTime<Tz>> {
+    fn next_tick(&mut self, timezone: &Tz) -> Option<DateTime<Tz>> {
         self.schedule.upcoming(timezone.clone()).next()
     }
 }

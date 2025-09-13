@@ -88,9 +88,9 @@
 use crate::backend::Backend;
 use crate::error::{BoxDynError, WorkerError};
 use crate::monitor::shutdown::Shutdown;
+use crate::task::Task;
 use crate::task::attempt::Attempt;
 use crate::task::data::Data;
-use crate::task::Task;
 use crate::worker::call_all::{CallAllError, CallAllUnordered};
 use crate::worker::context::{Tracked, WorkerContext};
 use crate::worker::event::Event;
@@ -285,7 +285,7 @@ where
     ///     Ok(())
     /// }
     /// ```
-    pub fn stream(self) -> impl Stream<Item = Result<Event, WorkerError>> {
+    pub fn stream(self) -> impl Stream<Item = Result<Event, WorkerError>> + use<Args, S, B, M> {
         let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
         self.stream_with_ctx(&mut ctx)
     }
@@ -297,7 +297,7 @@ where
     pub fn stream_with_ctx(
         self,
         ctx: &mut WorkerContext,
-    ) -> impl Stream<Item = Result<Event, WorkerError>> {
+    ) -> impl Stream<Item = Result<Event, WorkerError>> + use<Args, S, B, M> {
         let backend = self.backend;
         let event_handler = self.event_handler;
         ctx.wrap_listener(event_handler);
@@ -536,7 +536,7 @@ mod tests {
     use std::{
         future::ready,
         ops::Deref,
-        sync::{atomic::AtomicUsize, Arc},
+        sync::{Arc, atomic::AtomicUsize},
         time::Duration,
     };
 
@@ -544,7 +544,7 @@ mod tests {
     use futures_core::future::BoxFuture;
 
     use crate::{
-        backend::{json::JsonStorage, memory::MemoryStorage, TaskSink},
+        backend::{TaskSink, json::JsonStorage, memory::MemoryStorage},
         task::Parts,
         worker::{
             builder::WorkerBuilder,

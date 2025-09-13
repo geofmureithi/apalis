@@ -30,7 +30,7 @@ impl Shutdown {
     }
 
     /// Set the future to await before shutting down
-    pub fn shutdown_after<F: Future>(&self, f: F) -> impl Future<Output = F::Output> {
+    pub fn shutdown_after<F: Future>(&self, f: F) -> impl Future<Output = F::Output> + use<F> {
         let handle = self.clone();
         async move {
             let result = f.await;

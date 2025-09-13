@@ -3,7 +3,7 @@ use chrono::DateTime;
 use crate::schedule::Schedule;
 
 impl<Tz: chrono::TimeZone> Schedule<Tz> for cron::Schedule {
-    fn next_tick(&self, timezone: &Tz) -> Option<DateTime<Tz>> {
+    fn next_tick(&mut self, timezone: &Tz) -> Option<DateTime<Tz>> {
         self.upcoming(timezone.clone()).next()
     }
 }

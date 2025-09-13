@@ -1,35 +1,39 @@
 use std::fmt;
 
-use chrono::{DateTime, Datelike, Duration, Timelike, Utc, Weekday};
+use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc, Weekday};
 
-// use crate::schedule::Schedule;
-
+/// Time units for scheduling
 #[derive(Debug, Clone)]
 pub enum TimeUnit {
+    /// Minutes time unit
     Minutes(u32),
+    /// Hours time unit
     Hours,
+    /// Days time unit
     Days,
+    /// Weeks time unit
     Weeks,
+    /// Months time unit
     Months,
 }
 
+/// Builder for creating schedules via a fluent API
 #[derive(Debug, Clone)]
 pub struct ScheduleBuilder {
-    pub interval: Option<u32>,
-    pub unit: Option<TimeUnit>,
-    pub weekday: Option<Weekday>,
-    pub time: Option<String>,
-    pub at_second: Option<u32>,
+    interval: Option<u32>,
+    unit: Option<TimeUnit>,
+    weekday: Option<Weekday>,
+    time: Option<String>,
 }
 
 impl ScheduleBuilder {
+    /// Creates a new `ScheduleBuilder`.
     pub fn new() -> Self {
         ScheduleBuilder {
             interval: None,
             unit: None,
             weekday: None,
             time: None,
-            at_second: None,
         }
     }
 
@@ -171,23 +175,31 @@ impl ScheduleBuilder {
     }
 }
 
+/// Builder for creating intervals
+#[derive(Debug, Clone)]
 pub struct IntervalBuilder {
     interval: u32,
 }
 
+/// Builder for creating time units
+#[derive(Debug, Clone)]
 pub struct TimeUnitBuilder {
     schedule: ScheduleBuilder,
 }
 
+/// Builder for creating weekdays
+#[derive(Debug, Clone)]
 pub struct WeekdayBuilder {
     schedule: ScheduleBuilder,
 }
 
 impl ScheduleBuilder {
+    /// Creates a new `IntervalBuilder` for specifying the interval.
     pub fn every(&self, interval: u32) -> IntervalBuilder {
         IntervalBuilder { interval }
     }
 
+    /// Creates a new `TimeUnitBuilder` for specifying the time unit.
     pub fn each(&self) -> TimeUnitBuilder {
         TimeUnitBuilder {
             schedule: ScheduleBuilder::new(),
@@ -196,6 +208,7 @@ impl ScheduleBuilder {
 }
 
 impl IntervalBuilder {
+    /// Creates a new `TimeUnitBuilder` for specifying the time unit.
     pub fn minutes(self) -> TimeUnitBuilder {
         TimeUnitBuilder {
             schedule: ScheduleBuilder {
@@ -208,21 +221,23 @@ impl IntervalBuilder {
 }
 
 impl TimeUnitBuilder {
+    /// Sets the time unit to hours.
     pub fn hour(mut self) -> TimeUnitBuilder {
         self.schedule.unit = Some(TimeUnit::Hours);
         self
     }
 
+    /// Sets the time unit to days.
     pub fn day(mut self) -> TimeUnitBuilder {
         self.schedule.unit = Some(TimeUnit::Days);
         self
     }
-
+    /// Sets the time unit to weeks.
     pub fn week(mut self) -> TimeUnitBuilder {
         self.schedule.unit = Some(TimeUnit::Weeks);
         self
     }
-
+    /// Sets the day to Monday for the weekday schedule.
     pub fn monday(mut self) -> WeekdayBuilder {
         self.schedule.weekday = Some(Weekday::Mon);
         WeekdayBuilder {
@@ -230,6 +245,7 @@ impl TimeUnitBuilder {
         }
     }
 
+    /// Sets the day to Tuesday for the weekday schedule.
     pub fn tuesday(mut self) -> WeekdayBuilder {
         self.schedule.weekday = Some(Weekday::Tue);
         WeekdayBuilder {
@@ -237,6 +253,7 @@ impl TimeUnitBuilder {
         }
     }
 
+    /// Sets the day to Wednesday for the weekday schedule.
     pub fn wednesday(mut self) -> WeekdayBuilder {
         self.schedule.weekday = Some(Weekday::Wed);
         WeekdayBuilder {
@@ -244,6 +261,7 @@ impl TimeUnitBuilder {
         }
     }
 
+    /// Sets the day to Thursday for the weekday schedule.
     pub fn thursday(mut self) -> WeekdayBuilder {
         self.schedule.weekday = Some(Weekday::Thu);
         WeekdayBuilder {
@@ -251,6 +269,7 @@ impl TimeUnitBuilder {
         }
     }
 
+    /// Sets the day to Friday for the weekday schedule.
     pub fn friday(mut self) -> WeekdayBuilder {
         self.schedule.weekday = Some(Weekday::Fri);
         WeekdayBuilder {
@@ -258,6 +277,7 @@ impl TimeUnitBuilder {
         }
     }
 
+    /// Sets the day to Saturday for the weekday schedule.
     pub fn saturday(mut self) -> WeekdayBuilder {
         self.schedule.weekday = Some(Weekday::Sat);
         WeekdayBuilder {
@@ -265,6 +285,7 @@ impl TimeUnitBuilder {
         }
     }
 
+    /// Sets the day to Sunday for the weekday schedule.
     pub fn sunday(mut self) -> WeekdayBuilder {
         self.schedule.weekday = Some(Weekday::Sun);
         WeekdayBuilder {
@@ -272,38 +293,49 @@ impl TimeUnitBuilder {
         }
     }
 
+    /// Sets the time unit to minutes.
     pub fn minute(mut self) -> TimeUnitBuilder {
         self.schedule.unit = Some(TimeUnit::Minutes(1));
         self
     }
 
+    /// Sets the time
     pub fn at(mut self, time: &str) -> TimeUnitBuilder {
         self.schedule.time = Some(time.to_string());
         self
     }
 
-    pub fn build(self) -> ScheduleBuilder {
-        self.schedule
+    /// Builds the schedule iterator.
+    pub fn build<Tz: TimeZone>(self) -> ScheduleIterator<Tz> {
+        ScheduleIterator::new(self.schedule)
     }
 }
 
 impl WeekdayBuilder {
+    /// Sets the time for the weekday schedule.
     pub fn at(mut self, time: &str) -> WeekdayBuilder {
         self.schedule.time = Some(time.to_string());
         self
     }
 
-    pub fn build(self) -> ScheduleBuilder {
-        self.schedule
+    /// Builds the weekday schedule.
+    pub fn build<Tz: TimeZone>(self) -> ScheduleIterator<Tz> {
+        ScheduleIterator::new(self.schedule)
     }
 }
 
-pub struct ScheduleIterator<Tz = Utc> {
+/// Iterator over schedule ticks
+#[derive(Debug, Clone)]
+pub struct ScheduleIterator<Tz = Utc>
+where
+    Tz: chrono::TimeZone,
+{
     schedule: ScheduleBuilder,
     current: Option<DateTime<Tz>>,
 }
 
 impl<Tz: chrono::TimeZone> ScheduleIterator<Tz> {
+    /// Create a new schedule iterator
     pub fn new(schedule: ScheduleBuilder) -> Self {
         Self {
             schedule,
@@ -312,14 +344,17 @@ impl<Tz: chrono::TimeZone> ScheduleIterator<Tz> {
     }
 }
 
-impl Iterator for ScheduleIterator {
-    type Item = DateTime<Utc>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.current.unwrap_or_default();
-        let next = self.schedule.calculate_next_execution(current);
-        self.current = next;
-        next
+impl<Tz> fmt::Display for ScheduleIterator<Tz>
+where
+    Tz: TimeZone,
+    Tz::Offset: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ScheduleIterator(schedule = {:?}, ", self.schedule)?;
+        match &self.current {
+            Some(dt) => write!(f, "next = {})", dt),
+            None => write!(f, "end)"),
+        }
     }
 }
 
@@ -360,11 +395,19 @@ impl fmt::Display for ScheduleBuilder {
     }
 }
 
-impl<Tz: chrono::TimeZone> crate::schedule::Schedule<Tz> for ScheduleBuilder {
-    fn next_tick(&self, tz: &Tz) -> Option<DateTime<Tz>> {
-        let now = Utc::now();
-        let next = self.calculate_next_execution(now);
-        next.map(|dt| dt.with_timezone(tz))
+impl<Tz: chrono::TimeZone> crate::schedule::Schedule<Tz> for ScheduleIterator<Tz> {
+    fn next_tick(&mut self, tz: &Tz) -> Option<DateTime<Tz>> {
+        let current = self
+            .current
+            .take()
+            .unwrap_or(Utc::now().with_timezone(&tz))
+            .with_timezone(&Utc);
+        let next = self
+            .schedule
+            .calculate_next_execution(current)
+            .map(|dt| dt.with_timezone(tz));
+        self.current = next.clone();
+        next
     }
 }
 
@@ -374,7 +417,7 @@ mod tests {
         error::BoxDynError,
         task::task_id::TaskId,
         worker::{
-            builder::WorkerBuilder, context::WorkerContext, event::Event,
+            builder::WorkerBuilder, event::Event,
             ext::event_listener::EventListenerExt,
         },
     };
@@ -388,27 +431,27 @@ mod tests {
     #[test]
     fn test_schedule_examples() {
         // Every 10 minutes
-        let s1 = schedule().every(10).minutes().build();
+        let s1 = schedule().every(10).minutes().build::<Utc>();
         println!("{}", s1);
 
         // Every hour
-        let s2 = schedule().each().hour().build();
+        let s2 = schedule().each().hour().build::<Utc>();
         println!("{}", s2);
 
         // Every day at 10:30
-        let s3 = schedule().each().day().at("10:30").build();
+        let s3 = schedule().each().day().at("10:30").build::<Utc>();
         println!("{}", s3);
 
         // Every Monday
-        let s4 = schedule().each().monday().build();
+        let s4 = schedule().each().monday().build::<Utc>();
         println!("{}", s4);
 
         // Every Wednesday at 13:15
-        let s5 = schedule().each().wednesday().at("13:15").build();
+        let s5 = schedule().each().wednesday().at("13:15").build::<Utc>();
         println!("{}", s5);
 
         // Every minute at second 17
-        let s7 = schedule().each().minute().at(":17").build();
+        let s7 = schedule().each().minute().at(":17").build::<Utc>();
         println!("{}", s7);
     }
 
