@@ -39,6 +39,9 @@ pub use tower::timeout::TimeoutLayer;
 #[cfg_attr(docsrs, doc(cfg(feature = "catch-panic")))]
 pub mod catch_panic;
 
+/// Configuration for worker middlewares
+pub mod config;
+
 /// An extension trait that extends `WorkerBuilder` with additional middleware methods
 pub trait WorkerBuilderExt<Args, Ctx, Source, Middleware> {
     /// Optionally adds a new layer `T` into the [`WorkerBuilder`].

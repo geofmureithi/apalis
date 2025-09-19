@@ -99,9 +99,9 @@ use std::{fmt, marker::PhantomData};
 use thiserror::Error;
 use tower_layer::Identity;
 
+use crate::backend::TaskStream;
 use crate::backend::codec::Codec;
 use crate::backend::codec::IdentityCodec;
-use crate::backend::TaskStream;
 use crate::error::BoxDynError;
 use crate::features_table;
 use crate::{backend::Backend, task::Task, worker::context::WorkerContext};
@@ -247,19 +247,21 @@ impl<Args, DB, Fetch, Sink, IdType>
     pub fn new() -> Self {
         Self::new_with_cfg(())
     }
+
+    /// Create a new `BackendBuilder` instance with custom configuration
+    pub fn new_with_cfg<Config>(
+        config: Config,
+    ) -> BackendBuilder<Args, DB, Fetch, Sink, IdType, IdentityCodec, Config> {
+        BackendBuilder {
+            config: Some(config),
+            ..Default::default()
+        }
+    }
 }
 
 impl<Args, DB, Fetch, Sink, IdType, Codec, Config>
     BackendBuilder<Args, DB, Fetch, Sink, IdType, Codec, Config>
 {
-    /// Create a new `BackendBuilder` instance with custom configuration
-    pub fn new_with_cfg(config: Config) -> Self {
-        Self {
-            config: Some(config),
-            ..Default::default()
-        }
-    }
-
     /// Set a new codec for encoding/decoding task arguments
     pub fn with_codec<NewCodec>(
         self,
@@ -409,7 +411,7 @@ where
 mod tests {
     use std::{collections::VecDeque, time::Duration};
 
-    use futures_util::{lock::Mutex, sink, stream, FutureExt};
+    use futures_util::{FutureExt, lock::Mutex, sink, stream};
 
     use crate::{
         backend::TaskSink,

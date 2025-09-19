@@ -36,6 +36,7 @@ pub mod codec;
 pub mod custom;
 pub mod pipe;
 pub mod shared;
+pub mod poll_strategy;
 
 mod impls;
 

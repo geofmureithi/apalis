@@ -42,7 +42,7 @@ optional = true
 
 
 [features]
-default = []
+default = ["sleep"]
 docsrs = ["dep:document-features"]
 ## Sleep feature for backends that need to wait
 sleep = ["dep:futures-timer"]
