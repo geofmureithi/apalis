@@ -4,9 +4,9 @@ repository = "https://github.com/geofmureithi/apalis"
 
 [package]
 name = "apalis"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.2"
 authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
-description = "Simple, extensible multithreaded background task processing for Rust"
+description = "Simple, extensible and multithreaded background task processing for Rust"
 edition.workspace = true
 repository.workspace = true
 documentation = "https://docs.rs/apalis"
@@ -54,7 +54,7 @@ layers = [
 docsrs = ["document-features"]
 
 [dependencies.apalis-core]
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.2"
 default-features = false
 path = "./packages/apalis-core"
 
@@ -79,34 +79,6 @@ tokio = { version = "1", features = ["full"] }
 [workspace]
 members = [
   "packages/apalis-core",
-  # "packages/apalis-redis",
-  # "packages/apalis-sql",
-  # "packages/apalis-cron",
-  # Examples
-  # "examples/email-service",
-  # "examples/redis",
-  # "examples/actix-web",
-  # "examples/sqlite",
-  # "examples/sentry",
-  # "examples/mysql",
-  # "examples/postgres",
-  # "examples/axum",
-  # "examples/prometheus",
-  # "examples/tracing",
-  # "examples/async-std-runtime",
-  # "examples/basics",
-  # "examples/redis-with-msg-pack",
-  # "examples/redis-deadpool",
-  # "examples/redis-mq-example",
-  # "examples/cron",
-  # "examples/catch-panic",
-  # "examples/graceful-shutdown",
-  # "examples/unmonitored-worker",
-  # "examples/fn-args",
-  # "examples/persisted-cron",
-  # "examples/rest-api",
-  # "examples/stepped-tasks",
-  # "examples/retries",
   "packages/apalis-workflow",
 ]
 
