@@ -68,20 +68,30 @@ pub mod layers;
 
 /// Common imports
 pub mod prelude {
-    // pub use crate::layers::WorkerBuilderExt;
-    // pub use apalis_core::{
-    //     worker::builder::{WorkerBuilder, WorkerFactory},
-    //     data::Extensions,
-    //     data::{AddExtension, Data},
-    //     error::BoxDynError,
-    //     memory::{MemoryStorage, MemoryWrapper},
-    //     monitor::Monitor,
-    //     request::{Request, RequestStream},
-    //     response::IntoResponse,
-    //     service_fn::{service_fn, FromRequest, TaskFn},
-    //     // step::*,
-    //     request::attempt::Attempt,
-    //     request::task_id::TaskId,
-    //     worker::{Event, Worker, WorkerContext, WorkerError, WorkerId},
-    // };
+    pub use crate::layers::WorkerBuilderExt;
+    pub use apalis_core::{
+        backend::{
+            Backend, FetchById, ListTasks, ListWorkers, Metric, RegisterWorker, Reschedule,
+            ResumeAbandoned, ResumeById, TaskSink, Update, WaitForCompletion,
+        },
+        backend::{
+            TaskResult, TaskStream, codec::*, custom::*, memory::MemoryStorage, pipe::*,
+            poll_strategy::*, shared::MakeShared,
+        },
+        error::*,
+        layers::*,
+        monitor::{ExitError, Monitor, MonitorError, MonitoredWorkerError, shutdown::Shutdown},
+        task::Parts,
+        task::Task,
+        task::attempt::Attempt,
+        task::builder::TaskBuilder,
+        task::data::{AddExtension, Data},
+        task::extensions::Extensions,
+        task::metadata::MetadataExt,
+        task::task_id::TaskId,
+        task_fn::{FromRequest, IntoResponse, TaskFn, task_fn},
+        worker::builder::*,
+        worker::ext::{ack::*, circuit_breaker::*, event_listener::*, long_running::*},
+        worker::{Worker, context::WorkerContext, event::Event},
+    };
 }
