@@ -71,7 +71,7 @@ pub mod prelude {
     pub use crate::layers::WorkerBuilderExt;
     pub use apalis_core::{
         backend::{
-            Backend, FetchById, ListTasks, ListWorkers, Metric, RegisterWorker, Reschedule,
+            Backend, FetchById, ListTasks, ListWorkers, Metrics, RegisterWorker, Reschedule,
             ResumeAbandoned, ResumeById, TaskSink, Update, WaitForCompletion,
         },
         backend::{

@@ -22,23 +22,26 @@ use std::{future::Future, time::Duration};
 
 use futures_sink::Sink;
 use futures_util::{
-    stream::{self, BoxStream},
     Stream,
+    stream::{self, BoxStream},
 };
 
 use crate::{
     error::BoxDynError,
-    task::{status::Status, task_id::TaskId, Task},
+    task::{Task, status::Status, task_id::TaskId},
     worker::context::WorkerContext,
 };
 
 pub mod codec;
 pub mod custom;
 pub mod pipe;
-pub mod shared;
 pub mod poll_strategy;
+pub mod shared;
 
+mod expose;
 mod impls;
+
+pub use expose::*;
 
 pub use impls::guide;
 
@@ -161,7 +164,7 @@ pub trait FetchById<Args>: Backend<Args> {
     fn fetch_by_id(
         &mut self,
         task_id: &TaskId<Self::IdType>,
-    ) -> impl Future<Output = Result<Option<Task<Args, Self::Context>>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Option<Task<Args, Self::Context, Self::IdType>>, Self::Error>> + Send;
 }
 
 /// Allows updating an existing task
@@ -213,34 +216,6 @@ pub trait RegisterWorker<Args>: Backend<Args> {
         &mut self,
         worker_id: String,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-}
-
-/// Allows collecting metrics from the backend
-pub trait Metric<Output> {
-    /// The error type returned by metric operations
-    type Error;
-    /// Collects and returns backend metrics
-    fn metric(&mut self) -> impl Future<Output = Result<Output, Self::Error>> + Send;
-}
-
-/// Allows listing all workers registered with the backend
-pub trait ListWorkers<Args>: Backend<Args> {
-    /// The type representing a worker
-    type Worker;
-    /// List all registered workers
-    fn list_workers(&self) -> impl Future<Output = Result<Vec<Self::Worker>, Self::Error>> + Send;
-}
-
-/// Allows listing tasks with optional filtering
-pub trait ListTasks<Args>: Backend<Args> {
-    /// The type representing a filter for tasks
-    type Filter;
-
-    /// List tasks matching the given filter
-    fn list_tasks(
-        &self,
-        filter: &Self::Filter,
-    ) -> impl Future<Output = Result<Vec<Task<Args, Self::Context, Self::IdType>>, Self::Error>> + Send;
 }
 
 /// Represents the result of a task execution
