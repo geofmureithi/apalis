@@ -4,7 +4,6 @@ use crate::{
 };
 
 const DEFAULT_PAGE_SIZE: u32 = 10;
-const DEFAULT_PAGE: u32 = 1;
 
 /// Allows listing all workers registered with the backend
 pub trait ListWorkers<Args>: Backend<Args> {
@@ -52,13 +51,13 @@ pub struct RunningWorker {
 /// Filter criteria for listing tasks
 pub struct Filter {
     /// Optional status to filter tasks by
-    #[serde(default)]
+    #[cfg_attr(feature = "serde", serde(default))]
     pub status: Option<Status>,
-    #[serde(default = "default_page")]
+    #[cfg_attr(feature = "serde", serde(default = "default_page"))]
     /// Page number for pagination (default is 1)
     pub page: u32,
     /// Optional page size for pagination (default is 10)
-    #[serde(default)]
+    #[cfg_attr(feature = "serde", serde(default))]
     pub page_size: Option<u32>,
 }
 
@@ -74,8 +73,9 @@ impl Filter {
     }
 }
 
+#[cfg(feature = "serde")]
 fn default_page() -> u32 {
-    DEFAULT_PAGE
+    1
 }
 
 /// Represents various task statistics in the backend
