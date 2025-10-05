@@ -174,7 +174,7 @@ macro_rules! impl_service_fn {
         impl<T, Args, Ctx, F, R, B, $($K),+>
             IntoWorkerService<B, TaskFn<T, Args, Ctx, ($($K),+)>, Args, Ctx> for T
         where
-            B: Backend<Args, Context = Ctx>,
+            B: Backend<Args= Args, Context = Ctx>,
             T: FnMut(Args, $($K),+) -> F + Send + Clone + 'static,
             F: Future + Send,
             Args: Send + 'static,
@@ -221,7 +221,7 @@ where
     T: FnMut(Args) -> F,
     F: Future,
     F::Output: IntoResponse<Output = R>,
-    Backend: crate::backend::Backend<Args, Context = Ctx>,
+    Backend: crate::backend::Backend<Args = Args, Context = Ctx>,
     Args: Send,
 {
     fn into_service(self, _: &Backend) -> TaskFn<T, Args, Ctx, ()> {
@@ -232,7 +232,7 @@ where
 impl<Args, Ctx, S, B> IntoWorkerService<B, S, Args, Ctx> for S
 where
     S: Service<Task<Args, Ctx, B::IdType>>,
-    B: Backend<Args, Context = Ctx>,
+    B: Backend<Args = Args, Context = Ctx>,
 {
     fn into_service(self, _: &B) -> S {
         self

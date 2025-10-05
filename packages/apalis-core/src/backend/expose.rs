@@ -1,20 +1,22 @@
-use std::collections::HashMap;
-
 use crate::{
     backend::Backend,
     task::{Task, status::Status},
 };
 
 const DEFAULT_PAGE_SIZE: u32 = 10;
+/// Allows exposing additional functionality from the backend
+pub trait Expose {}
+
+impl<B> Expose for B where B: Backend + ListTasks + Metrics + ListWorkers + ListQueues {}
 
 /// Allows listing all queues available in the backend
-pub trait ListQueues<Args>: Backend<Args> {
+pub trait ListQueues: Backend {
     /// List all available queues in the backend
     fn list_queues(&self) -> impl Future<Output = Result<Vec<QueueInfo>, Self::Error>> + Send;
 }
 
 /// Allows listing all workers registered with the backend
-pub trait ListWorkers<Args>: Backend<Args> {
+pub trait ListWorkers: Backend {
     /// List all registered workers in the current namespace
     fn list_workers(&self) -> impl Future<Output = Result<Vec<RunningWorker>, Self::Error>> + Send;
 
@@ -24,24 +26,34 @@ pub trait ListWorkers<Args>: Backend<Args> {
     ) -> impl Future<Output = Result<Vec<RunningWorker>, Self::Error>> + Send;
 }
 /// Allows listing tasks with optional filtering
-pub trait ListTasks<Args>: Backend<Args> {
+pub trait ListTasks: Backend {
     /// List tasks matching the given filter in the current namespace
     fn list_tasks(
         &self,
         filter: &Filter,
-    ) -> impl Future<Output = Result<Vec<Task<Args, Self::Context, Self::IdType>>, Self::Error>> + Send;
+    ) -> impl Future<
+        Output = Result<Vec<Task<Self::Args, Self::Context, Self::IdType>>, Self::Error>,
+    > + Send;
 
-    /// List all tasks in all namespaces
+    /// List tasks matching the given filter in all namespaces
     fn list_all_tasks(
         &self,
         filter: &Filter,
-    ) -> impl Future<Output = Result<Vec<Task<Args, Self::Context, Self::IdType>>, Self::Error>> + Send;
+    ) -> impl Future<
+        Output = Result<Vec<Task<Self::Compact, Self::Context, Self::IdType>>, Self::Error>,
+    > + Send;
 }
 
 /// Allows collecting metrics from the backend
-pub trait Metrics<Stat, Args>: Backend<Args> {
-    /// Collects and returns backend stats
-    fn metric(&self) -> impl Future<Output = Result<Stat, Self::Error>> + Send;
+pub trait Metrics: Backend {
+    /// Collects and returns global statistics from the backend
+    fn global(&self) -> impl Future<Output = Result<Vec<Statistic>, Self::Error>> + Send;
+
+    /// Collects and returns statistics for a specific queue
+    fn fetch_by_queue(
+        &self,
+        namespace: &str,
+    ) -> impl Future<Output = Result<Vec<Statistic>, Self::Error>> + Send;
 }
 
 /// Represents information about a specific queue in the backend
@@ -51,7 +63,7 @@ pub struct QueueInfo {
     /// Name of the queue
     pub name: String,
     /// Statistics related to the queue
-    pub stat: Stats,
+    pub stats: Vec<Statistic>,
     /// List of workers associated with the queue
     pub workers: Vec<String>,
     /// Last 7 days of activity in the queue
@@ -66,10 +78,8 @@ pub struct RunningWorker {
     pub id: String,
     /// Namespace the worker belongs to
     pub namespace: String,
-    /// Hostname of the worker
-    pub hostname: String,
-    /// Process ID of the worker
-    pub pid: i64,
+    /// Backend of the worker
+    pub backend: String,
     /// Timestamp when the worker was started
     pub started_at: u64,
     /// Timestamp of the last heartbeat received from the worker
@@ -109,33 +119,29 @@ impl Filter {
 fn default_page() -> u32 {
     1
 }
-
-/// Represents core task statistics in the backend
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Default, Clone)]
-pub struct Stats {
-    /// Represents pending tasks
-    pub pending: usize,
-    /// Represents running tasks
-    pub running: usize,
-    /// Represents dead tasks
-    pub killed: usize,
-    /// Represents failed tasks
-    pub failed: usize,
-    /// Represents successful tasks
-    pub success: usize,
-    /// Total number of tasks
-    pub total: usize,
-}
-
 /// Represents an overview of the backend including queues, workers, and statistics
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Default, Clone)]
-pub struct Overview {
-    /// List of queues in the backend
-    pub queues: Vec<QueueInfo>,
-    /// List of workers in the backend
-    pub workers: Vec<RunningWorker>,
-    /// Statistics related to the backend
-    pub stats: HashMap<String, usize>,
+#[derive(Debug, Clone)]
+pub struct Statistic {
+    /// Overall statistics of the backend
+    pub title: String,
+    /// The statistics type
+    pub stat_type: StatType,
+    /// The value of the statistic
+    pub value: String,
+    /// The priority of the statistic (lower number means higher priority)
+    pub priority: Option<u8>,
+}
+/// Statistics type
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone)]
+pub enum StatType {
+    /// Timestamp statistic
+    Timestamp,
+    /// Numeric statistic
+    Number,
+    /// Decimal statistic
+    Decimal,
+    /// Percentage statistic
+    Percentage,
 }

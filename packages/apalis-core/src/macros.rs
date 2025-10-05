@@ -1,8 +1,8 @@
 #[cfg(feature = "tracing")]
 #[allow(unused_macros)]
-macro_rules! trace {
+macro_rules! debug {
     ($($tt:tt)*) => {
-        tracing::trace!($($tt)*)
+        tracing::debug!($($tt)*)
     }
 }
 
@@ -24,7 +24,7 @@ macro_rules! error {
 
 #[cfg(not(feature = "tracing"))]
 #[allow(unused_macros)]
-macro_rules! trace {
+macro_rules! debug {
     ($($tt:tt)*) => {};
 }
 

@@ -339,7 +339,7 @@ pub enum BuildError {
     MissingConfig,
 }
 
-impl<Args, DB, Fetch, Sink, IdType: Clone, E, Ctx: Default, Encode, Config> Backend<Args>
+impl<Args, DB, Fetch, Sink, IdType: Clone, E, Ctx: Default, Encode, Config> Backend
     for CustomBackend<Args, DB, Fetch, Sink, IdType, Encode, Config>
 where
     Fetch: Stream<Item = Result<Option<Task<Encode::Compact, Ctx, IdType>>, E>> + Send + 'static,
@@ -347,6 +347,7 @@ where
     Encode::Error: Into<BoxDynError>,
     E: Into<BoxDynError>,
 {
+    type Args = Args;
     type IdType = IdType;
 
     type Context = Ctx;
@@ -356,6 +357,8 @@ where
     type Stream = TaskStream<Task<Args, Ctx, IdType>, BoxDynError>;
 
     type Codec = Encode;
+    
+    type Compact = Encode::Compact;
 
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 

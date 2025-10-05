@@ -205,9 +205,10 @@ impl<Args, Ctx> Stream for MemoryStorage<Args, Ctx> {
 }
 
 // MemoryStorage as a Backend
-impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend<Args>
+impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend
     for MemoryStorage<Args, Ctx>
 {
+    type Args = Args;
     type IdType = RandomId;
 
     type Context = Ctx;
@@ -218,6 +219,7 @@ impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend<Args>
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
     type Codec = IdentityCodec;
+    type Compact = Args;
 
     fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()

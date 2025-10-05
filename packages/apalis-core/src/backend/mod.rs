@@ -27,6 +27,7 @@ use futures_util::{
 };
 
 use crate::{
+    backend::codec::Codec,
     error::BoxDynError,
     task::{Task, status::Status, task_id::TaskId},
     worker::context::WorkerContext,
@@ -59,7 +60,9 @@ pub mod json {
 /// The `Backend` trait defines how workers get and manage tasks from a backend.
 ///
 /// In other languages, this might be called a "Queue", "Broker", etc.
-pub trait Backend<Args> {
+pub trait Backend {
+    /// The type of arguments the backend handles.
+    type Args;
     /// The type used to uniquely identify tasks.
     type IdType: Clone;
     /// Context associated with each task.
@@ -67,10 +70,15 @@ pub trait Backend<Args> {
     /// The error type returned by backend operations
     type Error;
     /// The codec used for serialization/deserialization of tasks.
-    type Codec;
+    type Codec: Codec<Self::Args, Compact = Self::Compact>;
+
+    /// The compact representation of task arguments.
+    type Compact;
 
     /// A stream of tasks provided by the backend.
-    type Stream: Stream<Item = Result<Option<Task<Args, Self::Context, Self::IdType>>, Self::Error>>;
+    type Stream: Stream<
+        Item = Result<Option<Task<Self::Args, Self::Context, Self::IdType>>, Self::Error>,
+    >;
     /// A stream representing heartbeat signals.
     type Beat: Stream<Item = Result<(), Self::Error>>;
     /// The type representing backend middleware layer.
@@ -88,7 +96,7 @@ pub trait Backend<Args> {
 pub type TaskStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
 
 /// Extends Backend to allow pushing tasks into the backend
-pub trait TaskSink<Args>: Backend<Args> {
+pub trait TaskSink<Args>: Backend<Args = Args> {
     /// Allows pushing a single task into the backend
     fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
@@ -115,7 +123,7 @@ impl<Args, S, E> TaskSink<Args> for S
 where
     S: Sink<Task<Args, Self::Context, Self::IdType>, Error = E>
         + Unpin
-        + Backend<Args, Error = E>
+        + Backend<Args = Args, Error = E>
         + Send,
     Args: Send,
     S::Context: Send + Default,
@@ -159,43 +167,43 @@ where
 }
 
 /// Allows fetching a task by its ID
-pub trait FetchById<Args>: Backend<Args> {
+pub trait FetchById: Backend {
     /// Fetch a task by its unique identifier
     fn fetch_by_id(
         &mut self,
         task_id: &TaskId<Self::IdType>,
-    ) -> impl Future<Output = Result<Option<Task<Args, Self::Context, Self::IdType>>, Self::Error>> + Send;
+    ) -> impl Future<
+        Output = Result<Option<Task<Self::Args, Self::Context, Self::IdType>>, Self::Error>,
+    > + Send;
 }
 
 /// Allows updating an existing task
-pub trait Update<Args>: Backend<Args> {
+pub trait Update: Backend {
     /// Update the given task
     fn update(
         &mut self,
-        task: Task<Args, Self::Context, Self::IdType>,
+        task: Task<Self::Args, Self::Context, Self::IdType>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 /// Allows rescheduling a task for later execution
-pub trait Reschedule<Args>: Backend<Args> {
+pub trait Reschedule: Backend {
     /// Reschedule the task after a specified duration
     fn reschedule(
         &mut self,
-        task: Task<Args, Self::Context, Self::IdType>,
+        task: Task<Self::Args, Self::Context, Self::IdType>,
         wait: Duration,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 /// Allows cleaning up resources in the backend
-pub trait Vacuum {
-    /// The error type returned by vacuum operations
-    type Error;
+pub trait Vacuum: Backend {
     /// Cleans up resources and returns the number of items vacuumed
     fn vacuum(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
 /// Allows resuming a task by its ID
-pub trait ResumeById<Args>: Backend<Args> {
+pub trait ResumeById: Backend {
     /// Resume a task by its ID
     fn resume_by_id(
         &mut self,
@@ -204,13 +212,13 @@ pub trait ResumeById<Args>: Backend<Args> {
 }
 
 /// Allows fetching multiple tasks by their IDs
-pub trait ResumeAbandoned<Args>: Backend<Args> {
+pub trait ResumeAbandoned: Backend {
     /// Resume all abandoned tasks
     fn resume_abandoned(&mut self) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
 /// Allows registering a worker with the backend
-pub trait RegisterWorker<Args>: Backend<Args> {
+pub trait RegisterWorker: Backend {
     /// Registers a worker
     fn register_worker(
         &mut self,
@@ -258,7 +266,7 @@ impl<T> TaskResult<T> {
 }
 
 /// Allows waiting for tasks to complete and checking their status
-pub trait WaitForCompletion<T, Args>: Backend<Args> {
+pub trait WaitForCompletion<T>: Backend {
     /// The result stream type yielding task results
     type ResultStream: Stream<Item = Result<TaskResult<T>, Self::Error>> + Send + 'static;
 

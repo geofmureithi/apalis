@@ -98,10 +98,10 @@ impl<Args: Send + 'static + Debug, Res: Serialize, Ctx: Sync> Acknowledge<Res, C
 }
 
 #[cfg(feature = "sleep")]
-impl<Res: 'static + serde::de::DeserializeOwned + Send, Compact: 'static + Sync>
-    crate::backend::WaitForCompletion<Res, Compact> for JsonStorage<Compact>
+impl<Res: 'static + serde::de::DeserializeOwned + Send, Args: 'static + Sync>
+    crate::backend::WaitForCompletion<Res> for JsonStorage<Args>
 where
-    Compact: Send + serde::de::DeserializeOwned + 'static + Unpin,
+    Args: Send + serde::de::DeserializeOwned + 'static + Unpin + Serialize,
 {
     type ResultStream = futures_core::stream::BoxStream<
         'static,
@@ -125,11 +125,11 @@ where
         let state = PollState {
             vault: self.clone(),
             pending_tasks: task_ids,
-            namespace: std::any::type_name::<Compact>().to_owned(),
+            namespace: std::any::type_name::<Args>().to_owned(),
             poll_interval: Duration::from_millis(100),
             _phantom: std::marker::PhantomData,
         };
-        futures_util::stream::unfold(state, |mut state: PollState<Res, Compact>| {
+        futures_util::stream::unfold(state, |mut state: PollState<Res, Args>| {
             async move {
                 // panic!( "{}", state.pending_tasks.len());
                 // If no pending tasks, we're done
@@ -184,7 +184,7 @@ where
         for task_id in task_ids {
             let key = TaskKey {
                 task_id: task_id.clone(),
-                namespace: std::any::type_name::<Compact>().to_owned(),
+                namespace: std::any::type_name::<Args>().to_owned(),
                 status: Status::Pending,
             };
             if let Some(value) = self.get(&key) {

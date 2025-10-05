@@ -122,7 +122,7 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
     pub fn new<Args, Ctx, W>(backend: B, factory: W) -> TestWorker<B, S, Res, B::IdType>
     where
         W: IntoWorkerService<B, S, Args, Ctx>,
-        B: Backend<Args, Context = Ctx> + 'static,
+        B: Backend<Args = Args, Context = Ctx> + 'static,
         S: Service<Task<Args, Ctx, B::IdType>, Response = Res> + Send + 'static,
         B::Stream: Unpin + Send + 'static,
         B::Beat: Unpin + Send + 'static,
@@ -134,16 +134,16 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
         S::Error: Into<BoxDynError> + Send + Sync,
         S::Response: Clone + Send,
         Res: 'static,
-        <<B as Backend<Args>>::Layer as Layer<
+        <<B as Backend>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service: Service<Task<Args, Ctx, B::IdType>>,
-        <<<B as Backend<Args>>::Layer as Layer<
+        <<<B as Backend>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Error: Into<BoxDynError> + Sync + Send,
-        <<<B as Backend<Args>>::Layer as Layer<
+        <<<B as Backend>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Future: Send,
-        <<B as Backend<Args>>::Layer as Layer<
+        <<B as Backend>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service: std::marker::Send + 'static,
         B::IdType: Send + Clone + 'static,
@@ -155,7 +155,7 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
     /// Create a new test worker with a service
     pub fn new_with_svc<Args, Ctx>(backend: B, service: S) -> TestWorker<B, S, Res, B::IdType>
     where
-        B: Backend<Args, Context = Ctx> + 'static,
+        B: Backend<Args = Args, Context = Ctx> + 'static,
         S: Service<Task<Args, Ctx, B::IdType>, Response = Res> + Send + 'static,
         B::Stream: Unpin + Send + 'static,
         B::Beat: Unpin + Send + 'static,
@@ -167,16 +167,16 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
         S::Error: Into<BoxDynError> + Send + Sync,
         S::Response: Clone + Send,
         Res: 'static,
-        <<B as Backend<Args>>::Layer as Layer<
+        <<B as Backend>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service: Service<Task<Args, Ctx, B::IdType>>,
-        <<<B as Backend<Args>>::Layer as Layer<
+        <<<B as Backend>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Error: Into<BoxDynError> + Sync + Send,
-        <<<B as Backend<Args>>::Layer as Layer<
+        <<<B as Backend>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service as Service<Task<Args, Ctx, B::IdType>>>::Future: Send,
-        <<B as Backend<Args>>::Layer as Layer<
+        <<B as Backend>::Layer as Layer<
             ReadinessService<TrackerService<TestEmitService<S, Res, B::IdType>>>,
         >>::Service: std::marker::Send + 'static,
         B::IdType: Send + Clone + 'static,

@@ -184,7 +184,7 @@ impl<Args, Ctx, B, Svc, M> Worker<Args, Ctx, B, Svc, M> {
 
 impl<Args, S, B, M> Worker<Args, B::Context, B, S, M>
 where
-    B: Backend<Args>,
+    B: Backend<Args = Args>,
     S: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
     B::Stream: Unpin + Send + 'static,
     B::Beat: Unpin + Send + 'static,

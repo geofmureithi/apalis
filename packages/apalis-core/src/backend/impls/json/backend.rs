@@ -6,7 +6,7 @@ use std::{
 use futures_channel::mpsc::SendError;
 use futures_core::{Stream, stream::BoxStream};
 use futures_util::{StreamExt, stream};
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::{
@@ -23,7 +23,8 @@ use crate::{
     worker::{context::WorkerContext, ext::ack::AcknowledgeLayer},
 };
 
-impl<Args: 'static + Send + DeserializeOwned + Unpin> Backend<Args> for JsonStorage<Args> {
+impl<Args: 'static + Send + Serialize + DeserializeOwned + Unpin> Backend for JsonStorage<Args> {
+    type Args = Args;
     type IdType = RandomId;
     type Error = SendError;
     type Context = JsonMapMetadata;
@@ -32,6 +33,8 @@ impl<Args: 'static + Send + DeserializeOwned + Unpin> Backend<Args> for JsonStor
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
     type Codec = JsonCodec<Value>;
+
+    type Compact = Value;
 
     fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()

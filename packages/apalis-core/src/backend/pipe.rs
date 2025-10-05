@@ -115,16 +115,16 @@ impl<S: fmt::Debug, Into: fmt::Debug, Args, Ctx> fmt::Debug for Pipe<S, Into, Ar
     }
 }
 
-impl<Args, Ctx, S, TSink, Err> Backend<Args> for Pipe<S, TSink, Args, Ctx>
+impl<Args, Ctx, S, TSink, Err> Backend for Pipe<S, TSink, Args, Ctx>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    TSink: Backend<Args, Context = Ctx>
+    TSink: Backend<Args = Args, Context = Ctx>
         + Sink<Task<Args, Ctx, TSink::IdType>>
         + Clone
         + Unpin
         + Send
         + 'static,
-    <TSink as Backend<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    <TSink as Backend>::Error: Into<BoxDynError> + Send + Sync + 'static,
     TSink::Beat: Send + 'static,
     TSink::IdType: Send + Clone + 'static,
     TSink::Stream: Send + 'static,
@@ -134,6 +134,8 @@ where
     <TSink as Sink<Task<Args, Ctx, TSink::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
 {
+    type Args = Args;
+
     type IdType = TSink::IdType;
 
     type Context = Ctx;
@@ -147,6 +149,8 @@ where
     type Error = PipeError;
 
     type Codec = TSink::Codec;
+
+    type Compact = TSink::Compact;
 
     fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat {
         self.into
@@ -193,8 +197,8 @@ where
 impl<B, Args, Ctx, Err, S> PipeExt<B, Args, Ctx> for S
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
-    <B as Backend<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
-    B: Backend<Args> + Sink<Task<Args, Ctx, B::IdType>>,
+    <B as Backend>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    B: Backend<Args = Args> + Sink<Task<Args, Ctx, B::IdType>>,
 {
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx> {
         Pipe::new(self, backend)

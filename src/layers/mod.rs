@@ -169,7 +169,7 @@ pub trait WorkerBuilderExt<Args, Ctx, Source, Middleware> {
 impl<Args, Ctx, Source, Middleware> WorkerBuilderExt<Args, Ctx, Source, Middleware>
     for WorkerBuilder<Args, Ctx, Source, Middleware>
 where
-    Source: Backend<Args>,
+    Source: Backend<Args = Args, Context = Ctx>,
 {
     fn option_layer<T>(
         self,

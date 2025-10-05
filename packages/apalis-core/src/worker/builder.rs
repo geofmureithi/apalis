@@ -127,7 +127,7 @@ impl WorkerBuilder<(), (), (), Identity> {
     /// Set the source to a backend that implements [Backend]
     pub fn backend<NB, NJ, Ctx>(self, backend: NB) -> WorkerBuilder<NJ, Ctx, NB, Identity>
     where
-        NB: Backend<NJ, Context = Ctx>,
+        NB: Backend<Args = NJ, Context = Ctx>,
     {
         WorkerBuilder {
             request: PhantomData,
@@ -142,7 +142,7 @@ impl WorkerBuilder<(), (), (), Identity> {
 
 impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M>
 where
-    B: Backend<Args>,
+    B: Backend<Args = Args>,
 {
     /// Allows of decorating the service that consumes jobs.
     /// Allows adding multiple middleware in one call
@@ -207,7 +207,7 @@ where
 /// Finalizes the builder and constructs a [`Worker`] with the provided service
 impl<Args, Ctx, B, M> WorkerBuilder<Args, Ctx, B, M>
 where
-    B: Backend<Args>,
+    B: Backend<Args = Args, Context = Ctx>,
 {
     /// Consumes the builder and a service to construct the final worker
     pub fn build<W: IntoWorkerServiceExt<Args, Ctx, Svc, B, M>, Svc>(
@@ -216,7 +216,6 @@ where
     ) -> Worker<Args, Ctx, B, Svc, M>
     where
         Svc: Service<Task<Args, Ctx, B::IdType>>,
-        B: Backend<Args, Context = Ctx>,
     {
         service.build_with(self)
     }
@@ -225,7 +224,7 @@ where
 /// Trait for building a worker service provided a backend
 pub trait IntoWorkerService<Backend, Svc, Args, Ctx>
 where
-    Backend: crate::backend::Backend<Args, Context = Ctx>,
+    Backend: crate::backend::Backend<Args = Args, Context = Ctx>,
     Svc: Service<Task<Args, Ctx, Backend::IdType>>,
 {
     /// Build the service from the backend
@@ -235,7 +234,7 @@ where
 /// Extension trait for building a worker from a builder
 pub trait IntoWorkerServiceExt<Args, Ctx, Svc, Backend, M>: Sized
 where
-    Backend: crate::backend::Backend<Args, Context = Ctx>,
+    Backend: crate::backend::Backend<Args = Args, Context = Ctx>,
     Svc: Service<Task<Args, Ctx, Backend::IdType>>,
 {
     /// Consumes the builder and returns a worker
@@ -252,7 +251,7 @@ where
 impl<T, Args, Ctx, Svc, B, M> IntoWorkerServiceExt<Args, Ctx, Svc, B, M> for T
 where
     T: IntoWorkerService<B, Svc, Args, Ctx>,
-    B: Backend<Args, Context = Ctx>,
+    B: Backend<Args = Args, Context = Ctx>,
     Svc: Service<Task<Args, Ctx, B::IdType>>,
 {
     fn build_with(self, builder: WorkerBuilder<Args, Ctx, B, M>) -> Worker<Args, Ctx, B, Svc, M> {
@@ -264,7 +263,7 @@ where
             .map(|mut d| d.take())
             .unwrap()
             .unwrap_or(Box::new(|_ctx, _e| {
-                trace!("Worker [{}] received event {_e}", _ctx.name());
+                debug!("Worker [{}] received event {_e}", _ctx.name());
             }));
         worker.shutdown = builder.shutdown;
         worker

@@ -85,7 +85,7 @@ where
 
 impl<Args, P, M, Ctx> EventListenerExt<Args, Ctx, P, M> for WorkerBuilder<Args, Ctx, P, M>
 where
-    P: Backend<Args>,
+    P: Backend<Args = Args, Context = Ctx>,
     M: Layer<EventListenerLayer>,
 {
     fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(
@@ -107,7 +107,7 @@ where
                     }
                     None => {
                         let new: RawEventListener = Box::new(move |ctx, ev| {
-                            f(ctx, ev);
+                            f(&ctx, &ev);
                         });
                         new
                     }
