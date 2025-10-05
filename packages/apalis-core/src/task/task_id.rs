@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    task::{data::MissingDataError, Task},
+    task::{Task, data::MissingDataError},
     task_fn::FromRequest,
 };
 

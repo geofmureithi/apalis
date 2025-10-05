@@ -1,4 +1,4 @@
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 pub(super) type JsonMapMetadata = serde_json::Map<String, serde_json::Value>;
 

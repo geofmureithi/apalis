@@ -44,17 +44,17 @@ use crate::task::extensions::Extensions;
 use crate::{
     backend::{Backend, TaskStream},
     task::{
-        task_id::{RandomId, TaskId},
         Task,
+        task_id::{RandomId, TaskId},
     },
     worker::context::WorkerContext,
 };
-use futures_channel::mpsc::{unbounded, SendError};
+use futures_channel::mpsc::{SendError, unbounded};
 use futures_core::ready;
 use futures_sink::Sink;
 use futures_util::{
-    stream::{self, BoxStream},
     FutureExt, SinkExt, Stream, StreamExt,
+    stream::{self, BoxStream},
 };
 use std::{
     pin::Pin,

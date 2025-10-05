@@ -67,5 +67,6 @@ tokio = { version = "1.37.0", features = [
     "rt",
     "sync",
     "rt-multi-thread",
+    "signal",
 ] }
 tower = { version = "0.5", features = ["full"] }

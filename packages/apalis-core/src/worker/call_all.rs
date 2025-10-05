@@ -3,7 +3,7 @@
 //! A combinator for calling all requests from a stream to a service, yielding responses
 //! as they arrive. It supports both ordered and unordered response handling, allowing for flexible integration
 //! with asynchronous services.
-use futures_util::{ready, stream::FuturesUnordered, Stream};
+use futures_util::{Stream, ready, stream::FuturesUnordered};
 use std::{
     error::Error,
     fmt,

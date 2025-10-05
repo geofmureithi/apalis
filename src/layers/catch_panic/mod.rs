@@ -79,7 +79,7 @@
 use apalis_core::error::{AbortError, BoxDynError};
 use apalis_core::task::Task;
 use futures::future::CatchUnwind;
-use futures::{ready, FutureExt};
+use futures::{FutureExt, ready};
 use std::any::Any;
 use std::fmt;
 use std::future::Future;
@@ -282,7 +282,7 @@ mod tests {
 
     use crate::layers::retry::RetryPolicy;
     use apalis_core::{
-        backend::{memory::MemoryStorage, TaskSink},
+        backend::{TaskSink, memory::MemoryStorage},
         error::BoxDynError,
         worker::{builder::WorkerBuilder, event::Event, ext::event_listener::EventListenerExt},
     };

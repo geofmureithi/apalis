@@ -9,11 +9,11 @@ use serde::Serialize;
 
 use crate::{
     backend::impls::json::{
+        JsonStorage,
         meta::JsonMapMetadata,
         util::{TaskKey, TaskWithMeta},
-        JsonStorage,
     },
-    task::{task_id::TaskId, Task},
+    task::{Task, task_id::TaskId},
 };
 
 impl<Args: Unpin + Serialize> Sink<Task<Args, JsonMapMetadata>> for JsonStorage<Args> {

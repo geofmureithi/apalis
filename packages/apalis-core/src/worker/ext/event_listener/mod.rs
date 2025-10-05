@@ -20,16 +20,13 @@
 //!
 //! This will print every event emitted by the worker.
 //!
-use std::sync::Arc;
-
 use tower_layer::{Layer, Stack};
 use tower_service::Service;
 
 use crate::{
     backend::Backend,
     task::Task,
-    worker::builder::WorkerBuilder,
-    worker::{Event, WorkerContext},
+    worker::{builder::WorkerBuilder, event::RawEventListener, Event, WorkerContext},
 };
 
 /// Worker extension for emitting events
@@ -59,9 +56,6 @@ impl<S> Layer<S> for EventListenerLayer {
         EventListenerService { service }
     }
 }
-
-/// Event listening type
-pub type EventListener = Arc<Box<dyn Fn(WorkerContext, Event) + Send + Sync>>;
 
 /// Service for emitting events
 #[derive(Debug, Clone)]
@@ -105,18 +99,16 @@ where
                 let current = res.take();
                 match current {
                     Some(c) => {
-                        let new: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync + 'static> =
-                            Box::new(move |ctx, ev| {
-                                c(&ctx, &ev);
-                                f(&ctx, &ev);
-                            });
+                        let new: RawEventListener = Box::new(move |ctx, ev| {
+                            c(&ctx, &ev);
+                            f(&ctx, &ev);
+                        });
                         new
                     }
                     None => {
-                        let new: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync + 'static> =
-                            Box::new(move |ctx, ev| {
-                                f(&ctx, &ev);
-                            });
+                        let new: RawEventListener = Box::new(move |ctx, ev| {
+                            f(ctx, ev);
+                        });
                         new
                     }
                 }

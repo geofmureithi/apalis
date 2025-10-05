@@ -57,7 +57,7 @@ macro_rules! error {
 ///     RegisterWorker => not_supported("Allow registering a worker with the backend"),
 /// }
 /// # }
-/// 
+///
 /// ```
 #[macro_export]
 macro_rules! features_table {

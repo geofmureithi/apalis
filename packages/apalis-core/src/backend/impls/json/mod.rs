@@ -66,9 +66,9 @@ use self::{
 use crate::{
     features_table,
     task::{
+        Task,
         status::Status,
         task_id::{RandomId, TaskId},
-        Task,
     },
 };
 use std::io::{BufReader, BufWriter};
@@ -304,7 +304,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::{
-        backend::{json::JsonStorage, TaskSink},
+        backend::{TaskSink, json::JsonStorage},
         error::BoxDynError,
         worker::{
             builder::WorkerBuilder, context::WorkerContext, ext::event_listener::EventListenerExt,

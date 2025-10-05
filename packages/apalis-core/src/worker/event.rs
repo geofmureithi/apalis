@@ -14,8 +14,11 @@ use crate::{error::BoxDynError, worker::context::WorkerContext};
 pub type EventHandlerBuilder =
     Arc<RwLock<Option<Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>>>>;
 
-/// Type alias for an event handler function wrapped in an `Arc`
-pub type EventHandler = Arc<Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>>;
+/// Type alias for an event listener function wrapped in an `Arc`
+pub type EventListener = Arc<RawEventListener>;
+
+/// Event listening type
+pub(crate) type RawEventListener = Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>;
 
 /// Events emitted by a worker
 #[derive(Debug)]

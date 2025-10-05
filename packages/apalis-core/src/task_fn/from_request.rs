@@ -31,7 +31,7 @@
 //!     let user_id = email.user_id;
 //!     let user = User::find_by_id(user_id).await?;
 //!     // Do something with user
-//! 
+//!
 //!     Ok(())
 //! }
 //! ```

@@ -1,4 +1,4 @@
-use super::{LatencyUnit, DEFAULT_ERROR_LEVEL};
+use super::{DEFAULT_ERROR_LEVEL, LatencyUnit};
 
 use std::{fmt::Display, time::Duration};
 use tracing::{Level, Span};
@@ -94,38 +94,34 @@ macro_rules! log_pattern_match {
             $(
                 (Level::$level, LatencyUnit::Seconds) => {
                     tracing::event!(
-                        parent: $span,
                         Level::$level,
-                        done_in = format_args!("{} s", $latency.as_secs_f64()),
-                        "{}",
-                        format_args!("{}", $error)
+                        done_in = format_args!("{}s", $latency.as_secs_f64()),
+                        result = format_args!("{}", $error),
+                        "task.failed"
                     );
                 }
                 (Level::$level, LatencyUnit::Millis) => {
                     tracing::event!(
-                        parent: $span,
                         Level::$level,
-                        done_in = format_args!("{} ms", $latency.as_millis()),
-                        "{}",
-                        format_args!("{}", $error)
+                        done_in = format_args!("{}ms", $latency.as_millis()),
+                        result = format_args!("{}", $error),
+                        "task.failed"
                     );
                 }
                 (Level::$level, LatencyUnit::Micros) => {
                     tracing::event!(
-                        parent: $span,
                         Level::$level,
-                        done_in = format_args!("{} μs", $latency.as_micros()),
-                        "{}",
-                        format_args!("{}", $error)
+                        done_in = format_args!("{}μs", $latency.as_micros()),
+                        result = format_args!("{}", $error),
+                        "task.failed"
                     );
                 }
                 (Level::$level, LatencyUnit::Nanos) => {
                     tracing::event!(
-                        parent: $span,
                         Level::$level,
-                        done_in = format_args!("{} ns", $latency.as_nanos()),
-                        "{}",
-                        format_args!("{}", $error)
+                        done_in = format_args!("{}ns", $latency.as_nanos()),
+                        result = format_args!("{}", $error),
+                        "task.failed"
                     );
                 }
             )*

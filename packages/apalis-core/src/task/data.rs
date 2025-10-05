@@ -36,7 +36,7 @@
 //! # Features
 //!
 //! - Type-safe access to shared data.
-//! - Integrated as middleware. 
+//! - Integrated as middleware.
 //! - Error handling for missing data.
 //!
 //! # See Also

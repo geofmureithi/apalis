@@ -5,7 +5,7 @@
 //!
 //! ## Introduction
 //!
-//! The first argument of any task function is the type `Args` which is tied to the backend's task type. 
+//! The first argument of any task function is the type `Args` which is tied to the backend's task type.
 //! Eg if you are writing a task for an email service, `Args` might be a struct `Email` that includes fields like `user_id`, `subject`, and `message`.
 //!
 //! A rule of thumb is to never store database models as task arguments.
@@ -30,11 +30,11 @@
 //!     message: String,
 //! }
 //! ```
-//! 
+//!
 //! All the primitive types (e.g. `String`, `u32`) can be used directly as task arguments.
-//! 
-//! **Note:** 
-//! 
+//!
+//! **Note:**
+//!
 //! > *Some backends like `apalis-cron` offer a specific `Args` type (Tick) for cron jobs while most others like `postgres` use a more generic `Args` type.*
 //!
 //! A guide for extracting complex information from tasks using [`FromRequest`] is available in [step 3](#3-implementing-custom-argument-extraction-with-fromrequest).

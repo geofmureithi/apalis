@@ -36,8 +36,8 @@
 
 use crate::backend::Backend;
 use crate::error::BoxDynError;
-use crate::task::task_id::{RandomId, TaskId};
 use crate::task::Task;
+use crate::task::task_id::{RandomId, TaskId};
 use crate::worker::builder::{IntoWorkerService, WorkerBuilder};
 use crate::worker::{Event, ReadinessService, TrackerService, WorkerError};
 use futures_channel::mpsc::{self, channel};
@@ -272,12 +272,12 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        backend::{memory::MemoryStorage, TaskSink},
+        backend::{TaskSink, memory::MemoryStorage},
         error::BoxDynError,
         task_fn::task_fn,
         worker::{
-            test_worker::{ExecuteNext, TestWorker},
             WorkerContext,
+            test_worker::{ExecuteNext, TestWorker},
         },
     };
     use std::time::Duration;

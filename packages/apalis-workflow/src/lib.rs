@@ -1,4 +1,3 @@
-
 //! # apalis-workflow
 //!
 //! This crate provides a flexible and composable workflow engine for [apalis].

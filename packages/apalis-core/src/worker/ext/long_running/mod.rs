@@ -50,13 +50,13 @@
 //! ```
 use std::{future::Future, time::Duration};
 
-use futures_util::{future::BoxFuture, FutureExt};
+use futures_util::{FutureExt, future::BoxFuture};
 use tower_layer::{Layer, Stack};
 use tower_service::Service;
 
 use crate::{
     backend::Backend,
-    task::{data::MissingDataError, Task},
+    task::{Task, data::MissingDataError},
     task_fn::FromRequest,
     worker::{
         builder::WorkerBuilder,
@@ -167,15 +167,14 @@ where
         task.parts.data.insert(tracker.clone());
         let worker: WorkerContext = task.parts.data.get().cloned().unwrap();
         let req = self.service.call(task);
-        let fut = async move {
+        async move {
             let res = req.await;
             tracker.close();
             let tracker_fut = worker.track(tracker.wait()); // Long running tasks will be awaited in a shutdown
             tracker_fut.await;
             res
         }
-        .boxed();
-        fut
+        .boxed()
     }
 }
 
@@ -220,7 +219,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::{
-        backend::{memory::MemoryStorage, TaskSink},
+        backend::{TaskSink, memory::MemoryStorage},
         error::BoxDynError,
         worker::{
             builder::WorkerBuilder,

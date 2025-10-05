@@ -8,7 +8,7 @@
 //! - Optional (via the `serde` feature) serialization and deserialization support for persisting or transmitting attempt state.
 use std::{
     convert::Infallible,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{Arc, atomic::AtomicUsize},
 };
 
 use crate::{task::Task, task_fn::FromRequest};

@@ -1,5 +1,8 @@
 use std::{
-    fmt, pin::Pin, task::{Context, Poll}, time::Instant
+    fmt,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Instant,
 };
 
 use apalis_core::{task::Task, worker::context::WorkerContext};

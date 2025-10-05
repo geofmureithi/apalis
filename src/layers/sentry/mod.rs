@@ -6,8 +6,8 @@ use std::task::{Context, Poll};
 use tower::Layer;
 use tower::Service;
 
-use apalis_core::task::task_id::RandomId;
 use apalis_core::task::Task;
+use apalis_core::task::task_id::RandomId;
 
 /// Sentry integration Layer.
 ///
@@ -69,10 +69,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SentryHttpFuture")
-            .field(
-                "on_first_poll",
-                &"<Request, TransactionContext>",
-            )
+            .field("on_first_poll", &"<Request, TransactionContext>")
             .field(
                 "transaction",
                 &self.transaction.as_ref().map(|(_, maybe_span)| {

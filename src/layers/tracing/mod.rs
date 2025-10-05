@@ -341,7 +341,6 @@ pub struct ResponseFuture<F, OnResponse, OnFailure> {
 impl<Fut, OnResponseT, OnFailureT, Res, E> Future for ResponseFuture<Fut, OnResponseT, OnFailureT>
 where
     Fut: Future<Output = Result<Res, E>>,
-
     OnResponseT: OnResponse<Res>,
     OnFailureT: OnFailure<E>,
 {
@@ -378,7 +377,7 @@ mod tests {
     use super::*;
 
     use apalis_core::{
-        backend::{memory::MemoryStorage, TaskSink},
+        backend::{TaskSink, memory::MemoryStorage},
         error::BoxDynError,
         task::{extensions::Extensions, task_id::RandomId},
         worker::{

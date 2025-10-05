@@ -93,9 +93,9 @@ use crate::task::attempt::Attempt;
 use crate::task::data::Data;
 use crate::worker::call_all::{CallAllError, CallAllUnordered};
 use crate::worker::context::{Tracked, WorkerContext};
-use crate::worker::event::Event;
+use crate::worker::event::{Event, RawEventListener};
 use futures_core::stream::BoxStream;
-use futures_util::{Future, FutureExt, Stream, StreamExt};
+use futures_util::{Future, FutureExt, Stream, StreamExt, TryFutureExt};
 use std::fmt::Debug;
 use std::fmt::{self};
 use std::marker::PhantomData;
@@ -151,7 +151,7 @@ pub struct Worker<Args, Ctx, Backend, Svc, Middleware> {
     pub(crate) middleware: Middleware,
     pub(crate) task_marker: PhantomData<(Args, Ctx)>,
     pub(crate) shutdown: Option<Shutdown>,
-    pub(crate) event_handler: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync>,
+    pub(crate) event_handler: RawEventListener,
 }
 
 impl<Args, Ctx, B, Svc, Middleware> fmt::Debug for Worker<Args, Ctx, B, Svc, Middleware>
@@ -254,6 +254,21 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Run the worker with a shutdown signal future.
+    pub async fn run_with<Fut>(mut self, signal: Fut) -> Result<(), WorkerError>
+    where
+        Fut: Future<Output = Result<(), WorkerError>> + Send + 'static,
+        B: Send,
+        M: Send
+    {
+        let shutdown = self.shutdown.take().unwrap_or(Shutdown::new());
+        let terminator = shutdown.shutdown_after(signal);
+        let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
+        let c = ctx.clone();
+        let worker = self.run_with_ctx(&mut ctx).boxed();
+        futures_util::try_join!(terminator.map_ok(|_| c.stop()), worker).map(|_| ())
     }
 
     /// Returns a stream that will yield events as they occur within the worker's lifecycle
@@ -467,7 +482,7 @@ impl<Fut: Future> Future for AttemptOnPollFuture<Fut> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
-        if *this.polled == false {
+        if !(*this.polled) {
             *this.polled = true;
             this.attempt.increment();
         }
@@ -659,6 +674,39 @@ mod tests {
         let mut event_stream = worker.stream();
         while let Some(Ok(ev)) = event_stream.next().await {
             println!("On Event = {:?}", ev);
+        }
+    }
+
+    #[tokio::test]
+    async fn with_shutdown_signal() {
+        let mut in_memory = MemoryStorage::new();
+        for i in 0..ITEMS {
+            in_memory.push(i).await.unwrap();
+        }
+
+        async fn task(_: u32) -> Result<(), BoxDynError> {
+            Ok(())
+        }
+
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
+            .on_event(|ctx, ev| {
+                println!("On Event = {:?} from {}", ev, ctx.name());
+            })
+            .build(task);
+        let signal = async {
+            let ctrl_c = tokio::signal::ctrl_c().map_err(|e| e.into());
+            let timeout = tokio::time::sleep(Duration::from_secs(5))
+                .map(|_| Err::<(), WorkerError>(WorkerError::GracefulExit));
+            let _ = futures_util::try_join!(ctrl_c, timeout)?;
+            Ok(())
+        };
+        let res = worker.run_with(signal).await;
+        match res {
+            Err(WorkerError::GracefulExit) => {
+                println!("Worker exited gracefully");
+            }
+            _ => panic!("Expected graceful exit error"),
         }
     }
 }

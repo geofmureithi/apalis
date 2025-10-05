@@ -1,5 +1,5 @@
-use super::LatencyUnit;
 use super::DEFAULT_MESSAGE_LEVEL;
+use super::LatencyUnit;
 use std::fmt::Debug;
 use std::time::Duration;
 use tracing::Level;

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    backend::impls::json::{meta::JsonMapMetadata, JsonStorage},
+    backend::impls::json::{JsonStorage, meta::JsonMapMetadata},
     error::BoxDynError,
     task::{
         status::Status,
@@ -111,8 +111,8 @@ where
         &self,
         task_ids: impl IntoIterator<Item = TaskId<Self::IdType>>,
     ) -> Self::ResultStream {
-        use std::{collections::HashSet, time::Duration};
         use futures_util::StreamExt;
+        use std::{collections::HashSet, time::Duration};
 
         let task_ids: HashSet<_> = task_ids.into_iter().collect();
         struct PollState<T, Compact> {

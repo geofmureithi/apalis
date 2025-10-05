@@ -56,7 +56,7 @@
 //! # use apalis_core::task::{Task, Parts};
 //! # use apalis_core::task::builder::TaskBuilder;
 //! # use apalis_core::task::extensions::Extensions;
-//! 
+//!
 //! #[derive(Default, Clone)]
 //! struct MyCtx { priority: u8 }
 //! let task: Task<String, Extensions> = TaskBuilder::new("important work".to_string())

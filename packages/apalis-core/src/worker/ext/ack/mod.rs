@@ -58,8 +58,8 @@
 //!     worker.run().await.unwrap();
 //! }
 //! ```
-use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
+use futures_util::future::BoxFuture;
 use std::{future::Future, task::Poll};
 use tower_layer::{Layer, Stack};
 use tower_service::Service;

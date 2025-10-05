@@ -366,7 +366,10 @@ where
                     _marker: PhantomData::<(Current, FlowSink, Encode, Output, F, FnArgs)>,
                 },
             );
-            CompositeService { svc, _marker: PhantomData}
+            CompositeService {
+                svc,
+                _marker: PhantomData,
+            }
         });
         WorkFlow {
             name: self.name,

@@ -25,8 +25,8 @@
 //! ```
 //!
 use crate::task::{
-    attempt::Attempt, extensions::Extensions, metadata::MetadataExt, status::Status,
-    task_id::TaskId, Parts, Task,
+    Parts, Task, attempt::Attempt, extensions::Extensions, metadata::MetadataExt, status::Status,
+    task_id::TaskId,
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

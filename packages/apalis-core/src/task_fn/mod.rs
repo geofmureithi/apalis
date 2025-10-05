@@ -44,8 +44,8 @@ use crate::backend::Backend;
 use crate::error::BoxDynError;
 use crate::task::Task;
 use crate::worker::builder::IntoWorkerService;
-use futures_util::future::Map;
 use futures_util::FutureExt;
+use futures_util::future::Map;
 use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -253,5 +253,9 @@ impl_service_fn!(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11);
 impl_service_fn!(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12);
 impl_service_fn!(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13);
 impl_service_fn!(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14);
-impl_service_fn!(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15);
-impl_service_fn!(A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16);
+impl_service_fn!(
+    A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
+);
+impl_service_fn!(
+    A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16
+);

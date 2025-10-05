@@ -138,7 +138,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures_util::{future::BoxFuture, Future, FutureExt, StreamExt};
+use futures_util::{Future, FutureExt, StreamExt, future::BoxFuture};
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -148,9 +148,9 @@ use crate::{
     monitor::shutdown::Shutdown,
     task::Task,
     worker::{
+        ReadinessService, TrackerService, Worker,
         context::WorkerContext,
         event::{Event, EventHandlerBuilder},
-        ReadinessService, TrackerService, Worker,
     },
 };
 
@@ -161,7 +161,6 @@ pub mod shutdown;
 struct MonitoredWorker {
     factory: Box<
         dyn Fn(usize) -> (WorkerContext, BoxFuture<'static, Result<(), WorkerError>>)
-            + Sync
             + 'static
             + Send,
     >,
@@ -169,11 +168,7 @@ struct MonitoredWorker {
     current: Option<(WorkerContext, BoxFuture<'static, Result<(), WorkerError>>)>,
     attempt: usize,
     should_restart: Arc<
-        RwLock<
-            Option<
-                Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + Sync + 'static + Send>,
-            >,
-        >,
+        RwLock<Option<Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + 'static + Send>>>,
     >,
 }
 
@@ -188,7 +183,7 @@ impl Future for MonitoredWorker {
     type Output = Result<(), MonitoredWorkerError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        use std::panic::{catch_unwind, AssertUnwindSafe};
+        use std::panic::{AssertUnwindSafe, catch_unwind};
         let mut this = self.project();
 
         loop {
@@ -242,11 +237,7 @@ pub struct Monitor {
     shutdown: Shutdown,
     event_handler: EventHandlerBuilder,
     should_restart: Arc<
-        RwLock<
-            Option<
-                Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + 'static + Send + Sync>,
-            >,
-        >,
+        RwLock<Option<Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + 'static + Send>>>,
     >,
 }
 
@@ -325,7 +316,7 @@ impl Monitor {
     /// ```
     pub fn register<Args, S, P, M>(
         mut self,
-        factory: impl Fn(usize) -> Worker<Args, P::Context, P, S, M> + 'static + Send + Sync,
+        factory: impl Fn(usize) -> Worker<Args, P::Context, P, S, M> + 'static + Send,
     ) -> Self
     where
         S: Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
@@ -404,8 +395,8 @@ impl Monitor {
         let shutdown = self.shutdown.clone();
         let shutdown_after = self.shutdown.shutdown_after(signal);
         if let Some(terminator) = self.terminator {
-            let _res = futures_util::future::select(
-                Self::run_all_workers(self.workers, shutdown).boxed(),
+            let _res = futures_util::future::join(
+                Self::run_all_workers(self.workers, shutdown),
                 async {
                     let res = shutdown_after.await;
                     terminator.await;
@@ -533,7 +524,7 @@ impl Monitor {
     /// Allows controlling the restart strategy for workers
     pub fn should_restart<F>(self, cb: F) -> Self
     where
-        F: Fn(&WorkerContext, &WorkerError, usize) -> bool + Send + Sync + 'static,
+        F: Fn(&WorkerContext, &WorkerError, usize) -> bool + Send + 'static,
     {
         let _ = self.should_restart.write().map(|mut res| {
             let _ = res.insert(Box::new(cb));
@@ -578,7 +569,7 @@ impl std::fmt::Display for ExitError {
 mod tests {
     use super::*;
     use crate::{
-        backend::{json::JsonStorage, TaskSink},
+        backend::{TaskSink, json::JsonStorage},
         task::task_id::TaskId,
         worker::context::WorkerContext,
     };

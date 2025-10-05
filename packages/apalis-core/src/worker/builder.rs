@@ -81,9 +81,9 @@ use tower_service::Service;
 use crate::{
     backend::Backend,
     monitor::shutdown::Shutdown,
-    task::{data::Data, Task},
+    task::{Task, data::Data},
     task_fn::{FromRequest, TaskFn},
-    worker::{event::EventHandlerBuilder, Worker},
+    worker::{Worker, event::EventHandlerBuilder},
 };
 
 /// Declaratively builds a [`Worker`]

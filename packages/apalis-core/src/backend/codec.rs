@@ -88,7 +88,7 @@ impl<T> Codec<T> for NoopCodec {
 pub mod json {
     use std::marker::PhantomData;
 
-    use serde::{de::DeserializeOwned, Serialize};
+    use serde::{Serialize, de::DeserializeOwned};
     use serde_json::Value;
 
     use super::Codec;

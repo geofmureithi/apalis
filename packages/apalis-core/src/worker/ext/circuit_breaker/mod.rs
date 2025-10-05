@@ -122,7 +122,7 @@ mod tests {
     use tower::limit::ConcurrencyLimitLayer;
 
     use crate::{
-        backend::{memory::MemoryStorage, TaskSink},
+        backend::{TaskSink, memory::MemoryStorage},
         error::BoxDynError,
         worker::{
             builder::WorkerBuilder,

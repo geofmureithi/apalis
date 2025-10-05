@@ -62,9 +62,9 @@
 
 use apalis_core::error::AbortError;
 
+use apalis_core::task::Task;
 use apalis_core::task::builder::TaskBuilder;
 use apalis_core::task::metadata::MetadataExt;
-use apalis_core::task::Task;
 use std::any::Any;
 use std::fmt::Debug;
 use tower::retry::backoff::Backoff;

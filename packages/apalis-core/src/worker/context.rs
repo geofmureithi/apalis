@@ -51,8 +51,8 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     task::{Context, Poll, Waker},
 };
@@ -60,10 +60,10 @@ use std::{
 use crate::{
     error::{WorkerError, WorkerStateError},
     monitor::shutdown::Shutdown,
-    task::{data::MissingDataError, Task},
+    task::{Task, data::MissingDataError},
     task_fn::FromRequest,
     worker::{
-        event::{Event, EventHandler},
+        event::{Event, EventListener},
         state::{InnerWorkerState, WorkerState},
     },
 };
@@ -81,7 +81,7 @@ pub struct WorkerContext {
     waker: Arc<Mutex<Option<Waker>>>,
     state: Arc<WorkerState>,
     pub(crate) shutdown: Option<Shutdown>,
-    event_handler: EventHandler,
+    event_handler: EventListener,
     pub(super) is_ready: Arc<AtomicBool>,
     pub(super) service: &'static str,
 }
@@ -359,7 +359,7 @@ impl Drop for WorkerContext {
             return;
         }
         if self.is_running() {
-            eprintln!(
+            error!(
                 "Worker '{}' is being dropped while running with `{}` tasks. Consider calling stop() before dropping.",
                 self.name(),
                 self.task_count()

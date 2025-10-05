@@ -23,11 +23,6 @@ pub trait OnRequest<Args, Ctx, IdType> {
     fn on_request(&mut self, request: &Task<Args, Ctx, IdType>, span: &Span);
 }
 
-impl<Args, Ctx, IdType> OnRequest<Args, Ctx, IdType> for () {
-    #[inline]
-    fn on_request(&mut self, _: &Task<Args, Ctx, IdType>, _: &Span) {}
-}
-
 impl<Args, F, Ctx, IdType> OnRequest<Args, Ctx, IdType> for F
 where
     F: for<'a> FnMut(&'a Task<Args, Ctx, IdType>, &'a Span),

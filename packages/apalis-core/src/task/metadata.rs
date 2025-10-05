@@ -45,8 +45,8 @@ mod tests {
     use crate::{
         error::BoxDynError,
         task::{
-            metadata::{Meta, MetadataExt},
             Task,
+            metadata::{Meta, MetadataExt},
         },
         task_fn::FromRequest,
     };
@@ -87,12 +87,8 @@ mod tests {
         }
     }
 
-    impl<
-            S,
-            Args: Send + Sync + 'static,
-            Ctx: Send + Sync + 'static,
-            IdType: Send + Sync + 'static,
-        > Service<Task<Args, Ctx, IdType>> for ExampleService<S>
+    impl<S, Args: Send + Sync + 'static, Ctx: Send + Sync + 'static, IdType: Send + Sync + 'static>
+        Service<Task<Args, Ctx, IdType>> for ExampleService<S>
     where
         S: Service<Task<Args, Ctx, IdType>> + Clone + Send + 'static,
         Ctx: MetadataExt<ExampleConfig> + Send,

@@ -52,19 +52,19 @@ use futures_channel::mpsc::SendError;
 use futures_core::Stream;
 use futures_sink::Sink;
 use futures_util::{SinkExt, StreamExt};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::{
     backend::{
         impls::json::{
+            JsonStorage,
             meta::JsonMapMetadata,
             util::{FindFirstWith, TaskKey, TaskWithMeta},
-            JsonStorage,
         },
         impls::memory::{MemorySink, MemoryStorage},
     },
-    task::{status::Status, task_id::TaskId, Task},
+    task::{Task, status::Status, task_id::TaskId},
 };
 
 #[derive(Debug)]
@@ -105,7 +105,7 @@ impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMe
 /// Sharable JSON based backend.
 ///
 /// # Features
-/// 
+///
 /// - Concurrent processing of multiple task types
 /// - In-memory storage with optional disk persistence
 /// - Metadata support for tasks
@@ -217,7 +217,7 @@ mod tests {
 
     use crate::worker::context::WorkerContext;
     use crate::{
-        backend::{shared::MakeShared, TaskSink},
+        backend::{TaskSink, shared::MakeShared},
         worker::{builder::WorkerBuilder, ext::event_listener::EventListenerExt},
     };
 

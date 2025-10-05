@@ -1,14 +1,14 @@
 use std::{fmt::Debug, marker::PhantomData};
 
 use apalis_core::{
-    backend::{codec::Codec, TaskSink},
+    backend::{TaskSink, codec::Codec},
     error::BoxDynError,
-    task::{metadata::MetadataExt, Task},
-    task_fn::{task_fn, TaskFn},
+    task::{Task, metadata::MetadataExt},
+    task_fn::{TaskFn, task_fn},
 };
 use tower::Service;
 
-use crate::{context::StepContext, Step, WorkFlow, WorkflowError, WorkflowRequest};
+use crate::{Step, WorkFlow, WorkflowError, WorkflowRequest, context::StepContext};
 
 #[derive(Debug)]
 pub struct ThenStep<S, T> {

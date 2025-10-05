@@ -4,9 +4,9 @@ use std::{
 };
 
 use apalis_core::{
-    backend::{self, codec::Codec, TaskSink},
+    backend::{self, TaskSink, codec::Codec},
     error::BoxDynError,
-    task::{metadata::MetadataExt, Task},
+    task::{Task, metadata::MetadataExt},
 };
 use futures::future::BoxFuture;
 use tower::Service;
@@ -91,16 +91,13 @@ where
         let meta: WorkflowRequest = req.parts.ctx.extract().unwrap_or_default();
         let idx = meta.step_index;
         let mut ctx: StepContext<FlowSink, Encode> = StepContext::new(self.backend.clone(), idx);
-        let has_next = self
-            .services
-            .get(&(idx+1))
-            .is_some();
-        
+        let has_next = self.services.get(&(idx + 1)).is_some();
+
         let cl = self
             .services
             .get_mut(&idx)
             .expect("Attempted to run a step that doesn't exist");
-        
+
         let svc = &mut cl.svc;
 
         req.parts.data.insert(ctx.clone());

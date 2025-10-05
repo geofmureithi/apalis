@@ -69,6 +69,9 @@ pub enum WorkerError {
     /// A worker panicked and the panic was caught.
     #[error("Worker panicked: {0}")]
     PanicError(String),
+    /// An error occurred while handling io
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
 }
 
 /// Errors related to worker state transitions
