@@ -7,7 +7,7 @@ const DEFAULT_PAGE_SIZE: u32 = 10;
 /// Allows exposing additional functionality from the backend
 pub trait Expose {}
 
-impl<B> Expose for B where B: Backend + ListTasks + Metrics + ListWorkers + ListQueues {}
+impl<B> Expose for B where B: Backend + Metrics + ListWorkers + ListQueues {}
 
 /// Allows listing all queues available in the backend
 pub trait ListQueues: Backend {
