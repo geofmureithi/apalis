@@ -79,7 +79,7 @@ impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMe
         use crate::task::builder::TaskBuilder;
         let map = self.inner.tasks.try_read().expect("Failed to read tasks");
         if let Some((key, _)) = map.find_first_with(|k, _| {
-            &k.namespace == std::any::type_name::<Args>() && k.status == Status::Pending
+            &k.queue == std::any::type_name::<Args>() && k.status == Status::Pending
         }) {
             let task = map.get(&key).unwrap();
             let args = match Args::deserialize(&task.args) {
@@ -178,7 +178,7 @@ impl JsonStorage<Value> {
                     .insert(
                         &TaskKey {
                             task_id,
-                            namespace: std::any::type_name::<Args>().to_owned(),
+                            queue: std::any::type_name::<Args>().to_owned(),
                             status: Status::Pending,
                         },
                         TaskWithMeta {

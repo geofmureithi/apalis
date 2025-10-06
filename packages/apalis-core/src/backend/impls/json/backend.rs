@@ -55,7 +55,7 @@ impl<Args: DeserializeOwned + Unpin> Stream for JsonStorage<Args> {
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let map = self.tasks.try_write().unwrap();
         if let Some((key, task)) = map.find_first_with(|s, _| {
-            s.namespace == std::any::type_name::<Args>() && s.status == Status::Pending
+            s.queue == std::any::type_name::<Args>() && s.status == Status::Pending
         }) {
             use crate::task::builder::TaskBuilder;
             let key = key.clone();

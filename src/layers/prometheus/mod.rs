@@ -110,7 +110,7 @@ where
 
         let labels = [
             ("worker", this.worker.to_string()),
-            ("namespace", this.job_type.to_string()),
+            ("queue", this.job_type.to_string()),
             ("status", status),
         ];
         let counter = metrics::counter!("tasks_total", &labels);

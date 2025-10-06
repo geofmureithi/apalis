@@ -136,7 +136,7 @@ impl<Args> JsonStorage<Args> {
                     let key = TaskKey {
                         status: entry.status,
                         task_id: entry.task_id,
-                        namespace: std::any::type_name::<Args>().to_owned(),
+                        queue: std::any::type_name::<Args>().to_owned(),
                     };
                     data.insert(key, entry.task);
                 }
@@ -219,7 +219,7 @@ impl<Args> JsonStorage<Args> {
                     let key = TaskKey {
                         status: entry.status,
                         task_id: entry.task_id,
-                        namespace: std::any::type_name::<Args>().to_owned(),
+                        queue: std::any::type_name::<Args>().to_owned(),
                     };
                     new_data.insert(key, entry.task);
                 }
@@ -255,7 +255,7 @@ impl<Args> JsonStorage<Args> {
             let new_key = TaskKey {
                 status: new_status,
                 task_id: old_key.task_id.clone(),
-                namespace: old_key.namespace.clone(),
+                queue: old_key.queue.clone(),
             };
             tasks.insert(new_key, value);
             Ok(true)
@@ -277,7 +277,7 @@ impl<Args> JsonStorage<Args> {
             let new_key = TaskKey {
                 status,
                 task_id: key.task_id.clone(),
-                namespace: key.namespace.clone(),
+                queue: key.queue.clone(),
             };
             task.result = Some(val);
 

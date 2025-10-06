@@ -18,13 +18,13 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct TaskKey {
     pub(super) task_id: TaskId,
-    pub(super) namespace: String,
+    pub(super) queue: String,
     pub(super) status: Status,
 }
 
 impl PartialEq for TaskKey {
     fn eq(&self, other: &Self) -> bool {
-        self.task_id == other.task_id && self.namespace == other.namespace
+        self.task_id == other.task_id && self.queue == other.queue
     }
 }
 
@@ -39,7 +39,7 @@ impl PartialOrd for TaskKey {
 impl Ord for TaskKey {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.task_id.cmp(&other.task_id) {
-            Ordering::Equal => self.namespace.cmp(&other.namespace),
+            Ordering::Equal => self.queue.cmp(&other.queue),
             ord => ord,
         }
     }
@@ -83,7 +83,7 @@ impl<Args: Send + 'static + Debug, Res: Serialize, Ctx: Sync> Acknowledge<Res, C
         async move {
             let key = TaskKey {
                 task_id: task_id.clone(),
-                namespace: std::any::type_name::<Args>().to_owned(),
+                queue: std::any::type_name::<Args>().to_owned(),
                 status: Status::Running,
             };
 
@@ -118,14 +118,14 @@ where
         struct PollState<T, Compact> {
             vault: JsonStorage<Compact>,
             pending_tasks: HashSet<TaskId>,
-            namespace: String,
+            queue: String,
             poll_interval: Duration,
             _phantom: std::marker::PhantomData<T>,
         }
         let state = PollState {
             vault: self.clone(),
             pending_tasks: task_ids,
-            namespace: std::any::type_name::<Args>().to_owned(),
+            queue: std::any::type_name::<Args>().to_owned(),
             poll_interval: Duration::from_millis(100),
             _phantom: std::marker::PhantomData,
         };
@@ -143,7 +143,7 @@ where
                     let completed_task = state.pending_tasks.iter().find_map(|task_id| {
                         let key = TaskKey {
                             task_id: task_id.clone(),
-                            namespace: state.namespace.clone(),
+                            queue: state.queue.clone(),
                             status: Status::Pending,
                         };
 
@@ -184,7 +184,7 @@ where
         for task_id in task_ids {
             let key = TaskKey {
                 task_id: task_id.clone(),
-                namespace: std::any::type_name::<Args>().to_owned(),
+                queue: std::any::type_name::<Args>().to_owned(),
                 status: Status::Pending,
             };
             if let Some(value) = self.get(&key) {

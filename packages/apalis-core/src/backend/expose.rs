@@ -17,25 +17,26 @@ pub trait ListQueues: Backend {
 
 /// Allows listing all workers registered with the backend
 pub trait ListWorkers: Backend {
-    /// List all registered workers in the current namespace
-    fn list_workers(&self) -> impl Future<Output = Result<Vec<RunningWorker>, Self::Error>> + Send;
+    /// List all registered workers in the current queue
+    fn list_workers(&self, queue: &str) -> impl Future<Output = Result<Vec<RunningWorker>, Self::Error>> + Send;
 
-    /// List all registered workers in all namespaces
+    /// List all registered workers in all queues
     fn list_all_workers(
         &self,
     ) -> impl Future<Output = Result<Vec<RunningWorker>, Self::Error>> + Send;
 }
 /// Allows listing tasks with optional filtering
 pub trait ListTasks: Backend {
-    /// List tasks matching the given filter in the current namespace
+    /// List tasks matching the given filter in the current queue
     fn list_tasks(
         &self,
+        queue: &str,
         filter: &Filter,
     ) -> impl Future<
         Output = Result<Vec<Task<Self::Args, Self::Context, Self::IdType>>, Self::Error>,
     > + Send;
 
-    /// List tasks matching the given filter in all namespaces
+    /// List tasks matching the given filter in all queues
     fn list_all_tasks(
         &self,
         filter: &Filter,
@@ -52,7 +53,7 @@ pub trait Metrics: Backend {
     /// Collects and returns statistics for a specific queue
     fn fetch_by_queue(
         &self,
-        namespace: &str,
+        queue: &str,
     ) -> impl Future<Output = Result<Vec<Statistic>, Self::Error>> + Send;
 }
 
@@ -76,8 +77,8 @@ pub struct QueueInfo {
 pub struct RunningWorker {
     /// Unique identifier for the worker
     pub id: String,
-    /// Namespace the worker belongs to
-    pub namespace: String,
+    /// Queue the worker is processing tasks from
+    pub queue: String,
     /// Backend of the worker
     pub backend: String,
     /// Timestamp when the worker was started

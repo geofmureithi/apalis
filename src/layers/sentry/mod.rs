@@ -48,7 +48,7 @@ impl<S> Layer<S> for SentryLayer {
 struct Request {
     id: uuid::Uuid,
     current_attempt: i32,
-    namespace: String,
+    queue: String,
 }
 
 /// The Future returned from [`SentryTaskService`].
@@ -101,7 +101,7 @@ where
                     event.event_id = tid;
                     Some(event)
                 });
-                scope.set_tag("namespace", task_details.namespace.to_string());
+                scope.set_tag("queue", task_details.queue.to_string());
                 let mut details = std::collections::BTreeMap::new();
                 details.insert(String::from("task_id"), task_details.id.to_string().into());
                 details.insert(
@@ -172,7 +172,7 @@ where
         let task_details = Request {
             id: task_id.clone(),
             current_attempt: attempt.current().try_into().unwrap_or_default(),
-            namespace: task_type,
+            queue: task_type,
         };
 
         SentryHttpFuture {
