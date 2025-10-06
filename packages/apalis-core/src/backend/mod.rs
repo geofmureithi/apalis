@@ -167,13 +167,13 @@ where
 }
 
 /// Allows fetching a task by its ID
-pub trait FetchById: Backend {
+pub trait FetchById<Args>: Backend {
     /// Fetch a task by its unique identifier
     fn fetch_by_id(
         &mut self,
         task_id: &TaskId<Self::IdType>,
     ) -> impl Future<
-        Output = Result<Option<Task<Self::Args, Self::Context, Self::IdType>>, Self::Error>,
+        Output = Result<Option<Task<Args, Self::Context, Self::IdType>>, Self::Error>,
     > + Send;
 }
 
