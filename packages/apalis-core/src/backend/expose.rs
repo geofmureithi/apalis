@@ -26,14 +26,14 @@ pub trait ListWorkers: Backend {
     ) -> impl Future<Output = Result<Vec<RunningWorker>, Self::Error>> + Send;
 }
 /// Allows listing tasks with optional filtering
-pub trait ListTasks: Backend {
+pub trait ListTasks<Args>: Backend { // Backend must use both Args and Compact as the same
     /// List tasks matching the given filter in the current queue
     fn list_tasks(
         &self,
         queue: &str,
         filter: &Filter,
     ) -> impl Future<
-        Output = Result<Vec<Task<Self::Args, Self::Context, Self::IdType>>, Self::Error>,
+        Output = Result<Vec<Task<Args, Self::Context, Self::IdType>>, Self::Error>,
     > + Send;
 
     /// List tasks matching the given filter in all queues
@@ -131,7 +131,7 @@ pub struct Statistic {
     /// The value of the statistic
     pub value: String,
     /// The priority of the statistic (lower number means higher priority)
-    pub priority: Option<u8>,
+    pub priority: Option<u64>,
 }
 /// Statistics type
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
