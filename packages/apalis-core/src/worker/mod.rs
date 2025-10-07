@@ -268,9 +268,9 @@ where
     }
 
     /// Run the worker until a shutdown signal future is complete.
-    /// 
+    ///
     /// *Note*: Using this function requires you to call `ctx.stop()` in the future to completely stop the worker.
-    /// 
+    ///
     /// This can also be very powerful with pausing and resuming the worker using the context.
     ///
     /// # Example
@@ -578,6 +578,10 @@ where
     type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if self.ctx.is_shutting_down() {
+            self.ctx.is_ready.store(false, Ordering::SeqCst);
+            return Poll::Pending;
+        }
         // Delegate poll_ready to the inner service
         let result = self.inner.poll_ready(cx);
         // Update the readiness state based on the result
