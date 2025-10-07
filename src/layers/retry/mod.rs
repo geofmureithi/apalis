@@ -68,6 +68,7 @@ use apalis_core::task::metadata::MetadataExt;
 use std::any::Any;
 use std::fmt::Debug;
 use tower::retry::backoff::Backoff;
+use apalis_core::worker::context::WorkerContext;
 
 /// Re-exports from [`tower::retry`]
 pub use tower::retry::*;
@@ -120,6 +121,10 @@ where
         result: &mut Result<Res, Err>,
     ) -> Option<Self::Future> {
         let attempt = req.parts.attempt.current();
+        let worker = req.parts.data.get::<WorkerContext>()?;
+        if worker.is_shutting_down() {
+            return None;
+        }
         match result.as_mut() {
             Ok(_) => {
                 // Treat all `Response`s as success,
@@ -202,6 +207,10 @@ where
         result: &mut Result<Res, Err>,
     ) -> Option<Self::Future> {
         let attempt = req.parts.attempt.current();
+        let worker = req.parts.data.get::<WorkerContext>()?;
+        if worker.is_shutting_down() {
+            return None;
+        }
         match result.as_mut() {
             Ok(_) => {
                 // Treat all `Response`s as success,
@@ -263,6 +272,10 @@ where
         req: &mut Task<T, Ctx, IdType>,
         result: &mut Result<Res, Err>,
     ) -> Option<Self::Future> {
+        let worker = req.parts.data.get::<WorkerContext>()?;
+        if worker.is_shutting_down() {
+            return None;
+        }
         match result {
             Ok(_) => None,
             Err(err) => {
@@ -328,6 +341,10 @@ where
         req: &mut Task<T, Ctx, IdType>,
         result: &mut Result<Res, Err>,
     ) -> Option<Self::Future> {
+        let worker = req.parts.data.get::<WorkerContext>()?;
+        if worker.is_shutting_down() {
+            return None;
+        }
         match result {
             Ok(_) => None,
             Err(_) => {
