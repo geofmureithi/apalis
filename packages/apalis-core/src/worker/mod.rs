@@ -191,21 +191,12 @@ where
     Args: Send + 'static,
     B::Context: Send + 'static,
     B::Error: Into<BoxDynError> + Send + 'static,
-    M: Layer<ReadinessService<TrackerService<S>>>,
-    B::Layer: Layer<M::Service>,
-    <B::Layer as Layer<M::Service>>::Service:
-        Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
-        Into<BoxDynError> + Send + Sync + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future:
-        Send,
+    B::Layer: Layer<ReadinessService<TrackerService<S>>>,
+    M: Layer<<<B as Backend>::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>,
     M::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
-    <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-        Task<Args, B::Context, B::IdType>,
-    >>::Future: Send,
-    <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-        Task<Args, B::Context, B::IdType>,
-    >>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
+        Into<BoxDynError> + Send + Sync + 'static,
+    <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
     B::IdType: Send + 'static,
 {
     /// Run the worker until completion
@@ -237,7 +228,7 @@ where
     /// }
     /// ```
     pub async fn run(self) -> Result<(), WorkerError> {
-        let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
+        let mut ctx = WorkerContext::new::<M::Service>(&self.name);
         self.run_with_ctx(&mut ctx).await
     }
 
@@ -261,11 +252,11 @@ where
     where
         Fut: Future<Output = Result<(), WorkerError>> + Send + 'static,
         B: Send,
-        M: Send
+        M: Send,
     {
         let shutdown = self.shutdown.take().unwrap_or(Shutdown::new());
         let terminator = shutdown.shutdown_after(signal);
-        let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
+        let mut ctx = WorkerContext::new::<M::Service>(&self.name);
         let c = ctx.clone();
         let worker = self.run_with_ctx(&mut ctx).boxed();
         futures_util::try_join!(terminator.map_ok(|_| c.stop()), worker).map(|_| ())
@@ -301,7 +292,7 @@ where
     /// }
     /// ```
     pub fn stream(self) -> impl Stream<Item = Result<Event, WorkerError>> + use<Args, S, B, M> {
-        let mut ctx = WorkerContext::new::<<B::Layer as Layer<M::Service>>::Service>(&self.name);
+        let mut ctx = WorkerContext::new::<M::Service>(&self.name);
         self.stream_with_ctx(&mut ctx)
     }
 
@@ -339,8 +330,8 @@ where
             layer: Data::new(worker.clone()),
         };
         let service = svc
-            .layer(inner_layers)
             .layer(self.middleware)
+            .layer(inner_layers)
             .layer(ReadinessLayer::new(worker.clone()))
             .layer(TrackerLayer::new(worker.clone()))
             .service(self.service);

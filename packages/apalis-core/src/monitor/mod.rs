@@ -251,36 +251,28 @@ impl Debug for Monitor {
 }
 
 impl Monitor {
-    fn run_worker<Args, S, P, M>(
+    fn run_worker<Args, S, B, M>(
         mut ctx: WorkerContext,
-        worker: Worker<Args, P::Context, P, S, M>,
+        worker: Worker<Args, B::Context, B, S, M>,
     ) -> BoxFuture<'static, Result<(), WorkerError>>
     where
-        S: Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
+        S: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P: Backend<Args = Args> + Send + 'static,
-        P::Error: Into<BoxDynError> + Send + 'static,
-        P::Stream: Unpin + Send + 'static,
-        P::Beat: Unpin + Send,
-        Args: Send + 'static,
-        P::Context: Send + 'static,
-        M: Layer<ReadinessService<TrackerService<S>>> + 'static,
-        P::Layer: Layer<M::Service>,
-        <P::Layer as Layer<M::Service>>::Service:
-            Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Context, P::IdType>>>::Error:
+        B: Backend<Args = Args> + Send + 'static,
+        B::Error: Into<BoxDynError> + Send + 'static,
+        B::Layer: Layer<ReadinessService<TrackerService<S>>>,
+        M: Layer<<<B as Backend>::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>
+            + 'static,
+        M::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
+        <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Context, P::IdType>>>::Future:
-            Send,
-        M::Service: Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
-        <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Context, P::IdType>,
-        >>::Future: Send,
-        <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Context, P::IdType>,
-        >>::Error: Into<BoxDynError> + Send + Sync + 'static,
-        P::IdType: Sync + Send + 'static,
+        <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
+        B::Stream: Unpin + Send + 'static,
+        B::Beat: Unpin + Send,
+        Args: Send + 'static,
+        B::Context: Send + 'static,
+        B::IdType: Sync + Send + 'static,
     {
         let mut stream = worker.stream_with_ctx(&mut ctx);
         async move {
@@ -314,36 +306,27 @@ impl Monitor {
     /// .await;
     /// # }
     /// ```
-    pub fn register<Args, S, P, M>(
+    pub fn register<Args, S, B, M>(
         mut self,
-        factory: impl Fn(usize) -> Worker<Args, P::Context, P, S, M> + 'static + Send,
+        factory: impl Fn(usize) -> Worker<Args, B::Context, B, S, M> + 'static + Send,
     ) -> Self
     where
-        S: Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
+        S: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
         S::Future: Send,
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
-        P: Backend<Args = Args> + Send + 'static,
-        P::Error: Into<BoxDynError> + Send + 'static,
-        P::Stream: Unpin + Send + 'static,
-        P::Beat: Unpin + Send,
+        B: Backend<Args = Args> + Send + 'static,
+        B::Error: Into<BoxDynError> + Send + 'static,
+        B::Stream: Unpin + Send + 'static,
+        B::Beat: Unpin + Send,
         Args: Send + 'static,
-        P::Context: Send + 'static,
-        M: Layer<ReadinessService<TrackerService<S>>> + 'static,
-        P::Layer: Layer<M::Service>,
-        <P::Layer as Layer<M::Service>>::Service:
-            Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Context, P::IdType>>>::Error:
+        B::Context: Send + 'static,
+        B::Layer: Layer<ReadinessService<TrackerService<S>>>,
+        M: Layer<<<B as Backend>::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service> + 'static,
+        M::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
+        <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<P::Layer as Layer<M::Service>>::Service as Service<Task<Args, P::Context, P::IdType>>>::Future:
-            Send,
-        M::Service: Service<Task<Args, P::Context, P::IdType>> + Send + 'static,
-        <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Context, P::IdType>,
-        >>::Future: Send,
-        <<M as Layer<ReadinessService<TrackerService<S>>>>::Service as Service<
-            Task<Args, P::Context, P::IdType>,
-        >>::Error: Into<BoxDynError> + Send + Sync + 'static,
-        P::IdType: Send + Sync + 'static,
+        <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
+        B::IdType: Send + Sync + 'static,
     {
         let shutdown = Some(self.shutdown.clone());
         let handler = self.event_handler.clone();
