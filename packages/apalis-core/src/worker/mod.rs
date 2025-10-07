@@ -247,19 +247,76 @@ where
         Ok(())
     }
 
-    /// Run the worker with a shutdown signal future.
-    pub async fn run_with<Fut>(mut self, signal: Fut) -> Result<(), WorkerError>
+    /// Run the worker until a shutdown signal future is complete.
+    pub async fn run_until<Fut, Err>(mut self, signal: Fut) -> Result<(), WorkerError>
     where
-        Fut: Future<Output = Result<(), WorkerError>> + Send + 'static,
+        Fut: Future<Output = Result<(), Err>> + Send + 'static,
         B: Send,
         M: Send,
+        Err: Into<WorkerError> + Send + 'static,
     {
         let shutdown = self.shutdown.take().unwrap_or(Shutdown::new());
         let terminator = shutdown.shutdown_after(signal);
         let mut ctx = WorkerContext::new::<M::Service>(&self.name);
         let c = ctx.clone();
         let worker = self.run_with_ctx(&mut ctx).boxed();
-        futures_util::try_join!(terminator.map_ok(|_| c.stop()), worker).map(|_| ())
+        futures_util::try_join!(
+            terminator.map_ok(|_| c.stop()).map_err(|e| e.into()),
+            worker
+        )
+        .map(|_| ())
+    }
+
+    /// Run the worker until a shutdown signal future is complete.
+    /// 
+    /// *Note*: Using this function requires you to call `ctx.stop()` in the future to completely stop the worker.
+    /// 
+    /// This can also be very powerful with pausing and resuming the worker using the context.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    ///
+    /// # use apalis_core::{worker::builder::WorkerBuilder, backend::memory::MemoryStorage};
+    /// # use apalis_core::error::BoxDynError;
+    /// # use apalis_core::backend::TaskSink;
+    /// # use std::time::Duration;
+    /// # use tokio::time::sleep;
+    /// # use apalis_core::error::WorkerError;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), BoxDynError> {
+    ///     let mut storage = MemoryStorage::new();
+    ///     for i in 0..5 {
+    ///         storage.push(i).await?;
+    ///     }
+    ///     async fn handler(task: u32) {
+    ///         println!("Processing task: {task}");
+    ///     }
+    ///     let worker = WorkerBuilder::new("worker-1")
+    ///         .backend(storage)
+    ///         .build(handler);
+    ///     worker.run_until_ctx(|ctx| async move {
+    ///         sleep(Duration::from_secs(1)).await;
+    ///         ctx.stop()?;
+    ///         Ok(())
+    ///     }).await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn run_until_ctx<F, Fut>(mut self, fut: F) -> Result<(), WorkerError>
+    where
+        F: FnOnce(WorkerContext) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), WorkerError>> + Send + 'static,
+        B: Send,
+        M: Send,
+    {
+        let shutdown = self.shutdown.take().unwrap_or(Shutdown::new());
+        let mut ctx = WorkerContext::new::<M::Service>(&self.name);
+        let c = ctx.clone();
+        let terminator = shutdown.shutdown_after(fut(c));
+        let worker = self.run_with_ctx(&mut ctx).boxed();
+        futures_util::try_join!(terminator.map_ok(|_| ()).map_err(|e| e.into()), worker).map(|_| ())
     }
 
     /// Returns a stream that will yield events as they occur within the worker's lifecycle
@@ -690,9 +747,9 @@ mod tests {
             let timeout = tokio::time::sleep(Duration::from_secs(5))
                 .map(|_| Err::<(), WorkerError>(WorkerError::GracefulExit));
             let _ = futures_util::try_join!(ctrl_c, timeout)?;
-            Ok(())
+            Ok::<(), WorkerError>(())
         };
-        let res = worker.run_with(signal).await;
+        let res = worker.run_until(signal).await;
         match res {
             Err(WorkerError::GracefulExit) => {
                 println!("Worker exited gracefully");
