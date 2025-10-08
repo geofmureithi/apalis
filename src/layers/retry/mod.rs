@@ -65,10 +65,11 @@ use apalis_core::error::AbortError;
 use apalis_core::task::Task;
 use apalis_core::task::builder::TaskBuilder;
 use apalis_core::task::metadata::MetadataExt;
+use apalis_core::worker::context::WorkerContext;
 use std::any::Any;
 use std::fmt::Debug;
 use tower::retry::backoff::Backoff;
-use apalis_core::worker::context::WorkerContext;
+use apalis_core::task::status::Status;
 
 /// Re-exports from [`tower::retry`]
 pub use tower::retry::*;
@@ -121,6 +122,7 @@ where
         result: &mut Result<Res, Err>,
     ) -> Option<Self::Future> {
         let attempt = req.parts.attempt.current();
+        let status = req.parts.status.load();
         let worker = req.parts.data.get::<WorkerContext>()?;
         if worker.is_shutting_down() {
             return None;
@@ -134,6 +136,10 @@ where
             Err(_) if self.retries == 0 => {
                 return None;
             }
+            Err(_) if status == Status::Killed => {
+                return None;
+            }
+            // Helps handle the case where the user explicitly wants to abort retries
             Err(err) if (err as &dyn Any).downcast_ref::<AbortError>().is_some() => {
                 return None;
             }
@@ -207,6 +213,7 @@ where
         result: &mut Result<Res, Err>,
     ) -> Option<Self::Future> {
         let attempt = req.parts.attempt.current();
+        let status = req.parts.status.load();
         let worker = req.parts.data.get::<WorkerContext>()?;
         if worker.is_shutting_down() {
             return None;
@@ -218,6 +225,9 @@ where
                 None
             }
             Err(_) if self.retries == 0 => {
+                return None;
+            }
+            Err(_) if status == Status::Killed => {
                 return None;
             }
             Err(err) if (err as &dyn Any).downcast_ref::<AbortError>().is_some() => {
