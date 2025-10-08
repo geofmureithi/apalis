@@ -130,10 +130,10 @@ macro_rules! log_pattern_match {
 }
 
 impl<E: Display> OnFailure<E> for DefaultOnFailure {
-    fn on_failure(&mut self, error: &E, latency: Duration, span: &Span) {
+    fn on_failure(&mut self, error: &E, latency: Duration, _span: &Span) {
         log_pattern_match!(
             self,
-            span,
+            _span,
             error,
             latency,
             [ERROR, WARN, INFO, DEBUG, TRACE]

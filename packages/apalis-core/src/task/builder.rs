@@ -165,7 +165,7 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
                 data: self.data,
                 attempt: self.attempt.unwrap_or_default(),
                 ctx: self.ctx,
-                status: self.status.unwrap_or(Status::Pending),
+                status: self.status.unwrap_or(Status::Pending).into(),
                 run_at: self.run_at.unwrap_or_else(current_time),
             },
         }

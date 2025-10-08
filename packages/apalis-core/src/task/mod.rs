@@ -113,7 +113,7 @@ use crate::{
         attempt::Attempt,
         builder::TaskBuilder,
         extensions::Extensions,
-        status::Status,
+        status::{AtomicStatus, Status},
         task_id::{RandomId, TaskId},
     },
     task_fn::FromRequest,
@@ -156,8 +156,8 @@ pub struct Parts<Context, IdType = RandomId> {
     /// The task specific data provided by the backend
     pub ctx: Context,
 
-    /// The task status
-    pub status: Status,
+    /// The task status that is wrapped in an atomic status
+    pub status: AtomicStatus,
 
     /// The time a task should be run
     pub run_at: u64,
@@ -197,7 +197,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
                 task_id: Default::default(),
                 attempt: Default::default(),
                 data: Default::default(),
-                status: Status::Pending,
+                status: Status::Pending.into(),
                 run_at: {
                     let now = SystemTime::now();
                     let duration_since_epoch =
@@ -217,7 +217,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
                 task_id: Default::default(),
                 attempt: Default::default(),
                 data,
-                status: Status::Pending,
+                status: Status::Pending.into(),
                 run_at: {
                     let now = SystemTime::now();
                     let duration_since_epoch =
@@ -247,7 +247,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
             ctx: self.parts.ctx,
             attempt: Some(self.parts.attempt),
             data: self.parts.data,
-            status: Some(self.parts.status),
+            status: Some(self.parts.status.into()),
             run_at: Some(self.parts.run_at),
             task_id: self.parts.task_id,
         }
