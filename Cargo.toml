@@ -75,7 +75,7 @@ pprof = { version = "0.15", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-apalis = { path = ".", features = ["limit"] }
+apalis = { path = ".", features = ["limit", "retry"] }
 apalis-redis = { path = "./packages/apalis-redis" }
 apalis-sql = { path = "./packages/apalis-sql", features = [
   "postgres",
@@ -109,6 +109,7 @@ members = [
   "examples/mysql",
   "examples/postgres",
   "examples/postgres-stepped",
+  "examples/postgres-stepped-retry",
   "examples/axum",
   "examples/prometheus",
   "examples/tracing",
