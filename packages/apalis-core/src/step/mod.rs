@@ -203,8 +203,7 @@ where
                             // the seconds since the unix epoch, overflows
                             // are not expected, therefore a saturating cast
                             // is fine here.
-                            let target = i64::try_from(target_s)
-                                .unwrap_or(i64::MAX);
+                            let target = i64::try_from(target_s).unwrap_or(i64::MAX);
 
                             storage
                                 .schedule(

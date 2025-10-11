@@ -1,10 +1,9 @@
 // Imports /////////////////////////////////////////////////////////////////////
-// use apalis::prelude::*;
-use apalis::prelude::{
-    Monitor, StepBuilder, StepFn, StepWorkerFactory, WorkerBuilder, GoTo,
-    StepRequest, SteppableStorage
+use apalis::prelude::*;
+use apalis_sql::{
+    Config,
+    postgres::{PgListen, PgPool, PostgresStorage},
 };
-use apalis_sql::{postgres::{PgListen, PgPool, PostgresStorage}, Config};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
@@ -27,15 +26,12 @@ async fn main() -> Result<(), Error> {
     );
 
     // Define steps of workflow_1.
-    let wf1_steps = StepBuilder::new()
-        .step_fn(wf1::step_1)
-        .step_fn(wf1::step_2);
+    let wf1_steps = StepBuilder::new().step_fn(wf1::step_1).step_fn(wf1::step_2);
 
     // Define worker builder for workflow_1
     let wf1_worker_builder = WorkerBuilder::new("wf1_worker_builder")
         .backend(wf1_storage.clone())
         .build_stepped(wf1_steps);
-
 
     // Produce jobs in workflow_1
     wf1::produce_jobs(wf1_storage.clone()).await?;
@@ -51,12 +47,8 @@ async fn main() -> Result<(), Error> {
         println!("Database listener stopped: {res:?}");
     });
 
-
     // Create Apalis monitor, register workflows and run it.
-    Monitor::new()
-        .register(wf1_worker_builder)
-        .run()
-        .await?;
+    Monitor::new().register(wf1_worker_builder).run().await?;
 
     Ok(())
 }
@@ -77,7 +69,6 @@ mod wf1 {
             delay: std::time::Duration::from_secs(4),
         })
     }
-
 
     #[derive(Debug, serde::Serialize, serde::Deserialize)]
     pub struct Step2 {
