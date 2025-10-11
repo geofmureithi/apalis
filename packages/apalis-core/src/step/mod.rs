@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
 use std::hash::Hash;
+use std::i64;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -172,13 +173,46 @@ where
                                 .map_err(|e| Error::SourceError(Arc::new(e.into())))?;
                         }
                         GoTo::Delay { next, delay } => {
+                            // Get the current system time and calculate
+                            // milliseconds since the epoch.
+                            let now = std::time::SystemTime::now();
+                            let epoch_ms: u128 = now
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis();
+
+                            // Convert the given delay into milliseconds.
+                            let delay: u128 = delay.as_millis();
+
+                            // Calculate the target time as milliseconds since
+                            // the Unix epoch.
+                            let target_ms: u128 = epoch_ms + delay;
+
+                            // Convert the target from milliseconds to seconds.
+                            // Doing that, the result is rounded up to the next
+                            // whole second, because the `.schedule(...)`
+                            // method does not allow specifying the execution
+                            // target time more precisely and rounding up
+                            // prevents execution too early.
+                            let target_s: u128 = (target_ms + 999) / 1000;
+
+                            // The `.schedule(...)` method expects the target
+                            // execution time to be of type `i64`. Therefore
+                            // the `target_s` must be safely casted to this
+                            // type. As the value of the variable contains
+                            // the seconds since the unix epoch, overflows
+                            // are not expected, therefore a saturating cast
+                            // is fine here.
+                            let target = i64::try_from(target_s)
+                                .unwrap_or(i64::MAX);
+
                             storage
                                 .schedule(
                                     StepRequest {
                                         index: next_index,
                                         step: next.clone(),
                                     },
-                                    delay.as_secs().try_into().unwrap(),
+                                    target,
                                 )
                                 .await
                                 .map_err(|e| Error::SourceError(Arc::new(e.into())))?;
