@@ -1,0 +1,45 @@
+name: apalis
+
+services:
+  ### DATABASE #################################################################
+  # Database
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: "apalis"
+      POSTGRES_USER: "pg"
+      POSTGRES_PASSWORD: "pw"
+
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+    ports:
+      - 5432:5432
+
+  # Database Admin-UI
+  db-admin:
+    image: dpage/pgadmin4:9.4.0
+    restart: unless-stopped
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "pg@admin.de"
+      PGADMIN_DEFAULT_PASSWORD: "pw"
+
+    volumes:
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json
+      - db-admin_working-dir:/var/lib/pgadmin
+      - db-admin_servers:/pgadmin4
+
+    ports:
+      - 5433:80 # making it available on port 5433
+
+
+# Volumes ######################################################################
+volumes:
+  db_data:
+  db-admin_working-dir:
+  db-admin_servers:
+
+################################################################################
