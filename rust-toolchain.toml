@@ -1,0 +1,23 @@
+# Check out the documentation to find out about all options in this file:
+# https://rust-lang.github.io/rustup/overrides.html
+
+# Rust toolchain, including the following components:
+#   - rustc     (from minimal)
+#   - rust-std  (from minimal)
+#   - cargo     (from minimal)
+#   - rust-docs (from default)
+#   - rustfmt   (from default)
+#   - clippy    (from default)
+#
+# See: https://rust-lang.github.io/rustup/concepts/profiles
+#
+[toolchain]
+channel = "stable"
+
+# Specify additional components (which are not included in the default profile)
+# See profiles  : https://rust-lang.github.io/rustup/concepts/profiles
+# See components: https://rust-lang.github.io/rustup/concepts/components
+components = [
+    "rust-analyzer",
+    "rust-src"      # Needed for rust-analyzer (std lib autosuggestions etc.)
+]
