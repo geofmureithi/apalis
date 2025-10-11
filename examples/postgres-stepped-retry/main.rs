@@ -81,7 +81,7 @@ async fn main() -> Result<(), Error> {
 mod wf1 {
     use super::*;
 
-    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
     pub struct Step1 {}
 
     pub async fn step_1(_req: Step1) -> Result<GoTo<Step2>, Error> {
