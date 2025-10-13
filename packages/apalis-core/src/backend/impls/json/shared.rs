@@ -57,14 +57,12 @@ use serde_json::Value;
 
 use crate::{
     backend::{
-        impls::json::{
-            JsonStorage,
-            meta::JsonMapMetadata,
-            util::{FindFirstWith, TaskKey, TaskWithMeta},
-        },
-        impls::memory::{MemorySink, MemoryStorage},
+        impls::{json::{
+            meta::JsonMapMetadata, util::{FindFirstWith, TaskKey, TaskWithMeta}, JsonStorage
+        }, memory::{MemorySink, MemoryStorage}},
+        queue::Queue,
     },
-    task::{Task, status::Status, task_id::TaskId},
+    task::{status::Status, task_id::TaskId, Task},
 };
 
 #[derive(Debug)]
@@ -86,10 +84,11 @@ impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMe
                 Ok(value) => value,
                 Err(_) => return Poll::Pending,
             };
-            let task = TaskBuilder::new(args)
+            let mut task = TaskBuilder::new(args)
                 .with_task_id(key.task_id.clone())
                 .with_ctx(task.ctx.clone())
                 .build();
+            task.parts.data.insert(Queue::from(key.queue.clone()));
             let key = key.clone();
             drop(map);
             let this = &mut self.get_mut().inner;

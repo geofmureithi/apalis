@@ -191,12 +191,12 @@ where
     Args: Send + 'static,
     B::Context: Send + 'static,
     B::Error: Into<BoxDynError> + Send + 'static,
-    B::Layer: Layer<ReadinessService<TrackerService<S>>>,
-    M: Layer<<<B as Backend>::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>,
-    M::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
-    <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
+    M: Layer<ReadinessService<TrackerService<S>>>,
+    B::Layer: Layer<M::Service>,
+    <B::Layer as Layer<M::Service>>::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
         Into<BoxDynError> + Send + Sync + 'static,
-    <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
+    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
     B::IdType: Send + 'static,
 {
     /// Run the worker until completion
@@ -365,7 +365,7 @@ where
         let event_handler = self.event_handler;
         ctx.wrap_listener(event_handler);
         let worker = ctx.clone();
-        let inner_layers = backend.middleware();
+        let backend_middleware = backend.middleware();
         struct ServiceBuilder<L> {
             layer: L,
         }
@@ -387,9 +387,15 @@ where
             layer: Data::new(worker.clone()),
         };
         let service = svc
+            // backend middleware should be the outermost layer so it can observe all requests
+            .layer(backend_middleware)
+            // pass the user defined middleware next
             .layer(self.middleware)
-            .layer(inner_layers)
+            // when all layers are ready, inform the worker is ready to accept tasks
             .layer(ReadinessLayer::new(worker.clone()))
+            // Track all tasks to allow graceful shutdowns
+            // we also increment the attempt count on the first poll
+            // this ensures that the attempt count is accurate even if the task fails before completion
             .layer(TrackerLayer::new(worker.clone()))
             .service(self.service);
         let heartbeat = backend.heartbeat(&worker).map(|res| match res {

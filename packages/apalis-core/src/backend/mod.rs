@@ -37,6 +37,7 @@ pub mod codec;
 pub mod custom;
 pub mod pipe;
 pub mod poll_strategy;
+pub mod queue;
 pub mod shared;
 
 mod expose;
@@ -172,9 +173,7 @@ pub trait FetchById<Args>: Backend {
     fn fetch_by_id(
         &mut self,
         task_id: &TaskId<Self::IdType>,
-    ) -> impl Future<
-        Output = Result<Option<Task<Args, Self::Context, Self::IdType>>, Self::Error>,
-    > + Send;
+    ) -> impl Future<Output = Result<Option<Task<Args, Self::Context, Self::IdType>>, Self::Error>> + Send;
 }
 
 /// Allows updating an existing task

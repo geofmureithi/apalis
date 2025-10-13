@@ -140,7 +140,7 @@ pub struct Task<Args, Context, IdType = RandomId> {
 
 /// Component parts of a `Task`
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Parts<Context, IdType = RandomId> {
     /// The task's id if allocated
     pub task_id: Option<TaskId<IdType>>,
@@ -161,6 +161,19 @@ pub struct Parts<Context, IdType = RandomId> {
 
     /// The time a task should be run
     pub run_at: u64,
+}
+
+impl<Ctx: Debug, IdType: Debug> Debug for Parts<Ctx, IdType> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Parts")
+            .field("task_id", &self.task_id)
+            .field("data", &"<Extensions>")
+            .field("attempt", &self.attempt)
+            .field("ctx", &self.ctx)
+            .field("status", &self.status.load())
+            .field("run_at", &self.run_at)
+            .finish()
+    }
 }
 
 impl<Ctx, IdType: Clone> Clone for Parts<Ctx, IdType>

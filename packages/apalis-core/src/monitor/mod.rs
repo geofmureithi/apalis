@@ -261,13 +261,12 @@ impl Monitor {
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         B: Backend<Args = Args> + Send + 'static,
         B::Error: Into<BoxDynError> + Send + 'static,
-        B::Layer: Layer<ReadinessService<TrackerService<S>>>,
-        M: Layer<<<B as Backend>::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>
-            + 'static,
-        M::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
-        <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
+        M: Layer<ReadinessService<TrackerService<S>>> + 'static,
+        B::Layer: Layer<M::Service> + 'static,
+        <B::Layer as Layer<M::Service>>::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
+        <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
+        <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
         B::Stream: Unpin + Send + 'static,
         B::Beat: Unpin + Send,
         Args: Send + 'static,
@@ -320,12 +319,12 @@ impl Monitor {
         B::Beat: Unpin + Send,
         Args: Send + 'static,
         B::Context: Send + 'static,
-        B::Layer: Layer<ReadinessService<TrackerService<S>>>,
-        M: Layer<<<B as Backend>::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service> + 'static,
-        M::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
-        <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
+        M: Layer<ReadinessService<TrackerService<S>>> + 'static,
+        B::Layer: Layer<M::Service> + 'static,
+        <B::Layer as Layer<M::Service>>::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
+        <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <M::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
+        <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
         B::IdType: Send + Sync + 'static,
     {
         let shutdown = Some(self.shutdown.clone());

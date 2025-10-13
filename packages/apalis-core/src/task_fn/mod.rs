@@ -180,7 +180,6 @@ macro_rules! impl_service_fn {
             Args: Send + 'static,
             Ctx: Send + Sync + 'static,
             B::IdType: Send + 'static,
-            // TaskFn<F, Args, Ctx, FnArgs>: Service<Task<Args, Ctx, B::IdType>, Response = R>,
             F::Output: IntoResponse<Output = R>,
             $(
                 $K: FromRequest<Task<Args, Ctx, B::IdType>> + Send,

@@ -82,7 +82,6 @@ use crate::{
     backend::Backend,
     monitor::shutdown::Shutdown,
     task::{Task, data::Data},
-    task_fn::{FromRequest, TaskFn},
     worker::{Worker, event::EventHandlerBuilder},
 };
 
@@ -188,20 +187,6 @@ where
             event_handler: self.event_handler,
         }
     }
-
-    #[inline]
-    /// A helper for checking that the builder can build a worker with the provided service
-    pub fn build_check_fn<
-        F,
-        A1: FromRequest<Task<Args, Ctx, B::IdType>>,
-        A2: FromRequest<Task<Args, Ctx, B::IdType>>,
-    >(
-        self,
-        _: F,
-    ) where
-        TaskFn<F, Args, Ctx, (A1, A2)>: Service<Task<Args, Ctx, B::IdType>>,
-    {
-    }
 }
 
 /// Finalizes the builder and constructs a [`Worker`] with the provided service
@@ -267,5 +252,50 @@ where
             }));
         worker.shutdown = builder.shutdown;
         worker
+    }
+}
+
+macro_rules! impl_check_fn {
+    ($($num:tt => $($arg:ident),+);+ $(;)?) => {
+        $(
+            #[inline]
+            #[doc = concat!("A helper for checking that the builder can build a worker with the provided service (", stringify!($num), " arguments)")]
+            pub fn $num<
+                F,
+                $($arg: FromRequest<Task<Args, Ctx, B::IdType>>),+
+            >(
+                self,
+                _: F,
+            ) where
+                TaskFn<F, Args, Ctx, ($($arg,)+)>: Service<Task<Args, Ctx, B::IdType>>,
+            {
+            }
+        )+
+    };
+}
+
+use crate::task_fn::{FromRequest, TaskFn};
+
+impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M>
+where
+    B: Backend<Args = Args>,
+{
+    impl_check_fn! {
+        check_fn => A1;
+        check_fn_2 => A1, A2;
+        check_fn_3 => A1, A2, A3;
+        check_fn_4 => A1, A2, A3, A4;
+        check_fn_5 => A1, A2, A3, A4, A5;
+        check_fn_6 => A1, A2, A3, A4, A5, A6;
+        check_fn_7 => A1, A2, A3, A4, A5, A6, A7;
+        check_fn_8 => A1, A2, A3, A4, A5, A6, A7, A8;
+        check_fn_9 => A1, A2, A3, A4, A5, A6, A7, A8, A9;
+        check_fn_10 => A1, A2, A3, A4, A5, A6, A7, A8, A9, A10;
+        check_fn_11 => A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11;
+        check_fn_12 => A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12;
+        check_fn_13 => A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13;
+        check_fn_14 => A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14;
+        check_fn_15 => A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15;
+        check_fn_16 => A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16;
     }
 }

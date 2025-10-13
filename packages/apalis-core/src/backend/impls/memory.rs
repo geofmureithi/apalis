@@ -39,6 +39,7 @@
 //! - [`WorkerContext`](crate::worker::context::WorkerContext)
 
 use crate::backend::codec::IdentityCodec;
+use crate::backend::queue::Queue;
 use crate::features_table;
 use crate::task::extensions::Extensions;
 use crate::{
@@ -173,6 +174,9 @@ impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemorySink<Args, Ctx> {
         item.parts
             .task_id
             .get_or_insert_with(|| TaskId::new(RandomId::default()));
+        item.parts
+            .data
+            .insert(Queue::from(std::any::type_name::<Args>()));
         Pin::new(&mut *lock).start_send_unpin(item)
     }
 
@@ -205,9 +209,7 @@ impl<Args, Ctx> Stream for MemoryStorage<Args, Ctx> {
 }
 
 // MemoryStorage as a Backend
-impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend
-    for MemoryStorage<Args, Ctx>
-{
+impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend for MemoryStorage<Args, Ctx> {
     type Args = Args;
     type IdType = RandomId;
 
