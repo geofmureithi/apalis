@@ -4,4 +4,3 @@ Cargo.lock
 examples/**/*.env
 examples/sqlite/data.*
 .DS_Store
-.direnv/
