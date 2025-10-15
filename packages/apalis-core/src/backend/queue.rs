@@ -54,7 +54,7 @@ impl std::fmt::Display for Queue {
 impl serde::Serialize for Queue {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer,
+        S: serde::Serializer,
     {
         serializer.serialize_str(&self.0)
     }
@@ -64,7 +64,7 @@ impl serde::Serialize for Queue {
 impl<'de> serde::Deserialize<'de> for Queue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de>,
+        D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
         Ok(Queue(Arc::new(s)))
