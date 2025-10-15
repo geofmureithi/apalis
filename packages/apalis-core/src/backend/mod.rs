@@ -97,7 +97,7 @@ pub trait Backend {
 pub type TaskStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
 
 /// Extends Backend to allow pushing tasks into the backend
-pub trait TaskSink<Args>: Backend<Args = Args> {
+pub trait TaskSink<Args>: Backend {
     /// Allows pushing a single task into the backend
     fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
@@ -122,10 +122,7 @@ pub trait TaskSink<Args>: Backend<Args = Args> {
 
 impl<Args, S, E> TaskSink<Args> for S
 where
-    S: Sink<Task<Args, Self::Context, Self::IdType>, Error = E>
-        + Unpin
-        + Backend<Args = Args, Error = E>
-        + Send,
+    S: Sink<Task<Args, Self::Context, Self::IdType>, Error = E> + Unpin + Backend<Error = E> + Send,
     Args: Send,
     S::Context: Send + Default,
     S::IdType: Send + 'static,
