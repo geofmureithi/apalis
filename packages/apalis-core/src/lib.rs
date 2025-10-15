@@ -339,6 +339,7 @@ pub mod worker;
 /// Layers for building middleware stacks
 pub mod layers {
     pub use tower_layer::{Identity, Stack};
+    pub use tower_service::Service;
 }
 /// Timing and delaying utilities
 #[cfg(feature = "sleep")]

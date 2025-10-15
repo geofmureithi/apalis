@@ -109,6 +109,7 @@ use std::{
 };
 
 use crate::{
+    backend::queue::Queue,
     task::{
         attempt::Attempt,
         builder::TaskBuilder,
@@ -161,6 +162,16 @@ pub struct Parts<Context, IdType = RandomId> {
 
     /// The time a task should be run
     pub run_at: u64,
+
+    /// The queue the task belongs to
+    /// This is a runtime only field and is not serialized
+    /// It is set by the backend when the task is fetched from the queue
+    /// Workers can use this to determine which queue they are processing tasks from
+    /// Sinks can also use this to determine which queue to send the task to
+    /// This field is optional as not all backends support queues
+    /// For example, a simple in-memory backend does not have the concept of queues
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub queue: Option<Queue>,
 }
 
 impl<Ctx: Debug, IdType: Debug> Debug for Parts<Ctx, IdType> {
@@ -188,6 +199,7 @@ where
             ctx: self.ctx.clone(),
             status: self.status.clone(),
             run_at: self.run_at,
+            queue: self.queue.clone(),
         }
     }
 }
@@ -217,6 +229,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
                         now.duration_since(UNIX_EPOCH).expect("Time went backwards");
                     duration_since_epoch.as_secs()
                 },
+                queue: None,
             },
         }
     }
@@ -237,6 +250,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
                         now.duration_since(UNIX_EPOCH).expect("Time went backwards");
                     duration_since_epoch.as_secs()
                 },
+                queue: None,
             },
         }
     }
@@ -263,6 +277,7 @@ impl<Args, Ctx, IdType> Task<Args, Ctx, IdType> {
             status: Some(self.parts.status.into()),
             run_at: Some(self.parts.run_at),
             task_id: self.parts.task_id,
+            queue: self.parts.queue,
         }
     }
 }

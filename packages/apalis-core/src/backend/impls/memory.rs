@@ -175,8 +175,8 @@ impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemorySink<Args, Ctx> {
             .task_id
             .get_or_insert_with(|| TaskId::new(RandomId::default()));
         item.parts
-            .data
-            .insert(Queue::from(std::any::type_name::<Args>()));
+            .queue
+            .get_or_insert_with(|| Queue::from(std::any::type_name::<Args>()));
         Pin::new(&mut *lock).start_send_unpin(item)
     }
 

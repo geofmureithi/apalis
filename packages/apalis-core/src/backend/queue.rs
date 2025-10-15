@@ -1,13 +1,13 @@
 //! Represents a queue in the backend
-//! 
+//!
 //! This module provides the `Queue` struct and related functionality for managing
 //! queues in the backend. A queue is identified by its name and is used to group
 //! tasks for processing by workers.
-//! 
+//!
 //! The `Queue` struct is designed to be lightweight and easily clonable, allowing
 //! it to be passed around in various contexts. It uses an `Arc<String>` internally
 //! to store the queue name, ensuring efficient memory usage and thread safety.
-//! 
+//!
 //! The module also includes an implementation of the `FromRequest` trait, allowing
 //! extraction of the queue information from a task context. This is useful for
 //! workers that need to know which queue they are processing tasks from.
@@ -50,6 +50,27 @@ impl std::fmt::Display for Queue {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for Queue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Queue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(Queue(Arc::new(s)))
+    }
+}
+
 impl<Args, Ctx, IdType> FromRequest<Task<Args, Ctx, IdType>> for Queue
 where
     Args: Sync,
@@ -59,13 +80,20 @@ where
     type Error = QueueError;
 
     async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        let queue = req
-            .parts
-            .data
-            .get()
-            .cloned()
-            .ok_or_else(|| QueueError::NotFound)?;
-        Ok(queue)
+        let tagged = &req.parts.queue;
+        match tagged {
+            Some(queue) => Ok(queue.clone()),
+            None => {
+                // Fallback to looking into task data for backward compatibility
+                let queue = req
+                    .parts
+                    .data
+                    .get()
+                    .cloned()
+                    .ok_or_else(|| QueueError::NotFound)?;
+                Ok(queue)
+            }
+        }
     }
 }
 
