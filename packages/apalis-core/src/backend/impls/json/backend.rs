@@ -11,19 +11,23 @@ use serde_json::Value;
 
 use crate::{
     backend::{
-        Backend, TaskStream,
+        Backend, ConfigExt, TaskStream,
         codec::json::JsonCodec,
         impls::json::{
             JsonStorage,
             meta::JsonMapMetadata,
             util::{FindFirstWith, JsonAck},
         },
+        queue::Queue,
     },
     task::{Task, status::Status, task_id::RandomId},
     worker::{context::WorkerContext, ext::ack::AcknowledgeLayer},
 };
 
-impl<Args: 'static + Send + Serialize + DeserializeOwned + Unpin> Backend for JsonStorage<Args> {
+impl<Args> Backend for JsonStorage<Args>
+where
+    Args: 'static + Send + Serialize + DeserializeOwned + Unpin,
+{
     type Args = Args;
     type IdType = RandomId;
     type Error = SendError;
@@ -47,6 +51,15 @@ impl<Args: 'static + Send + Serialize + DeserializeOwned + Unpin> Backend for Js
     fn poll(self, _worker: &WorkerContext) -> Self::Stream {
         let stream = self.map(|r| Ok(Some(r))).boxed();
         stream
+    }
+}
+
+impl<Args> ConfigExt for JsonStorage<Args>
+where
+    Args: 'static + Send + Serialize + DeserializeOwned + Unpin,
+{
+    fn get_queue(&self) -> Queue {
+        Queue::from(std::any::type_name::<Args>())
     }
 }
 impl<Args: DeserializeOwned + Unpin> Stream for JsonStorage<Args> {

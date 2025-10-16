@@ -83,6 +83,7 @@ pub use self::shared::SharedJsonStore;
 
 /// A backend that persists to a file using json encoding
 ///
+/// *Warning*: This backend is not optimized for high-throughput scenarios and is best suited for development, testing, or low-volume workloads.
 #[doc = features_table! {
     setup = {
         use apalis_core::backend::json::JsonStorage;

@@ -40,12 +40,15 @@ pub mod poll_strategy;
 pub mod queue;
 pub mod shared;
 
+mod config;
 mod expose;
 mod impls;
 
 pub use expose::*;
 
 pub use impls::guide;
+
+pub use config::ConfigExt;
 
 /// In-memory backend based on channels
 pub mod memory {
