@@ -1,13 +1,22 @@
 use crate::{
-    backend::Backend,
+    backend::{Backend, TaskSink},
     task::{Task, status::Status},
 };
 
 const DEFAULT_PAGE_SIZE: u32 = 10;
 /// Allows exposing additional functionality from the backend
-pub trait Expose {}
+pub trait Expose<Args> {}
 
-impl<B> Expose for B where B: Backend + Metrics + ListWorkers + ListQueues {}
+impl<B, Args> Expose<Args> for B where
+    B: Backend<Args = Args>
+        + Metrics
+        + ListWorkers
+        + ListQueues
+        + ListAllTasks
+        + ListTasks<Args>
+        + TaskSink<Args>
+{
+}
 
 /// Allows listing all queues available in the backend
 pub trait ListQueues: Backend {
@@ -18,7 +27,10 @@ pub trait ListQueues: Backend {
 /// Allows listing all workers registered with the backend
 pub trait ListWorkers: Backend {
     /// List all registered workers in the current queue
-    fn list_workers(&self, queue: &str) -> impl Future<Output = Result<Vec<RunningWorker>, Self::Error>> + Send;
+    fn list_workers(
+        &self,
+        queue: &str,
+    ) -> impl Future<Output = Result<Vec<RunningWorker>, Self::Error>> + Send;
 
     /// List all registered workers in all queues
     fn list_all_workers(
@@ -26,16 +38,17 @@ pub trait ListWorkers: Backend {
     ) -> impl Future<Output = Result<Vec<RunningWorker>, Self::Error>> + Send;
 }
 /// Allows listing tasks with optional filtering
-pub trait ListTasks<Args>: Backend { // Backend must use both Args and Compact as the same
+pub trait ListTasks<Args>: Backend {
     /// List tasks matching the given filter in the current queue
     fn list_tasks(
         &self,
         queue: &str,
         filter: &Filter,
-    ) -> impl Future<
-        Output = Result<Vec<Task<Args, Self::Context, Self::IdType>>, Self::Error>,
-    > + Send;
+    ) -> impl Future<Output = Result<Vec<Task<Args, Self::Context, Self::IdType>>, Self::Error>> + Send;
+}
 
+/// Allows listing tasks across all queues with optional filtering
+pub trait ListAllTasks: Backend {
     /// List tasks matching the given filter in all queues
     fn list_all_tasks(
         &self,
