@@ -5,8 +5,7 @@
 //! The `Status` enum defines the various states
 //! a task can be in, such as `Pending`, `Running`, `Done`, `Failed`, etc.
 //!
-//! - It includes functionality for parsing a `Status` from a string and
-//! formatting it for display.
+//! - It includes functionality for parsing a `Status` from a string and formatting it for display.
 //! - This is useful for tracking the lifecycle of tasks.
 use core::fmt;
 use std::{
@@ -120,15 +119,15 @@ impl AtomicStatus {
     }
 }
 
-impl Into<Status> for AtomicStatus {
-    fn into(self) -> Status {
-        self.load()
+impl From<AtomicStatus> for Status {
+    fn from(val: AtomicStatus) -> Self {
+        val.load()
     }
 }
 
-impl Into<AtomicStatus> for Status {
-    fn into(self) -> AtomicStatus {
-        AtomicStatus::new(self)
+impl From<Status> for AtomicStatus {
+    fn from(val: Status) -> Self {
+        AtomicStatus::new(val)
     }
 }
 

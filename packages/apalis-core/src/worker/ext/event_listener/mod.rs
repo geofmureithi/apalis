@@ -26,7 +26,7 @@ use tower_service::Service;
 use crate::{
     backend::Backend,
     task::Task,
-    worker::{builder::WorkerBuilder, event::RawEventListener, Event, WorkerContext},
+    worker::{Event, WorkerContext, builder::WorkerBuilder, event::RawEventListener},
 };
 
 /// Worker extension for emitting events
@@ -39,13 +39,13 @@ pub trait EventListenerExt<Args, Ctx, Source, Middleware>: Sized {
 }
 
 /// Middleware for emitting events
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EventListenerLayer(());
 
 impl EventListenerLayer {
     /// Create a new event listener layer
     pub fn new() -> Self {
-        Self(())
+        Self::default()
     }
 }
 
@@ -100,14 +100,14 @@ where
                 match current {
                     Some(c) => {
                         let new: RawEventListener = Box::new(move |ctx, ev| {
-                            c(&ctx, &ev);
-                            f(&ctx, &ev);
+                            c(ctx, ev);
+                            f(ctx, ev);
                         });
                         new
                     }
                     None => {
                         let new: RawEventListener = Box::new(move |ctx, ev| {
-                            f(&ctx, &ev);
+                            f(ctx, ev);
                         });
                         new
                     }

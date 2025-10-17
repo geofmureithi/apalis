@@ -255,7 +255,7 @@ where
         M: Send,
         Err: Into<WorkerError> + Send + 'static,
     {
-        let shutdown = self.shutdown.take().unwrap_or(Shutdown::new());
+        let shutdown = self.shutdown.take().unwrap_or_default();
         let terminator = shutdown.shutdown_after(signal);
         let mut ctx = WorkerContext::new::<M::Service>(&self.name);
         let c = ctx.clone();
@@ -311,12 +311,12 @@ where
         B: Send,
         M: Send,
     {
-        let shutdown = self.shutdown.take().unwrap_or(Shutdown::new());
+        let shutdown = self.shutdown.take().unwrap_or_default();
         let mut ctx = WorkerContext::new::<M::Service>(&self.name);
         let c = ctx.clone();
         let terminator = shutdown.shutdown_after(fut(c));
         let worker = self.run_with_ctx(&mut ctx).boxed();
-        futures_util::try_join!(terminator.map_ok(|_| ()).map_err(|e| e.into()), worker).map(|_| ())
+        futures_util::try_join!(terminator.map_ok(|_| ()), worker).map(|_| ())
     }
 
     /// Returns a stream that will yield events as they occur within the worker's lifecycle

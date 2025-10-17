@@ -51,6 +51,8 @@ use std::task::{Context, Poll};
 use tower_layer::Layer;
 use tower_service::Service;
 
+type TestStream<IdType, Res> =
+    BoxStream<'static, Result<(TaskId<IdType>, Result<Res, BoxDynError>), WorkerError>>;
 /// A test worker to allow you to test services.
 /// Important for testing backends and tasks
 /// # Example
@@ -78,9 +80,8 @@ use tower_service::Service;
 ///    }
 ///}
 /// ````
-
 pub struct TestWorker<B, S, Res, IdType = RandomId> {
-    stream: BoxStream<'static, Result<(TaskId<IdType>, Result<Res, BoxDynError>), WorkerError>>,
+    stream: TestStream<IdType, Res>,
     backend: PhantomData<B>,
     service: PhantomData<(S, Res)>,
 }

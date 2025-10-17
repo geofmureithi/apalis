@@ -43,7 +43,7 @@ impl<IdType: FromStr> FromStr for TaskId<IdType> {
     type Err = TaskIdError<IdType::Err>;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(TaskId::new(
-            IdType::from_str(s).map_err(|e| TaskIdError::Decode(e))?,
+            IdType::from_str(s).map_err(TaskIdError::Decode)?,
         ))
     }
 }
@@ -67,13 +67,9 @@ impl<Args: Sync, Ctx: Sync, IdType: Sync + Send + Clone> FromRequest<Task<Args, 
 {
     type Error = MissingDataError;
     async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        Ok(task
-            .parts
-            .task_id
-            .clone()
-            .ok_or(MissingDataError::NotFound(
-                std::any::type_name::<TaskId<IdType>>().to_string(),
-            ))?)
+        task.parts.task_id.clone().ok_or(MissingDataError::NotFound(
+            std::any::type_name::<TaskId<IdType>>().to_string(),
+        ))
     }
 }
 

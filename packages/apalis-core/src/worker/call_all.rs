@@ -65,8 +65,8 @@ pub enum CallAllError<ServiceError> {
 impl<SE: fmt::Display> fmt::Display for CallAllError<SE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CallAllError::StreamError(e) => write!(f, "Stream error: {}", e),
-            CallAllError::ServiceError(e) => write!(f, "Service error: {}", e),
+            CallAllError::StreamError(e) => write!(f, "Stream error: {e}"),
+            CallAllError::ServiceError(e) => write!(f, "Service error: {e}"),
         }
     }
 }
@@ -161,10 +161,8 @@ where
 
         loop {
             // First, see if we have any responses to yield
-            if let Poll::Ready(r) = this.queue.poll(cx) {
-                if let Some(result) = r {
-                    return Poll::Ready(Some(result.map_err(CallAllError::ServiceError).map(Some)));
-                }
+            if let Poll::Ready(Some(result)) = this.queue.poll(cx) {
+                return Poll::Ready(Some(result.map_err(CallAllError::ServiceError).map(Some)));
             }
 
             // If there are no more requests coming, check if we're done

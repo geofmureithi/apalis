@@ -230,15 +230,17 @@ impl Future for MonitoredWorker {
     }
 }
 
+type ShouldRestart =
+    Arc<RwLock<Option<Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + 'static + Send>>>>;
+
 /// A monitor for coordinating and managing a collection of workers.
+#[derive(Default)]
 pub struct Monitor {
     workers: Vec<MonitoredWorker>,
     terminator: Option<BoxFuture<'static, ()>>,
     shutdown: Shutdown,
     event_handler: EventHandlerBuilder,
-    should_restart: Arc<
-        RwLock<Option<Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + 'static + Send>>>,
-    >,
+    should_restart: ShouldRestart,
 }
 
 impl Debug for Monitor {
@@ -341,7 +343,7 @@ impl Monitor {
                     let handlers = handler.read();
                     if let Ok(handlers) = handlers {
                         for h in handlers.iter() {
-                            h(&ctx, &ev);
+                            h(ctx, ev);
                         }
                     }
                 });
@@ -382,7 +384,7 @@ impl Monitor {
                 async {
                     let res = shutdown_after.await;
                     terminator.await;
-                    res.map_err(|e| MonitorError::ShutdownSignal(e))
+                    res.map_err(MonitorError::ShutdownSignal)
                 }
                 .boxed(),
             )
@@ -419,7 +421,7 @@ impl Monitor {
             shutdown_future,
         );
 
-        Ok(result?)
+        result
     }
     async fn run_all_workers(
         workers: Vec<MonitoredWorker>,
@@ -452,18 +454,6 @@ impl Monitor {
             let _ = res.insert(Box::new(f));
         });
         self
-    }
-}
-
-impl Default for Monitor {
-    fn default() -> Self {
-        Self {
-            shutdown: Shutdown::new(),
-            terminator: None,
-            event_handler: Arc::default(),
-            workers: Vec::new(),
-            should_restart: Default::default(), // Don't restart
-        }
     }
 }
 

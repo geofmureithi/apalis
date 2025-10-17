@@ -44,13 +44,13 @@ impl fmt::Display for Event {
         let event_description = match &self {
             Event::Start => "Worker started".to_string(),
             Event::Idle => "Worker is idle".to_string(),
-            Event::Custom(_) => format!("Custom event"),
-            Event::Error(err) => format!("Worker encountered an error: {}", err),
+            Event::Custom(_) => "Custom event".to_string(),
+            Event::Error(err) => format!("Worker encountered an error: {err}"),
             Event::Stop => "Worker stopped".to_string(),
             Event::HeartBeat => "Worker Heartbeat".to_owned(),
             Event::Success => "Worker completed task successfully".to_string(),
         };
 
-        write!(f, "WorkerEvent: {}", event_description)
+        write!(f, "WorkerEvent: {event_description}")
     }
 }

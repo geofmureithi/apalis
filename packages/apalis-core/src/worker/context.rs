@@ -63,7 +63,7 @@ use crate::{
     task::{Task, data::MissingDataError},
     task_fn::FromRequest,
     worker::{
-        event::{Event, EventListener},
+        event::{Event, EventListener, RawEventListener},
         state::{InnerWorkerState, WorkerState},
     },
 };
@@ -225,7 +225,7 @@ impl WorkerContext {
 
     /// Get the type of service
     pub fn get_service(&self) -> &str {
-        &self.service
+        self.service
     }
 
     /// Returns whether the worker is running
@@ -275,11 +275,10 @@ impl WorkerContext {
     /// Wraps the event listener with a new function
     pub fn wrap_listener<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(&mut self, f: F) {
         let cur = self.event_handler.clone();
-        let new: Box<dyn Fn(&WorkerContext, &Event) + Send + Sync + 'static> =
-            Box::new(move |ctx, ev| {
-                f(&ctx, &ev);
-                cur(&ctx, &ev);
-            });
+        let new: RawEventListener = Box::new(move |ctx, ev| {
+            f(ctx, ev);
+            cur(ctx, ev);
+        });
         self.event_handler = Arc::new(new);
     }
 
