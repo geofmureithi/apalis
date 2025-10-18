@@ -1,19 +1,19 @@
 // Imports /////////////////////////////////////////////////////////////////////
 use apalis::{layers::retry::RetryPolicy, prelude::*};
 use apalis_sql::{
-    Config,
     postgres::{PgListen, PgPool, PostgresStorage},
+    Config,
 };
 use chrono::{DateTime, Timelike, Utc};
 use serde_json::Value;
 use std::time::Duration;
 use tower::{
-    Layer,
     retry::{
-        RetryLayer,
         backoff::{ExponentialBackoffMaker, MakeBackoff},
+        RetryLayer,
     },
     util::rng::HasherRng,
+    Layer,
 };
 
 // Constants ///////////////////////////////////////////////////////////////////

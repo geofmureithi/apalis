@@ -1,8 +1,8 @@
 // Imports /////////////////////////////////////////////////////////////////////
 use apalis::prelude::*;
 use apalis_sql::{
-    Config,
     postgres::{PgListen, PgPool, PostgresStorage},
+    Config,
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
