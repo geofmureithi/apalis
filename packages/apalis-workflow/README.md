@@ -73,6 +73,10 @@ You can track your workflows using [apalis-board](https://github.com/apalis-dev/
 - [ ] Subflow
 - [ ] DAG
 
+## See also:
+
+- (Underway)[https://github.com/maxcountryman/underway]: Postgres-only solution that inspired some parts of this crate
+
 ## License
 
 Licensed under MIT or Apache-2.0.
