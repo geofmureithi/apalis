@@ -1,66 +1,21 @@
-//! # apalis-workflow
-//!
-//! This crate provides a flexible and composable workflow engine for [apalis].
-//!
-//! ## Overview
-//!
-//! The workflow engine allows you to define a sequence of steps, each represented as a service, that can process tasks in a customizable manner. Each step can have pre-processing, main execution, and post-processing hooks, enabling advanced control over task execution flow.
-//!
-//! Workflows are built by composing steps, and can be executed using supported backends. The engine supports asynchronous execution, error handling, and integration with the `apalis` worker system.
-//!
-//! ## Key Concepts
-//!
-//! - **Step**: Represents a single unit of work in the workflow. Each step can define pre, run, and post hooks.
-//! - **WorkFlow**: Manages a sequence of steps and orchestrates their execution.
-//! - **TaskFlowSink**: Trait for pushing tasks into the workflow, supporting step indexing and context metadata.
-//! - **CompositeService**: Wraps a step as a boxed Tower service for uniform execution.
-//! - **WorkflowError**: Unified error type for workflow operations.
-//!
-//! ## Features
-//!
-//! - Compose workflows from reusable steps
-//! - Asynchronous execution of steps
-//! - Customizable hooks for pre, run, and post step logic
-//! - Integration with `apalis` backends and workers
-//! - Strongly typed task and context handling
-//! - Extensible error handling
-//!
-//! ## Example
-//!
-//! ```rust
-//! let workflow = WorkFlow::new("odd-numbers-workflow")
-//!     .then(|a: usize| async move { Ok::<_, WorkflowError>(a - 2) })
-//!     .delay_for(Duration::from_millis(1000))
-//!     .then(|a| async move { Ok::<_, WorkflowError>(a + 3) });
-//! ```
-//!
-//! ## Usage
-//!
-//! 1. Define your steps by implementing the `Step` trait.
-//! 2. Compose them into a workflow using `WorkFlow`.
-//! 3. Push tasks into the workflow using a compatible backend.
-//! 4. Run the workflow with an `apalis` worker.
-//!
-//! ## License
-//!
-//! Licensed under MIT or Apache-2.0.
+#![doc = include_str!("../README.md")]
 use std::{
     collections::HashMap,
     fmt::Debug,
     future::Future,
     marker::PhantomData,
-    sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use apalis_core::{
-    backend::{Backend, TaskSink, codec::Codec},
+    backend::{Backend, TaskSink, WeakTaskSink, codec::Codec},
     error::BoxDynError,
     task::{Task, builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId},
     worker::builder::IntoWorkerService,
 };
 use futures::{
-    FutureExt, TryFutureExt,
+    FutureExt, Sink, TryFutureExt,
     future::{BoxFuture, ready},
 };
 use serde::{Deserialize, Serialize};
@@ -72,76 +27,51 @@ mod context;
 mod service;
 mod steps;
 
+pub use crate::steps::{delay::DelayStep, filter_map::FilterMapStep, then::ThenStep};
+
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
-type SteppedService<Compact, Ctx, IdType> =
-    BoxedService<Task<Compact, Ctx, IdType>, (bool, Compact)>;
+type SteppedService<Compact, Ctx, IdType> = BoxedService<Task<Compact, Ctx, IdType>, GoTo<Compact>>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GoTo<T = ()> {
+    Next(T),
+    DelayFor(Duration, T),
+    Done,
+    /// Breaks the current task execution
+    Break(T),
+
+    /// Execution will continue in another task identified by the String
+    /// Returning this does not guarantee that the task will be executed.
+    /// It may be an invalid task id, or the task may never be scheduled.
+    ContinueAt(String),
+}
 
 pub trait Step<Args, FlowSink, Encode>
 where
-    Encode: Codec<Args>,
-    FlowSink: TaskSink<Encode::Compact>,
+    FlowSink: WeakTaskSink<Self::Response>,
 {
     type Response;
     type Error: Send;
-    fn pre(
-        &self,
-        ctx: &mut StepContext<FlowSink, Encode>,
-        step: &Args,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        ready(Ok(()))
-    }
-
     fn run(
         &mut self,
         ctx: &StepContext<FlowSink, Encode>,
         step: Task<Args, FlowSink::Context, FlowSink::IdType>,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send;
-
-    fn post(
-        &self,
-        ctx: &StepContext<FlowSink, Encode>,
-        res: &Self::Response,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        ready(Ok(true)) // By default run the next hook
-    }
+    ) -> impl Future<Output = Result<GoTo<Self::Response>, Self::Error>> + Send;
 }
 
-pub struct WorkFlow<Input, Current, FlowSink, Encode, Compact>
-where
-    FlowSink: TaskSink<Compact>,
-{
+pub struct WorkFlow<Input, Current, FlowSink, Encode, Compact, Context, IdType> {
     name: String,
-    steps: HashMap<usize, CompositeService<FlowSink, Encode, Compact>>,
+    steps: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
     _marker: PhantomData<(Input, Current, FlowSink)>,
 }
 
-// type PreHook<FlowSink, Encode, Compact> = Box<
-//     dyn Fn(&StepContext<FlowSink, Encode>, &Compact) -> BoxFuture<'static, Result<(), BoxDynError>>
-//         + Send
-//         + Sync
-//         + 'static,
-// >;
-
-pub struct CompositeService<FlowSink, Encode, Compact>
-where
-    FlowSink: TaskSink<Compact>,
-{
-    svc: SteppedService<Compact, FlowSink::Context, FlowSink::IdType>,
+pub struct CompositeService<FlowSink, Encode, Compact, Context, IdType> {
+    svc: SteppedService<Compact, Context, IdType>,
     _marker: PhantomData<(FlowSink, Encode)>,
 }
 
-// impl<FlowSink, Encode, Compact> CompositeService<FlowSink, Encode, Compact> {
-//     fn new(svc: SteppedService<Compact, FlowSink::Context, FlowSink::IdType>) -> Self {
-//         Self {
-//             svc,
-//             _marker: PhantomData,
-//         }
-//     }
-// }
-
-impl<Input, FlowSink, Encode, Compact> WorkFlow<Input, Input, FlowSink, Encode, Compact>
-where
-    FlowSink: TaskSink<Compact>,
+impl<Input, FlowSink, Encode, Compact, Context, IdType>
+    WorkFlow<Input, Input, FlowSink, Encode, Compact, Context, IdType>
 {
     pub fn new(name: &str) -> Self {
         Self {
@@ -152,16 +82,18 @@ where
     }
 }
 
-impl<Input, Current, FlowSink, Encode, Compact> WorkFlow<Input, Current, FlowSink, Encode, Compact>
+impl<Input, Current, FlowSink, Encode, Compact>
+    WorkFlow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     Current: Send + 'static,
-    FlowSink: Send + Clone + Sync + 'static + Unpin + TaskSink<Compact>,
+    FlowSink: Send + Clone + Sync + 'static + Unpin + Backend,
 {
     pub fn add_step<S, Res, E, CodecError>(
         mut self,
         step: S,
-    ) -> WorkFlow<Input, Res, FlowSink, Encode, Compact>
+    ) -> WorkFlow<Input, Res, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
     where
+        FlowSink: WeakTaskSink<Res>,
         Current: std::marker::Send + 'static + Sync,
         FlowSink::Context: Send + 'static + Sync,
         S: Step<Current, FlowSink, Encode, Response = Res, Error = E>
@@ -213,7 +145,7 @@ where
         + Codec<S::Response, Compact = Compact, Error = CodecError>,
     S::Response: Send + 'static,
     S::Error: Send + 'static,
-    FlowSink: Clone + Send + 'static + Sync + TaskSink<Compact>,
+    FlowSink: Clone + Send + 'static + Sync + WeakTaskSink<S::Response>,
     Args: Send + 'static,
     FlowSink::Context: Send + 'static,
     FlowSink::IdType: Send + 'static,
@@ -222,40 +154,46 @@ where
     E: Into<BoxDynError> + Send + 'static + Sync,
     CodecError: std::error::Error + Send + 'static + Sync,
 {
-    type Response = (bool, Compact);
+    type Response = GoTo<Compact>;
     type Error = BoxDynError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
     fn call(&mut self, req: Task<Compact, FlowSink::Context, FlowSink::IdType>) -> Self::Future {
         let ctx: Option<&StepContext<FlowSink, Encode>> = req.parts.data.get();
         match ctx {
             Some(ctx) => {
-                let mut ctx = ctx.clone();
+                let ctx = ctx.clone();
                 let req = req.try_map(|arg| Encode::decode(&arg));
                 match req {
                     Ok(task) => {
                         let mut step = self.step.clone();
 
                         Box::pin(async move {
-                            let pre = step
-                                .pre(&mut ctx, &task.args)
-                                .await
-                                .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
                             let res = step
                                 .run(&ctx, task)
                                 .await
                                 .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
-                            let should_next = step
-                                .post(&ctx, &res)
-                                .await
-                                .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
-                            Ok((
-                                should_next,
-                                Encode::encode(&res)
-                                    .map_err(|e| WorkflowError::CodecError(e.into()))?,
-                            ))
+                            match res {
+                                GoTo::Next(output) => {
+                                    let compact = Encode::encode(&output)
+                                        .map_err(|e| WorkflowError::CodecError(e.into()))?;
+                                    Ok(GoTo::Next(compact))
+                                }
+                                GoTo::DelayFor(duration, output) => {
+                                    let compact = Encode::encode(&output)
+                                        .map_err(|e| WorkflowError::CodecError(e.into()))?;
+                                    Ok(GoTo::DelayFor(duration, compact))
+                                }
+                                GoTo::Done => Ok(GoTo::Done),
+                                GoTo::Break(output) => {
+                                    let compact = Encode::encode(&output)
+                                        .map_err(|e| WorkflowError::CodecError(e.into()))?;
+                                    Ok(GoTo::Break(compact))
+                                }
+                                GoTo::ContinueAt(task_id) => Ok(GoTo::ContinueAt(task_id)),
+                            }
                         })
                     }
                     Err(e) => ready(Err(WorkflowError::CodecError(e.into()))).boxed(),
@@ -265,7 +203,6 @@ where
         }
         .map_err(|e| BoxDynError::from(e))
         .boxed()
-        // Todo: Remove lots of boxes
     }
 }
 
@@ -288,31 +225,38 @@ pub struct WorkflowRequest {
     pub step_index: usize,
 }
 
-impl<Input, Current, FlowSink, Encode, Compact>
+impl<Input, Current, FlowSink, Encode, Compact, Err>
     IntoWorkerService<
         FlowSink,
-        WorkFlowService<FlowSink, Encode, Compact>,
+        WorkFlowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>,
         Compact,
         FlowSink::Context,
-    > for WorkFlow<Input, Current, FlowSink, Encode, Compact>
+    > for WorkFlow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
-    FlowSink: Clone + Send + Sync + 'static,
+    FlowSink: Clone
+        + Send
+        + Sync
+        + 'static
+        + Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = Err>
+        + Unpin,
+    Err: std::error::Error + Send + Sync + 'static,
     Compact: Send,
     FlowSink: TaskSink<Compact, Codec = Encode>,
     FlowSink::Context: MetadataExt<WorkflowRequest> + Send + Sync + 'static,
     Encode: Send + Sync + 'static + Codec<Compact, Compact = Compact>,
-    Compact: Send + Sync + 'static,
+    Compact: Send + Sync + 'static + Clone,
     FlowSink::IdType: Send + 'static + Default,
-    FlowSink: Sync + TaskSink<Compact>,
+    FlowSink: Sync + Backend<Args = Compact, Error = Err>,
     Compact: Send + Sync,
     FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
-    FlowSink::Error: Into<BoxDynError>,
     FlowSink::IdType: Default,
-    Encode: Codec<Compact, Compact = Compact>,
     <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
     Encode::Error: Into<BoxDynError>,
 {
-    fn into_service(self, b: &FlowSink) -> WorkFlowService<FlowSink, Encode, Compact> {
+    fn into_service(
+        self,
+        b: &FlowSink,
+    ) -> WorkFlowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType> {
         let services: HashMap<usize, _> = self
             .steps
             .into_iter()
@@ -322,7 +266,7 @@ where
     }
 }
 
-pub trait TaskFlowSink<Args, Compact>: Backend<Compact>
+pub trait TaskFlowSink<Args, Compact>: Backend
 where
     Self::Codec: Codec<Args>,
 {
@@ -339,18 +283,17 @@ where
 
 impl<S: Send, Args: Send, Compact> TaskFlowSink<Args, Compact> for S
 where
-    S: TaskSink<Compact> + Backend<Compact>,
+    S: WeakTaskSink<Args>,
     S::IdType: Default + Send,
     S::Codec: Codec<Args, Compact = Compact>,
     S::Context: MetadataExt<WorkflowRequest> + Send,
-    S::Error: Into<BoxDynError> + Send + Sync + 'static,
+    S::Error: std::error::Error + Send + Sync + 'static,
     <S::Codec as Codec<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
     <S::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError> + Send + Sync + 'static,
 {
     async fn push_step(&mut self, step: Args, index: usize) -> Result<(), WorkflowError> {
         let task_id = TaskId::new(S::IdType::default());
-        let args = S::Codec::encode(&step).map_err(|e| WorkflowError::CodecError(e.into()))?;
-        let task = TaskBuilder::new(args)
+        let task = TaskBuilder::new(step)
             .meta(WorkflowRequest { step_index: index })
             .with_task_id(task_id.clone())
             .build();
@@ -377,11 +320,39 @@ mod tests {
         let workflow = WorkFlow::new("odd-numbers-workflow")
             .then(|a: usize| async move { Ok::<_, WorkflowError>(a - 2) })
             .delay_for(Duration::from_millis(1000))
-            .then(|a| async move { Ok::<_, WorkflowError>(a + 3) });
+            .then(|_| async move { Err::<(), WorkflowError>(WorkflowError::MissingContextError) });
 
         let mut in_memory = JsonStorage::new_temp().unwrap();
 
         in_memory.push_start(usize::MAX).await.unwrap();
+
+        let worker = WorkerBuilder::new("rango-tango")
+            .backend(in_memory)
+            .on_event(|ctx, ev| {
+                println!("On Event = {:?}", ev);
+                if matches!(ev, Event::Error(_)) {
+                    ctx.stop().unwrap();
+                }
+            })
+            .build(workflow);
+        worker.run().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn then_workflow() {
+        let workflow = WorkFlow::new("then-workflow")
+            .then(|a: usize| async move { Ok::<_, WorkflowError>((0..a).collect::<Vec<_>>()) })
+            .filter_map(|x| async move { if x % 5 != 0 { Some(x) } else { None } })
+            .filter_map(|x| async move { if x % 3 != 0 { Some(x) } else { None } })
+            .filter_map(|x| async move { if x % 2 != 0 { Some(x) } else { None } })
+            .then(|a| async move {
+                dbg!(a);
+                Err::<(), WorkflowError>(WorkflowError::MissingContextError)
+            });
+
+        let mut in_memory = JsonStorage::new_temp().unwrap();
+
+        in_memory.push_start(100).await.unwrap();
 
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)

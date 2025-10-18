@@ -1,23 +1,22 @@
 use std::{
-    fmt::Debug,
+    fmt::{Debug, Display},
     marker::PhantomData,
-    sync::Arc,
     task::{Context, Poll},
 };
 
 use apalis_core::{
-    backend::{TaskSink, WaitForCompletion, codec::Codec},
+    backend::{Backend, WaitForCompletion, WeakTaskSink, codec::Codec},
     error::BoxDynError,
     task::{Task, builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId},
     task_fn::{TaskFn, task_fn},
 };
-use futures::FutureExt;
+use futures::Sink;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use tower::Service;
 
 use crate::{
-    CompositeService, Step, SteppedService, WorkFlow, WorkflowError, WorkflowRequest,
+    CompositeService, GoTo, Step, SteppedService, WorkFlow, WorkflowError, WorkflowRequest,
     context::StepContext,
 };
 
@@ -38,6 +37,12 @@ pub struct FilterContext<IdType> {
     task_ids: Vec<TaskId<IdType>>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub enum FilterState {
+    Parent,
+    Child,
+}
+
 impl<S, Input, Output, E, Sink, Compact, Encode, CodecError, MetadataError>
     Step<Vec<Input>, Sink, Encode> for FilterMap<S, Input, Output>
 where
@@ -49,7 +54,12 @@ where
     S::Error: Into<BoxDynError>,
     E: Into<BoxDynError>,
     Output: Sync + Send,
-    Sink: Sync + TaskSink<Compact> + Unpin + Send + WaitForCompletion<Output, Compact>,
+    Sink: Sync
+        + WeakTaskSink<Option<Output>> // Store the individual outputs as tasks
+        + WeakTaskSink<Vec<Output>> // Store the final vector of outputs to pass down
+        + Unpin
+        + Send
+        + WaitForCompletion<GoTo<Option<Output>>>,
     Input: Send + Sync,
     Sink::Context: Send
         + Sync
@@ -66,33 +76,12 @@ where
 {
     type Response = Vec<Output>;
     type Error = WorkflowError;
-    async fn pre(
-        &self,
-        ctx: &mut StepContext<Sink, Encode>,
-        steps: &Vec<Input>,
-    ) -> Result<(), Self::Error> {
-        let mut task_ids = Vec::new();
-        for step in steps {
-            let task_id = ctx.push_next_step(step).await?;
-            task_ids.push(task_id);
-        }
-        let args = Encode::encode(steps).map_err(|e| WorkflowError::CodecError(e.into()))?;
-        let task = TaskBuilder::new(args)
-            .meta(WorkflowRequest {
-                step_index: ctx.current_step + 1,
-            })
-            .meta(FilterContext { task_ids })
-            .build();
-
-        ctx.push_compact_task(task).await?;
-        Ok(())
-    }
 
     async fn run(
         &mut self,
         ctx: &StepContext<Sink, Encode>,
         steps: Task<Vec<Input>, Sink::Context, Sink::IdType>,
-    ) -> Result<Self::Response, Self::Error> {
+    ) -> Result<GoTo<Vec<Output>>, Self::Error> {
         let filter_ctx: FilterContext<Sink::IdType> = steps
             .parts
             .ctx
@@ -104,17 +93,20 @@ where
             .map_err(|e| WorkflowError::SingleStepError(e.into()))?
             .into_iter()
             .filter_map(|res| {
-                res.take()
+                let res = res
+                    .take()
                     .map_err(|e| WorkflowError::SingleStepError(e.into()))
-                    .ok()
+                    .ok();
+                match res {
+                    Some(GoTo::Break(val)) => val,
+                    _ => None,
+                }
             })
             .collect();
         if res.is_empty() {
-            return Err(WorkflowError::SingleStepError(
-                "FilterMap resulted in no items".into(),
-            ));
+            return Ok(GoTo::Break(res));
         }
-        Ok(res)
+        Ok(GoTo::Next(res))
     }
 }
 
@@ -149,7 +141,7 @@ where
     S::Error: Into<BoxDynError>,
     E: Into<BoxDynError>,
     O: Sync + Send,
-    B: Sync + Send + TaskSink<Compact>,
+    B: Sync + Send + 'static + WeakTaskSink<Option<O>>,
     T: Send,
     B::Context: Send + Sync,
     B::IdType: Send,
@@ -163,16 +155,9 @@ where
         &mut self,
         _: &StepContext<B, Encode>,
         args: Task<T, B::Context, B::IdType>,
-    ) -> Result<Self::Response, Self::Error> {
+    ) -> Result<GoTo<S::Response>, Self::Error> {
         let res = self.inner.call(args).await.map_err(|e| e.into())?;
-        Ok(res)
-    }
-    async fn post(
-        &self,
-        _: &StepContext<B, Encode>,
-        _: &Self::Response,
-    ) -> Result<bool, Self::Error> {
-        Ok(false) // The parent task will handle the collection
+        Ok(GoTo::Break(res))
     }
 }
 
@@ -193,6 +178,7 @@ impl<
     SvcError,
     MetadataError,
     CodecError,
+    DbError,
 > Service<Task<Compact, FlowSink::Context, FlowSink::IdType>>
     for FilterService<S, Current, FlowSink, Encode, Output, F, FnArgs>
 where
@@ -203,15 +189,19 @@ where
         + Codec<Vec<Output>, Compact = Compact, Error = CodecError>,
     Output: Send + Sync + 'static,
     S::Error: Into<BoxDynError> + Send + 'static,
-    FlowSink: Clone + Send + 'static + Sync + WaitForCompletion<Output, Compact>,
+    FlowSink: Clone + Send + 'static + Sync + WaitForCompletion<GoTo<Option<Output>>>,
     Current: Send + 'static + Sync,
     FlowSink::Context: Send
         + 'static
         + MetadataExt<FilterContext<FlowSink::IdType>, Error = MetadataError>
+        + MetadataExt<FilterState, Error = MetadataError>
         + MetadataExt<WorkflowRequest, Error = MetadataError>
         + Sync
         + Default,
-    FlowSink: TaskSink<Compact> + Unpin,
+    FlowSink: WeakTaskSink<Option<Output>, Codec = Encode, Error = DbError>
+        + WeakTaskSink<Vec<Output>, Codec = Encode, Error = DbError>
+        + Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = DbError>
+        + Unpin,
     TaskFn<F, Current, FlowSink::Context, FnArgs>: Service<
             Task<Current, FlowSink::Context, FlowSink::IdType>,
             Response = Option<Output>,
@@ -221,26 +211,27 @@ where
     SvcError: Into<BoxDynError> + Send + Sync + 'static,
     MetadataError: Into<BoxDynError> + Send + Sync,
     CodecError: std::error::Error + Sync + Send + 'static,
+    DbError: std::error::Error + Sync + Send + 'static,
     <TaskFn<F, Current, FlowSink::Context, FnArgs> as Service<
         Task<Current, FlowSink::Context, FlowSink::IdType>,
     >>::Future: Send + 'static,
-    FlowSink::Error: Into<BoxDynError> + Send + Sync,
+    DbError: Into<BoxDynError> + Send + Sync,
     Compact: Send + Sync + 'static,
-    FlowSink::IdType: Default + Send + Sync,
+    FlowSink::IdType: Default + Send + Sync + Display,
     Encode: Send + Sync + 'static,
     S::Error: Into<BoxDynError> + Send + Sync,
 {
-    type Response = (bool, Compact);
+    type Response = GoTo<Compact>;
     type Error = BoxDynError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
     fn call(&mut self, req: Task<Compact, FlowSink::Context, FlowSink::IdType>) -> Self::Future {
-        let mut ctx: StepContext<FlowSink, Encode> = req.parts.data.get_checked().cloned().unwrap();
-        let filter_ctx: Result<FilterContext<FlowSink::IdType>, _> = req.parts.ctx.extract();
+        let ctx: StepContext<FlowSink, Encode> = req.parts.data.get_checked().cloned().unwrap();
+        let filter_ctx: Result<FilterState, _> = req.parts.ctx.extract();
         match filter_ctx {
-            Ok(_) => {
+            Ok(FilterState::Parent) => {
                 let mut step = FilterMap {
                     mapper: PhantomData::<
                         FilterMapStep<
@@ -255,15 +246,28 @@ where
                         .try_map(|arg| Encode::decode(&arg))
                         .map_err(|e: CodecError| WorkflowError::CodecError(e.into()))?;
                     let res = step.run(&ctx, req).await?;
-                    let should_next = step.post(&mut ctx, &res).await?;
-                    Ok((
-                        should_next,
-                        Encode::encode(&res)
-                            .map_err(|e: CodecError| WorkflowError::CodecError(e.into()))?,
-                    ))
+                    match res {
+                        GoTo::Next(output) => {
+                            let compact = Encode::encode(&output)
+                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
+                            Ok(GoTo::Next(compact))
+                        }
+                        GoTo::DelayFor(duration, output) => {
+                            let compact = Encode::encode(&output)
+                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
+                            Ok(GoTo::DelayFor(duration, compact))
+                        }
+                        GoTo::Done => Ok(GoTo::Done),
+                        GoTo::Break(output) => {
+                            let compact = Encode::encode(&output)
+                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
+                            Ok(GoTo::Break(compact))
+                        }
+                        GoTo::ContinueAt(task_id) => Ok(GoTo::ContinueAt(task_id)),
+                    }
                 })
             }
-            Err(_) => {
+            Ok(FilterState::Child) => {
                 let mut step = self.step.clone();
                 Box::pin(async move {
                     let req = req
@@ -273,15 +277,69 @@ where
                         .run(&ctx, req)
                         .await
                         .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
-                    let should_next = step
-                        .post(&mut ctx, &res)
+
+                    match res {
+                        GoTo::Next(output) => {
+                            let compact = Encode::encode(&output)
+                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
+                            Ok(GoTo::Next(compact))
+                        }
+                        GoTo::DelayFor(duration, output) => {
+                            let compact = Encode::encode(&output)
+                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
+                            Ok(GoTo::DelayFor(duration, compact))
+                        }
+                        GoTo::Done => Ok(GoTo::Done),
+                        GoTo::Break(output) => {
+                            let compact = Encode::encode(&output)
+                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
+                            Ok(GoTo::Break(compact))
+                        }
+                        GoTo::ContinueAt(task_id) => Ok(GoTo::ContinueAt(task_id)),
+                    }
+                })
+            }
+            Err(_) => {
+                let mut backend = ctx.sink.clone();
+                // Assume this is a fresh task, setup the context for parent
+                Box::pin(async move {
+                    let main_args: Vec<Current> = vec![];
+                    let steps: Task<Vec<Current>, _, _> =
+                        req.try_map(|arg| Encode::decode(&arg))
+                            .map_err(|e: CodecError| WorkflowError::CodecError(e.into()))?;
+                    let mut task_ids = Vec::new();
+                    for step in steps.args {
+                        let task_id = TaskId::new(FlowSink::IdType::default());
+
+                        let task = TaskBuilder::new(step)
+                            .meta(WorkflowRequest {
+                                step_index: ctx.current_step,
+                            })
+                            .with_task_id(task_id.clone())
+                            .meta(FilterState::Child)
+                            .build();
+                        backend
+                            .push_task(task)
+                            .await
+                            .map_err(|e| WorkflowError::SinkError(e.into()))?;
+
+                        task_ids.push(task_id);
+                    }
+                    let task_id = TaskId::new(FlowSink::IdType::default());
+                    let task = TaskBuilder::new(main_args)
+                        .with_task_id(task_id.clone())
+                        .meta(WorkflowRequest {
+                            step_index: ctx.current_step,
+                        })
+                        .meta(FilterContext { task_ids })
+                        .meta(FilterState::Parent)
+                        .build();
+
+                    backend
+                        .push_task(task)
                         .await
-                        .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
-                    Ok((
-                        should_next,
-                        Encode::encode(&res)
-                            .map_err(|e: CodecError| WorkflowError::CodecError(e.into()))?,
-                    ))
+                        .map_err(|e| WorkflowError::SinkError(e.into()))?;
+                    Ok(GoTo::ContinueAt(task_id.to_string()))
                 })
             }
         }
@@ -289,21 +347,20 @@ where
 }
 
 impl<Input, Current, FlowSink, Encode, Compact>
-    WorkFlow<Input, Vec<Current>, FlowSink, Encode, Compact>
+    WorkFlow<Input, Vec<Current>, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     Current: Send + 'static,
-    FlowSink: TaskSink<Compact>,
+    FlowSink: Backend,
     FlowSink::Context: MetadataExt<FilterContext<FlowSink::IdType>> + Send + 'static,
 {
     /// Adds a `filter_map` step to the workflow, allowing you to filter and map items in the workflow using a predicate function.
     ///
     /// # Example
-    /// ```rust
+    /// ```rust,ignore
     /// use apalis_workflow::WorkFlow;
-    ///
     /// // Suppose you have a workflow of integers and want to filter even numbers and double them.
-    /// let workflow = WorkFlow::new()
-    ///     .filter_map(|x: i32| if x % 2 == 0 { Some(x * 2) } else { None });
+    /// let workflow = WorkFlow::new("the-even-doubler")
+    ///     .filter_map(|x: i32| async move { if x % 2 == 0 { Some(x * 2) } else { None } });
     /// // The resulting workflow will only contain doubled even numbers.
     /// ```
     ///
@@ -317,10 +374,10 @@ where
     /// - The predicate function must be `Send`, `Sync`, and `'static`.
     /// - The workflow step is inserted at the end of the current steps.
     /// - This method is intended for advanced workflow composition scenarios.
-    pub fn filter_map<F, Output, FnArgs, SvcError, MetadataError, CodecError>(
+    pub fn filter_map<F, Output, FnArgs, SvcError, MetadataError, CodecError, DbError>(
         mut self,
         predicate: F,
-    ) -> WorkFlow<Input, Vec<Output>, FlowSink, Encode, Compact>
+    ) -> WorkFlow<Input, Vec<Output>, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
     where
         F: Send + 'static + Sync + Clone,
         TaskFn<F, Current, FlowSink::Context, FnArgs>: Service<
@@ -335,14 +392,23 @@ where
             + Sync
             + Default
             + MetadataExt<FilterContext<FlowSink::IdType>, Error = MetadataError>
-            + MetadataExt<WorkflowRequest, Error = MetadataError>,
+            + MetadataExt<WorkflowRequest, Error = MetadataError>
+            + MetadataExt<FilterState, Error = MetadataError>,
         <TaskFn<F, Current, FlowSink::Context, FnArgs> as Service<
             Task<Current, FlowSink::Context, FlowSink::IdType>,
         >>::Future: Send + 'static,
         Output: Send + 'static + Sync,
         FnArgs: Sync,
-        FlowSink: Sync + Clone + Send + 'static + WaitForCompletion<Output, Compact> + Unpin,
-        FlowSink::Error: Debug,
+        FlowSink: WeakTaskSink<Option<Output>, Codec = Encode, Error = DbError>
+            + WeakTaskSink<Vec<Output>, Codec = Encode, Error = DbError>
+            + Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = DbError>
+            + Sync
+            + Clone
+            + Send
+            + 'static
+            + WaitForCompletion<GoTo<Option<Output>>>
+            + Unpin,
+        DbError: Debug,
         SvcError: Send + Sync + 'static + Into<BoxDynError>,
         FlowSink::IdType: Send,
         Encode: Codec<Current, Compact = Compact, Error = CodecError>
@@ -350,11 +416,13 @@ where
             + Codec<Vec<Current>, Compact = Compact, Error = CodecError>
             + Codec<Vec<Output>, Compact = Compact, Error = CodecError>,
         Compact: Send + Sync + 'static,
-        FlowSink::Error: Into<BoxDynError> + Send + Sync,
+        DbError: Into<BoxDynError> + Send + Sync,
         Encode: Send + Sync + 'static,
         CodecError: std::error::Error + Sync + Send + 'static,
         MetadataError: std::error::Error + Sync + Send + 'static,
         FlowSink::IdType: Default + Sync + Send,
+        DbError: std::error::Error + Sync + Send + 'static,
+        FlowSink::IdType: Display,
     {
         self.steps.insert(self.steps.len(), {
             let svc = SteppedService::<Compact, FlowSink::Context, FlowSink::IdType>::new(

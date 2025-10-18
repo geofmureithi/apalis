@@ -1,46 +1,78 @@
- # apalis-workflow
+# apalis-workflow
 
- This crate provides a flexible and composable workflow engine for [apalis].
+This crate provides a flexible and composable workflow engine for [apalis](https://github.com/geofmureithi/apalis). Can be used for building old school and advanced llm workflows.
 
- ## Overview
+## Overview
 
- The workflow engine allows you to define a sequence of steps, each represented as a service, that can process tasks in a customizable manner. Each step can have pre-processing, main execution, and post-processing hooks, enabling advanced control over task execution flow.
+The workflow engine allows you to define a sequence of steps in a workflow.
+Workflows are built by composing steps, and can be executed using supported backends
 
- Workflows are built by composing steps, and can be executed using supported backends. The engine supports asynchronous execution, error handling, and integration with the `apalis` worker system.
+## Features
 
- ## Key Concepts
+- Compose workflows from reusable steps.
+- Durable and resumable workflows.
+- Steps are processed in a distributed manner.
+- Parallel execution of steps.
+- Extensible via the `Step` trait.
+- Integration with `apalis` backends and workers
+- Strongly typed steps and context handling
 
- - **Step**: Represents a single unit of work in the workflow. Each step can define pre, run, and post hooks.
- - **WorkFlow**: Manages a sequence of steps and orchestrates their execution.
- - **TaskFlowSink**: Trait for pushing tasks into the workflow, supporting step indexing and context metadata.
- - **CompositeService**: Wraps a step as a boxed Tower service for uniform execution.
- - **WorkflowError**: Unified error type for workflow operations.
+## Example
 
- ## Features
+```rust,no_run
+use apalis_workflow::*;
+use apalis_core::backend::json::JsonStorage;
+use apalis_core::worker::builder::WorkerBuilder;
+use std::time::Duration;
+use apalis_core::worker::ext::event_listener::EventListenerExt;
 
- - Compose workflows from reusable steps
- - Asynchronous execution of steps
- - Customizable hooks for pre, run, and post step logic
- - Integration with `apalis` backends and workers
- - Strongly typed task and context handling
- - Extensible error handling
+#[tokio::main]
+async fn main() {
+   let workflow = WorkFlow::new("odd-numbers-workflow")
+       .then(|a: usize| async move { Ok::<_, WorkflowError>((0..a).collect::<Vec<_>>()) })
+       .filter_map(|x| async move { if x % 2 != 0 { Some(x) } else { None } })
+       .delay_for(Duration::from_millis(1000))
+       .then(|a: Vec<usize>| async move {
+           println!("Sum: {}", a.iter().sum::<usize>());
+           Ok::<_, WorkflowError>(())
+        });
 
- ## Example
+   let mut in_memory = JsonStorage::new_temp().unwrap();
 
- ```rust
- let workflow = WorkFlow::new("simple-workflow")
-     .then(|a: usize| async move { Ok::<_, BoxDynError>(a - 2) })
-     .delay_for(Duration::from_millis(1000))
-     .then(|a| async move { Ok::<_, BoxDynError>(a + 3) });
- ```
+   in_memory.push_start(10).await.unwrap();
 
- ## Usage
+   let worker = WorkerBuilder::new("rango-tango")
+       .backend(in_memory)
+       .on_event(|ctx, ev| {
+           println!("On Event = {:?}", ev);
+       })
+       .build(workflow);
+   worker.run().await.unwrap();
+}
+```
 
- 1. Define your steps by implementing the `Step` trait.
- 2. Compose them into a workflow using `WorkFlow`.
- 3. Push tasks into the workflow using a compatible backend.
- 4. Run the workflow with an `apalis` worker.
+## Observability
 
- ## License
+You can track your workflows using [apalis-board](https://github.com/apalis-dev/apalis-board).
+![Task](https://github.com/apalis-dev/apalis-board/raw/master/screenshots/task.png)
 
- Licensed under MIT or Apache-2.0.
+## Backend Support
+
+- [x] JSONStorage
+- [ ] SqliteStorage
+- [ ] RedisStorage
+- [ ] PostgresStorage
+
+## Roadmap
+
+- [x] Then: Sequential execution
+- [x] Delay: Delay execution
+- [x] FilterMap: MapReduce
+- [ ] Fold
+- [ ] Repeater
+- [ ] Subflow
+- [ ] DAG
+
+## License
+
+Licensed under MIT or Apache-2.0.

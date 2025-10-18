@@ -1,19 +1,15 @@
 use std::{fmt::Debug, marker::PhantomData};
 
 use apalis_core::{
-    backend::{codec::Codec, TaskResult, TaskSink, WaitForCompletion},
-    error::BoxDynError,
-    task::{builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId, Task},
+    backend::{TaskResult, WaitForCompletion},
+    task::task_id::TaskId,
 };
 use futures::StreamExt;
-
-use crate::{WorkflowError, WorkflowRequest};
-
 
 #[derive(Debug)]
 pub struct StepContext<FlowSink, Encode> {
     pub current_step: usize,
-    sink: FlowSink,
+    pub(crate) sink: FlowSink,
     _marker: PhantomData<Encode>,
 }
 
@@ -36,13 +32,13 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
         }
     }
 
-    pub async fn wait_for<O, Compact>(
+    pub async fn wait_for<O>(
         &self,
         task_ids: &Vec<TaskId<FlowSink::IdType>>,
     ) -> Result<Vec<TaskResult<O>>, FlowSink::Error>
     where
         O: Sync + Send,
-        FlowSink: Sync + WaitForCompletion<O, Compact> + TaskSink<Compact>,
+        FlowSink: Sync + WaitForCompletion<O>,
     {
         let items = self
             .sink
@@ -54,88 +50,99 @@ impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
         Ok(items)
     }
 
-    pub async fn push_compact_task<Compact>(
-        &mut self,
-        task: Task<Compact, FlowSink::Context, FlowSink::IdType>,
-    ) -> Result<(), WorkflowError>
-    where
-        FlowSink: Sync + TaskSink<Compact>,
-        Compact: Send,
-        FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
-        FlowSink::Error: Into<BoxDynError>,
-        FlowSink::IdType: Default,
-    {
-        self.sink
-            .push_task(task)
-            .await
-            .map_err(|e| WorkflowError::SinkError(e.into()))
-    }
+    //     pub async fn push_compact_task<Compact>(
+    //         &mut self,
+    //         task: Task<Compact, FlowSink::Context, FlowSink::IdType>,
+    //     ) -> Result<(), WorkflowError>
+    //     where
+    //         FlowSink: Sync + TaskSink<Compact>,
+    //         Compact: Send,
+    //         FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
+    //         FlowSink::Error: std::error::Error + Send + Sync + 'static,
+    //         FlowSink::IdType: Default,
+    //     {
+    //         self.sink
+    //             .push_task(task)
+    //             .await
+    //             .map_err(|e| WorkflowError::SinkError(e.into()))
+    //     }
 
-    pub async fn push_task<Args, Compact>(
-        &mut self,
-        task: Task<Args, FlowSink::Context, FlowSink::IdType>,
-    ) -> Result<(), WorkflowError>
-    where
-        FlowSink: Sync + TaskSink<Compact>,
-        Args: Send,
-        FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
-        FlowSink::Error: Into<BoxDynError>,
-        FlowSink::IdType: Default,
-        Encode: Codec<Args, Compact = Compact>,
-        Encode::Error: Into<BoxDynError>,
-    {
-        self.sink
-            .push_task(
-                task.try_map(|s| Encode::encode(&s))
-                    .map_err(|e| WorkflowError::CodecError(e.into()))?,
-            )
-            .await
-            .map_err(|e| WorkflowError::SinkError(e.into()))
-    }
+    //     pub async fn push_task<Args, Compact>(
+    //         &mut self,
+    //         task: Task<Args, FlowSink::Context, FlowSink::IdType>,
+    //     ) -> Result<(), WorkflowError>
+    //     where
+    //         FlowSink: Sync + TaskSink<Compact>,
+    //         Args: Send,
+    //         FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
+    //         FlowSink::Error: Into<BoxDynError>,
+    //         FlowSink::IdType: Default,
+    //         Encode: Codec<Args, Compact = Compact>,
+    //         Encode::Error: Into<BoxDynError>,
+    //     {
+    //         todo!()
+    //         // self.sink
+    //         //     .push_task(
+    //         //         task.try_map(|s| Encode::encode(&s))
+    //         //             .map_err(|e| WorkflowError::CodecError(e.into()))?,
+    //         //     )
+    //         //     .await
+    //         //     .map_err(|e| WorkflowError::SinkError(e.into()))
+    //     }
 
-    pub async fn push_step_with_index<T, Compact>(
-        &mut self,
-        index: usize,
-        step: &T,
-    ) -> Result<TaskId<FlowSink::IdType>, WorkflowError>
-    where
-        FlowSink: Sync + TaskSink<Compact>,
-        T: Send + Sync,
-        FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
-        FlowSink::Error: Into<BoxDynError>,
-        <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
-        FlowSink::IdType: Default,
-        Encode: Codec<T, Compact = Compact>,
-        Encode::Error: Into<BoxDynError>,
-    {
-        let task_id = TaskId::new(FlowSink::IdType::default());
+    //     pub async fn push_step_with_index<T>(
+    //         &mut self,
+    //         index: usize,
+    //         step: T,
+    //     ) -> Result<TaskId<FlowSink::IdType>, WorkflowError>
+    //     where
+    //         FlowSink: Sync + WeakTaskSink<T>,
+    //         T: Send + Sync,
+    //         FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
+    //         FlowSink::Error: std::error::Error + Send + Sync + 'static,
+    //         <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
+    //         FlowSink::IdType: Default,
+    //         Encode: Codec<T>,
+    //         Encode::Error: Into<BoxDynError>,
+    //     {
+    //         let task_id = TaskId::new(FlowSink::IdType::default());
+    //         let task = TaskBuilder::new(step)
+    //             .with_task_id(task_id.clone())
+    //             .meta(WorkflowRequest { step_index: index })
+    //             .build();
+    //         self.sink
+    //             .push_task(task)
+    //             .await
+    //             .map_err(|e| WorkflowError::SinkError(e.into()))?;
+    //         Ok(task_id)
+    //     }
 
-        let args = Encode::encode(step).map_err(|e| WorkflowError::CodecError(e.into()))?;
-        let task = TaskBuilder::new(args)
-            .with_task_id(task_id.clone())
-            .meta(WorkflowRequest { step_index: index })
-            .build();
-        self.sink
-            .push_task(task)
-            .await
-            .map_err(|e| WorkflowError::SinkError(e.into()))?;
-        Ok(task_id)
-    }
-
-    pub async fn push_next_step<T, Compact>(
-        &mut self,
-        step: &T,
-    ) -> Result<TaskId<FlowSink::IdType>, WorkflowError>
-    where
-        FlowSink: Sync + TaskSink<Compact>,
-        T: Send + Sync,
-        FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
-        FlowSink::Error: Into<BoxDynError>,
-        FlowSink::IdType: Default,
-        Encode: Codec<T, Compact = Compact>,
-        <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
-        Encode::Error: Into<BoxDynError>,
-    {
-        self.push_step_with_index(self.current_step + 1, step).await
-    }
+    //     pub async fn push_next_step<Err>(
+    //         &mut self,
+    //         step: FlowSink::Compact,
+    //     ) -> Result<TaskId<FlowSink::IdType>, WorkflowError>
+    //     where
+    //         FlowSink: Sync
+    //             + Backend<Error = Err>
+    //             + Sink<Task<FlowSink::Compact, FlowSink::Context, FlowSink::IdType>, Error = Err>
+    //             + Unpin,
+    //         FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
+    //         FlowSink::IdType: Default,
+    //         <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
+    //             std::error::Error + Send + Sync + 'static,
+    //         Err: std::error::Error + Send + Sync + 'static,
+    //     {
+    //         use futures::SinkExt;
+    //         let index = self.current_step + 1;
+    //         let task_id = TaskId::new(FlowSink::IdType::default());
+    //         let task = TaskBuilder::new(step)
+    //             .with_task_id(task_id.clone())
+    //             .meta(WorkflowRequest { step_index: index })
+    //             .build();
+    //         self.sink
+    //             .send(task)
+    //             .await
+    //             .map_err(|e| WorkflowError::SinkError(e.into()))?;
+    //         Ok(task_id)
+    //     }
 }

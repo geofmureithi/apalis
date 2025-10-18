@@ -357,7 +357,7 @@ where
     type Stream = TaskStream<Task<Args, Ctx, IdType>, BoxDynError>;
 
     type Codec = Encode;
-    
+
     type Compact = Encode::Compact;
 
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
@@ -386,10 +386,11 @@ where
     }
 }
 
-impl<Args, Ctx, IdType, DB, Fetch, S, Codec, Config> Sink<Task<Args, Ctx, IdType>>
-    for CustomBackend<Args, DB, Fetch, S, IdType, Codec, Config>
+impl<Args, Ctx, IdType, DB, Fetch, S, Cdc, Config> Sink<Task<Cdc::Compact, Ctx, IdType>>
+    for CustomBackend<Args, DB, Fetch, S, IdType, Cdc, Config>
 where
-    S: Sink<Task<Args, Ctx, IdType>>,
+    S: Sink<Task<Cdc::Compact, Ctx, IdType>>,
+    Cdc: Codec<Args> + Send + 'static,
 {
     type Error = S::Error;
 
@@ -397,7 +398,10 @@ where
         self.project().current_sink.poll_ready_unpin(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: Task<Args, Ctx, IdType>) -> Result<(), Self::Error> {
+    fn start_send(
+        self: Pin<&mut Self>,
+        item: Task<Cdc::Compact, Ctx, IdType>,
+    ) -> Result<(), Self::Error> {
         self.project().current_sink.start_send_unpin(item)
     }
 

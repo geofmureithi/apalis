@@ -1,14 +1,14 @@
 use std::{fmt::Debug, marker::PhantomData};
 
 use apalis_core::{
-    backend::{TaskSink, codec::Codec},
+    backend::{Backend, WeakTaskSink, codec::Codec},
     error::BoxDynError,
     task::{Task, metadata::MetadataExt},
     task_fn::{TaskFn, task_fn},
 };
 use tower::Service;
 
-use crate::{Step, WorkFlow, WorkflowError, WorkflowRequest, context::StepContext};
+use crate::{GoTo, Step, WorkFlow, WorkflowRequest, context::StepContext};
 
 #[derive(Debug)]
 pub struct ThenStep<S, T> {
@@ -43,9 +43,9 @@ where
     Current: Sync + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<BoxDynError>,
-    E: Into<BoxDynError>,
+    E: Into<BoxDynError> + Send + Sync + 'static,
     O: Sync,
-    FlowSink: Sync + Unpin + TaskSink<Compact> + Send,
+    FlowSink: Sync + Unpin + WeakTaskSink<O> + Send,
     Current: Send,
     FlowSink::Context: Send + Sync + Default + MetadataExt<WorkflowRequest>,
     FlowSink::Error: Into<BoxDynError> + Send + 'static,
@@ -57,38 +57,28 @@ where
         std::error::Error + Sync + Send + 'static,
 {
     type Response = S::Response;
-    type Error = WorkflowError;
-    async fn pre(
-        &self,
-        ctx: &mut StepContext<FlowSink, Encode>,
-        step: &Current,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
+    type Error = S::Error;
 
     async fn run(
         &mut self,
         _: &StepContext<FlowSink, Encode>,
         args: Task<Current, FlowSink::Context, FlowSink::IdType>,
-    ) -> Result<Self::Response, Self::Error> {
-        let res = self
-            .inner
-            .call(args)
-            .await
-            .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
-        Ok(res)
+    ) -> Result<GoTo<S::Response>, Self::Error> {
+        let res = self.inner.call(args).await?;
+        Ok(GoTo::Next(res))
     }
 }
 
-impl<Input, Current, FlowSink, Encode, Compact> WorkFlow<Input, Current, FlowSink, Encode, Compact>
+impl<Input, Current, FlowSink, Encode, Compact>
+    WorkFlow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     Current: Send + 'static,
-    FlowSink: Send + Clone + Sync + 'static + Unpin + TaskSink<Compact>,
+    FlowSink: Send + Clone + Sync + 'static + Unpin + Backend,
 {
     pub fn then<F, O, E, FnArgs, CodecError>(
         self,
         then: F,
-    ) -> WorkFlow<Input, O, FlowSink, Encode, Compact>
+    ) -> WorkFlow<Input, O, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
     where
         O: Sync + Send + 'static,
         E: Into<BoxDynError> + Send + Sync + 'static,
@@ -113,6 +103,7 @@ where
         Encode: Codec<O, Compact = Compact, Error = CodecError> + 'static,
         <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
             std::error::Error + Sync + Send + 'static,
+        FlowSink: WeakTaskSink<O>,
     {
         self.add_step::<_, O, _, _>(ThenStep {
             inner: task_fn::<F, Current, FlowSink::Context, FnArgs>(then),

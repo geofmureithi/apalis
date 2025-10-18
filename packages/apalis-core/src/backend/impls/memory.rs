@@ -37,7 +37,6 @@
 //! ## See Also
 //! - [`Backend`]
 //! - [`WorkerContext`](crate::worker::context::WorkerContext)
-
 use crate::backend::codec::IdentityCodec;
 use crate::backend::queue::Queue;
 use crate::features_table;
@@ -105,7 +104,12 @@ impl<Args: Send + 'static> MemoryStorage<Args, Extensions> {
     pub fn new() -> Self {
         let (sender, receiver) = unbounded();
         let sender = Box::new(sender)
-            as Box<dyn Sink<Task<Args, Extensions>, Error = SendError> + Send + Sync + Unpin>;
+            as Box<
+                dyn Sink<Task<Args, Extensions>, Error = SendError>
+                    + Send
+                    + Sync
+                    + Unpin,
+            >;
         MemoryStorage {
             sender: MemorySink {
                 inner: Arc::new(futures_util::lock::Mutex::new(sender)),
@@ -139,7 +143,13 @@ impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemoryStorage<Args, Ctx> {
 pub struct MemorySink<Args, Ctx = Extensions> {
     pub(super) inner: Arc<
         futures_util::lock::Mutex<
-            Box<dyn Sink<Task<Args, Ctx>, Error = SendError> + Send + Sync + Unpin + 'static>,
+            Box<
+                dyn Sink<Task<Args, Ctx>, Error = SendError>
+                    + Send
+                    + Sync
+                    + Unpin
+                    + 'static,
+            >,
         >,
     >,
 }

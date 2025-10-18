@@ -105,8 +105,9 @@ pub use self::shared::SharedJsonStore;
 #[derive(Debug)]
 pub struct JsonStorage<Args> {
     tasks: Arc<RwLock<BTreeMap<TaskKey, TaskWithMeta>>>,
-    buffer: Vec<Task<Args, JsonMapMetadata>>,
+    buffer: Vec<Task<Value, JsonMapMetadata>>,
     path: PathBuf,
+    _marker: std::marker::PhantomData<Args>,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -148,6 +149,7 @@ impl<Args> JsonStorage<Args> {
             path,
             tasks: Arc::new(RwLock::new(data)),
             buffer: Vec::new(),
+            _marker: std::marker::PhantomData,
         })
     }
 
@@ -296,6 +298,7 @@ impl<Args> Clone for JsonStorage<Args> {
             tasks: self.tasks.clone(),
             buffer: Vec::new(),
             path: self.path.clone(),
+            _marker: std::marker::PhantomData,
         }
     }
 }

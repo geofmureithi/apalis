@@ -46,10 +46,11 @@
 //! See also:
 //! - [`apalis-cron`](https://docs.rs/apalis-cron)
 
+use crate::backend::TaskSink;
 use crate::error::BoxDynError;
 use crate::features_table;
 use crate::task::Task;
-use crate::{backend::Backend, worker::context::WorkerContext};
+use crate::{backend::Backend, backend::codec::Codec, worker::context::WorkerContext};
 use futures_sink::Sink;
 use futures_util::stream::{once, select};
 use futures_util::{SinkExt, Stream, TryStreamExt};
@@ -119,20 +120,23 @@ impl<Args, Ctx, S, TSink, Err> Backend for Pipe<S, TSink, Args, Ctx>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
     TSink: Backend<Args = Args, Context = Ctx>
-        + Sink<Task<Args, Ctx, TSink::IdType>>
+        + TaskSink<Args>
         + Clone
         + Unpin
         + Send
-        + 'static,
-    <TSink as Backend>::Error: Into<BoxDynError> + Send + Sync + 'static,
+        + 'static
+        + Sink<Task<TSink::Compact, Ctx, TSink::IdType>>,
+    <TSink as Backend>::Error: std::error::Error + Send + Sync + 'static,
     TSink::Beat: Send + 'static,
     TSink::IdType: Send + Clone + 'static,
     TSink::Stream: Send + 'static,
     Args: Send + 'static,
     Ctx: Send + 'static + Default,
-    Err: Into<BoxDynError> + Send + Sync + 'static,
-    <TSink as Sink<Task<Args, Ctx, TSink::IdType>>>::Error:
-        Into<BoxDynError> + Send + Sync + 'static,
+    Err: std::error::Error + Send + Sync + 'static,
+    <TSink as Sink<Task<TSink::Compact, Ctx, TSink::IdType>>>::Error:
+        std::error::Error + Send + Sync + 'static,
+    <<TSink as Backend>::Codec as Codec<Args>>::Error: std::error::Error + Send + Sync + 'static,
+    TSink::Compact: Send
 {
     type Args = Args;
 
@@ -164,12 +168,19 @@ where
     }
 
     fn poll(self, worker: &WorkerContext) -> Self::Stream {
-        let mut sink = self.into.clone().sink_map_err(|e| e.into());
+        let mut sink = self
+            .into
+            .clone()
+            .sink_map_err(|e| PipeError::Inner(e.into()));
 
         let mut sink_stream = self
             .from
-            .map_ok(|s| Task::new(s))
-            .map_err(|e| e.into())
+            .map_err(|e| PipeError::Inner(e.into()))
+            .map_ok(|s| {
+                Task::new(s)
+                    .try_map(|s| TSink::Codec::encode(&s).map_err(|e| PipeError::Inner(e.into())))
+            })
+            .map(|t| t.and_then(|t| t))
             .boxed();
 
         let sender_stream = self.into.poll(worker);
@@ -198,7 +209,7 @@ impl<B, Args, Ctx, Err, S> PipeExt<B, Args, Ctx> for S
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
     <B as Backend>::Error: Into<BoxDynError> + Send + Sync + 'static,
-    B: Backend<Args = Args> + Sink<Task<Args, Ctx, B::IdType>>,
+    B: Backend<Args = Args> + TaskSink<Args>,
 {
     fn pipe_to(self, backend: B) -> Pipe<Self, B, Args, Ctx> {
         Pipe::new(self, backend)

@@ -69,7 +69,7 @@
 //! ```rust
 //! use apalis_core::task::{Task, Parts, status::Status};
 //! let mut task = Task::<String, ()>::new("work".to_string());
-//! task.parts.status = Status::Running;
+//! task.parts.status = Status::Running.into();
 //! task.parts.attempt.increment();
 //! ```
 //!

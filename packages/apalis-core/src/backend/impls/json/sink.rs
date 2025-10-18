@@ -6,17 +6,20 @@ use std::{
 use futures_channel::mpsc::SendError;
 use futures_sink::Sink;
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::{
-    backend::impls::json::{
-        JsonStorage,
-        meta::JsonMapMetadata,
-        util::{TaskKey, TaskWithMeta},
+    backend::{
+        impls::json::{
+            JsonStorage,
+            meta::JsonMapMetadata,
+            util::{TaskKey, TaskWithMeta},
+        },
     },
     task::{Task, task_id::TaskId},
 };
 
-impl<Args: Unpin + Serialize> Sink<Task<Args, JsonMapMetadata>> for JsonStorage<Args> {
+impl<Args: Unpin + Serialize> Sink<Task<Value, JsonMapMetadata>> for JsonStorage<Args> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -25,7 +28,7 @@ impl<Args: Unpin + Serialize> Sink<Task<Args, JsonMapMetadata>> for JsonStorage<
 
     fn start_send(
         self: Pin<&mut Self>,
-        item: Task<Args, JsonMapMetadata>,
+        item: Task<Value, JsonMapMetadata>,
     ) -> Result<(), Self::Error> {
         let this = Pin::get_mut(self);
 
@@ -53,7 +56,7 @@ impl<Args: Unpin + Serialize> Sink<Task<Args, JsonMapMetadata>> for JsonStorage<
             this.insert(
                 &key,
                 TaskWithMeta {
-                    args: serde_json::to_value(task.args).unwrap(),
+                    args: task.args,
                     ctx: task.parts.ctx,
                     result: None,
                 },
@@ -64,6 +67,6 @@ impl<Args: Unpin + Serialize> Sink<Task<Args, JsonMapMetadata>> for JsonStorage<
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Sink::<Task<Args, JsonMapMetadata>>::poll_flush(self, cx)
+        Sink::<Task<Value, JsonMapMetadata>>::poll_flush(self, cx)
     }
 }

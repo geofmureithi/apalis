@@ -4,29 +4,25 @@ use std::{
 };
 
 use apalis_core::{
-    backend::{self, TaskSink, codec::Codec},
+    backend::{Backend, codec::Codec},
     error::BoxDynError,
     task::{Task, metadata::MetadataExt},
 };
-use futures::future::BoxFuture;
+use futures::{Sink, future::BoxFuture};
 use tower::Service;
 
-use crate::{CompositeService, Step, StepContext, WorkflowRequest};
+use crate::{CompositeService, GoTo, StepContext, WorkflowRequest};
 
-pub struct WorkFlowService<FlowSink, Encode, Compact>
-where
-    FlowSink: TaskSink<Compact>,
-{
-    services: HashMap<usize, CompositeService<FlowSink, Encode, Compact>>,
+pub struct WorkFlowService<FlowSink, Encode, Compact, Context, IdType> {
+    services: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
     not_ready: VecDeque<usize>,
     backend: FlowSink,
 }
-impl<FlowSink, Encode, Compact> WorkFlowService<FlowSink, Encode, Compact>
-where
-    FlowSink: TaskSink<Compact>,
+impl<FlowSink, Encode, Compact, Context, IdType>
+    WorkFlowService<FlowSink, Encode, Compact, Context, IdType>
 {
     pub(crate) fn new(
-        services: HashMap<usize, CompositeService<FlowSink, Encode, Compact>>,
+        services: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
         backend: FlowSink,
     ) -> Self {
         Self {
@@ -37,23 +33,24 @@ where
     }
 }
 
-impl<FlowSink: Clone + Send + Sync + 'static + TaskSink<Compact>, Encode, Compact>
+impl<FlowSink: Clone + Send + Sync + 'static + Backend<Error = Err>, Encode, Compact, Err>
     Service<Task<Compact, FlowSink::Context, FlowSink::IdType>>
-    for WorkFlowService<FlowSink, Encode, Compact>
+    for WorkFlowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     FlowSink::Context: MetadataExt<WorkflowRequest>,
     Encode: Send + Sync + 'static,
-    Compact: Send + 'static,
-    FlowSink: Sync + TaskSink<Compact>,
+    Compact: Send + 'static + Clone,
+    FlowSink: Sync,
     Compact: Send + Sync,
     FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
-    FlowSink::Error: Into<BoxDynError>,
+    Err: std::error::Error + Send + Sync + 'static,
     FlowSink::IdType: Default + Send + 'static,
     Encode: Codec<Compact, Compact = Compact>,
     <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
     Encode::Error: Into<BoxDynError>,
+    FlowSink: Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = Err> + Unpin,
 {
-    type Response = Compact;
+    type Response = GoTo<Compact>;
     type Error = BoxDynError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -90,7 +87,8 @@ where
         );
         let meta: WorkflowRequest = req.parts.ctx.extract().unwrap_or_default();
         let idx = meta.step_index;
-        let mut ctx: StepContext<FlowSink, Encode> = StepContext::new(self.backend.clone(), idx);
+        let ctx: StepContext<FlowSink, Encode> = StepContext::new(self.backend.clone(), idx);
+        let mut sink = self.backend.clone();
         let has_next = self.services.get(&(idx + 1)).is_some();
 
         let cl = self
@@ -105,9 +103,28 @@ where
         self.not_ready.push_back(idx);
         let fut = svc.call(req);
         Box::pin(async move {
-            let (should_next, res) = fut.await?;
-            if should_next && has_next {
-                ctx.push_next_step(&res).await?;
+            let res = fut.await?;
+            match &res {
+                GoTo::Next(next) if has_next => {
+                    use futures::SinkExt;
+                    let task = Task::builder(next.clone())
+                        .meta(WorkflowRequest {
+                            step_index: idx + 1,
+                        })
+                        .build();
+                    sink.send(task).await?;
+                }
+                GoTo::DelayFor(delay, next) if has_next => {
+                    use futures::SinkExt;
+                    let task = Task::builder(next.clone())
+                        .run_after(*delay)
+                        .meta(WorkflowRequest {
+                            step_index: idx + 1,
+                        })
+                        .build();
+                    sink.send(task).await?;
+                }
+                _ => {}
             }
             Ok(res)
         })

@@ -149,7 +149,7 @@ where
 
                         vault
                             .get(&key)
-                            .map(|value| (task_id.clone(), value.result.unwrap()))
+                            .and_then(|value| Some((task_id.clone(), value.result?)))
                     });
 
                     if let Some((task_id, result)) = completed_task {

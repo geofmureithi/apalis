@@ -20,10 +20,9 @@
 //! - [`CustomBackend`](custom::CustomBackend): A flexible backend allowing custom functions for task management
 use std::{future::Future, time::Duration};
 
-use futures_sink::Sink;
 use futures_util::{
     Stream,
-    stream::{self, BoxStream},
+    stream::{BoxStream},
 };
 
 use crate::{
@@ -43,7 +42,9 @@ pub mod shared;
 mod config;
 mod expose;
 mod impls;
+mod sink;
 
+pub use sink::*;
 pub use expose::*;
 
 pub use impls::guide;
@@ -98,75 +99,6 @@ pub trait Backend {
 
 /// Represents a stream for T.
 pub type TaskStream<T, E = BoxDynError> = BoxStream<'static, Result<Option<T>, E>>;
-
-/// Extends Backend to allow pushing tasks into the backend
-pub trait TaskSink<Args>: Backend {
-    /// Allows pushing a single task into the backend
-    fn push(&mut self, task: Args) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Allows pushing multiple tasks into the backend in bulk
-    fn push_bulk(
-        &mut self,
-        tasks: Vec<Args>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Allows pushing tasks from a stream into the backend
-    fn push_stream(
-        &mut self,
-        tasks: impl Stream<Item = Args> + Unpin + Send,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Allows pushing a fully constructed task into the backend
-    fn push_task(
-        &mut self,
-        task: Task<Args, Self::Context, Self::IdType>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-}
-
-impl<Args, S, E> TaskSink<Args> for S
-where
-    S: Sink<Task<Args, Self::Context, Self::IdType>, Error = E> + Unpin + Backend<Error = E> + Send,
-    Args: Send,
-    S::Context: Send + Default,
-    S::IdType: Send + 'static,
-    E: Send,
-{
-    async fn push(&mut self, task: Args) -> Result<(), Self::Error> {
-        use futures_util::SinkExt;
-        self.send(Task::new(task)).await
-    }
-
-    async fn push_bulk(&mut self, tasks: Vec<Args>) -> Result<(), Self::Error> {
-        use futures_util::SinkExt;
-        self.send_all(&mut stream::iter(
-            tasks
-                .into_iter()
-                .map(Task::new)
-                .map(Result::Ok)
-                .collect::<Vec<_>>(),
-        ))
-        .await
-    }
-
-    async fn push_stream(
-        &mut self,
-        tasks: impl Stream<Item = Args> + Unpin + Send,
-    ) -> Result<(), Self::Error> {
-        use futures_util::SinkExt;
-        use futures_util::StreamExt;
-        self.send_all(&mut tasks.map(Task::new).map(Result::Ok))
-            .await
-    }
-
-    async fn push_task(
-        &mut self,
-        task: Task<Args, Self::Context, Self::IdType>,
-    ) -> Result<(), Self::Error> {
-        use futures_util::SinkExt;
-        self.send(task).await
-    }
-}
-
 /// Allows fetching a task by its ID
 pub trait FetchById<Args>: Backend {
     /// Fetch a task by its unique identifier
