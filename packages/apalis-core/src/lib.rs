@@ -301,6 +301,10 @@
 //! - [**Implementing Backends**](crate::backend::guide) - implementing the [`Backend`] trait from scratch
 //! - [**Extending Workers using extension traits**](crate::worker::ext#creating-a-custom-worker-extension-trait) - implementing custom worker functionality via extension traits
 //!
+//! # Observability
+//! You can track tasks using [apalis-board](https://github.com/apalis-dev/apalis-board).
+//! ![Task](https://github.com/apalis-dev/apalis-board/raw/master/screenshots/task.png)
+//! 
 //! [`Backend`]: crate::backend::Backend
 //! [`TaskFn`]: crate::task_fn::TaskFn
 //! [`Service`]: tower_service::Service
