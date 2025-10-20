@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use tower::Service;
 
 use crate::{
-    CompositeService, GoTo, Step, SteppedService, WorkFlow, WorkflowError, WorkflowRequest,
-    context::StepContext,
+    CompositeService, GenerateId, GoTo, Step, SteppedService, WorkFlow, WorkflowError,
+    WorkflowRequest, context::StepContext,
 };
 
 pub struct FilterMap<Step, Input, Output> {
@@ -67,7 +67,7 @@ where
         + MetadataExt<FilterContext<Sink::IdType>, Error = MetadataError>
         + Default,
     Sink::Error: Into<BoxDynError> + Sync + Send + 'static,
-    Sink::IdType: Default + Send + Sync,
+    Sink::IdType: GenerateId + Send + Sync,
     Encode: Codec<Vec<Input>, Compact = Compact, Error = CodecError>,
     Encode: Codec<Input, Compact = Compact, Error = CodecError>,
     MetadataError: Into<BoxDynError>,
@@ -217,7 +217,7 @@ where
     >>::Future: Send + 'static,
     DbError: Into<BoxDynError> + Send + Sync,
     Compact: Send + Sync + 'static,
-    FlowSink::IdType: Default + Send + Sync + Display,
+    FlowSink::IdType: GenerateId + Send + Sync + Display,
     Encode: Send + Sync + 'static,
     S::Error: Into<BoxDynError> + Send + Sync,
 {
@@ -309,7 +309,7 @@ where
                             .map_err(|e: CodecError| WorkflowError::CodecError(e.into()))?;
                     let mut task_ids = Vec::new();
                     for step in steps.args {
-                        let task_id = TaskId::new(FlowSink::IdType::default());
+                        let task_id = TaskId::new(FlowSink::IdType::generate());
 
                         let task = TaskBuilder::new(step)
                             .meta(WorkflowRequest {
@@ -325,7 +325,7 @@ where
 
                         task_ids.push(task_id);
                     }
-                    let task_id = TaskId::new(FlowSink::IdType::default());
+                    let task_id = TaskId::new(FlowSink::IdType::generate());
                     let task = TaskBuilder::new(main_args)
                         .with_task_id(task_id.clone())
                         .meta(WorkflowRequest {
@@ -420,7 +420,7 @@ where
         Encode: Send + Sync + 'static,
         CodecError: std::error::Error + Sync + Send + 'static,
         MetadataError: std::error::Error + Sync + Send + 'static,
-        FlowSink::IdType: Default + Sync + Send,
+        FlowSink::IdType: GenerateId + Sync + Send,
         DbError: std::error::Error + Sync + Send + 'static,
         FlowSink::IdType: Display,
     {

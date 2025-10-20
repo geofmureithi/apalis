@@ -8,7 +8,7 @@ use apalis_core::{
 };
 use tower::Service;
 
-use crate::{GoTo, Step, WorkFlow, WorkflowRequest, context::StepContext};
+use crate::{context::StepContext, GenerateId, GoTo, Step, WorkFlow, WorkflowRequest};
 
 #[derive(Debug)]
 pub struct ThenStep<S, T> {
@@ -49,7 +49,7 @@ where
     Current: Send,
     FlowSink::Context: Send + Sync + Default + MetadataExt<WorkflowRequest>,
     FlowSink::Error: Into<BoxDynError> + Send + 'static,
-    FlowSink::IdType: Default + Send,
+    FlowSink::IdType: GenerateId + Send,
     Compact: Sync + Send,
     Encode: Codec<Current, Compact = Compact> + Sync + Send + 'static,
     Encode::Error: std::error::Error + Sync + Send + 'static,
@@ -95,7 +95,7 @@ where
         <TaskFn<F, Current, FlowSink::Context, FnArgs> as Service<
             Task<Current, FlowSink::Context, FlowSink::IdType>,
         >>::Error: Into<BoxDynError>,
-        FlowSink::IdType: Send + Default,
+        FlowSink::IdType: Send + GenerateId,
         Compact: Sync + Send + 'static,
         Encode: Codec<Current, Compact = Compact, Error = CodecError> + Send + Sync,
         CodecError: Send + Sync + std::error::Error + 'static,

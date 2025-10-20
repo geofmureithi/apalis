@@ -6,7 +6,7 @@ use apalis_core::{
     task::{Task, metadata::MetadataExt},
 };
 
-use crate::{GoTo, Step, WorkFlow, WorkflowRequest, context::StepContext};
+use crate::{context::StepContext, GenerateId, GoTo, Step, WorkFlow, WorkflowRequest};
 
 #[derive(Debug)]
 pub struct DelayStep<S, T> {
@@ -40,7 +40,7 @@ where
     Current: Send,
     FlowSink::Context: Send + Sync + Default + MetadataExt<WorkflowRequest>,
     FlowSink::Error: Into<BoxDynError> + Send + 'static,
-    FlowSink::IdType: Default + Send,
+    FlowSink::IdType: GenerateId + Send,
     Compact: Sync + Send,
     Encode: Codec<Current, Compact = Compact> + Sync + Send + 'static,
     Encode::Error: std::error::Error + Sync + Send + 'static,
@@ -73,7 +73,7 @@ where
         Current: std::marker::Send + 'static + Sync,
         FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
         FlowSink::Error: Into<BoxDynError> + Send + 'static,
-        FlowSink::IdType: Send + Default,
+        FlowSink::IdType: Send + GenerateId,
         Compact: Sync + Send + 'static,
         Encode: Codec<Current, Compact = Compact, Error = CodecError> + Send + Sync + 'static,
         CodecError: Send + Sync + std::error::Error + 'static,

@@ -11,7 +11,7 @@ use apalis_core::{
 use futures::{Sink, future::BoxFuture};
 use tower::Service;
 
-use crate::{CompositeService, GoTo, StepContext, WorkflowRequest};
+use crate::{CompositeService, GenerateId, GoTo, StepContext, WorkflowRequest};
 
 pub struct WorkFlowService<FlowSink, Encode, Compact, Context, IdType> {
     services: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
@@ -44,7 +44,7 @@ where
     Compact: Send + Sync,
     FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
     Err: std::error::Error + Send + Sync + 'static,
-    FlowSink::IdType: Default + Send + 'static,
+    FlowSink::IdType: GenerateId + Send + 'static,
     Encode: Codec<Compact, Compact = Compact>,
     <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
     Encode::Error: Into<BoxDynError>,

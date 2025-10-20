@@ -24,10 +24,12 @@ use tower::Service;
 use crate::{context::StepContext, service::WorkFlowService};
 
 mod context;
+mod id_generator;
 mod service;
 mod steps;
 
 pub use crate::steps::{delay::DelayStep, filter_map::FilterMapStep, then::ThenStep};
+pub use id_generator::GenerateId;
 
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
 type SteppedService<Compact, Ctx, IdType> = BoxedService<Task<Compact, Ctx, IdType>, GoTo<Compact>>;
@@ -249,7 +251,7 @@ where
     FlowSink: Sync + Backend<Args = Compact, Error = Err>,
     Compact: Send + Sync,
     FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
-    FlowSink::IdType: Default,
+    FlowSink::IdType: GenerateId,
     <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
     Encode::Error: Into<BoxDynError>,
 {

@@ -7,8 +7,17 @@ authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 license = "MIT"
 description = "A flexible and composable task workflow engine for rust"
 
+[features]
+default = ["tracing", "ulid"]
+## Enable tracing support
+tracing = ["dep:tracing", "apalis-core/tracing"]
+## Enable ulid support for task ids
+ulid = ["dep:ulid"]
+## Enable uuid support for task ids
+uuid = ["dep:uuid"]
+
 [dependencies]
-petgraph = { version = "0.8.2", features = ["serde-1"] }
+# petgraph = { version = "0.8.2", features = ["serde-1"] }
 serde = { version = "1.0", features = ["derive"] }
 tower = { version = "0.5", features = ["util"], default-features = false }
 apalis-core = { path = "../apalis-core", version = "1.0.0-alpha.5", default-features = false, features = [
@@ -17,6 +26,10 @@ apalis-core = { path = "../apalis-core", version = "1.0.0-alpha.5", default-feat
 ] }
 futures = "0.3.30"
 thiserror = "2.0.0"
+# TODO: move to workspace dependencies
+tracing = { version = "0.1", default-features = false, optional = true }
+ulid = { version = "1", optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
 
 [dev-dependencies]
 serde_json = "1"
