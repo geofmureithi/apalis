@@ -6,9 +6,10 @@ use apalis_core::{
     task::{Task, metadata::MetadataExt},
     task_fn::{TaskFn, task_fn},
 };
+use futures::Sink;
 use tower::Service;
 
-use crate::{context::StepContext, GenerateId, GoTo, Step, WorkFlow, WorkflowRequest};
+use crate::{GenerateId, GoTo, Step, WorkFlow, WorkflowRequest, context::StepContext};
 
 #[derive(Debug)]
 pub struct ThenStep<S, T> {
@@ -75,7 +76,7 @@ where
     Current: Send + 'static,
     FlowSink: Send + Clone + Sync + 'static + Unpin + Backend,
 {
-    pub fn then<F, O, E, FnArgs, CodecError>(
+    pub fn then<F, O, E, FnArgs, CodecError, DbError>(
         self,
         then: F,
     ) -> WorkFlow<Input, O, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
@@ -88,7 +89,7 @@ where
         FnArgs: std::marker::Send + 'static + Sync,
         Current: std::marker::Send + 'static + Sync,
         FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
-        FlowSink::Error: Into<BoxDynError> + Send + 'static,
+        DbError: std::error::Error + Send + Sync + 'static,
         <TaskFn<F, Current, FlowSink::Context, FnArgs> as Service<
             Task<Current, FlowSink::Context, FlowSink::IdType>,
         >>::Future: Send + 'static,
@@ -101,11 +102,13 @@ where
         CodecError: Send + Sync + std::error::Error + 'static,
         E: Into<BoxDynError>,
         Encode: Codec<O, Compact = Compact, Error = CodecError> + 'static,
+        Encode: Codec<GoTo<O>, Compact = Compact, Error = CodecError> + 'static,
         <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
             std::error::Error + Sync + Send + 'static,
-        FlowSink: WeakTaskSink<O>,
+        FlowSink: WeakTaskSink<O, Codec = Encode, Error = DbError>
+            + Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = DbError>,
     {
-        self.add_step::<_, O, _, _>(ThenStep {
+        self.add_step::<_, O, _, _, _>(ThenStep {
             inner: task_fn::<F, Current, FlowSink::Context, FnArgs>(then),
             _marker: PhantomData,
         })

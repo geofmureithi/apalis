@@ -17,7 +17,7 @@ use tower::Service;
 
 use crate::{
     CompositeService, GenerateId, GoTo, Step, SteppedService, WorkFlow, WorkflowError,
-    WorkflowRequest, context::StepContext,
+    WorkflowRequest, context::StepContext, service::handle_workflow_result,
 };
 
 pub struct FilterMap<Step, Input, Output> {
@@ -186,7 +186,9 @@ where
     Encode: Codec<Current, Compact = Compact, Error = CodecError>
         + Codec<Option<Output>, Compact = Compact, Error = CodecError>
         + Codec<Vec<Current>, Compact = Compact, Error = CodecError>
-        + Codec<Vec<Output>, Compact = Compact, Error = CodecError>,
+        + Codec<Vec<Output>, Compact = Compact, Error = CodecError>
+        + Codec<GoTo<Option<Output>>, Compact = Compact, Error = CodecError>
+        + Codec<GoTo<Vec<Output>>, Compact = Compact, Error = CodecError>,
     Output: Send + Sync + 'static,
     S::Error: Into<BoxDynError> + Send + 'static,
     FlowSink: Clone + Send + 'static + Sync + WaitForCompletion<GoTo<Option<Output>>>,
@@ -221,14 +223,14 @@ where
     Encode: Send + Sync + 'static,
     S::Error: Into<BoxDynError> + Send + Sync,
 {
-    type Response = GoTo<Compact>;
+    type Response = Compact;
     type Error = BoxDynError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
     fn call(&mut self, req: Task<Compact, FlowSink::Context, FlowSink::IdType>) -> Self::Future {
-        let ctx: StepContext<FlowSink, Encode> = req.parts.data.get_checked().cloned().unwrap();
+        let mut ctx: StepContext<FlowSink, Encode> = req.parts.data.get_checked().cloned().unwrap();
         let filter_ctx: Result<FilterState, _> = req.parts.ctx.extract();
         match filter_ctx {
             Ok(FilterState::Parent) => {
@@ -246,25 +248,13 @@ where
                         .try_map(|arg| Encode::decode(&arg))
                         .map_err(|e: CodecError| WorkflowError::CodecError(e.into()))?;
                     let res = step.run(&ctx, req).await?;
-                    match res {
-                        GoTo::Next(output) => {
-                            let compact = Encode::encode(&output)
-                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
-                            Ok(GoTo::Next(compact))
-                        }
-                        GoTo::DelayFor(duration, output) => {
-                            let compact = Encode::encode(&output)
-                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
-                            Ok(GoTo::DelayFor(duration, compact))
-                        }
-                        GoTo::Done => Ok(GoTo::Done),
-                        GoTo::Break(output) => {
-                            let compact = Encode::encode(&output)
-                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
-                            Ok(GoTo::Break(compact))
-                        }
-                        GoTo::ContinueAt(task_id) => Ok(GoTo::ContinueAt(task_id)),
-                    }
+                    handle_workflow_result::<Vec<Output>, Compact, FlowSink, DbError>(
+                        &mut ctx, &res,
+                    )
+                    .await?;
+                    let compact =
+                        Encode::encode(&res).map_err(|e| WorkflowError::CodecError(e.into()))?;
+                    Ok(compact)
                 })
             }
             Ok(FilterState::Child) => {
@@ -278,25 +268,13 @@ where
                         .await
                         .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
 
-                    match res {
-                        GoTo::Next(output) => {
-                            let compact = Encode::encode(&output)
-                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
-                            Ok(GoTo::Next(compact))
-                        }
-                        GoTo::DelayFor(duration, output) => {
-                            let compact = Encode::encode(&output)
-                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
-                            Ok(GoTo::DelayFor(duration, compact))
-                        }
-                        GoTo::Done => Ok(GoTo::Done),
-                        GoTo::Break(output) => {
-                            let compact = Encode::encode(&output)
-                                .map_err(|e| WorkflowError::CodecError(e.into()))?;
-                            Ok(GoTo::Break(compact))
-                        }
-                        GoTo::ContinueAt(task_id) => Ok(GoTo::ContinueAt(task_id)),
-                    }
+                    handle_workflow_result::<Option<Output>, Compact, FlowSink, DbError>(
+                        &mut ctx, &res,
+                    )
+                    .await?;
+                    let compact =
+                        Encode::encode(&res).map_err(|e| WorkflowError::CodecError(e.into()))?;
+                    Ok(compact)
                 })
             }
             Err(_) => {
@@ -339,7 +317,10 @@ where
                         .push_task(task)
                         .await
                         .map_err(|e| WorkflowError::SinkError(e.into()))?;
-                    Ok(GoTo::ContinueAt(task_id.to_string()))
+
+                    let compact = Encode::encode(&GoTo::<Option<Output>>::ContinueAt(task_id.to_string()))
+                        .map_err(|e: CodecError| WorkflowError::CodecError(e.into()))?;
+                    Ok(compact)
                 })
             }
         }
@@ -412,9 +393,11 @@ where
         SvcError: Send + Sync + 'static + Into<BoxDynError>,
         FlowSink::IdType: Send,
         Encode: Codec<Current, Compact = Compact, Error = CodecError>
+            + Codec<GoTo<Option<Output>>, Compact = Compact, Error = CodecError>
             + Codec<Option<Output>, Compact = Compact, Error = CodecError>
             + Codec<Vec<Current>, Compact = Compact, Error = CodecError>
-            + Codec<Vec<Output>, Compact = Compact, Error = CodecError>,
+            + Codec<Vec<Output>, Compact = Compact, Error = CodecError>
+            + Codec<GoTo<Vec<Output>>, Compact = Compact, Error = CodecError>,
         Compact: Send + Sync + 'static,
         DbError: Into<BoxDynError> + Send + Sync,
         Encode: Send + Sync + 'static,

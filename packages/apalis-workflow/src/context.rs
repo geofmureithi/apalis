@@ -10,6 +10,7 @@ use futures::StreamExt;
 pub struct StepContext<FlowSink, Encode> {
     pub current_step: usize,
     pub(crate) sink: FlowSink,
+    pub has_next: bool,
     _marker: PhantomData<Encode>,
 }
 
@@ -18,17 +19,19 @@ impl<FlowSink: Clone, Encode> Clone for StepContext<FlowSink, Encode> {
         StepContext {
             current_step: self.current_step,
             sink: self.sink.clone(),
+            has_next: self.has_next,
             _marker: PhantomData,
         }
     }
 }
 
 impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
-    pub fn new(backend: FlowSink, current_step: usize) -> Self {
+    pub fn new(backend: FlowSink, current_step: usize, has_next: bool) -> Self {
         Self {
             current_step,
             sink: backend,
             _marker: PhantomData,
+            has_next,
         }
     }
 

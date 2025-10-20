@@ -4,7 +4,7 @@ use std::{
 };
 
 use apalis_core::{
-    backend::{Backend, codec::Codec},
+    backend::{Backend, TaskSinkError, codec::Codec},
     error::BoxDynError,
     task::{Task, metadata::MetadataExt},
 };
@@ -50,7 +50,7 @@ where
     Encode::Error: Into<BoxDynError>,
     FlowSink: Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = Err> + Unpin,
 {
-    type Response = GoTo<Compact>;
+    type Response = Compact;
     type Error = BoxDynError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -87,9 +87,10 @@ where
         );
         let meta: WorkflowRequest = req.parts.ctx.extract().unwrap_or_default();
         let idx = meta.step_index;
-        let ctx: StepContext<FlowSink, Encode> = StepContext::new(self.backend.clone(), idx);
-        let mut sink = self.backend.clone();
+
         let has_next = self.services.get(&(idx + 1)).is_some();
+        let ctx: StepContext<FlowSink, Encode> =
+            StepContext::new(self.backend.clone(), idx, has_next);
 
         let cl = self
             .services
@@ -98,35 +99,51 @@ where
 
         let svc = &mut cl.svc;
 
-        req.parts.data.insert(ctx.clone());
+        // Prepare the context for the next step
+        req.parts.data.insert(ctx);
 
         self.not_ready.push_back(idx);
-        let fut = svc.call(req);
-        Box::pin(async move {
-            let res = fut.await?;
-            match &res {
-                GoTo::Next(next) if has_next => {
-                    use futures::SinkExt;
-                    let task = Task::builder(next.clone())
-                        .meta(WorkflowRequest {
-                            step_index: idx + 1,
-                        })
-                        .build();
-                    sink.send(task).await?;
-                }
-                GoTo::DelayFor(delay, next) if has_next => {
-                    use futures::SinkExt;
-                    let task = Task::builder(next.clone())
-                        .run_after(*delay)
-                        .meta(WorkflowRequest {
-                            step_index: idx + 1,
-                        })
-                        .build();
-                    sink.send(task).await?;
-                }
-                _ => {}
-            }
-            Ok(res)
-        })
+        svc.call(req)
     }
+}
+
+pub async fn handle_workflow_result<N, Compact, FlowSink, Err>(
+    ctx: &mut StepContext<FlowSink, FlowSink::Codec>,
+    result: &GoTo<N>,
+) -> Result<(), TaskSinkError<Err>>
+where
+    FlowSink: Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = Err>
+        + Backend<Error = Err>
+        + Send
+        + Unpin,
+    FlowSink::Context: MetadataExt<WorkflowRequest>,
+    FlowSink::Codec: Codec<N, Compact = Compact>,
+    <FlowSink::Codec as Codec<N>>::Error: Into<BoxDynError>,
+{
+    use futures::SinkExt;
+    match result {
+        GoTo::Next(next) if ctx.has_next => {
+            let task = Task::builder(
+                FlowSink::Codec::encode(next).map_err(|e| TaskSinkError::CodecError(e.into()))?,
+            )
+            .meta(WorkflowRequest {
+                step_index: ctx.current_step + 1,
+            })
+            .build();
+            ctx.sink.send(task).await?;
+        }
+        GoTo::DelayFor(delay, next) if ctx.has_next => {
+            let task = Task::builder(
+                FlowSink::Codec::encode(next).map_err(|e| TaskSinkError::CodecError(e.into()))?,
+            )
+            .run_after(*delay)
+            .meta(WorkflowRequest {
+                step_index: ctx.current_step + 1,
+            })
+            .build();
+            ctx.sink.send(task).await?;
+        }
+        _ => {}
+    }
+    Ok(())
 }

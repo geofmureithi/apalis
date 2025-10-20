@@ -9,7 +9,7 @@ use std::{
 };
 
 use apalis_core::{
-    backend::{Backend, TaskSink, WeakTaskSink, codec::Codec},
+    backend::{Backend, TaskSink, TaskSinkError, WeakTaskSink, codec::Codec},
     error::BoxDynError,
     task::{Task, builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId},
     worker::builder::IntoWorkerService,
@@ -21,7 +21,10 @@ use futures::{
 use serde::{Deserialize, Serialize};
 use tower::Service;
 
-use crate::{context::StepContext, service::WorkFlowService};
+use crate::{
+    context::StepContext,
+    service::{WorkFlowService, handle_workflow_result},
+};
 
 mod context;
 mod id_generator;
@@ -32,7 +35,7 @@ pub use crate::steps::{delay::DelayStep, filter_map::FilterMapStep, then::ThenSt
 pub use id_generator::GenerateId;
 
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
-type SteppedService<Compact, Ctx, IdType> = BoxedService<Task<Compact, Ctx, IdType>, GoTo<Compact>>;
+type SteppedService<Compact, Ctx, IdType> = BoxedService<Task<Compact, Ctx, IdType>, Compact>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GoTo<T = ()> {
@@ -90,12 +93,13 @@ where
     Current: Send + 'static,
     FlowSink: Send + Clone + Sync + 'static + Unpin + Backend,
 {
-    pub fn add_step<S, Res, E, CodecError>(
+    pub fn add_step<S, Res, E, CodecError, BackendError>(
         mut self,
         step: S,
     ) -> WorkFlow<Input, Res, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
     where
-        FlowSink: WeakTaskSink<Res>,
+        FlowSink: WeakTaskSink<Res, Codec = Encode, Error = BackendError>
+            + Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = BackendError>,
         Current: std::marker::Send + 'static + Sync,
         FlowSink::Context: Send + 'static + Sync,
         S: Step<Current, FlowSink, Encode, Response = Res, Error = E>
@@ -105,14 +109,17 @@ where
             + Clone,
         S::Response: Send,
         S::Error: Send,
-        Res: 'static,
+        Res: 'static + Sync,
         FlowSink::IdType: Send,
         Encode: Codec<Current, Compact = Compact, Error = CodecError>
+            + Codec<GoTo<Res>, Compact = Compact, Error = CodecError>
             + Codec<Res, Compact = Compact, Error = CodecError>,
         Compact: Send + Sync + 'static,
         Encode: Send + Sync + 'static,
         E: Into<BoxDynError> + Send + Sync + 'static,
         CodecError: std::error::Error + Send + 'static + Sync,
+        FlowSink::Context: MetadataExt<WorkflowRequest>,
+        BackendError: std::error::Error + Send + Sync + 'static,
     {
         self.steps.insert(self.steps.len(), {
             let svc =
@@ -138,73 +145,75 @@ pub struct StepService<Step, Encode, Args, FlowSink> {
     codec: PhantomData<(Encode, Args, FlowSink)>,
 }
 
-impl<Args, S, Encode, Compact, FlowSink, E, CodecError>
+impl<Args, S, Encode, Compact, FlowSink, E, CodecError, BackendErr>
     Service<Task<Compact, FlowSink::Context, FlowSink::IdType>>
     for StepService<S, Encode, Args, FlowSink>
 where
     S: Step<Args, FlowSink, Encode, Error = E> + Clone + Send + 'static,
     Encode: Codec<Args, Compact = Compact, Error = CodecError>
-        + Codec<S::Response, Compact = Compact, Error = CodecError>,
-    S::Response: Send + 'static,
+        + Codec<S::Response, Compact = Compact, Error = CodecError>
+        + Codec<GoTo<S::Response>, Compact = Compact, Error = CodecError>,
+    S::Response: Send + 'static + Sync,
     S::Error: Send + 'static,
-    FlowSink: Clone + Send + 'static + Sync + WeakTaskSink<S::Response>,
+    FlowSink: Clone
+        + Send
+        + 'static
+        + Sync
+        + WeakTaskSink<S::Response, Codec = Encode, Error = BackendErr>
+        + Unpin
+        + Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = BackendErr>,
     Args: Send + 'static,
-    FlowSink::Context: Send + 'static,
+    FlowSink::Context: Send + 'static + MetadataExt<WorkflowRequest>,
     FlowSink::IdType: Send + 'static,
     Compact: Send + Sync + 'static,
     Encode: Send + Sync + 'static,
     E: Into<BoxDynError> + Send + 'static + Sync,
     CodecError: std::error::Error + Send + 'static + Sync,
+    BackendErr: std::error::Error + Send + 'static + Sync,
 {
-    type Response = GoTo<Compact>;
+    type Response = Compact;
     type Error = BoxDynError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
     fn call(&mut self, req: Task<Compact, FlowSink::Context, FlowSink::IdType>) -> Self::Future {
-        let ctx: Option<&StepContext<FlowSink, Encode>> = req.parts.data.get();
-        match ctx {
-            Some(ctx) => {
-                let ctx = ctx.clone();
-                let req = req.try_map(|arg| Encode::decode(&arg));
-                match req {
-                    Ok(task) => {
-                        let mut step = self.step.clone();
-
-                        Box::pin(async move {
+        let ctx: Option<StepContext<FlowSink, Encode>> = req.parts.data.get().cloned();
+        let mut step = self.step.clone();
+        Box::pin(async move {
+            match ctx {
+                Some(ctx) => {
+                    let mut ctx = ctx.clone();
+                    let req = req.try_map(|arg| Encode::decode(&arg));
+                    match req {
+                        Ok(task) => {
                             let res = step
                                 .run(&ctx, task)
                                 .await
-                                .map_err(|e| WorkflowError::SingleStepError(e.into()))?;
-                            match res {
-                                GoTo::Next(output) => {
-                                    let compact = Encode::encode(&output)
-                                        .map_err(|e| WorkflowError::CodecError(e.into()))?;
-                                    Ok(GoTo::Next(compact))
+                                .map_err(|e| e.into())?;
+
+                            let _ = handle_workflow_result::<
+                                S::Response,
+                                Compact,
+                                FlowSink,
+                                BackendErr,
+                            >(&mut ctx, &res)
+                            .await
+                            .map_err(|e| match e {
+                                TaskSinkError::PushError(err) => Box::new(err) as BoxDynError,
+                                TaskSinkError::CodecError(err) => {
+                                    WorkflowError::CodecError(err.into()).into()
                                 }
-                                GoTo::DelayFor(duration, output) => {
-                                    let compact = Encode::encode(&output)
-                                        .map_err(|e| WorkflowError::CodecError(e.into()))?;
-                                    Ok(GoTo::DelayFor(duration, compact))
-                                }
-                                GoTo::Done => Ok(GoTo::Done),
-                                GoTo::Break(output) => {
-                                    let compact = Encode::encode(&output)
-                                        .map_err(|e| WorkflowError::CodecError(e.into()))?;
-                                    Ok(GoTo::Break(compact))
-                                }
-                                GoTo::ContinueAt(task_id) => Ok(GoTo::ContinueAt(task_id)),
-                            }
-                        })
+                            })?;
+                            Encode::encode(&res)
+                                .map_err(|e| WorkflowError::CodecError(e.into()).into())
+                        }
+                        Err(e) => Err(WorkflowError::CodecError(e.into()).into()),
                     }
-                    Err(e) => ready(Err(WorkflowError::CodecError(e.into()))).boxed(),
                 }
+                None => Err(WorkflowError::MissingContextError.into()),
             }
-            None => ready(Err(WorkflowError::MissingContextError)).boxed(),
-        }
-        .map_err(|e| BoxDynError::from(e))
-        .boxed()
+        })
     }
 }
 

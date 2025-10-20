@@ -1,12 +1,13 @@
 use std::{convert::Infallible, fmt::Debug, marker::PhantomData, time::Duration};
 
 use apalis_core::{
-    backend::{WeakTaskSink, codec::Codec},
+    backend::{codec::Codec, Backend, WeakTaskSink},
     error::BoxDynError,
-    task::{Task, metadata::MetadataExt},
+    task::{metadata::MetadataExt, Task},
 };
+use futures::Sink;
 
-use crate::{context::StepContext, GenerateId, GoTo, Step, WorkFlow, WorkflowRequest};
+use crate::{GenerateId, GoTo, Step, WorkFlow, WorkflowRequest, context::StepContext};
 
 #[derive(Debug)]
 pub struct DelayStep<S, T> {
@@ -63,24 +64,26 @@ impl<Input, Current, FlowSink, Encode, Compact>
     WorkFlow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     Current: Send + 'static,
-    FlowSink: Send + Clone + Sync + 'static + Unpin + WeakTaskSink<Current>,
+    FlowSink: Send + Clone + Sync + 'static + Unpin + WeakTaskSink<Current, Codec = Encode>,
 {
-    pub fn delay_for<CodecError>(
+    pub fn delay_for<CodecError, DbError>(
         self,
         duration: Duration,
     ) -> WorkFlow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
     where
         Current: std::marker::Send + 'static + Sync,
         FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
-        FlowSink::Error: Into<BoxDynError> + Send + 'static,
+        FlowSink: Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = DbError> + Backend<Error = DbError>,
+        DbError: std::error::Error + Send + Sync + 'static,
         FlowSink::IdType: Send + GenerateId,
         Compact: Sync + Send + 'static,
         Encode: Codec<Current, Compact = Compact, Error = CodecError> + Send + Sync + 'static,
+        Encode: Codec<GoTo<Current>, Compact = Compact, Error = CodecError> + Send + Sync + 'static,
         CodecError: Send + Sync + std::error::Error + 'static,
         <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
             std::error::Error + Sync + Send + 'static,
     {
-        self.add_step::<_, Current, _, _>(DelayStep {
+        self.add_step::<_, Current, _, _, DbError>(DelayStep {
             duration,
             _marker: PhantomData,
         })
