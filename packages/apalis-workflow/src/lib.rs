@@ -14,10 +14,7 @@ use apalis_core::{
     task::{Task, builder::TaskBuilder, metadata::MetadataExt, task_id::TaskId},
     worker::builder::IntoWorkerService,
 };
-use futures::{
-    FutureExt, Sink, TryFutureExt,
-    future::{BoxFuture, ready},
-};
+use futures::{Sink, future::BoxFuture};
 use serde::{Deserialize, Serialize};
 use tower::Service;
 
@@ -187,10 +184,7 @@ where
                     let req = req.try_map(|arg| Encode::decode(&arg));
                     match req {
                         Ok(task) => {
-                            let res = step
-                                .run(&ctx, task)
-                                .await
-                                .map_err(|e| e.into())?;
+                            let res = step.run(&ctx, task).await.map_err(|e| e.into())?;
 
                             let _ = handle_workflow_result::<
                                 S::Response,

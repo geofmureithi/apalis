@@ -8,10 +8,14 @@ use apalis_core::{
     error::BoxDynError,
     task::{Task, metadata::MetadataExt},
 };
-use futures::{Sink, future::BoxFuture};
+use futures::{FutureExt, Sink, TryFutureExt, future::BoxFuture};
+use serde::{Deserialize, Serialize};
 use tower::Service;
 
 use crate::{CompositeService, GenerateId, GoTo, StepContext, WorkflowRequest};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepResult<T>(T);
 
 pub struct WorkFlowService<FlowSink, Encode, Compact, Context, IdType> {
     services: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
@@ -50,7 +54,7 @@ where
     Encode::Error: Into<BoxDynError>,
     FlowSink: Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = Err> + Unpin,
 {
-    type Response = Compact;
+    type Response = StepResult<Compact>;
     type Error = BoxDynError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -103,7 +107,7 @@ where
         req.parts.data.insert(ctx);
 
         self.not_ready.push_back(idx);
-        svc.call(req)
+        svc.call(req).map_ok(|res| StepResult(res)).boxed()
     }
 }
 
