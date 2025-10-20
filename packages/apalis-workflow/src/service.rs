@@ -15,7 +15,7 @@ use tower::Service;
 use crate::{CompositeService, GenerateId, GoTo, StepContext, WorkflowRequest};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StepResult<T>(T);
+pub struct StepResult<T>(pub T);
 
 pub struct WorkFlowService<FlowSink, Encode, Compact, Context, IdType> {
     services: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
