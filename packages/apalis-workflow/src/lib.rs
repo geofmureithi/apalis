@@ -18,10 +18,7 @@ use futures::{Sink, future::BoxFuture};
 use serde::{Deserialize, Serialize};
 use tower::Service;
 
-use crate::{
-    context::StepContext,
-    service::{WorkFlowService, handle_workflow_result},
-};
+use crate::{context::StepContext, service::WorkFlowService};
 
 mod context;
 mod id_generator;
@@ -30,6 +27,7 @@ mod steps;
 
 pub use crate::steps::{delay::DelayStep, filter_map::FilterMapStep, then::ThenStep};
 pub use id_generator::GenerateId;
+pub use service::{StepResult, handle_workflow_result};
 
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
 type SteppedService<Compact, Ctx, IdType> = BoxedService<Task<Compact, Ctx, IdType>, Compact>;
