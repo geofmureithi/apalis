@@ -8,7 +8,7 @@ readme = "README.md"
 
 license = "MIT"
 description = "SQL utilities for background job processing with apalis"
-keywords = ["job", "task", "scheduler", "worker", "cron", "sql", "database"]
+keywords = ["job", "task", "scheduler", "worker", "sql"]
 categories = ["database", "asynchronous", "background-jobs", "data-storage"]
 
 [dependencies]
