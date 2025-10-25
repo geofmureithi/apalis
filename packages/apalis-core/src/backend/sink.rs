@@ -1,12 +1,13 @@
-use futures_core::Stream;
-use futures_sink::Sink;
-use futures_util::stream;
-
 use crate::{
     backend::{Backend, codec::Codec},
     error::BoxDynError,
     task::Task,
 };
+use futures_core::Stream;
+use futures_sink::Sink;
+use futures_util::SinkExt;
+use futures_util::StreamExt;
+use futures_util::stream;
 
 /// Error type for TaskSink operations
 #[derive(Debug, thiserror::Error)]
@@ -43,6 +44,12 @@ pub trait TaskSink<Args>: Backend {
     fn push_task(
         &mut self,
         task: Task<Args, Self::Context, Self::IdType>,
+    ) -> impl Future<Output = Result<(), TaskSinkError<Self::Error>>> + Send;
+
+    /// Allows pushing a fully constructed task into the backend
+    fn push_all(
+        &mut self,
+        tasks: impl Stream<Item = Task<Args, Self::Context, Self::IdType>> + Unpin + Send,
     ) -> impl Future<Output = Result<(), TaskSinkError<Self::Error>>> + Send;
 }
 
@@ -85,8 +92,6 @@ where
         &mut self,
         tasks: impl Stream<Item = Args> + Unpin + Send,
     ) -> Result<(), TaskSinkError<Self::Error>> {
-        use futures_util::SinkExt;
-        use futures_util::StreamExt;
         Ok(self
             .sink_map_err(|e| TaskSinkError::PushError(e))
             .send_all(&mut tasks.map(Task::new).map(|task| {
@@ -102,6 +107,18 @@ where
         use futures_util::SinkExt;
         self.sink_map_err(|e| TaskSinkError::PushError(e))
             .send(task.try_map(|t| C::encode(&t).map_err(|e| TaskSinkError::CodecError(e.into())))?)
+            .await
+    }
+
+    async fn push_all(
+        &mut self,
+        tasks: impl Stream<Item = Task<Args, Self::Context, Self::IdType>> + Unpin + Send,
+    ) -> Result<(), TaskSinkError<Self::Error>> {
+        use futures_util::SinkExt;
+        self.sink_map_err(|e| TaskSinkError::PushError(e))
+            .send_all(&mut tasks.map(|task| {
+                task.try_map(|t| C::encode(&t).map_err(|e| TaskSinkError::CodecError(e.into())))
+            }))
             .await
     }
 }

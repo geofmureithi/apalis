@@ -59,9 +59,9 @@ You can track your workflows using [apalis-board](https://github.com/apalis-dev/
 ## Backend Support
 
 - [x] JSONStorage
-- [ ] SqliteStorage
+- [x] SqliteStorage
 - [ ] RedisStorage
-- [ ] PostgresStorage
+- [x] PostgresStorage
 
 ## Roadmap
 
@@ -75,7 +75,7 @@ You can track your workflows using [apalis-board](https://github.com/apalis-dev/
 
 ## See also:
 
-- (Underway)[https://github.com/maxcountryman/underway]: Postgres-only solution that inspired some parts of this crate
+- [Underway](https://github.com/maxcountryman/underway): Postgres-only solution that inspired some parts of this crate
 
 ## License
 

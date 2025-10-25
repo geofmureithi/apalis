@@ -9,13 +9,48 @@ use apalis_core::{
     task::{Task, metadata::MetadataExt},
 };
 use futures::{FutureExt, Sink, TryFutureExt, future::BoxFuture};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use serde_json::Value;
 use tower::Service;
 
 use crate::{CompositeService, GenerateId, GoTo, StepContext, WorkflowRequest};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StepResult<T>(pub T);
+
+impl Serialize for StepResult<Vec<u8>> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Try to deserialize the bytes as JSON
+        match serde_json::from_slice::<serde_json::Value>(&self.0) {
+            Ok(value) => value.serialize(serializer),
+            Err(e) => {
+                // If deserialization fails, serialize the error
+                use serde::ser::Error;
+                Err(S::Error::custom(e.to_string()))
+            }
+        }
+    }
+}
+
+impl Serialize for StepResult<serde_json::Value> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Try to deserialize the bytes as JSON
+        match Value::deserialize(&self.0) {
+            Ok(value) => value.serialize(serializer),
+            Err(e) => {
+                // If deserialization fails, serialize the error
+                use serde::ser::Error;
+                Err(S::Error::custom(e.to_string()))
+            }
+        }
+    }
+}
 
 pub struct WorkFlowService<FlowSink, Encode, Compact, Context, IdType> {
     services: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,

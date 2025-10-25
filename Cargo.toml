@@ -78,7 +78,7 @@ tokio = { version = "1", features = ["full"] }
 
 [workspace]
 members = [
-  "packages/apalis-core",
+  "packages/apalis-core", "packages/apalis-sql",
   "packages/apalis-workflow",
 ]
 
