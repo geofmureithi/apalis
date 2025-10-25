@@ -9,7 +9,7 @@ readme = "README.md"
 license = "MIT"
 description = "SQL utilities for background job processing with apalis"
 keywords = ["job", "task", "scheduler", "worker", "sql"]
-categories = ["database", "asynchronous", "background-jobs", "data-storage"]
+categories = ["database", "asynchronous"]
 
 [dependencies]
 apalis-core = { path = "../apalis-core", version = "1.0.0-alpha.7", default-features = false, features = [
