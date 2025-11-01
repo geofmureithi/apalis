@@ -1,6 +1,6 @@
 # apalis-workflow
 
-This crate provides a flexible and composable workflow engine for [apalis](https://github.com/geofmureithi/apalis). Can be used for building old school and advanced llm workflows.
+This crate provides a flexible and composable workflow engine for [apalis](https://github.com/geofmureithi/apalis). Can be used for building old school workflows or advanced LLM workflows.
 
 ## Overview
 
@@ -29,9 +29,9 @@ use apalis_core::worker::ext::event_listener::EventListenerExt;
 #[tokio::main]
 async fn main() {
    let workflow = WorkFlow::new("odd-numbers-workflow")
+       .delay_for(Duration::from_millis(1000))
        .then(|a: usize| async move { Ok::<_, WorkflowError>((0..a).collect::<Vec<_>>()) })
        .filter_map(|x| async move { if x % 2 != 0 { Some(x) } else { None } })
-       .delay_for(Duration::from_millis(1000))
        .then(|a: Vec<usize>| async move {
            println!("Sum: {}", a.iter().sum::<usize>());
            Ok::<_, WorkflowError>(())
@@ -60,8 +60,10 @@ You can track your workflows using [apalis-board](https://github.com/apalis-dev/
 
 - [x] JSONStorage
 - [x] SqliteStorage
-- [ ] RedisStorage
+- [x] RedisStorage
 - [x] PostgresStorage
+- [ ] MysqlStorage
+- [ ] RsMq
 
 ## Roadmap
 
