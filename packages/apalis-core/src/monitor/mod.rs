@@ -138,7 +138,10 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures_util::{Future, FutureExt, StreamExt, future::BoxFuture};
+use futures_util::{
+    Future, FutureExt, StreamExt,
+    future::{BoxFuture, Shared},
+};
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -162,13 +165,21 @@ struct MonitoredWorker {
     factory: Box<
         dyn Fn(usize) -> (WorkerContext, BoxFuture<'static, Result<(), WorkerError>>)
             + 'static
-            + Send,
+            + Send
+            + Sync,
     >,
     #[pin]
-    current: Option<(WorkerContext, BoxFuture<'static, Result<(), WorkerError>>)>,
+    current: Option<(
+        WorkerContext,
+        Shared<BoxFuture<'static, Result<(), Arc<WorkerError>>>>,
+    )>,
     attempt: usize,
     should_restart: Arc<
-        RwLock<Option<Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + 'static + Send>>>,
+        RwLock<
+            Option<
+                Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + 'static + Send + Sync>,
+            >,
+        >,
     >,
 }
 
@@ -187,16 +198,20 @@ impl Future for MonitoredWorker {
         let mut this = self.project();
 
         loop {
+            use futures_util::TryFutureExt;
             if this.current.is_none() {
-                let worker = (this.factory)(*this.attempt);
-                this.current.set(Some(worker));
+                let (ctx, worker) = (this.factory)(*this.attempt);
+                this.current.set(Some((
+                    ctx,
+                    worker.map_err(|e: WorkerError| Arc::new(e)).boxed().shared(),
+                )));
             }
 
             let mut current = this.current.as_mut().as_pin_mut().unwrap();
             if current.0.is_running() && current.0.is_shutting_down() {
                 return Poll::Ready(Ok(()));
             }
-            let poll_result = catch_unwind(AssertUnwindSafe(|| current.1.as_mut().poll(cx)))
+            let poll_result = catch_unwind(AssertUnwindSafe(|| current.1.poll_unpin(cx)))
                 .map_err(|err| {
                     let err = if let Some(s) = err.downcast_ref::<&str>() {
                         s.to_string()
@@ -205,7 +220,7 @@ impl Future for MonitoredWorker {
                     } else {
                         "Unknown panic".to_string()
                     };
-                    WorkerError::PanicError(err)
+                    Arc::new(WorkerError::PanicError(err))
                 });
 
             match poll_result {
@@ -218,11 +233,11 @@ impl Future for MonitoredWorker {
                     match should_restart.as_ref().map(|s| s.as_ref()) {
                         Ok(Some(cb)) => {
                             if !(cb)(&ctx, &e, *this.attempt) {
-                                return Poll::Ready(Err(MonitoredWorkerError { ctx, error: e }));
+                                return Poll::Ready(Err(MonitoredWorkerError { ctx, error: Arc::into_inner(e).unwrap() }));
                             }
                             *this.attempt += 1;
                         }
-                        _ => return Poll::Ready(Err(MonitoredWorkerError { ctx, error: e })),
+                        _ => return Poll::Ready(Err(MonitoredWorkerError { ctx, error: Arc::into_inner(e).unwrap() })),
                     }
                 }
             }
@@ -230,14 +245,17 @@ impl Future for MonitoredWorker {
     }
 }
 
-type ShouldRestart =
-    Arc<RwLock<Option<Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + 'static + Send>>>>;
+type ShouldRestart = Arc<
+    RwLock<
+        Option<Box<dyn Fn(&WorkerContext, &WorkerError, usize) -> bool + Send + Sync + 'static>>,
+    >,
+>;
 
 /// A monitor for coordinating and managing a collection of workers.
 #[derive(Default)]
 pub struct Monitor {
     workers: Vec<MonitoredWorker>,
-    terminator: Option<BoxFuture<'static, ()>>,
+    terminator: Option<Shared<BoxFuture<'static, ()>>>,
     shutdown: Shutdown,
     event_handler: EventHandlerBuilder,
     should_restart: ShouldRestart,
@@ -309,7 +327,7 @@ impl Monitor {
     /// ```
     pub fn register<Args, S, B, M>(
         mut self,
-        factory: impl Fn(usize) -> Worker<Args, B::Context, B, S, M> + 'static + Send,
+        factory: impl Fn(usize) -> Worker<Args, B::Context, B, S, M> + 'static + Send + Sync,
     ) -> Self
     where
         S: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
@@ -489,14 +507,14 @@ impl Monitor {
     /// signal (or combination) to force a full shutdown even if one or more tasks are taking
     /// longer than expected to finish.
     pub fn with_terminator(mut self, fut: impl Future<Output = ()> + Send + 'static) -> Self {
-        self.terminator = Some(fut.boxed());
+        self.terminator = Some(fut.boxed().shared());
         self
     }
 
     /// Allows controlling the restart strategy for workers
     pub fn should_restart<F>(self, cb: F) -> Self
     where
-        F: Fn(&WorkerContext, &WorkerError, usize) -> bool + Send + 'static,
+        F: Fn(&WorkerContext, &WorkerError, usize) -> bool + Send + Sync + 'static,
     {
         let _ = self.should_restart.write().map(|mut res| {
             let _ = res.insert(Box::new(cb));
@@ -538,6 +556,7 @@ impl std::fmt::Display for ExitError {
 }
 
 #[cfg(test)]
+#[cfg(feature = "json")]
 mod tests {
     use super::*;
     use crate::{
@@ -637,6 +656,8 @@ mod tests {
 
         let monitor: Monitor = Monitor::new();
 
+        assert_send_sync::<Monitor>();
+
         let monitor = monitor.on_event(|wrk, e| {
             println!("{:?}, {e:?}", wrk.name());
         });
@@ -677,4 +698,6 @@ mod tests {
         let result = monitor.run().await;
         assert!(result.is_ok());
     }
+
+    fn assert_send_sync<T: Send + Sync>() {}
 }

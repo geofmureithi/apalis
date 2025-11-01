@@ -605,6 +605,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg(feature = "json")]
 mod tests {
     use std::{
         future::ready,

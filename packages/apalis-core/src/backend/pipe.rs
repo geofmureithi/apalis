@@ -228,6 +228,7 @@ pub enum PipeError {
 }
 
 #[cfg(test)]
+#[cfg(feature = "json")]
 mod tests {
     use std::{io, time::Duration};
 

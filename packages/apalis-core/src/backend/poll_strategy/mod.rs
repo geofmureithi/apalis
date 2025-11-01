@@ -119,6 +119,7 @@ mod tests {
     type InMemoryQueue<T> = Arc<Mutex<VecDeque<Task<T, ()>>>>;
 
     #[tokio::test]
+    #[cfg(feature = "sleep")]
     async fn basic_strategy_backend() {
         let memory: InMemoryQueue<u32> = Arc::new(Mutex::new(VecDeque::new()));
 
@@ -204,6 +205,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "sleep")]
     async fn custom_strategy_backend() {
         let memory: InMemoryQueue<u32> = Arc::new(Mutex::new(VecDeque::new()));
 
