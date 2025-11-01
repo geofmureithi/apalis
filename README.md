@@ -34,7 +34,7 @@
 
 - Simple and predictable task handling model.
 - Task handlers are just an async function with a macro free API.
-- Familiar dependency injection for task handlers, similar to actix and axum.
+- Familiar dependency injection for task handlers, similar to [`actix`] and [`axum`].
 - Take full advantage of the [`tower`] ecosystem of middleware, services, and utilities.
 - Easy to scale, backends are distributed by default.
 - Runtime agnostic - Use tokio, smol etc.
@@ -63,7 +63,7 @@ To get started, just add to Cargo.toml
 ```toml
 [dependencies]
 apalis = { version = "1.0.0-alpha.8", features = "limit" } # Limit for concurrency
-apalis-redis = { version = "0.7" } # Use redis for persistence
+apalis-redis = { version = "1.0.0-alpha.1" } # Use redis for persistence
 ```
 
 ## Usage
@@ -156,18 +156,27 @@ sequenceDiagram
     Worker->>+Backend: Update task status to 'completed'
 ```
 
+## Integrations
+- [zino](https://crates.io/crates/zino-core): Next-generation framework for composable applications in Rust.
+- [spring-rs](https://github.com/spring-rs/spring-rs): Application framework written in Rust, inspired by Java's SpringBoot
+
+## Projects using apalis
+
+- [Ryot](https://github.com/IgnisDa/ryot): A self hosted platform for tracking various facets of your life - media, fitness etc.
+- [Hyprnote](https://github.com/fastrepl/hyprnote): Local-first AI Notepad for Private Meetings 
+- [oxy](https://github.com/oxy-hq/oxy): A framework for building SQL agents and automations for analytics. 
+- [OpenZeppelin Relayer](https://github.com/OpenZeppelin/openzeppelin-relayer): OpenZeppelin relayer service
+- [Summarizer](https://github.com/akhildevelops/summarizer): Podcast summarizer
+- [Universal Inbox](https://github.com/universal-inbox/universal-inbox): Universal Inbox is a solution that centralizes all your notifications and tasks in one place to create a unique inbox.
+- [Hatsu](https://github.com/importantimport/hatsu): Self-hosted and fully-automated ActivityPub bridge for static sites.
+- [Stamon](https://github.com/krivahtoo/stamon): A lightweight self-hosted status monitoring tool
+- [Gq](https://github.com/jorgehermo9/gq): open-source filtering tool for JSON and YAML files
+
 ## External examples
 
 - [Shuttle](https://github.com/shuttle-hq/shuttle-examples/tree/main/shuttle-cron): Using apalis-cron with [shuttle.rs](https://shuttle.rs)
 - [Actix-Web](https://github.com/actix/examples/tree/master/background-jobs): Using apalis-redis with actix-web
 - [Zino-Example](https://github.com/apalis-dev/zino-example): Using [zino](https://crates.io/crates/zino)
-
-## Projects using apalis
-
-- [Ryot](https://github.com/IgnisDa/ryot): A self hosted platform for tracking various facets of your life - media, fitness etc.
-- [Summarizer](https://github.com/akhildevelops/summarizer): Podcast summarizer
-- [Universal Inbox](https://github.com/universal-inbox/universal-inbox): Universal Inbox is a solution that centralizes all your notifications and tasks in one place to create a unique inbox.
-- [Hatsu](https://github.com/importantimport/hatsu): Self-hosted and fully-automated ActivityPub bridge for static sites.
 
 ## Resources
 
@@ -177,16 +186,16 @@ sequenceDiagram
 
 ### Web UI
 
-If you are running [apalis Board](https://github.com/geofmureithi/apalis-board), you can easily manage your jobs. See a working [rest API example here](https://github.com/geofmureithi/apalis/tree/main/examples/rest-api)
+If you are running the [web UI](https://github.com/apalis-dev/apalis-board), you can easily manage your jobs. See a working [rest API example here](https://github.com/apalis-dev/apalis-board/blob/master/examples/axum-email-service)
 
-<img src="https://github.com/geofmureithi/apalis-board/raw/master/screenshots/workers.png" width="100%">
+<img src="https://github.com/apalis-dev/apalis-board/raw/master/screenshots/workers.png" width="100%">
 
 ## Thanks to
 
 - [`tower`] - Tower is a library of modular and reusable components for building robust networking clients and servers.
-- [redis-rs](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
-- [sqlx](https://github.com/launchbadge/sqlx) - The Rust SQL Toolkit
-- [cron](https://docs.rs/cron/latest/cron/) - A cron expression parser and schedule explorer
+- [`redis-rs`](https://github.com/mitsuhiko/redis-rs) - Redis library for rust
+- [`sqlx`](https://github.com/launchbadge/sqlx) - The Rust SQL Toolkit
+- [`cron`](https://docs.rs/cron/latest/cron/) - A cron expression parser and schedule explorer
 
 ## Contributing
 
@@ -196,9 +205,7 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduc
 
 We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/geofmureithi/apalis/tags).
 
-## Authors
-
-- **Njuguna Mureithi** - _Initial work_ - [Njuguna Mureithi](https://github.com/geofmureithi)
+## Contributors
 
 See also the list of [contributors](https://github.com/geofmureithi/apalis/contributors) who participated in this project.
 
@@ -209,3 +216,4 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 [`tower::Service`]: https://docs.rs/tower/latest/tower/trait.Service.html
 [`tower`]: https://crates.io/crates/tower
 [`actix`]: https://crates.io/crates/actix
+[`axum`]: https://crates.io/crates/axum

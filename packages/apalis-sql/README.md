@@ -23,6 +23,11 @@ The following are the supported backends:
  apalis-sqlite = "1"
  ```
 
+ ## Observability
+
+You can track your jobs using [apalis-board](https://github.com/apalis-dev/apalis-board).
+![Task](https://github.com/apalis-dev/apalis-board/raw/master/screenshots/task.png)
+
  ## Licence
 
  MIT
