@@ -136,7 +136,7 @@ where
     <TSink as Sink<Task<TSink::Compact, Ctx, TSink::IdType>>>::Error:
         std::error::Error + Send + Sync + 'static,
     <<TSink as Backend>::Codec as Codec<Args>>::Error: std::error::Error + Send + Sync + 'static,
-    TSink::Compact: Send
+    TSink::Compact: Send,
 {
     type Args = Args;
 

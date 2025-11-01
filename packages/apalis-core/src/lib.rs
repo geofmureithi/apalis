@@ -304,7 +304,7 @@
 //! # Observability
 //! You can track tasks using [apalis-board](https://github.com/apalis-dev/apalis-board).
 //! ![Task](https://github.com/apalis-dev/apalis-board/raw/master/screenshots/task.png)
-//! 
+//!
 //! [`Backend`]: crate::backend::Backend
 //! [`TaskFn`]: crate::task_fn::TaskFn
 //! [`Service`]: tower_service::Service

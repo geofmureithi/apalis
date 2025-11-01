@@ -9,12 +9,10 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
-    backend::{
-        impls::json::{
-            JsonStorage,
-            meta::JsonMapMetadata,
-            util::{TaskKey, TaskWithMeta},
-        },
+    backend::impls::json::{
+        JsonStorage,
+        meta::JsonMapMetadata,
+        util::{TaskKey, TaskWithMeta},
     },
     task::{Task, task_id::TaskId},
 };

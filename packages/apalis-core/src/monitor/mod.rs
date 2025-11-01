@@ -203,7 +203,10 @@ impl Future for MonitoredWorker {
                 let (ctx, worker) = (this.factory)(*this.attempt);
                 this.current.set(Some((
                     ctx,
-                    worker.map_err(|e: WorkerError| Arc::new(e)).boxed().shared(),
+                    worker
+                        .map_err(|e: WorkerError| Arc::new(e))
+                        .boxed()
+                        .shared(),
                 )));
             }
 
@@ -211,8 +214,8 @@ impl Future for MonitoredWorker {
             if current.0.is_running() && current.0.is_shutting_down() {
                 return Poll::Ready(Ok(()));
             }
-            let poll_result = catch_unwind(AssertUnwindSafe(|| current.1.poll_unpin(cx)))
-                .map_err(|err| {
+            let poll_result =
+                catch_unwind(AssertUnwindSafe(|| current.1.poll_unpin(cx))).map_err(|err| {
                     let err = if let Some(s) = err.downcast_ref::<&str>() {
                         s.to_string()
                     } else if let Some(s) = err.downcast_ref::<String>() {
@@ -233,11 +236,19 @@ impl Future for MonitoredWorker {
                     match should_restart.as_ref().map(|s| s.as_ref()) {
                         Ok(Some(cb)) => {
                             if !(cb)(&ctx, &e, *this.attempt) {
-                                return Poll::Ready(Err(MonitoredWorkerError { ctx, error: Arc::into_inner(e).unwrap() }));
+                                return Poll::Ready(Err(MonitoredWorkerError {
+                                    ctx,
+                                    error: Arc::into_inner(e).unwrap(),
+                                }));
                             }
                             *this.attempt += 1;
                         }
-                        _ => return Poll::Ready(Err(MonitoredWorkerError { ctx, error: Arc::into_inner(e).unwrap() })),
+                        _ => {
+                            return Poll::Ready(Err(MonitoredWorkerError {
+                                ctx,
+                                error: Arc::into_inner(e).unwrap(),
+                            }));
+                        }
                     }
                 }
             }
@@ -281,12 +292,13 @@ impl Monitor {
         S::Error: Send + Sync + 'static + Into<BoxDynError>,
         B: Backend<Args = Args> + Send + 'static,
         B::Error: Into<BoxDynError> + Send + 'static,
-        M: Layer<ReadinessService<TrackerService<S>>> + 'static,
-        B::Layer: Layer<M::Service> + 'static,
-        <B::Layer as Layer<M::Service>>::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
-        <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
-            Into<BoxDynError> + Send + Sync + 'static,
-        <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
+        B::Layer: Layer<ReadinessService<TrackerService<S>>> + 'static,
+        M: Layer<<<B as Backend>::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service> + 'static,
+        <M as Layer<
+            <<B as Backend>::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service,
+        >>::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
+            <<M as Layer<<B::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
+        <<M as Layer<<B::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
         B::Stream: Unpin + Send + 'static,
         B::Beat: Unpin + Send,
         Args: Send + 'static,
@@ -339,12 +351,14 @@ impl Monitor {
         B::Beat: Unpin + Send,
         Args: Send + 'static,
         B::Context: Send + 'static,
-        M: Layer<ReadinessService<TrackerService<S>>> + 'static,
-        B::Layer: Layer<M::Service> + 'static,
-        <B::Layer as Layer<M::Service>>::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
-        <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
+        B::Layer: Layer<ReadinessService<TrackerService<S>>> + 'static,
+        M: Layer<<<B as Backend>::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service> + 'static,
+        <M as Layer<
+            <<B as Backend>::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service,
+        >>::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
+            <<M as Layer<<B::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
+        <<M as Layer<<B::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
             Into<BoxDynError> + Send + Sync + 'static,
-        <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
         B::IdType: Send + Sync + 'static,
     {
         let shutdown = Some(self.shutdown.clone());

@@ -20,10 +20,7 @@
 //! - [`CustomBackend`](custom::CustomBackend): A flexible backend allowing custom functions for task management
 use std::{future::Future, time::Duration};
 
-use futures_util::{
-    Stream,
-    stream::{BoxStream},
-};
+use futures_util::{Stream, stream::BoxStream};
 
 use crate::{
     backend::codec::Codec,
@@ -44,8 +41,8 @@ mod expose;
 mod impls;
 mod sink;
 
-pub use sink::*;
 pub use expose::*;
+pub use sink::*;
 
 pub use impls::guide;
 

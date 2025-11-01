@@ -255,33 +255,42 @@ where
     }
 }
 
-macro_rules! impl_check_fn {
-    ($($num:tt => $($arg:ident),+);+ $(;)?) => {
-        $(
-            #[inline]
-            #[doc = concat!("A helper for checking that the builder can build a worker with the provided service (", stringify!($num), " arguments)")]
-            pub fn $num<
-                F,
-                $($arg: FromRequest<Task<Args, Ctx, B::IdType>>),+
-            >(
-                self,
-                _: F,
-            ) where
-                TaskFn<F, Args, Ctx, ($($arg,)+)>: Service<Task<Args, Ctx, B::IdType>>,
-            {
-            }
-        )+
-    };
-}
 
-use crate::task_fn::{FromRequest, TaskFn};
 
-impl<Args, Ctx, M, B> WorkerBuilder<Args, Ctx, B, M>
-where
-    B: Backend<Args = Args>,
-{
+/// Module for validating task function implementations
+/// This module provides macros and utilities to ensure that task functions
+/// conform to the expected signatures and can be converted into worker services.
+#[cfg(feature = "test-utils")]
+pub mod task_fn_validator {
+    use crate::backend::Backend;
+    use crate::task::Task;
+    use tower_service::Service;
+
+    use crate::task_fn::{FromRequest, TaskFn};
+
+
+    /// Macro for implementing the check functions
+    macro_rules! impl_check_fn {
+        ($($num:tt => $($arg:ident),+);+ $(;)?) => {
+            $(
+                #[inline]
+                #[doc = concat!("A helper for checking that the builder can build a worker with the provided service (", stringify!($num), " arguments)")]
+                pub fn $num<
+                    F, B, Args, Ctx,
+                    $($arg: FromRequest<Task<Args, Ctx, B::IdType>>),+
+                >(
+                    _: F,
+                ) where
+                    TaskFn<F, Args, Ctx, ($($arg,)+)>: Service<Task<Args, Ctx, B::IdType>>,
+                    B: Backend<Args = Args>
+                {
+                }
+            )+
+        };
+    }
+
     impl_check_fn! {
-        check_fn => A1;
+        check_fn_1 => A1;
         check_fn_2 => A1, A2;
         check_fn_3 => A1, A2, A3;
         check_fn_4 => A1, A2, A3, A4;

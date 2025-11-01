@@ -1,5 +1,8 @@
-use std::{error::Error as StdError, time::Duration};
+use std::{
+    error::Error as StdError, marker::PhantomData, pin::Pin, task::{Context, Poll}, time::Duration
+};
 use thiserror::Error;
+use tower_service::Service;
 
 /// Convenience type alias
 pub type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
@@ -62,7 +65,7 @@ pub enum WorkerError {
     HeartbeatError(BoxDynError),
     /// An error occurred while trying to change the state of the worker.
     #[error("Failed to handle the new state: {0}")]
-    StateError(WorkerStateError),
+    StateError(#[from] WorkerStateError),
     /// A worker that terminates when .stop was called
     #[error("Worker stopped and gracefully exited")]
     GracefulExit,
@@ -95,4 +98,69 @@ pub enum WorkerStateError {
     /// Invalid state provided
     #[error("Worker provided with invalid state {0}")]
     InvalidState(String),
+}
+
+/// A Tower layer for handling and converting service errors into a `BoxDynError`.
+///
+/// The service's error type must implement `std::error::Error`, allowing for flexible
+/// error handling, especially when dealing with trait objects or complex error chains.
+#[derive(Clone, Debug)]
+pub struct ErrorHandlingLayer {
+    _p: PhantomData<()>,
+}
+
+impl ErrorHandlingLayer {
+    /// Create a new ErrorHandlingLayer
+    pub fn new() -> Self {
+        Self { _p: PhantomData }
+    }
+}
+
+impl Default for ErrorHandlingLayer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<S> tower_layer::Layer<S> for ErrorHandlingLayer {
+    type Service = ErrorHandlingService<S>;
+
+    fn layer(&self, service: S) -> Self::Service {
+        ErrorHandlingService { service }
+    }
+}
+
+/// The underlying service
+#[derive(Clone, Debug)]
+pub struct ErrorHandlingService<S> {
+    service: S,
+}
+
+impl<S, Request> Service<Request> for ErrorHandlingService<S>
+where
+    S: Service<Request>,
+    S::Error: std::error::Error + Send + Sync + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = BoxDynError;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx).map_err(|e| {
+            let boxed_error: BoxDynError = e.into();
+            boxed_error
+        })
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        let fut = self.service.call(req);
+
+        Box::pin(async move {
+            fut.await.map_err(|e| {
+                let boxed_error: BoxDynError = e.into();
+                boxed_error
+            })
+        })
+    }
 }

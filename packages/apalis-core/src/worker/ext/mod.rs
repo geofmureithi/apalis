@@ -10,6 +10,7 @@
 //! - [`event_listener`]: Traits for subscribing to and handling worker events.
 //! - [`long_running`]: Traits for building long running workers and tasks.
 //! - [`circuit_breaker`]: Traits for adding circuit breaker patterns to workers.
+//! - [`parallelize`]: Traits for enabling parallel task execution within workers.
 //!
 //! These extensions can be composed to customize worker behavior, improve reliability, and add observability.
 //!
@@ -53,3 +54,4 @@ pub mod ack;
 pub mod circuit_breaker;
 pub mod event_listener;
 pub mod long_running;
+pub mod parallelize;

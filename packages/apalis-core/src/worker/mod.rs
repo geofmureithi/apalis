@@ -6,10 +6,10 @@
 //!
 //! # Features
 //! - Pluggable backends for task queues (e.g., in-memory, Redis).
-//! - Middleware support for request processing.
+//! - Middleware support for task processing.
 //! - Stream or future-based worker execution modes.
 //! - Built-in event system for logging or metrics.
-//! - Job tracking and readiness probing.
+//! - Task tracking and controlled worker readiness.
 //!
 //! # Lifecycle
 //!
@@ -191,12 +191,12 @@ where
     Args: Send + 'static,
     B::Context: Send + 'static,
     B::Error: Into<BoxDynError> + Send + 'static,
-    M: Layer<ReadinessService<TrackerService<S>>>,
-    B::Layer: Layer<M::Service>,
-    <B::Layer as Layer<M::Service>>::Service: Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error:
-        Into<BoxDynError> + Send + Sync + 'static,
-    <<B::Layer as Layer<M::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
+    B::Layer: Layer<ReadinessService<TrackerService<S>>>,
+    M: Layer<<B::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>,
+    <M as Layer<<B::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>>::Service:
+        Service<Task<Args, B::Context, B::IdType>> + Send + 'static,
+    <<M as Layer<<B::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Future: Send,
+        <<M as Layer<<B::Layer as Layer<ReadinessService<TrackerService<S>>>>::Service>>::Service as Service<Task<Args, B::Context, B::IdType>>>::Error: Into<BoxDynError> + Send + Sync + 'static,
     B::IdType: Send + 'static,
 {
     /// Run the worker until completion
@@ -387,10 +387,10 @@ where
             layer: Data::new(worker.clone()),
         };
         let service = svc
-            // backend middleware should be the outermost layer so it can observe all requests
-            .layer(backend_middleware)
-            // pass the user defined middleware next
+            // pass the user defined middleware first
             .layer(self.middleware)
+            // backend middleware should be the next layer so it can observe all requests released by user middleware
+            .layer(backend_middleware)
             // when all layers are ready, inform the worker is ready to accept tasks
             .layer(ReadinessLayer::new(worker.clone()))
             // Track all tasks to allow graceful shutdowns
