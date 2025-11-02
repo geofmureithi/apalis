@@ -192,8 +192,7 @@ macro_rules! features_table {
     // Standardized assert function mapping for identifiers
     (@assert_function Workflow) => { concat!(
         "    # use apalis_workflow::*;\n",
-        "    # use apalis_core::backend::WeakTaskSink;\n",
-        "    backend.push(42).await.unwrap();\n\n",
+        "    backend.push_start(42).await.unwrap();\n\n",
         "    async fn task1(task: u32, worker: WorkerContext) -> u32 {\n",
         "        task + 99 \n",
         "    }\n",
