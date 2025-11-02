@@ -62,7 +62,7 @@ use std::ops::{Deref, DerefMut};
 
 /// A generic pipe that wraps a [`Stream`] and passes it to a backend
 #[doc = features_table! {
-    setup = unreachable!();,
+    setup = "unreachable!();";,
     TaskSink => supported("Ability to push new tasks", false),
     InheritsFeatures => limited("Inherits features from the underlying backend", false),
 }]

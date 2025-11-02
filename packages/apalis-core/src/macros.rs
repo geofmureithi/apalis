@@ -62,7 +62,7 @@ macro_rules! error {
 #[macro_export]
 macro_rules! features_table {
     (
-        setup = $setup:expr;,
+        setup = $setup:literal;,
         $(
             $feature:tt => $status:ident($description:literal $(, $include_example:tt)?)
         ),* $(,)?
@@ -114,41 +114,41 @@ macro_rules! features_table {
     };
 
     // Helper to decide whether to generate doctest - with explicit flag
-    (@maybe_generate_doctest $setup:expr, $feature:tt, $status:ident, $include_example:tt) => {
+    (@maybe_generate_doctest $setup:literal, $feature:tt, $status:ident, $include_example:tt) => {
         features_table!(@check_should_generate $setup, $feature, $status, $include_example)
     };
 
     // Helper to decide whether to generate doctest - without explicit flag (default behavior)
-    (@maybe_generate_doctest $setup:expr, $feature:tt, $status:ident) => {
+    (@maybe_generate_doctest $setup:literal, $feature:tt, $status:ident) => {
         features_table!(@check_should_generate $setup, $feature, $status, default)
     };
 
     // Check if we should generate - true flag
-    (@check_should_generate $setup:expr, $feature:tt, $status:ident, true) => {
+    (@check_should_generate $setup:literal, $feature:tt, $status:ident, true) => {
         features_table!(@do_generate_doctest $setup, $feature, $status)
     };
 
     // Check if we should generate - false flag
-    (@check_should_generate $setup:expr, $feature:tt, $status:ident, false) => {
+    (@check_should_generate $setup:literal, $feature:tt, $status:ident, false) => {
         ""
     };
 
     // Check if we should generate - default behavior
-    (@check_should_generate $setup:expr, $feature:tt, supported, default) => {
+    (@check_should_generate $setup:literal, $feature:tt, supported, default) => {
         features_table!(@do_generate_doctest $setup, $feature, supported)
     };
-    (@check_should_generate $setup:expr, $feature:tt, limited, default) => {
+    (@check_should_generate $setup:literal, $feature:tt, limited, default) => {
         features_table!(@do_generate_doctest $setup, $feature, limited)
     };
-    (@check_should_generate $setup:expr, $feature:tt, not_implemented, default) => {
+    (@check_should_generate $setup:literal, $feature:tt, not_implemented, default) => {
         ""
     };
-    (@check_should_generate $setup:expr, $feature:tt, not_supported, default) => {
+    (@check_should_generate $setup:literal, $feature:tt, not_supported, default) => {
         ""
     };
 
     // Actually generate the doctest
-    (@do_generate_doctest $setup:expr, $feature:ident, $status:ident) => {
+    (@do_generate_doctest $setup:literal, $feature:ident, $status:ident) => {
         concat!(
             "#### ", stringify!($feature), "\n\n",
             "```rust\n",
@@ -157,7 +157,7 @@ macro_rules! features_table {
             "#[tokio::main]\n",
             "async fn main() {\n",
             "    // let mut backend = /* snip */;\n",
-            "# let mut backend = ", stringify!($setup), ";\n",
+            "    # let mut backend = ", stringify!($setup), ";\n",
             features_table!(@assert_function $feature), "\n",
             "```\n\n"
         )
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn test_clean_table_structure_with_example_flags() {
         let table = features_table! {
-            setup = MemoryStorage::new();,
+            setup = { MemoryStorage::new() };,
             TaskSink => supported("Ability to push new tasks", true),
             Serialization => limited("Serialization support for arguments. Only accepts `json`", false),
             FetchById => not_implemented("Allow fetching a task by its ID"),

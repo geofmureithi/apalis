@@ -121,7 +121,7 @@ use crate::{backend::Backend, task::Task, worker::context::WorkerContext};
 ///     .unwrap();
 /// ```
 #[doc = features_table! {
-    setup = unreachable!();,
+    setup = "unreachable!();";,
     TaskSink => supported("Ability to push new tasks", false),
     Serialization => supported("Serialization support for arguments", false),
     FetchById => not_supported("Allow fetching a task by its ID"),

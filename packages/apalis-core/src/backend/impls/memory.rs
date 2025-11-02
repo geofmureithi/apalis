@@ -65,18 +65,18 @@ use tower_layer::Identity;
 /// In-memory queue that is based on channels
 ///
 #[doc = features_table! {
-    setup = {
-        use apalis_core::backend::memory::MemoryStorage;
-        // No migrations
-        MemoryStorage::new()
-    };,
+    setup = "{
+    #    use apalis_core::backend::memory::MemoryStorage;
+    #    // No migrations
+    #    MemoryStorage::new()
+    # };";,
 
     Backend => supported("Basic Backend functionality", true),
     TaskSink => supported("Ability to push new tasks", true),
     Serialization => not_supported("Serialization support for arguments"),
 
     PipeExt => not_implemented("Allow other backends to pipe to this backend"),
-    MakeShared => not_supported("Share the same JSON storage across multiple workers"),
+    MakeShared => not_supported("Share the same storage across multiple workers"),
 
     Update => not_supported("Allow updating a task"),
     FetchById => not_supported("Allow fetching a task by its ID"),

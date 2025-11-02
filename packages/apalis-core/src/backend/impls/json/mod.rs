@@ -84,7 +84,11 @@ pub use self::shared::SharedJsonStore;
 ///
 /// *Warning*: This backend is not optimized for high-throughput scenarios and is best suited for development, testing, or low-volume workloads.
 #[doc = features_table! {
-    setup = {use apalis_core::backend::json::JsonStorage;JsonStorage::new_temp().unwrap()};,
+    setup = "{
+        # use apalis_core::backend::json::JsonStorage;
+        # // Creates a temporary JSON storage backend
+        # JsonStorage::new_temp().unwrap()
+    # };";,
 
     Backend => supported("Basic Backend functionality", true),
     TaskSink => supported("Ability to push new tasks", true),
