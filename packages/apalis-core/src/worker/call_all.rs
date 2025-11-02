@@ -94,7 +94,8 @@ impl<F: Future> Drive<F> for FuturesUnordered<F> {
     }
 }
 
-/// The [`Future`] returned by the [`ServiceExt::call_all`] combinator.
+/// The [`Future`] returned by the [`ServiceExt::call_all`](https://docs.rs/tower/latest/tower/trait.ServiceExt.html#method.call_all) combinator.
+///
 #[pin_project::pin_project]
 pub(crate) struct CallAll<Svc, S, T, Q, E>
 where

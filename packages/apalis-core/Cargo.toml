@@ -70,3 +70,4 @@ tokio = { version = "1.37.0", features = [
     "signal",
 ] }
 tower = { version = "0.5", features = ["full"] }
+apalis-workflow = { path = "../apalis-workflow", version = "0.1.0-alpha.6" } # For json backend tests

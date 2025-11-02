@@ -24,12 +24,9 @@
 //!     .build();
 //! ```
 //!
-use crate::{
-    backend::queue::Queue,
-    task::{
-        Parts, Task, attempt::Attempt, extensions::Extensions, metadata::MetadataExt,
-        status::Status, task_id::TaskId,
-    },
+use crate::task::{
+    Parts, Task, attempt::Attempt, extensions::Extensions, metadata::MetadataExt, status::Status,
+    task_id::TaskId,
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -43,7 +40,6 @@ pub struct TaskBuilder<Args, Ctx, IdType> {
     pub(super) attempt: Option<Attempt>,
     pub(super) status: Option<Status>,
     pub(super) run_at: Option<u64>,
-    pub(super) queue: Option<Queue>,
 }
 
 impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
@@ -60,7 +56,6 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
             attempt: None,
             status: None,
             run_at: None,
-            queue: None,
         }
     }
 
@@ -108,12 +103,6 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
     /// Set the task status
     pub fn with_status(mut self, status: Status) -> Self {
         self.status = Some(status);
-        self
-    }
-
-    /// Set the task's queue
-    pub fn with_queue<S: AsRef<str>>(mut self, queue: S) -> Self {
-        self.queue = Some(Queue::from(queue.as_ref()));
         self
     }
 
@@ -178,7 +167,6 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
                 ctx: self.ctx,
                 status: self.status.unwrap_or(Status::Pending).into(),
                 run_at: self.run_at.unwrap_or_else(current_time),
-                queue: self.queue,
             },
         }
     }

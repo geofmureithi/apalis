@@ -80,28 +80,29 @@ mod sink;
 mod util;
 
 pub use self::shared::SharedJsonStore;
-
 /// A backend that persists to a file using json encoding
 ///
 /// *Warning*: This backend is not optimized for high-throughput scenarios and is best suited for development, testing, or low-volume workloads.
 #[doc = features_table! {
-    setup = {
-        use apalis_core::backend::json::JsonStorage;
-        JsonStorage::new_temp().unwrap()
-    };,
-    TaskSink => supported("Ability to push new tasks"),
+    setup = {use apalis_core::backend::json::JsonStorage;JsonStorage::new_temp().unwrap()};,
+
+    Backend => supported("Basic Backend functionality", true),
+    TaskSink => supported("Ability to push new tasks", true),
     Serialization => limited("Serialization support for arguments. Only accepts `json`", false),
+    WebUI => not_implemented("Expose a web interface for monitoring tasks"),
     FetchById => not_implemented("Allow fetching a task by its ID"),
     RegisterWorker => not_supported("Allow registering a worker with the backend"),
-    PipeExt => supported("Allow other backends to pipe to this backend", false),
-    MakeShared => supported("Share the same JSON storage across multiple workers", false),
-    Workflow => supported("Flexible enough to support workflows", false),
-    WaitForCompletion => supported("Wait for tasks to complete without blocking", false),
+    "[`PipeExt`]" => supported("Allow other backends to pipe to this backend", false),
+    MakeShared => supported("Share the same JSON storage across multiple workers via [`SharedJsonStore`]", false),
+    Workflow => supported("Flexible enough to support workflows", true),
+    WaitForCompletion => supported("Wait for tasks to complete without blocking", true),
     ResumeById => not_implemented("Resume a task by its ID"),
     ResumeAbandoned => not_implemented("Resume abandoned tasks"),
     ListWorkers => not_supported("List all workers registered with the backend"),
     ListTasks => not_implemented("List all tasks in the backend"),
 }]
+///
+/// [`PipeExt`]: crate::backend::pipe::PipeExt
 #[derive(Debug)]
 pub struct JsonStorage<Args> {
     tasks: Arc<RwLock<BTreeMap<TaskKey, TaskWithMeta>>>,

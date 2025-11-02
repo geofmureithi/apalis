@@ -80,20 +80,13 @@ where
     type Error = QueueError;
 
     async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        let tagged = &req.parts.queue;
-        match tagged {
-            Some(queue) => Ok(queue.clone()),
-            None => {
-                // Fallback to looking into task data for backward compatibility
-                let queue = req
-                    .parts
-                    .data
-                    .get()
-                    .cloned()
-                    .ok_or_else(|| QueueError::NotFound)?;
-                Ok(queue)
-            }
-        }
+        let queue = req
+            .parts
+            .data
+            .get()
+            .cloned()
+            .ok_or_else(|| QueueError::NotFound)?;
+        Ok(queue)
     }
 }
 

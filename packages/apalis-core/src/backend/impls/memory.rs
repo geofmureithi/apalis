@@ -36,9 +36,8 @@
 //!
 //! ## See Also
 //! - [`Backend`]
-//! - [`WorkerContext`](crate::worker::context::WorkerContext)
+//! - [`WorkerContext`]
 use crate::backend::codec::IdentityCodec;
-use crate::backend::queue::Queue;
 use crate::features_table;
 use crate::task::extensions::Extensions;
 use crate::{
@@ -173,9 +172,6 @@ impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemorySink<Args, Ctx> {
         item.parts
             .task_id
             .get_or_insert_with(|| TaskId::new(RandomId::default()));
-        item.parts
-            .queue
-            .get_or_insert_with(|| Queue::from(std::any::type_name::<Args>()));
         Pin::new(&mut *lock).start_send_unpin(item)
     }
 

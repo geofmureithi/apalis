@@ -89,7 +89,6 @@ impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMe
             let task = TaskBuilder::new(args)
                 .with_task_id(key.task_id.clone())
                 .with_ctx(task.ctx.clone())
-                .with_queue(&key.queue)
                 .build();
             let key = key.clone();
             drop(map);
