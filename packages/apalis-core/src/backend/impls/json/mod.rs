@@ -83,13 +83,25 @@ pub use self::shared::SharedJsonStore;
 /// A backend that persists to a file using json encoding
 ///
 /// *Warning*: This backend is not optimized for high-throughput scenarios and is best suited for development, testing, or low-volume workloads.
+///
+/// # Example
+///
+/// Creates a temporary JSON storage backend
+/// ```rust
+/// # use apalis_core::backend::json::JsonStorage;
+/// # pub fn setup_json_storage() -> JsonStorage<u32> {
+/// let mut backend = JsonStorage::new_temp().unwrap();
+/// # backend
+/// # }
+/// ```
 #[doc = features_table! {
-    setup = "{
-        # use apalis_core::backend::json::JsonStorage;
-        # // Creates a temporary JSON storage backend
-        # JsonStorage::new_temp().unwrap()
-    # };";,
-
+    setup = r#"
+        # {
+        #   use apalis_core::backend::json::JsonStorage;
+        #   let mut backend = JsonStorage::new_temp().unwrap();
+        #   backend
+        # };
+    "#,
     Backend => supported("Basic Backend functionality", true),
     TaskSink => supported("Ability to push new tasks", true),
     Serialization => limited("Serialization support for arguments. Only accepts `json`", false),

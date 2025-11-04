@@ -50,7 +50,7 @@ macro_rules! error {
 /// use apalis_core::features_table;
 /// # fn example() -> &'static str {
 /// features_table! {
-///     setup = MemoryStorage::new();,
+///     setup = "MemoryStorage::new();",
 ///     TaskSink => supported("Ability to push new tasks", true),
 ///     Serialization => limited("Serialization support for arguments. Only accepts `json`"),
 ///     FetchById => not_implemented("Allow fetching a task by its ID"),
@@ -62,7 +62,7 @@ macro_rules! error {
 #[macro_export]
 macro_rules! features_table {
     (
-        setup = $setup:literal;,
+        setup = $setup:literal,
         $(
             $feature:tt => $status:ident($description:literal $(, $include_example:tt)?)
         ),* $(,)?
@@ -157,7 +157,7 @@ macro_rules! features_table {
             "#[tokio::main]\n",
             "async fn main() {\n",
             "    // let mut backend = /* snip */;\n",
-            "    # let mut backend = ", stringify!($setup), ";\n",
+            "    # let mut backend = ", $setup, "\n",
             features_table!(@assert_function $feature), "\n",
             "```\n\n"
         )
@@ -203,7 +203,7 @@ macro_rules! features_table {
         "        assert_eq!(task, 142);\n",
         "        worker.stop().unwrap();\n",
         "    }\n",
-        "    let workflow = WorkFlow::new(\"test_workflow\")\n",
+        "    let workflow = Workflow::new(\"test_workflow\")\n",
         "       .then(task1)\n",
         "       .then(task2)\n",
         "       .then(task3);\n",
@@ -248,7 +248,11 @@ mod tests {
     #[test]
     fn test_clean_table_structure_with_example_flags() {
         let table = features_table! {
-            setup = { MemoryStorage::new() };,
+            setup = "{
+                use apalis_core::backend::memory::MemoryStorage;
+                // No migrations
+                MemoryStorage::new()
+            };",
             TaskSink => supported("Ability to push new tasks", true),
             Serialization => limited("Serialization support for arguments. Only accepts `json`", false),
             FetchById => not_implemented("Allow fetching a task by its ID"),
@@ -292,7 +296,7 @@ mod tests {
     #[test]
     fn test_explicit_false_flag() {
         let table = features_table! {
-            setup = MemoryStorage::new();,
+            setup = "{ unreachable!() }",
             TaskSink => supported("Ability to push new tasks", false),
         };
 
@@ -304,7 +308,7 @@ mod tests {
     #[test]
     fn test_explicit_true_flag() {
         let table = features_table! {
-            setup = MemoryStorage::new();,
+            setup = "{ unreachable!() }",
             TaskSink => supported("Ability to push new tasks", true),
             Serialization => limited("Serialization support", true),
         };

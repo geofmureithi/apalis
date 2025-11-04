@@ -64,13 +64,23 @@ use tower_layer::Identity;
 
 /// In-memory queue that is based on channels
 ///
+/// 
+/// ## Example
+/// ```rust
+/// # use apalis_core::backend::memory::MemoryStorage;
+/// # fn setup() -> MemoryStorage<u32> {
+/// let mut backend = MemoryStorage::new();
+/// # backend
+/// # }
+/// ```
+///
 #[doc = features_table! {
-    setup = "{
-    #    use apalis_core::backend::memory::MemoryStorage;
-    #    // No migrations
-    #    MemoryStorage::new()
-    # };";,
-
+    setup = r#"
+        # {
+        #   use apalis_core::backend::memory::MemoryStorage;
+        #   MemoryStorage::new()
+        # };
+    "#,
     Backend => supported("Basic Backend functionality", true),
     TaskSink => supported("Ability to push new tasks", true),
     Serialization => not_supported("Serialization support for arguments"),
