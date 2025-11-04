@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tower::Service;
 
 use crate::{
-    CompositeService, GenerateId, GoTo, Step, SteppedService, WorkFlow, WorkflowError,
+    CompositeService, GenerateId, GoTo, Step, SteppedService, Workflow, WorkflowError,
     WorkflowRequest, context::StepContext, service::handle_workflow_result,
 };
 
@@ -328,7 +328,7 @@ where
 }
 
 impl<Input, Current, FlowSink, Encode, Compact>
-    WorkFlow<Input, Vec<Current>, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    Workflow<Input, Vec<Current>, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     Current: Send + 'static,
     FlowSink: Backend,
@@ -358,7 +358,7 @@ where
     pub fn filter_map<F, Output, FnArgs, SvcError, MetadataError, CodecError, DbError>(
         mut self,
         predicate: F,
-    ) -> WorkFlow<Input, Vec<Output>, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    ) -> Workflow<Input, Vec<Output>, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
     where
         F: Send + 'static + Sync + Clone,
         TaskFn<F, Current, FlowSink::Context, FnArgs>: Service<
@@ -422,7 +422,7 @@ where
                 _marker: PhantomData,
             }
         });
-        WorkFlow {
+        Workflow {
             name: self.name,
             steps: self.steps,
             _marker: PhantomData,

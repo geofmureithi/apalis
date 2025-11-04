@@ -9,7 +9,7 @@ use apalis_core::{
 use futures::Sink;
 use tower::Service;
 
-use crate::{GenerateId, GoTo, Step, WorkFlow, WorkflowRequest, context::StepContext};
+use crate::{GenerateId, GoTo, Step, Workflow, WorkflowRequest, context::StepContext};
 
 #[derive(Debug)]
 pub struct ThenStep<S, T> {
@@ -71,7 +71,7 @@ where
 }
 
 impl<Input, Current, FlowSink, Encode, Compact>
-    WorkFlow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    Workflow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     Current: Send + 'static,
     FlowSink: Send + Clone + Sync + 'static + Unpin + Backend,
@@ -79,7 +79,7 @@ where
     pub fn then<F, O, E, FnArgs, CodecError, DbError>(
         self,
         then: F,
-    ) -> WorkFlow<Input, O, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    ) -> Workflow<Input, O, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
     where
         O: Sync + Send + 'static,
         E: Into<BoxDynError> + Send + Sync + 'static,

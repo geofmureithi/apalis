@@ -7,7 +7,7 @@ use apalis_core::{
 };
 use futures::Sink;
 
-use crate::{GenerateId, GoTo, Step, WorkFlow, WorkflowRequest, context::StepContext};
+use crate::{GenerateId, GoTo, Step, Workflow, WorkflowRequest, context::StepContext};
 
 #[derive(Debug)]
 pub struct DelayStep<S, T> {
@@ -61,7 +61,7 @@ where
 }
 
 impl<Input, Current, FlowSink, Encode, Compact>
-    WorkFlow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    Workflow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     Current: Send + 'static,
     FlowSink: Send + Clone + Sync + 'static + Unpin + WeakTaskSink<Current, Codec = Encode>,
@@ -69,7 +69,7 @@ where
     pub fn delay_for<CodecError, DbError>(
         self,
         duration: Duration,
-    ) -> WorkFlow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    ) -> Workflow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
     where
         Current: std::marker::Send + 'static + Sync,
         FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,

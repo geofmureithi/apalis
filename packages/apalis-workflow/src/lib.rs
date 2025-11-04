@@ -59,7 +59,7 @@ where
     ) -> impl Future<Output = Result<GoTo<Self::Response>, Self::Error>> + Send;
 }
 
-pub struct WorkFlow<Input, Current, FlowSink, Encode, Compact, Context, IdType> {
+pub struct Workflow<Input, Current, FlowSink, Encode, Compact, Context, IdType> {
     name: String,
     steps: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
     _marker: PhantomData<(Input, Current, FlowSink)>,
@@ -71,7 +71,7 @@ pub struct CompositeService<FlowSink, Encode, Compact, Context, IdType> {
 }
 
 impl<Input, FlowSink, Encode, Compact, Context, IdType>
-    WorkFlow<Input, Input, FlowSink, Encode, Compact, Context, IdType>
+    Workflow<Input, Input, FlowSink, Encode, Compact, Context, IdType>
 {
     pub fn new(name: &str) -> Self {
         Self {
@@ -83,7 +83,7 @@ impl<Input, FlowSink, Encode, Compact, Context, IdType>
 }
 
 impl<Input, Current, FlowSink, Encode, Compact>
-    WorkFlow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    Workflow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     Current: Send + 'static,
     FlowSink: Send + Clone + Sync + 'static + Unpin + Backend,
@@ -91,7 +91,7 @@ where
     pub fn add_step<S, Res, E, CodecError, BackendError>(
         mut self,
         step: S,
-    ) -> WorkFlow<Input, Res, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    ) -> Workflow<Input, Res, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
     where
         FlowSink: WeakTaskSink<Res, Codec = Encode, Error = BackendError>
             + Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = BackendError>,
@@ -127,7 +127,7 @@ where
                 _marker: PhantomData,
             }
         });
-        WorkFlow {
+        Workflow {
             name: self.name,
             steps: self.steps,
             _marker: PhantomData,
@@ -234,7 +234,7 @@ impl<Input, Current, FlowSink, Encode, Compact, Err>
         WorkFlowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>,
         Compact,
         FlowSink::Context,
-    > for WorkFlow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    > for Workflow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     FlowSink: Clone
         + Send
@@ -287,7 +287,7 @@ where
 impl<S: Send, Args: Send, Compact> TaskFlowSink<Args, Compact> for S
 where
     S: WeakTaskSink<Args>,
-    S::IdType: Default + Send,
+    S::IdType: GenerateId + Send,
     S::Codec: Codec<Args, Compact = Compact>,
     S::Context: MetadataExt<WorkflowRequest> + Send,
     S::Error: std::error::Error + Send + Sync + 'static,
@@ -295,7 +295,7 @@ where
     <S::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError> + Send + Sync + 'static,
 {
     async fn push_step(&mut self, step: Args, index: usize) -> Result<(), WorkflowError> {
-        let task_id = TaskId::new(S::IdType::default());
+        let task_id = TaskId::new(S::IdType::generate());
         let task = TaskBuilder::new(step)
             .meta(WorkflowRequest { step_index: index })
             .with_task_id(task_id.clone())
@@ -316,11 +316,11 @@ mod tests {
 
     use std::time::Duration;
 
-    use crate::{TaskFlowSink, WorkFlow, WorkflowError};
+    use crate::{TaskFlowSink, Workflow, WorkflowError};
 
     #[tokio::test]
     async fn simple_workflow() {
-        let workflow = WorkFlow::new("odd-numbers-workflow")
+        let workflow = Workflow::new("odd-numbers-workflow")
             .then(|a: usize| async move { Ok::<_, WorkflowError>(a - 2) })
             .delay_for(Duration::from_millis(1000))
             .then(|_| async move { Err::<(), WorkflowError>(WorkflowError::MissingContextError) });
@@ -343,7 +343,7 @@ mod tests {
 
     #[tokio::test]
     async fn then_workflow() {
-        let workflow = WorkFlow::new("then-workflow")
+        let workflow = Workflow::new("then-workflow")
             .then(|a: usize| async move { Ok::<_, WorkflowError>((0..a).collect::<Vec<_>>()) })
             .filter_map(|x| async move { if x % 5 != 0 { Some(x) } else { None } })
             .filter_map(|x| async move { if x % 3 != 0 { Some(x) } else { None } })
