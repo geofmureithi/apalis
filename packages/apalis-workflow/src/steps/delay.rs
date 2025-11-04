@@ -1,9 +1,9 @@
 use std::{convert::Infallible, fmt::Debug, marker::PhantomData, time::Duration};
 
 use apalis_core::{
-    backend::{codec::Codec, Backend, WeakTaskSink},
+    backend::{Backend, WeakTaskSink, codec::Codec},
     error::BoxDynError,
-    task::{metadata::MetadataExt, Task},
+    task::{Task, metadata::MetadataExt},
 };
 use futures::Sink;
 
@@ -73,7 +73,8 @@ where
     where
         Current: std::marker::Send + 'static + Sync,
         FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
-        FlowSink: Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = DbError> + Backend<Error = DbError>,
+        FlowSink: Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = DbError>
+            + Backend<Error = DbError>,
         DbError: std::error::Error + Send + Sync + 'static,
         FlowSink::IdType: Send + GenerateId,
         Compact: Sync + Send + 'static,

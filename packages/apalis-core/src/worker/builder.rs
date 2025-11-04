@@ -255,8 +255,6 @@ where
     }
 }
 
-
-
 /// Module for validating task function implementations
 /// This module provides macros and utilities to ensure that task functions
 /// conform to the expected signatures and can be converted into worker services.
@@ -267,7 +265,6 @@ pub mod task_fn_validator {
     use tower_service::Service;
 
     use crate::task_fn::{FromRequest, TaskFn};
-
 
     /// Macro for implementing the check functions
     macro_rules! impl_check_fn {

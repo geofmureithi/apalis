@@ -25,11 +25,7 @@ pub mod limit {
 
 #[cfg(feature = "catch-panic")]
 use apalis_core::error::AbortError;
-use apalis_core::{
-    backend::Backend,
-    error::{BoxDynError, ErrorHandlingLayer},
-    worker::builder::WorkerBuilder,
-};
+use apalis_core::{backend::Backend, worker::builder::WorkerBuilder};
 #[cfg(feature = "catch-panic")]
 use catch_panic::CatchPanicLayer;
 use tower::layer::util::{Identity, Stack};

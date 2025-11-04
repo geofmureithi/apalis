@@ -71,8 +71,7 @@ impl TaskRow {
         // Optimize for the case where Args and CompactType are the same type
         // to avoid unnecessary serialization/deserialization.
         // That comes at the cost of using unsafe code, and leaking memory
-        let args = if std::any::TypeId::of::<Args>() == std::any::TypeId::of::<Vec<u8>>()
-        {
+        let args = if std::any::TypeId::of::<Args>() == std::any::TypeId::of::<Vec<u8>>() {
             // SAFETY: We've verified that Args and CompactType are the same type.
             // We use ptr::read to move the value out without calling drop on self.job.
             // Then we use mem::forget to prevent self from being dropped (which would
@@ -126,8 +125,12 @@ impl TaskRow {
         let task = TaskBuilder::new(self.job)
             .with_ctx(ctx)
             .with_attempt(Attempt::new_with_value(self.attempts))
-            .with_status(Status::from_str(&self.status).map_err(|e| FromRowError::DecodeError(e.into()))?)
-            .with_task_id(TaskId::from_str(&self.id).map_err(|e| FromRowError::DecodeError(e.into()))?)
+            .with_status(
+                Status::from_str(&self.status).map_err(|e| FromRowError::DecodeError(e.into()))?,
+            )
+            .with_task_id(
+                TaskId::from_str(&self.id).map_err(|e| FromRowError::DecodeError(e.into()))?,
+            )
             .run_at_timestamp(
                 self.run_at
                     .ok_or(FromRowError::ColumnNotFound("run_at".to_owned()))?

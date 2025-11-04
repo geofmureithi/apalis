@@ -64,7 +64,7 @@ use tower_layer::Identity;
 
 /// In-memory queue that is based on channels
 ///
-/// 
+///
 /// ## Example
 /// ```rust
 /// # use apalis_core::backend::memory::MemoryStorage;

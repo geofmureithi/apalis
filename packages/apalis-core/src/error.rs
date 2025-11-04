@@ -1,5 +1,9 @@
 use std::{
-    error::Error as StdError, marker::PhantomData, pin::Pin, task::{Context, Poll}, time::Duration
+    error::Error as StdError,
+    marker::PhantomData,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
 };
 use thiserror::Error;
 use tower_service::Service;

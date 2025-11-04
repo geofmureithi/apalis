@@ -65,11 +65,11 @@ use apalis_core::error::AbortError;
 use apalis_core::task::Task;
 use apalis_core::task::builder::TaskBuilder;
 use apalis_core::task::metadata::MetadataExt;
+use apalis_core::task::status::Status;
 use apalis_core::worker::context::WorkerContext;
 use std::any::Any;
 use std::fmt::Debug;
 use tower::retry::backoff::Backoff;
-use apalis_core::task::status::Status;
 
 /// Re-exports from [`tower::retry`]
 pub use tower::retry::*;

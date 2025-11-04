@@ -318,8 +318,9 @@ where
                         .await
                         .map_err(|e| WorkflowError::SinkError(e.into()))?;
 
-                    let compact = Encode::encode(&GoTo::<Option<Output>>::ContinueAt(task_id.to_string()))
-                        .map_err(|e: CodecError| WorkflowError::CodecError(e.into()))?;
+                    let compact =
+                        Encode::encode(&GoTo::<Option<Output>>::ContinueAt(task_id.to_string()))
+                            .map_err(|e: CodecError| WorkflowError::CodecError(e.into()))?;
                     Ok(compact)
                 })
             }
