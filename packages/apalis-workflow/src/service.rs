@@ -52,13 +52,13 @@ impl Serialize for StepResult<serde_json::Value> {
     }
 }
 
-pub struct WorkFlowService<FlowSink, Encode, Compact, Context, IdType> {
+pub struct WorkflowService<FlowSink, Encode, Compact, Context, IdType> {
     services: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
     not_ready: VecDeque<usize>,
     backend: FlowSink,
 }
 impl<FlowSink, Encode, Compact, Context, IdType>
-    WorkFlowService<FlowSink, Encode, Compact, Context, IdType>
+    WorkflowService<FlowSink, Encode, Compact, Context, IdType>
 {
     pub(crate) fn new(
         services: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
@@ -74,7 +74,7 @@ impl<FlowSink, Encode, Compact, Context, IdType>
 
 impl<FlowSink: Clone + Send + Sync + 'static + Backend<Error = Err>, Encode, Compact, Err>
     Service<Task<Compact, FlowSink::Context, FlowSink::IdType>>
-    for WorkFlowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    for WorkflowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
 where
     FlowSink::Context: MetadataExt<WorkflowRequest>,
     Encode: Send + Sync + 'static,

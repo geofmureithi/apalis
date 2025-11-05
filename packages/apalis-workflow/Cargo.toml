@@ -17,7 +17,7 @@ ulid = ["dep:ulid"]
 uuid = ["dep:uuid"]
 
 [dependencies]
-# petgraph = { version = "0.8.2", features = ["serde-1"] }
+petgraph = { version = "0.8.2", features = ["serde-1"] }
 serde = { version = "1.0", features = ["derive"] }
 tower = { version = "0.5", features = ["util"], default-features = false }
 apalis-core = { path = "../apalis-core", version = "1.0.0-alpha.9", default-features = false, features = [

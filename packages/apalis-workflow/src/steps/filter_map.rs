@@ -339,15 +339,15 @@ where
     ///
     /// # Example
     /// ```rust,ignore
-    /// use apalis_workflow::WorkFlow;
+    /// use apalis_workflow::Workflow;
     /// // Suppose you have a workflow of integers and want to filter even numbers and double them.
-    /// let workflow = WorkFlow::new("the-even-doubler")
+    /// let workflow = Workflow::new("the-even-doubler")
     ///     .filter_map(|x: i32| async move { if x % 2 == 0 { Some(x * 2) } else { None } });
     /// // The resulting workflow will only contain doubled even numbers.
     /// ```
     ///
     /// # Returns
-    /// Returns a new `WorkFlow` with the filter_map step added, producing a vector of outputs.
+    /// Returns a new `Workflow` with the filter_map step added, producing a vector of outputs.
     ///
     /// # Errors
     /// Errors from the predicate function or encoding/decoding are propagated as boxed dynamic errors.

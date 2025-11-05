@@ -28,7 +28,7 @@ use apalis_core::worker::ext::event_listener::EventListenerExt;
 
 #[tokio::main]
 async fn main() {
-   let workflow = WorkFlow::new("odd-numbers-workflow")
+   let workflow = Workflow::new("odd-numbers-workflow")
        .delay_for(Duration::from_millis(1000))
        .then(|a: usize| async move { Ok::<_, WorkflowError>((0..a).collect::<Vec<_>>()) })
        .filter_map(|x| async move { if x % 2 != 0 { Some(x) } else { None } })

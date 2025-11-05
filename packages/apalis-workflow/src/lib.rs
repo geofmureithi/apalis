@@ -18,7 +18,7 @@ use futures::{Sink, future::BoxFuture};
 use serde::{Deserialize, Serialize};
 use tower::Service;
 
-use crate::{context::StepContext, service::WorkFlowService};
+use crate::{context::StepContext, service::WorkflowService};
 
 mod context;
 mod id_generator;
@@ -231,7 +231,7 @@ pub struct WorkflowRequest {
 impl<Input, Current, FlowSink, Encode, Compact, Err>
     IntoWorkerService<
         FlowSink,
-        WorkFlowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>,
+        WorkflowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>,
         Compact,
         FlowSink::Context,
     > for Workflow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
@@ -259,13 +259,13 @@ where
     fn into_service(
         self,
         b: &FlowSink,
-    ) -> WorkFlowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType> {
+    ) -> WorkflowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType> {
         let services: HashMap<usize, _> = self
             .steps
             .into_iter()
             .map(|(index, svc)| (index, svc))
             .collect();
-        WorkFlowService::new(services, b.clone())
+        WorkflowService::new(services, b.clone())
     }
 }
 
