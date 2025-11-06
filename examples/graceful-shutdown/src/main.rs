@@ -8,7 +8,7 @@ use tracing::info;
 #[derive(Debug, Serialize, Deserialize)]
 struct LongRunningJob {}
 
-async fn long_running_task(_task: LongRunningJob, worker: Worker<Context>) {
+async fn long_running_task(_task: LongRunningJob, worker: WorkerContext) {
     loop {
         info!("is_shutting_down: {}", worker.is_shutting_down());
         if worker.is_shutting_down() {
@@ -40,7 +40,7 @@ async fn main() -> Result<(), std::io::Error> {
                 .concurrency(2)
                 .enable_tracing()
                 .backend(sqlite)
-                .build_fn(long_running_task)
+                .build(long_running_task)
         })
         .on_event(|e| info!("{e}"))
         // Wait 5 seconds after shutdown is triggered to allow any incomplete jobs to complete

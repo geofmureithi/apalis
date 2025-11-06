@@ -1,0 +1,92 @@
+[package]
+name = "apalis"
+version = "1.0.0-alpha.9"
+authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
+description = "Simple, extensible and multithreaded background task processing for Rust"
+edition.workspace = true
+repository.workspace = true
+documentation = "https://docs.rs/apalis"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["job", "task", "scheduler", "worker", "cron"]
+categories = ["database"]
+
+[lib]
+bench = false
+
+[features]
+default = ["tracing", "catch-panic", "limit", "timeout", "retry"]
+
+## Support Tracing 👀
+tracing = ["dep:tracing", "dep:tracing-futures"]
+
+## Support for Sentry exception and performance monitoring
+sentry = ["dep:sentry-core", "dep:ulid", "ulid?/uuid", "dep:uuid"]
+## Support Prometheus metrics
+prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
+## Support direct retrying tasks
+retry = ["tower/retry"]
+## Support timeouts on tasks
+timeout = ["tower/timeout"]
+## 💪 Limit the amount of tasks
+limit = ["tower/limit"]
+## Support filtering tasks based on a predicate
+filter = ["tower/filter"]
+## Captures panics in executions and convert them to errors
+catch-panic = ["dep:futures-util"]
+
+## All available features
+full = [
+  "sentry",
+  "prometheus",
+  "tracing",
+  "retry",
+  "timeout",
+  "limit",
+  "filter",
+  "catch-panic",
+]
+
+docsrs = ["document-features"]
+
+[dependencies.apalis-core]
+version = "1.0.0-alpha.9"
+default-features = false
+path = "../apalis-core"
+
+[dependencies.document-features]
+version = "0.2"
+optional = true
+
+[dependencies]
+tower = { version = "0.5.2", features = ["util"], default-features = false }
+tracing-futures = { version = "0.2.5", optional = true, default-features = false }
+sentry-core = { version = "0.42.0", optional = true, default-features = false }
+metrics = { version = "0.24.0", optional = true, default-features = false }
+metrics-exporter-prometheus = { version = "0.17", optional = true, default-features = false }
+futures-util = { version = "0.3.31", optional = true, default-features = false }
+thiserror = "2.0.0"
+
+pin-project = "1"
+# Needed only for sentry reporting
+uuid = { version = "1.8", optional = true }
+ulid = { version = "1", optional = true }
+
+[dependencies.tracing]
+default-features = false
+version = "0.1.40"
+optional = true
+
+[dev-dependencies]
+apalis = { path = ".", version = "1.0.0-alpha.9" }
+criterion = { version = "0.7.0", features = ["async_tokio", "html_reports"] }
+pprof = { version = "0.15", features = ["flamegraph"] }
+paste = "1.0.14"
+serde = "1"
+tokio = { version = "1", features = ["full"] }
+apalis-redis = "1.0.0-alpha.1"
+
+[package.metadata.docs.rs]
+# defines the configuration attribute `docsrs`
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true

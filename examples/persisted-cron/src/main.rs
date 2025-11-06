@@ -46,6 +46,6 @@ async fn main() {
         .enable_tracing()
         .rate_limit(1, Duration::from_secs(2))
         .backend(backend)
-        .build_fn(send_reminder);
+        .build(send_reminder);
     Monitor::new().register(worker).run().await.unwrap();
 }

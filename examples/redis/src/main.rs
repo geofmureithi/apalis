@@ -42,12 +42,12 @@ async fn main() -> Result<()> {
         .timeout(Duration::from_millis(500))
         .concurrency(2)
         .backend(storage)
-        .build_fn(send_email);
+        .build(send_email);
 
     Monitor::new()
         .register(worker)
         .on_event(|e| {
-            let worker_id = e.id();
+            let worker_id = e.name();
             match e.inner() {
                 Event::Start => {
                     info!("Worker [{worker_id}] started");

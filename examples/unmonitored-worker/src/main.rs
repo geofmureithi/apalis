@@ -10,7 +10,7 @@ struct SelfMonitoringJob {
     id: i32,
 }
 
-async fn self_monitoring_task(task: SelfMonitoringJob, worker: Worker<Context>) {
+async fn self_monitoring_task(task: SelfMonitoringJob, worker: WorkerContext) {
     info!("task: {:?}, {:?}", task, worker);
     if task.id == 99 {
         tokio::spawn(async move {

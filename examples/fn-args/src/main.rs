@@ -8,7 +8,7 @@ use std::{
 
 use apalis::prelude::*;
 use apalis_sql::{
-    context::SqlContext,
+    context::SqlMetadata,
     sqlite::{SqlitePool, SqliteStorage},
 };
 use serde::{Deserialize, Serialize};
@@ -19,13 +19,13 @@ struct SimpleJob {}
 
 // A task can have up to 16 arguments
 async fn simple_job(
-    _: SimpleJob,            // Required, must be of the type of the job/message
-    worker: Worker<Context>, // The worker and its context, added by worker
+    _: SimpleJob,          // Required, must be of the type of the job/message
+    worker: WorkerContext, // The worker and its context, added by worker
     _sqlite: Data<SqliteStorage<SimpleJob>>, // The source, added by storage
-    task_id: TaskId,         // The task id, added by storage
-    attempt: Attempt,        // The current attempt
-    ctx: SqlContext,         // The task context provided by the backend
-    count: Data<Count>,      // Our custom data added via layer
+    task_id: TaskId,       // The task id, added by storage
+    attempt: Attempt,      // The current attempt
+    ctx: SqlMetadata,      // The task context provided by the backend
+    count: Data<Count>,    // Our custom data added via layer
 ) {
     // increment the counter
     let current = count.fetch_add(1, Ordering::Relaxed);
@@ -65,7 +65,7 @@ async fn main() -> Result<(), std::io::Error> {
                 .data(sqlite.clone())
                 .concurrency(2)
                 .backend(sqlite)
-                .build_fn(simple_job)
+                .build(simple_job)
         })
         .run()
         .await?;

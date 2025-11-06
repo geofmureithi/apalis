@@ -2,7 +2,7 @@ use std::{fmt::Debug, marker::PhantomData, time::Duration};
 
 use apalis::prelude::*;
 
-use apalis_redis::{self, Config};
+use apalis_redis::{self, RedisConfig};
 
 use apalis_core::{
     codec::json::JsonCodec,
@@ -19,7 +19,7 @@ use tracing::info;
 struct RedisMq<T, C = JsonCodec<Vec<u8>>> {
     conn: Rsmq,
     msg_type: PhantomData<T>,
-    config: Config,
+    config: RedisConfig,
     codec: PhantomData<C>,
 }
 
@@ -49,7 +49,7 @@ impl<T, C> Clone for RedisMq<T, C> {
     }
 }
 
-impl<Req, C> Backend<Request<Req, RedisMqContext>> for RedisMq<Req, C>
+impl<Req, C> Backend<Req, RedisMqContext> for RedisMq<Req, C>
 where
     Req: Send + DeserializeOwned + 'static,
     C: Codec<Compact = Vec<u8>>,
@@ -60,7 +60,7 @@ where
 
     type Codec = C;
 
-    fn poll(mut self, _worker: &Worker<Context>) -> Poller<Self::Stream, Self::Layer> {
+    fn poll(mut self, _worker: &WorkerContext) -> Poller<Self::Stream, Self::Layer> {
         let (mut tx, rx) = mpsc::channel(self.config.get_buffer_size());
         let stream: RequestStream<Request<Req, RedisMqContext>> = Box::pin(rx);
         let layer = AckLayer::new(self.clone());
@@ -212,14 +212,14 @@ async fn main() -> anyhow::Result<()> {
         conn,
         msg_type: PhantomData,
         codec: PhantomData,
-        config: Config::default().set_namespace("email"),
+        config: RedisConfig::default().set_namespace("email"),
     };
     produce_jobs(&mut mq).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
         .enable_tracing()
         .backend(mq)
-        .build_fn(send_email);
+        .build(send_email);
 
     Monitor::new()
         .register(worker)

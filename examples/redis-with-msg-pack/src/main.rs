@@ -36,14 +36,14 @@ async fn main() -> Result<()> {
     let conn = apalis_redis::connect(redis_url)
         .await
         .expect("Could not connect");
-    let config = apalis_redis::Config::default().set_namespace("apalis_redis-with-msg-pack");
+    let config = apalis_redis::RedisConfig::default().set_namespace("apalis_redis-with-msg-pack");
     let storage = RedisStorage::new_with_codec::<MessagePack>(conn, config);
     // This can be in another part of the program
     produce_jobs(storage.clone()).await?;
 
     let worker = WorkerBuilder::new("rango-tango")
         .backend(storage)
-        .build_fn(send_email);
+        .build(send_email);
 
     Monitor::new()
         .register(worker)

@@ -63,13 +63,13 @@ async fn main() -> Result<()> {
             WorkerBuilder::new("tasty-banana")
                 .enable_tracing()
                 .backend(email_storage)
-                .build_fn(send_email)
+                .build(send_email)
         })
         .register({
             WorkerBuilder::new("tasty-mango")
                 // .enable_tracing()
                 .backend(notification_storage)
-                .build_fn(job::notify)
+                .build(job::notify)
         })
         .run()
         .await?;

@@ -1,8 +1,8 @@
 use apalis::prelude::*;
 
-use apalis_cron::CronContext;
 use apalis_cron::CronStream;
 use apalis_cron::Schedule;
+use apalis_cron::Tick;
 use chrono::Local;
 use std::str::FromStr;
 use std::time::Duration;
@@ -11,7 +11,7 @@ use tower::load_shed::LoadShedLayer;
 #[derive(Debug, Default)]
 struct Reminder;
 
-async fn send_reminder(_job: Reminder, ctx: CronContext<Local>) {
+async fn send_reminder(_job: Reminder, ctx: Tick<Local>) {
     println!("Running cronjob for timestamp: {}", ctx.get_timestamp())
     // Do something
 }
@@ -24,6 +24,6 @@ async fn main() {
         .layer(LoadShedLayer::new()) // Important when you have layers that block the service
         .rate_limit(1, Duration::from_secs(2))
         .backend(CronStream::new_with_timezone(schedule, Local))
-        .build_fn(send_reminder);
+        .build(send_reminder);
     worker.run().await;
 }
