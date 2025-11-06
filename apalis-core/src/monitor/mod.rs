@@ -221,11 +221,11 @@ impl Future for MonitoredWorker {
             let poll_result =
                 catch_unwind(AssertUnwindSafe(|| current.1.poll_unpin(cx))).map_err(|err| {
                     let err = if let Some(s) = err.downcast_ref::<&str>() {
-                        s.to_string()
+                        (*s).to_owned()
                     } else if let Some(s) = err.downcast_ref::<String>() {
                         s.clone()
                     } else {
-                        "Unknown panic".to_string()
+                        "Unknown panic".to_owned()
                     };
                     Arc::new(WorkerError::PanicError(err))
                 });
@@ -335,6 +335,7 @@ impl Monitor {
     /// .await;
     /// # }
     /// ```
+    #[must_use]
     pub fn register<Args, S, B, M>(
         mut self,
         factory: impl Fn(usize) -> Worker<Args, B::Context, B, S, M> + 'static + Send + Sync,
@@ -426,9 +427,8 @@ impl Monitor {
                 (Ok(_), Ok(_)) => {
                     // All good
                 }
-                (Err(e), Ok(_)) => return Err(e.into()),
+                (Err(e), Ok(_) | Err(_)) => return Err(e.into()),
                 (Ok(_), Err(e)) => return Err(e),
-                (Err(e), Err(_)) => return Err(e.into()),
             }
         }
         Ok(())
@@ -482,6 +482,7 @@ impl Monitor {
     }
 
     /// Handles all workers' events emitted
+    #[must_use]
     pub fn on_event<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(self, f: F) -> Self {
         let _ = self.event_handler.write().map(|mut res| {
             let _ = res.insert(Box::new(f));
@@ -496,6 +497,7 @@ impl Monitor {
     /// # Returns
     ///
     /// A new monitor instance, with an empty collection of workers.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -510,6 +512,7 @@ impl Monitor {
     ///
     /// The monitor instance, with the shutdown timeout duration set.
     #[cfg(feature = "sleep")]
+    #[must_use]
     pub fn shutdown_timeout(self, duration: std::time::Duration) -> Self {
         self.with_terminator(crate::timer::sleep(duration))
     }
@@ -521,12 +524,14 @@ impl Monitor {
     /// shutdown even if there are outstanding tasks. This can be useful for using a timeout or
     /// signal (or combination) to force a full shutdown even if one or more tasks are taking
     /// longer than expected to finish.
+    #[must_use]
     pub fn with_terminator(mut self, fut: impl Future<Output = ()> + Send + 'static) -> Self {
         self.terminator = Some(fut.boxed().shared());
         self
     }
 
     /// Allows controlling the restart strategy for workers
+    #[must_use]
     pub fn should_restart<F>(self, cb: F) -> Self
     where
         F: Fn(&WorkerContext, &WorkerError, usize) -> bool + Send + Sync + 'static,

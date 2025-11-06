@@ -153,7 +153,7 @@ impl<S> CircuitBreakerService<S> {
                 stats.state = CircuitState::Open;
                 stats.half_open_calls = 0;
             }
-            _ => {}
+            CircuitState::Open => {}
         }
     }
 
@@ -185,7 +185,7 @@ pub(super) enum CircuitBreakerError {
 impl std::fmt::Display for CircuitBreakerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CircuitBreakerError::CircuitOpen => write!(f, "Circuit breaker is open"),
+            Self::CircuitOpen => write!(f, "Circuit breaker is open"),
         }
     }
 }
@@ -262,7 +262,7 @@ where
                                 s.state = CircuitState::Open;
                                 s.half_open_calls = 0;
                             }
-                            _ => {}
+                            CircuitState::Open => {}
                         }
                     }
                     Err(e.into())
@@ -296,7 +296,7 @@ mod tests {
                 if should_fail {
                     Err("Service error")
                 } else {
-                    Ok("success".to_string())
+                    Ok("success".to_owned())
                 }
             })
         }

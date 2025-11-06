@@ -17,10 +17,10 @@ impl TryFrom<usize> for InnerWorkerState {
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(InnerWorkerState::Pending),
-            1 => Ok(InnerWorkerState::Running),
-            2 => Ok(InnerWorkerState::Paused),
-            3 => Ok(InnerWorkerState::Stopped),
+            0 => Ok(Self::Pending),
+            1 => Ok(Self::Running),
+            2 => Ok(Self::Paused),
+            3 => Ok(Self::Stopped),
             v => Err(WorkerError::StateError(WorkerStateError::InvalidState(
                 format!("{v} not a valid state"),
             ))),

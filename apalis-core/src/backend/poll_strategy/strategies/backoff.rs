@@ -20,6 +20,7 @@ pub struct BackoffStrategy {
 }
 impl BackoffStrategy {
     /// Create a new BackoffStrategy wrapping an IntervalStrategy with the given BackoffConfig
+    #[must_use]
     pub fn new(inner: IntervalStrategy, config: BackoffConfig) -> Self {
         Self {
             default_delay: inner.poll_interval,
@@ -74,6 +75,7 @@ impl Default for BackoffConfig {
 
 impl BackoffConfig {
     /// Create a new BackoffConfig with the specified maximum delay
+    #[must_use]
     pub fn new(max: Duration) -> Self {
         Self {
             max_delay: max,
@@ -82,12 +84,14 @@ impl BackoffConfig {
     }
 
     /// Set the multiplier for exponential backoff
+    #[must_use]
     pub fn with_multiplier(mut self, multiplier: f64) -> Self {
         self.multiplier = multiplier;
         self
     }
 
     /// Set the jitter factor (0.0 to 1.0) for randomizing delays
+    #[must_use]
     pub fn with_jitter(mut self, jitter_factor: f64) -> Self {
         self.jitter_factor = jitter_factor.clamp(0.0, 1.0);
         self

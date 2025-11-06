@@ -42,9 +42,7 @@ pub enum TaskIdError<E> {
 impl<IdType: FromStr> FromStr for TaskId<IdType> {
     type Err = TaskIdError<IdType::Err>;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(TaskId::new(
-            IdType::from_str(s).map_err(TaskIdError::Decode)?,
-        ))
+        Ok(Self::new(IdType::from_str(s).map_err(TaskIdError::Decode)?))
     }
 }
 
@@ -68,7 +66,7 @@ impl<Args: Sync, Ctx: Sync, IdType: Sync + Send + Clone> FromRequest<Task<Args, 
     type Error = MissingDataError;
     async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
         task.parts.task_id.clone().ok_or(MissingDataError::NotFound(
-            std::any::type_name::<TaskId<IdType>>().to_string(),
+            std::any::type_name::<Self>().to_owned(),
         ))
     }
 }
@@ -95,7 +93,7 @@ mod random_id {
     impl FromStr for RandomId {
         type Err = Infallible;
         fn from_str(s: &str) -> Result<Self, Self::Err> {
-            Ok(RandomId(s.to_owned()))
+            Ok(Self(s.to_owned()))
         }
     }
 
@@ -115,7 +113,7 @@ mod random_id {
 
     impl Default for RandomId {
         fn default() -> Self {
-            RandomId(unique_id())
+            Self(unique_id())
         }
     }
 

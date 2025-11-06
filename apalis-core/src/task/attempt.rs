@@ -25,21 +25,25 @@ impl Default for Attempt {
 
 impl Attempt {
     /// Build a new tracker
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Build a tracker from an existing value
+    #[must_use]
     pub fn new_with_value(value: usize) -> Self {
         Self(Arc::new(AtomicUsize::from(value)))
     }
 
     /// Get the current value
+    #[must_use]
     pub fn current(&self) -> usize {
         self.0.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Increase the current value
+    #[must_use]
     pub fn increment(&self) -> usize {
         self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }

@@ -23,8 +23,9 @@ pub struct Shutdown {
 
 impl Shutdown {
     /// Create a new shutdown handle
-    pub fn new() -> Shutdown {
-        Shutdown {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
             inner: Arc::new(ShutdownCtx::new()),
         }
     }
@@ -52,7 +53,7 @@ pub(crate) struct ShutdownCtx {
     waker: Mutex<Option<Waker>>,
 }
 impl ShutdownCtx {
-    fn new() -> ShutdownCtx {
+    fn new() -> Self {
         Self {
             state: AtomicBool::default(),
             waker: Mutex::default(),
@@ -76,6 +77,7 @@ impl ShutdownCtx {
 
 impl Shutdown {
     /// Check if the system is shutting down
+    #[must_use]
     pub fn is_shutting_down(&self) -> bool {
         self.inner.is_shutting_down()
     }

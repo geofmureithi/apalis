@@ -121,11 +121,13 @@ pub struct Filter {
 
 impl Filter {
     /// Calculate the offset based on the current page and page size
+    #[must_use]
     pub fn offset(&self) -> u32 {
         (self.page - 1) * self.page_size.unwrap_or(DEFAULT_PAGE_SIZE)
     }
 
     /// Get the limit (page size) for the query
+    #[must_use]
     pub fn limit(&self) -> u32 {
         self.page_size.unwrap_or(DEFAULT_PAGE_SIZE)
     }

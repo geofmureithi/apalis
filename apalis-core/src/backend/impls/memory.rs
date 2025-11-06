@@ -116,11 +116,12 @@ impl<Args: Send + 'static> Default for MemoryStorage<Args, Extensions> {
 
 impl<Args: Send + 'static> MemoryStorage<Args, Extensions> {
     /// Create a new in-memory storage
+    #[must_use]
     pub fn new() -> Self {
         let (sender, receiver) = unbounded();
         let sender = Box::new(sender)
             as Box<dyn Sink<Task<Args, Extensions>, Error = SendError> + Send + Sync + Unpin>;
-        MemoryStorage {
+        Self {
             sender: MemorySink {
                 inner: Arc::new(futures_util::lock::Mutex::new(sender)),
             },

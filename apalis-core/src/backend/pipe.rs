@@ -74,7 +74,7 @@ pub struct Pipe<S, Into, Args, Ctx> {
 
 impl<S: Clone, Into: Clone, Args, Ctx> Clone for Pipe<S, Into, Args, Ctx> {
     fn clone(&self) -> Self {
-        Pipe {
+        Self {
             from: self.from.clone(),
             into: self.into.clone(),
             _req: PhantomData,
@@ -99,7 +99,7 @@ impl<S, Into, Args, Ctx> DerefMut for Pipe<S, Into, Args, Ctx> {
 impl<S, Into, Args, Ctx> Pipe<S, Into, Args, Ctx> {
     /// Create a new Pipe instance
     pub fn new(stream: S, backend: Into) -> Self {
-        Pipe {
+        Self {
             from: stream,
             into: backend,
             _req: PhantomData,

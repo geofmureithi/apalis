@@ -16,7 +16,7 @@ pub struct StepContext<FlowSink, Encode> {
 
 impl<FlowSink: Clone, Encode> Clone for StepContext<FlowSink, Encode> {
     fn clone(&self) -> Self {
-        StepContext {
+        Self {
             current_step: self.current_step,
             sink: self.sink.clone(),
             has_next: self.has_next,

@@ -5,6 +5,7 @@ use apalis_core::backend::{
     queue::Queue,
 };
 
+/// Configuration for the SQL backend
 #[derive(Debug, Clone)]
 pub struct Config {
     keep_alive: Duration,
@@ -35,8 +36,9 @@ impl Default for Config {
 
 impl Config {
     /// Create a new config with a jobs queue
+    #[must_use]
     pub fn new(queue: &str) -> Self {
-        Config {
+        Self {
             queue: Queue::from(queue),
             ..Default::default()
         }
@@ -45,6 +47,7 @@ impl Config {
     /// Interval between database poll queries
     ///
     /// Defaults to 100ms
+    #[must_use]
     pub fn with_poll_interval(mut self, strategy: MultiStrategy) -> Self {
         self.poll_strategy = strategy;
         self
@@ -53,6 +56,7 @@ impl Config {
     /// Interval between worker keep-alive database updates
     ///
     /// Defaults to 30s
+    #[must_use]
     pub fn set_keep_alive(mut self, keep_alive: Duration) -> Self {
         self.keep_alive = keep_alive;
         self
@@ -61,12 +65,14 @@ impl Config {
     /// Buffer size to use when querying for jobs
     ///
     /// Defaults to 10
+    #[must_use]
     pub fn set_buffer_size(mut self, buffer_size: usize) -> Self {
         self.buffer_size = buffer_size;
         self
     }
 
     /// Gets a reference to the keep_alive duration.
+    #[must_use]
     pub fn keep_alive(&self) -> &Duration {
         &self.keep_alive
     }
@@ -77,11 +83,13 @@ impl Config {
     }
 
     /// Gets the buffer size.
+    #[must_use]
     pub fn buffer_size(&self) -> usize {
         self.buffer_size
     }
 
     /// Gets a reference to the poll_strategy.
+    #[must_use]
     pub fn poll_strategy(&self) -> &MultiStrategy {
         &self.poll_strategy
     }
@@ -92,6 +100,7 @@ impl Config {
     }
 
     /// Gets a reference to the queue.
+    #[must_use]
     pub fn queue(&self) -> &Queue {
         &self.queue
     }
@@ -102,6 +111,7 @@ impl Config {
     }
 
     /// Gets the reenqueue_orphaned_after duration.
+    #[must_use]
     pub fn reenqueue_orphaned_after(&self) -> Duration {
         self.reenqueue_orphaned_after
     }
@@ -115,15 +125,21 @@ impl Config {
     /// This is the time a task takes before its back to the queue
     ///
     /// Defaults to 5 minutes
+    #[must_use]
     pub fn set_reenqueue_orphaned_after(mut self, after: Duration) -> Self {
         self.reenqueue_orphaned_after = after;
         self
     }
 
+    /// Whether to automatically acknowledge jobs after processing
+    /// Defaults to true
+    #[must_use]
     pub fn ack(&self) -> bool {
         self.ack
     }
 
+    /// Set whether to automatically acknowledge jobs after processing
+    #[must_use]
     pub fn set_ack(mut self, auto_ack: bool) -> Self {
         self.ack = auto_ack;
         self

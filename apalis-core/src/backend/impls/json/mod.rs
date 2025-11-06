@@ -162,7 +162,7 @@ impl<Args> JsonStorage<Args> {
             }
         }
 
-        Ok(JsonStorage {
+        Ok(Self {
             path,
             tasks: Arc::new(RwLock::new(data)),
             buffer: Vec::new(),
@@ -171,12 +171,12 @@ impl<Args> JsonStorage<Args> {
     }
 
     /// Creates a new temporary `JsonStorage` instance.
-    pub fn new_temp() -> Result<JsonStorage<Args>, std::io::Error> {
+    pub fn new_temp() -> Result<Self, std::io::Error> {
         let p = std::env::temp_dir().join(format!("apalis-json-store-{}", RandomId::default()));
         Self::new(p)
     }
 
-    fn insert(&mut self, k: &TaskKey, v: TaskWithMeta) -> Result<(), std::io::Error> {
+    fn insert(&self, k: &TaskKey, v: TaskWithMeta) -> Result<(), std::io::Error> {
         self.tasks.try_write().unwrap().insert(k.clone(), v);
         Ok(())
     }
@@ -285,6 +285,7 @@ impl<Args> JsonStorage<Args> {
     }
 
     /// Retrieves a task from the storage.
+    #[must_use]
     pub fn get(&self, key: &TaskKey) -> Option<TaskWithMeta> {
         let tasks = self.tasks.try_read().unwrap();
         let res = tasks.get(key);
@@ -353,7 +354,7 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(json_store)
             .on_event(|ctx, ev| {
-                println!("On Event = {:?} from = {}", ev, ctx.name());
+                println!("On Event = {ev:?} from = {}", ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();

@@ -9,9 +9,10 @@ use apalis_core::{
 use futures::Sink;
 use tower::Service;
 
-use crate::{GenerateId, GoTo, Step, Workflow, WorkflowRequest, context::StepContext};
+use crate::{GenerateId, GoTo, Step, Workflow, WorkflowContext, context::StepContext};
 
 #[derive(Debug)]
+/// A step that runs a service and proceeds to the next step
 pub struct ThenStep<S, T> {
     inner: S,
     _marker: std::marker::PhantomData<T>,
@@ -19,7 +20,7 @@ pub struct ThenStep<S, T> {
 
 impl<S: Clone, T> Clone for ThenStep<S, T> {
     fn clone(&self) -> Self {
-        ThenStep {
+        Self {
             inner: self.inner.clone(),
             _marker: PhantomData,
         }
@@ -27,6 +28,7 @@ impl<S: Clone, T> Clone for ThenStep<S, T> {
 }
 
 impl<S, T> ThenStep<S, T> {
+    /// Create a new then step
     pub fn new(inner: S) -> Self {
         Self {
             inner,
@@ -48,13 +50,13 @@ where
     O: Sync,
     FlowSink: Sync + Unpin + WeakTaskSink<O> + Send,
     Current: Send,
-    FlowSink::Context: Send + Sync + Default + MetadataExt<WorkflowRequest>,
+    FlowSink::Context: Send + Sync + Default + MetadataExt<WorkflowContext>,
     FlowSink::Error: Into<BoxDynError> + Send + 'static,
     FlowSink::IdType: GenerateId + Send,
     Compact: Sync + Send,
     Encode: Codec<Current, Compact = Compact> + Sync + Send + 'static,
     Encode::Error: std::error::Error + Sync + Send + 'static,
-    <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
+    <FlowSink::Context as MetadataExt<WorkflowContext>>::Error:
         std::error::Error + Sync + Send + 'static,
 {
     type Response = S::Response;
@@ -76,6 +78,7 @@ where
     Current: Send + 'static,
     FlowSink: Send + Clone + Sync + 'static + Unpin + Backend,
 {
+    /// Add a then step to the workflow
     pub fn then<F, O, E, FnArgs, CodecError, DbError>(
         self,
         then: F,
@@ -88,7 +91,7 @@ where
             Service<Task<Current, FlowSink::Context, FlowSink::IdType>, Response = O, Error = E>,
         FnArgs: std::marker::Send + 'static + Sync,
         Current: std::marker::Send + 'static + Sync,
-        FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
+        FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowContext>,
         DbError: std::error::Error + Send + Sync + 'static,
         <TaskFn<F, Current, FlowSink::Context, FnArgs> as Service<
             Task<Current, FlowSink::Context, FlowSink::IdType>,
@@ -97,13 +100,13 @@ where
             Task<Current, FlowSink::Context, FlowSink::IdType>,
         >>::Error: Into<BoxDynError>,
         FlowSink::IdType: Send + GenerateId,
-        Compact: Sync + Send + 'static,
+        Compact: Sync + Send + 'static + Clone,
         Encode: Codec<Current, Compact = Compact, Error = CodecError> + Send + Sync,
         CodecError: Send + Sync + std::error::Error + 'static,
         E: Into<BoxDynError>,
         Encode: Codec<O, Compact = Compact, Error = CodecError> + 'static,
         Encode: Codec<GoTo<O>, Compact = Compact, Error = CodecError> + 'static,
-        <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
+        <FlowSink::Context as MetadataExt<WorkflowContext>>::Error:
             std::error::Error + Sync + Send + 'static,
         FlowSink: WeakTaskSink<O, Codec = Encode, Error = DbError>
             + Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = DbError>,

@@ -7,8 +7,9 @@ use apalis_core::{
 };
 use futures::Sink;
 
-use crate::{GenerateId, GoTo, Step, Workflow, WorkflowRequest, context::StepContext};
+use crate::{GenerateId, GoTo, Step, Workflow, WorkflowContext, context::StepContext};
 
+/// Step that delays the workflow for a specified duration
 #[derive(Debug)]
 pub struct DelayStep<S, T> {
     duration: S,
@@ -17,7 +18,7 @@ pub struct DelayStep<S, T> {
 
 impl<S: Clone, T> Clone for DelayStep<S, T> {
     fn clone(&self) -> Self {
-        DelayStep {
+        Self {
             duration: self.duration.clone(),
             _marker: PhantomData,
         }
@@ -25,6 +26,7 @@ impl<S: Clone, T> Clone for DelayStep<S, T> {
 }
 
 impl<S, T> DelayStep<S, T> {
+    /// Create a new delay step
     pub fn new(inner: S) -> Self {
         Self {
             duration: inner,
@@ -39,13 +41,13 @@ where
     Current: Sync + Send + 'static,
     FlowSink: Sync + Unpin + WeakTaskSink<Current> + Send,
     Current: Send,
-    FlowSink::Context: Send + Sync + Default + MetadataExt<WorkflowRequest>,
+    FlowSink::Context: Send + Sync + Default + MetadataExt<WorkflowContext>,
     FlowSink::Error: Into<BoxDynError> + Send + 'static,
     FlowSink::IdType: GenerateId + Send,
     Compact: Sync + Send,
     Encode: Codec<Current, Compact = Compact> + Sync + Send + 'static,
     Encode::Error: std::error::Error + Sync + Send + 'static,
-    <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
+    <FlowSink::Context as MetadataExt<WorkflowContext>>::Error:
         std::error::Error + Sync + Send + 'static,
 {
     type Response = Current;
@@ -66,22 +68,21 @@ where
     Current: Send + 'static,
     FlowSink: Send + Clone + Sync + 'static + Unpin + WeakTaskSink<Current, Codec = Encode>,
 {
-    pub fn delay_for<CodecError, DbError>(
-        self,
-        duration: Duration,
-    ) -> Workflow<Input, Current, FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+    #[must_use]
+    /// Add a delay step to the workflow
+    pub fn delay_for<CodecError, DbError>(self, duration: Duration) -> Self
     where
         Current: std::marker::Send + 'static + Sync,
-        FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowRequest>,
+        FlowSink::Context: Send + Sync + Default + 'static + MetadataExt<WorkflowContext>,
         FlowSink: Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = DbError>
             + Backend<Error = DbError>,
         DbError: std::error::Error + Send + Sync + 'static,
         FlowSink::IdType: Send + GenerateId,
-        Compact: Sync + Send + 'static,
+        Compact: Sync + Send + 'static + Clone,
         Encode: Codec<Current, Compact = Compact, Error = CodecError> + Send + Sync + 'static,
         Encode: Codec<GoTo<Current>, Compact = Compact, Error = CodecError> + Send + Sync + 'static,
         CodecError: Send + Sync + std::error::Error + 'static,
-        <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error:
+        <FlowSink::Context as MetadataExt<WorkflowContext>>::Error:
             std::error::Error + Sync + Send + 'static,
     {
         self.add_step::<_, Current, _, _, DbError>(DelayStep {

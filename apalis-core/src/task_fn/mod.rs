@@ -100,7 +100,7 @@ impl<T: Copy, Args, Ctx, FnArgs> Copy for TaskFn<T, Args, Ctx, FnArgs> {}
 
 impl<T: Clone, Args, Ctx, FnArgs> Clone for TaskFn<T, Args, Ctx, FnArgs> {
     fn clone(&self) -> Self {
-        TaskFn {
+        Self {
             f: self.f.clone(),
             req: PhantomData,
             fn_args: PhantomData,

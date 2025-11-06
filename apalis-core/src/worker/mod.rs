@@ -170,7 +170,7 @@ where
 impl<Args, Ctx, B, Svc, M> Worker<Args, Ctx, B, Svc, M> {
     /// Build a worker that is ready for execution
     pub fn new(name: String, backend: B, service: Svc, layers: M) -> Self {
-        Worker {
+        Self {
             name,
             backend,
             service,
@@ -239,7 +239,7 @@ where
         let mut stream = self.stream_with_ctx(ctx);
         while let Some(res) = stream.next().await {
             match res {
-                Ok(_) => continue,
+                Ok(_) => {},
                 Err(WorkerError::GracefulExit) => return Ok(()),
                 Err(e) => return Err(e),
             }
@@ -538,7 +538,7 @@ impl<Fut: Future> Future for AttemptOnPollFuture<Fut> {
         let mut this = self.project();
         if !(*this.polled) {
             *this.polled = true;
-            this.attempt.increment();
+            let _ = this.attempt.increment();
         }
         this.fut.poll_unpin(cx)
     }
@@ -690,7 +690,7 @@ mod tests {
             .long_running()
             .ack_with(MyAcknowledger)
             .on_event(|ctx, ev| {
-                println!("On Event = {:?} from {}", ev, ctx.name());
+                println!("On Event = {ev:?} from {}", ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();
@@ -727,7 +727,7 @@ mod tests {
             .break_circuit()
             .long_running()
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                println!("CTX {:?}, On Event = {ev:?}", ctx.name());
             })
             .build(task);
         let mut event_stream = worker.stream();
@@ -750,7 +750,7 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(in_memory)
             .on_event(|ctx, ev| {
-                println!("On Event = {:?} from {}", ev, ctx.name());
+                println!("On Event = {ev:?} from {}", ctx.name());
             })
             .build(task);
         let signal = async {

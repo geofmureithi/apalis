@@ -38,10 +38,14 @@ pub use service::{StepResult, handle_workflow_result};
 type BoxedService<Input, Output> = tower::util::BoxService<Input, Output, BoxDynError>;
 type SteppedService<Compact, Ctx, IdType> = BoxedService<Task<Compact, Ctx, IdType>, Compact>;
 
+/// Enum representing the possible transitions in a workflow
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GoTo<T = ()> {
+    /// Proceed to the next step with the given value
     Next(T),
+    /// Delay the execution for the specified duration
     DelayFor(Duration, T),
+    /// Marks the workflow as done
     Done,
     /// Breaks the current task execution
     Break(T),
@@ -52,12 +56,16 @@ pub enum GoTo<T = ()> {
     ContinueAt(String),
 }
 
+/// A step in a workflow
 pub trait Step<Args, FlowSink, Encode>
 where
     FlowSink: WeakTaskSink<Self::Response>,
 {
+    /// The response type of the step
     type Response;
+    /// The error type of the step
     type Error: Send;
+    /// Run the step with the given context and task
     fn run(
         &mut self,
         ctx: &StepContext<FlowSink, Encode>,
@@ -65,20 +73,35 @@ where
     ) -> impl Future<Output = Result<GoTo<Self::Response>, Self::Error>> + Send;
 }
 
+/// A workflow composed of multiple steps
+#[derive(Debug)]
 pub struct Workflow<Input, Current, FlowSink, Encode, Compact, Context, IdType> {
     name: String,
     steps: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
     _marker: PhantomData<(Input, Current, FlowSink)>,
 }
 
+/// Service that composes multiple stepped services for workflow execution
 pub struct CompositeService<FlowSink, Encode, Compact, Context, IdType> {
     svc: SteppedService<Compact, Context, IdType>,
     _marker: PhantomData<(FlowSink, Encode)>,
 }
 
+impl<FlowSink, Encode, Compact, Context, IdType> Debug
+    for CompositeService<FlowSink, Encode, Compact, Context, IdType>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompositeService")
+            .field("svc", &"SteppedService<..>")
+            .finish()
+    }
+}
+
 impl<Input, FlowSink, Encode, Compact, Context, IdType>
     Workflow<Input, Input, FlowSink, Encode, Compact, Context, IdType>
 {
+    /// Create a new workflow
+    #[must_use]
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_owned(),
@@ -94,6 +117,7 @@ where
     Current: Send + 'static,
     FlowSink: Send + Clone + Sync + 'static + Unpin + Backend,
 {
+    /// Add a step to the workflow
     pub fn add_step<S, Res, E, CodecError, BackendError>(
         mut self,
         step: S,
@@ -115,11 +139,11 @@ where
         Encode: Codec<Current, Compact = Compact, Error = CodecError>
             + Codec<GoTo<Res>, Compact = Compact, Error = CodecError>
             + Codec<Res, Compact = Compact, Error = CodecError>,
-        Compact: Send + Sync + 'static,
+        Compact: Send + Sync + 'static + Clone,
         Encode: Send + Sync + 'static,
         E: Into<BoxDynError> + Send + Sync + 'static,
         CodecError: std::error::Error + Send + 'static + Sync,
-        FlowSink::Context: MetadataExt<WorkflowRequest>,
+        FlowSink::Context: MetadataExt<WorkflowContext>,
         BackendError: std::error::Error + Send + Sync + 'static,
     {
         self.steps.insert(self.steps.len(), {
@@ -140,7 +164,8 @@ where
         }
     }
 }
-
+/// Service that wraps a step for workflow processing
+#[derive(Debug, Clone)]
 pub struct StepService<Step, Encode, Args, FlowSink> {
     step: Step,
     codec: PhantomData<(Encode, Args, FlowSink)>,
@@ -164,9 +189,9 @@ where
         + Unpin
         + Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = BackendErr>,
     Args: Send + 'static,
-    FlowSink::Context: Send + 'static + MetadataExt<WorkflowRequest>,
+    FlowSink::Context: Send + 'static + MetadataExt<WorkflowContext>,
     FlowSink::IdType: Send + 'static,
-    Compact: Send + Sync + 'static,
+    Compact: Send + Sync + 'static + Clone,
     Encode: Send + Sync + 'static,
     E: Into<BoxDynError> + Send + 'static + Sync,
     CodecError: std::error::Error + Send + 'static + Sync,
@@ -212,22 +237,30 @@ where
     }
 }
 
+/// Errors that can occur during workflow processing
 #[derive(Debug, thiserror::Error)]
 pub enum WorkflowError {
+    /// Missing step context in the task metadata
     #[error("Missing StepContext")]
     MissingContextError,
+    /// Error during codec operations
     #[error("CodecError: {0}")]
     CodecError(BoxDynError),
+    /// Error during single step execution
     #[error("SingleStepError: {0}")]
     SingleStepError(BoxDynError),
+    /// Error pushing task into the sink
     #[error("SinkError: {0}")]
     SinkError(BoxDynError),
+    /// Error accessing or modifying metadata
     #[error("MetadataError: {0}")]
     MetadataError(BoxDynError),
 }
 
+/// Metadata stored in each task for workflow processing
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct WorkflowRequest {
+pub struct WorkflowContext {
+    /// Index of the step in the workflow
     pub step_index: usize,
 }
 
@@ -248,15 +281,15 @@ where
     Err: std::error::Error + Send + Sync + 'static,
     Compact: Send,
     FlowSink: TaskSink<Compact, Codec = Encode>,
-    FlowSink::Context: MetadataExt<WorkflowRequest> + Send + Sync + 'static,
+    FlowSink::Context: MetadataExt<WorkflowContext> + Send + Sync + 'static,
     Encode: Send + Sync + 'static + Codec<Compact, Compact = Compact>,
     Compact: Send + Sync + 'static + Clone,
     FlowSink::IdType: Send + 'static + Default,
     FlowSink: Sync + Backend<Args = Compact, Error = Err>,
     Compact: Send + Sync,
-    FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
+    FlowSink::Context: Send + Default + MetadataExt<WorkflowContext>,
     FlowSink::IdType: GenerateId,
-    <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
+    <FlowSink::Context as MetadataExt<WorkflowContext>>::Error: Into<BoxDynError>,
     Encode::Error: Into<BoxDynError>,
 {
     fn into_service(
@@ -264,18 +297,21 @@ where
         b: &FlowSink,
     ) -> WorkflowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType> {
         let services: HashMap<usize, _> = self.steps.into_iter().collect();
-        WorkflowService::new(services, b.clone())
+        WorkflowService::<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>::new(services, b.clone())
     }
 }
 
+/// Extension trait for pushing tasks into a workflow sink
 pub trait TaskFlowSink<Args, Compact>: Backend
 where
     Self::Codec: Codec<Args>,
 {
+    /// Push a step into the workflow sink at the start
     fn push_start(&mut self, step: Args) -> impl Future<Output = Result<(), WorkflowError>> + Send {
         self.push_step(step, 0)
     }
 
+    /// Push a step into the workflow sink at the specified index
     fn push_step(
         &mut self,
         step: Args,
@@ -283,23 +319,26 @@ where
     ) -> impl Future<Output = Result<(), WorkflowError>> + Send;
 }
 
-impl<S: Send, Args: Send, Compact> TaskFlowSink<Args, Compact> for S
+impl<S: Send, Args: Send, Compact, Err> TaskFlowSink<Args, Compact> for S
 where
-    S: WeakTaskSink<Args>,
+    S: Sink<Task<Compact, S::Context, S::IdType>, Error = Err> + Backend<Error = Err> + Unpin,
     S::IdType: GenerateId + Send,
     S::Codec: Codec<Args, Compact = Compact>,
-    S::Context: MetadataExt<WorkflowRequest> + Send,
-    S::Error: std::error::Error + Send + Sync + 'static,
+    S::Context: MetadataExt<WorkflowContext> + Send,
+    Err: std::error::Error + Send + Sync + 'static,
     <S::Codec as Codec<Args>>::Error: Into<BoxDynError> + Send + Sync + 'static,
-    <S::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    <S::Context as MetadataExt<WorkflowContext>>::Error: Into<BoxDynError> + Send + Sync + 'static,
+    Compact: Send + 'static,
 {
     async fn push_step(&mut self, step: Args, index: usize) -> Result<(), WorkflowError> {
+        use futures::SinkExt;
         let task_id = TaskId::new(S::IdType::generate());
-        let task = TaskBuilder::new(step)
-            .meta(WorkflowRequest { step_index: index })
+        let compact = S::Codec::encode(&step).map_err(|e| WorkflowError::CodecError(e.into()))?;
+        let task = TaskBuilder::new(compact)
+            .meta(WorkflowContext { step_index: index })
             .with_task_id(task_id.clone())
             .build();
-        self.push_task(task)
+        self.send(task)
             .await
             .map_err(|e| WorkflowError::SinkError(e.into()))
     }
@@ -348,7 +387,7 @@ mod tests {
             .filter_map(|x| async move { if x % 3 != 0 { Some(x) } else { None } })
             .filter_map(|x| async move { if x % 2 != 0 { Some(x) } else { None } })
             .then(|a| async move {
-                dbg!(a);
+                drop(a);
                 Err::<(), WorkflowError>(WorkflowError::MissingContextError)
             });
 

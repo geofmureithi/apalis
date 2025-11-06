@@ -1,6 +1,6 @@
 #[allow(unused)]
-pub mod dag;
-pub mod delay;
-pub mod filter_map;
-pub mod fold;
-pub mod then;
+pub(crate) mod dag;
+pub(crate) mod delay;
+pub(crate) mod filter_map;
+pub(crate) mod fold;
+pub(crate) mod then;

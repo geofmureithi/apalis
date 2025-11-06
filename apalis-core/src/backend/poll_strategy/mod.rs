@@ -77,10 +77,12 @@ impl PollContext {
         Self { worker, prev_count }
     }
     /// Get a reference to the worker context
+    #[must_use]
     pub fn worker(&self) -> &WorkerContext {
         &self.worker
     }
     /// Get a reference to the previous count of tasks received
+    #[must_use]
     pub fn prev_count(&self) -> &Arc<AtomicUsize> {
         &self.prev_count
     }
@@ -150,18 +152,15 @@ mod tests {
                         let mut db = p.lock().await;
                         let item = db.pop_front();
                         drop(db);
-                        match item {
-                            Some(item) => {
-                                config.prev_count.store(1, Ordering::Relaxed);
-                                Some((Ok::<_, BoxDynError>(Some(item)), (p, config, poller, ctx)))
-                            }
-                            None => {
-                                config.prev_count.store(0, Ordering::Relaxed);
-                                Some((
-                                    Ok::<Option<Task<u32, ()>>, BoxDynError>(None),
-                                    (p, config, poller, ctx),
-                                ))
-                            }
+                        if let Some(item) = item {
+                            config.prev_count.store(1, Ordering::Relaxed);
+                            Some((Ok::<_, BoxDynError>(Some(item)), (p, config, poller, ctx)))
+                        } else {
+                            config.prev_count.store(0, Ordering::Relaxed);
+                            Some((
+                                Ok::<Option<Task<u32, ()>>, BoxDynError>(None),
+                                (p, config, poller, ctx),
+                            ))
                         }
                     },
                 )
@@ -198,7 +197,7 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(backend)
             .on_event(|ctx, ev| {
-                println!("On Event = {:?} from {}", ev, ctx.name());
+                println!("On Event = {ev:?} from {}", ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();
@@ -262,18 +261,15 @@ mod tests {
                         let mut db = p.lock().await;
                         let item = db.pop_front();
                         drop(db);
-                        match item {
-                            Some(item) => {
-                                config.prev_count.store(1, Ordering::Relaxed);
-                                Some((Ok::<_, BoxDynError>(Some(item)), (p, config, poller, ctx)))
-                            }
-                            None => {
-                                config.prev_count.store(0, Ordering::Relaxed);
-                                Some((
-                                    Ok::<Option<Task<u32, ()>>, BoxDynError>(None),
-                                    (p, config, poller, ctx),
-                                ))
-                            }
+                        if let Some(item) = item {
+                            config.prev_count.store(1, Ordering::Relaxed);
+                            Some((Ok::<_, BoxDynError>(Some(item)), (p, config, poller, ctx)))
+                        } else {
+                            config.prev_count.store(0, Ordering::Relaxed);
+                            Some((
+                                Ok::<Option<Task<u32, ()>>, BoxDynError>(None),
+                                (p, config, poller, ctx),
+                            ))
                         }
                     },
                 )
@@ -310,7 +306,7 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(backend)
             .on_event(|ctx, ev| {
-                println!("On Event = {:?} from {}", ev, ctx.name());
+                println!("On Event = {ev:?} from {}", ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();

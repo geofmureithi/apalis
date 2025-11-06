@@ -77,6 +77,7 @@ pub struct LongRunningConfig {
 }
 impl LongRunningConfig {
     /// Create a new long running config
+    #[must_use]
     pub fn new(max_duration: Duration) -> Self {
         Self {
             max_duration: Some(max_duration),
@@ -107,7 +108,7 @@ impl<Args: Sync, Ctx: Sync + Clone, IdType: Sync + Send> FromRequest<Task<Args, 
     async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
         let tracker: &TaskTracker = task.parts.data.get_checked()?;
         let wrk: &WorkerContext = task.parts.data.get_checked()?;
-        Ok(LongRunnerCtx {
+        Ok(Self {
             tracker: tracker.clone(),
             wrk: wrk.clone(),
         })
@@ -123,8 +124,9 @@ pub struct LongRunningLayer(LongRunningConfig);
 
 impl LongRunningLayer {
     /// Create a new long running layer
+    #[must_use]
     pub fn new(config: LongRunningConfig) -> Self {
-        LongRunningLayer(config)
+        Self(config)
     }
 }
 
@@ -169,7 +171,7 @@ where
         let req = self.service.call(task);
         async move {
             let res = req.await;
-            tracker.close();
+            let _ = tracker.close();
             let tracker_fut = worker.track(tracker.wait()); // Long running tasks will be awaited in a shutdown
             tracker_fut.await;
             res
@@ -260,7 +262,7 @@ mod tests {
             .backend(in_memory)
             .long_running()
             .on_event(|ctx, ev| {
-                println!("On Event = {:?} from {}", ev, ctx.name());
+                println!("On Event = {ev:?} from {}", ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();

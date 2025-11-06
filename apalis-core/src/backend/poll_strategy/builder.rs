@@ -27,6 +27,7 @@ impl Default for StrategyBuilder {
 
 impl StrategyBuilder {
     /// Create a new StrategyBuilder
+    #[must_use]
     pub fn new() -> Self {
         Self {
             strategies: Vec::new(),
@@ -36,6 +37,7 @@ impl StrategyBuilder {
     /// Apply a polling strategy to the builder
     /// Strategies are executed in the order they are added, with the first strategy having the highest priority
     /// In case of multiple strategies being ready at the same time, the first one added will be chosen
+    #[must_use]
     pub fn apply<S, Stm>(mut self, strategy: S) -> Self
     where
         S: PollStrategy<Stream = Stm> + 'static + Sync + Send,
@@ -49,6 +51,7 @@ impl StrategyBuilder {
     /// Build the MultiStrategy from the builder
     /// Consumes the builder and returns a MultiStrategy
     /// The MultiStrategy will contain all the strategies added to the builder
+    #[must_use]
     pub fn build(self) -> MultiStrategy {
         MultiStrategy {
             strategies: Arc::new(std::sync::Mutex::new(self.strategies)),

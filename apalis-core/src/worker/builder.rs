@@ -110,8 +110,8 @@ impl<Args, Ctx, Source, Middleware> std::fmt::Debug
 
 impl WorkerBuilder<(), (), (), Identity> {
     /// Build a new [`WorkerBuilder`] instance with a name for the worker to build
-    pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), (), Identity> {
-        WorkerBuilder {
+    pub fn new<T: AsRef<str>>(name: T) -> Self {
+        Self {
             request: PhantomData,
             layer: Identity::new(),
             source: (),

@@ -150,7 +150,7 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
         B::IdType: Send + Clone + 'static,
     {
         let service = factory.into_service(&backend);
-        TestWorker::new_with_svc(backend, service)
+        Self::new_with_svc(backend, service)
     }
 
     /// Create a new test worker with a service
@@ -300,7 +300,7 @@ mod tests {
         });
         let mut worker = TestWorker::new(backend, service);
         while let Some(Ok((_, ret))) = worker.execute_next().await {
-            dbg!(ret.unwrap());
+            ret.unwrap();
         }
         println!("Worker run successfully");
     }

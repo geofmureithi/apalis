@@ -25,7 +25,7 @@ use tower::{Service, ServiceBuilder};
 
 use crate::{BoxedService, SteppedService};
 
-pub struct DagFlow<Compact, Ctx, IdType, Codec> {
+pub(crate) struct DagFlow<Compact, Ctx, IdType, Codec> {
     graph: DiGraph<SteppedService<Compact, Ctx, IdType>, ()>,
     node_mapping: HashMap<String, NodeIndex>,
     codec: PhantomData<Codec>,
@@ -42,7 +42,7 @@ impl<Compact, Ctx, IdType, Codec> Default for DagFlow<Compact, Ctx, IdType, Code
 }
 
 impl<Compact, Ctx, IdType, Codec> DagFlow<Compact, Ctx, IdType, Codec> {
-    pub fn new_typed<T>() -> DagFlow<T, Ctx, IdType, Codec> {
+    pub(crate) fn new_typed<T>() -> DagFlow<T, Ctx, IdType, Codec> {
         DagFlow {
             graph: DiGraph::new(),
             node_mapping: HashMap::new(),
@@ -56,7 +56,11 @@ where
     Compact: Debug,
 {
     /// Add a node to the DAG
-    pub fn node<S, Current, Output, E: Into<BoxDynError>>(mut self, name: &str, service: S) -> Self
+    pub(crate) fn node<S, Current, Output, E: Into<BoxDynError>>(
+        mut self,
+        name: &str,
+        service: S,
+    ) -> Self
     where
         S: Service<Task<Current, Ctx, IdType>, Response = Output, Error = E> + Send + 'static,
         S::Future: Send + 'static,
@@ -68,40 +72,37 @@ where
     {
         let current = self.node_mapping.get_mut(name);
 
-        match current {
-            Some(exists) => {
-                // Ensure it exists
-                let _ = self.graph.node_weight_mut(*exists).unwrap();
-            }
-            None => {
-                let dag_service = ServiceBuilder::new()
-                    .map_request(|req: Task<Compact, Ctx, IdType>| {
-                        req.map(|args| {
-                            let c: Current = Codec::decode(&args).unwrap_or_else(|_| {
-                                panic!(
-                                    "Could not decode node, expecting {}",
-                                    std::any::type_name::<Current>()
-                                )
-                            });
-                            c
-                        })
+        if let Some(exists) = current {
+            // Ensure it exists
+            let _ = self.graph.node_weight_mut(*exists).unwrap();
+        } else {
+            let dag_service = ServiceBuilder::new()
+                .map_request(|req: Task<Compact, Ctx, IdType>| {
+                    req.map(|args| {
+                        let c: Current = Codec::decode(&args).unwrap_or_else(|_| {
+                            panic!(
+                                "Could not decode node, expecting {}",
+                                std::any::type_name::<Current>()
+                            )
+                        });
+                        c
                     })
-                    .map_response(|res: Output| {
-                        // .map_err(|e| WorkflowError::CodecError(e.into()))?;
-                        Codec::encode(&res).unwrap()
-                    })
-                    .map_err(|e: E| e.into())
-                    .service(service);
+                })
+                .map_response(|res: Output| {
+                    // .map_err(|e| WorkflowError::CodecError(e.into()))?;
+                    Codec::encode(&res).unwrap()
+                })
+                .map_err(|e: E| e.into())
+                .service(service);
 
-                let node_id = self.graph.add_node(BoxedService::new(dag_service));
-                self.node_mapping.insert(name.to_owned(), node_id);
-            }
+            let node_id = self.graph.add_node(BoxedService::new(dag_service));
+            self.node_mapping.insert(name.to_owned(), node_id);
         }
 
         self
     }
     /// Add an edge to the DAG
-    pub fn edge(mut self, from: &str, to: &str) -> Self {
+    pub(crate) fn edge(mut self, from: &str, to: &str) -> Self {
         let from_node = self
             .node_mapping
             .get(from)
@@ -117,7 +118,7 @@ where
         self
     }
     /// Build the DAG executor
-    pub fn build(self) -> Result<DagExecutor<Compact, Ctx, IdType>, String> {
+    pub(crate) fn build(self) -> Result<DagExecutor<Compact, Ctx, IdType>, String> {
         // Validate DAG (check for cycles)
         let sorted = toposort(&self.graph, None).map_err(|_| "DAG contains cycles")?;
 
@@ -129,20 +130,20 @@ where
     }
 }
 
-pub struct RoutedDagService<Inner, SinkT> {
+pub(crate) struct RoutedDagService<Inner, SinkT> {
     inner: Inner,
     sink: Arc<Mutex<SinkT>>,
 }
 
 /// Request for DAG node execution
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DagRequest {
+pub(crate) struct DagRequest {
     pub node_id: NodeIndex,
     pub execution_context: ExecutionContext,
 }
 
 impl DagRequest {
-    pub fn new(node_id: NodeIndex, context: ExecutionContext) -> Self {
+    pub(crate) fn new(node_id: NodeIndex, context: ExecutionContext) -> Self {
         Self {
             node_id,
             execution_context: context,
@@ -152,13 +153,13 @@ impl DagRequest {
 
 /// Context for tracking DAG execution state
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct ExecutionContext {
+pub(crate) struct ExecutionContext {
     pub nodes: HashMap<NodeIndex, String>,
     pub completed_nodes: HashSet<NodeIndex>,
 }
 
 /// Executor for DAG workflows
-pub struct DagExecutor<Compact, Ctx, IdType> {
+pub(crate) struct DagExecutor<Compact, Ctx, IdType> {
     graph: DiGraph<SteppedService<Compact, Ctx, IdType>, ()>,
     node_mapping: HashMap<String, NodeIndex>,
     topological_order: Vec<NodeIndex>,

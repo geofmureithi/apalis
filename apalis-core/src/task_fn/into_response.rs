@@ -46,8 +46,8 @@ pub trait IntoResponse {
 }
 
 impl IntoResponse for bool {
-    type Output = bool;
-    fn into_response(self) -> Result<bool, BoxDynError> {
+    type Output = Self;
+    fn into_response(self) -> Result<Self, BoxDynError> {
         match self {
             true => Ok(true),
             false => Err("Task returned false".into()),
@@ -56,8 +56,8 @@ impl IntoResponse for bool {
 }
 
 impl<T> IntoResponse for Option<T> {
-    type Output = Option<T>;
-    fn into_response(self) -> Result<Option<T>, BoxDynError> {
+    type Output = Self;
+    fn into_response(self) -> Result<Self, BoxDynError> {
         Ok(self)
     }
 }

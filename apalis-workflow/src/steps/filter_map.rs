@@ -17,16 +17,16 @@ use tower::Service;
 
 use crate::{
     CompositeService, GenerateId, GoTo, Step, SteppedService, Workflow, WorkflowError,
-    WorkflowRequest, context::StepContext, service::handle_workflow_result,
+    WorkflowContext, context::StepContext, service::handle_workflow_result,
 };
 
-pub struct FilterMap<Step, Input, Output> {
+pub(crate) struct FilterMap<Step, Input, Output> {
     mapper: PhantomData<FilterMapStep<Step, Input, Output>>,
 }
 
 impl<Step, Input, Output> Clone for FilterMap<Step, Input, Output> {
     fn clone(&self) -> Self {
-        FilterMap {
+        Self {
             mapper: self.mapper,
         }
     }
@@ -63,7 +63,7 @@ where
     Input: Send + Sync,
     Sink::Context: Send
         + Sync
-        + MetadataExt<WorkflowRequest, Error = MetadataError>
+        + MetadataExt<WorkflowContext, Error = MetadataError>
         + MetadataExt<FilterContext<Sink::IdType>, Error = MetadataError>
         + Default,
     Sink::Error: Into<BoxDynError> + Sync + Send + 'static,
@@ -110,6 +110,8 @@ where
     }
 }
 
+/// Step that applies a filter map function to each item
+#[derive(Debug)]
 pub struct FilterMapStep<S, T, O> {
     inner: S,
     _marker: std::marker::PhantomData<(T, O)>,
@@ -117,7 +119,7 @@ pub struct FilterMapStep<S, T, O> {
 
 impl<S: Clone, T, O> Clone for FilterMapStep<S, T, O> {
     fn clone(&self) -> Self {
-        FilterMapStep {
+        Self {
             inner: self.inner.clone(),
             _marker: PhantomData,
         }
@@ -125,6 +127,7 @@ impl<S: Clone, T, O> Clone for FilterMapStep<S, T, O> {
 }
 
 impl<S, T, O> FilterMapStep<S, T, O> {
+    /// Create a new filter map step
     pub fn new(inner: S) -> Self {
         Self {
             inner,
@@ -161,7 +164,7 @@ where
     }
 }
 
-pub struct FilterService<Step, Current, FlowSink, Encode, Output, F, FnArgs> {
+pub(crate) struct FilterService<Step, Current, FlowSink, Encode, Output, F, FnArgs> {
     step: Step,
     _marker: PhantomData<(Current, FlowSink, Encode, Output, F, FnArgs)>,
 }
@@ -197,7 +200,7 @@ where
         + 'static
         + MetadataExt<FilterContext<FlowSink::IdType>, Error = MetadataError>
         + MetadataExt<FilterState, Error = MetadataError>
-        + MetadataExt<WorkflowRequest, Error = MetadataError>
+        + MetadataExt<WorkflowContext, Error = MetadataError>
         + Sync
         + Default,
     FlowSink: WeakTaskSink<Option<Output>, Codec = Encode, Error = DbError>
@@ -218,7 +221,7 @@ where
         Task<Current, FlowSink::Context, FlowSink::IdType>,
     >>::Future: Send + 'static,
     DbError: Into<BoxDynError> + Send + Sync,
-    Compact: Send + Sync + 'static,
+    Compact: Send + Sync + 'static + Clone,
     FlowSink::IdType: GenerateId + Send + Sync + Display,
     Encode: Send + Sync + 'static,
     S::Error: Into<BoxDynError> + Send + Sync,
@@ -290,7 +293,7 @@ where
                         let task_id = TaskId::new(FlowSink::IdType::generate());
 
                         let task = TaskBuilder::new(step)
-                            .meta(WorkflowRequest {
+                            .meta(WorkflowContext {
                                 step_index: ctx.current_step,
                             })
                             .with_task_id(task_id.clone())
@@ -306,7 +309,7 @@ where
                     let task_id = TaskId::new(FlowSink::IdType::generate());
                     let task = TaskBuilder::new(main_args)
                         .with_task_id(task_id.clone())
-                        .meta(WorkflowRequest {
+                        .meta(WorkflowContext {
                             step_index: ctx.current_step,
                         })
                         .meta(FilterContext { task_ids })
@@ -374,7 +377,7 @@ where
             + Sync
             + Default
             + MetadataExt<FilterContext<FlowSink::IdType>, Error = MetadataError>
-            + MetadataExt<WorkflowRequest, Error = MetadataError>
+            + MetadataExt<WorkflowContext, Error = MetadataError>
             + MetadataExt<FilterState, Error = MetadataError>,
         <TaskFn<F, Current, FlowSink::Context, FnArgs> as Service<
             Task<Current, FlowSink::Context, FlowSink::IdType>,
@@ -399,7 +402,7 @@ where
             + Codec<Vec<Current>, Compact = Compact, Error = CodecError>
             + Codec<Vec<Output>, Compact = Compact, Error = CodecError>
             + Codec<GoTo<Vec<Output>>, Compact = Compact, Error = CodecError>,
-        Compact: Send + Sync + 'static,
+        Compact: Send + Sync + 'static + Clone,
         DbError: Into<BoxDynError> + Send + Sync,
         Encode: Send + Sync + 'static,
         CodecError: std::error::Error + Sync + Send + 'static,

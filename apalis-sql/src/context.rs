@@ -12,6 +12,8 @@ use serde::{
     de::{DeserializeOwned, Error},
 };
 
+
+/// The SQL context used for jobs stored in a SQL database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlContext {
     max_attempts: i32,
@@ -32,8 +34,9 @@ impl Default for SqlContext {
 
 impl SqlContext {
     /// Build a new context with defaults
+    #[must_use]
     pub fn new() -> Self {
-        SqlContext {
+        Self {
             lock_at: None,
             done_at: None,
             max_attempts: 5,
@@ -46,84 +49,104 @@ impl SqlContext {
     }
 
     /// Set the number of attempts
+    #[must_use]
     pub fn with_max_attempts(mut self, max_attempts: i32) -> Self {
         self.max_attempts = max_attempts;
         self
     }
 
     /// Gets the maximum attempts for a job. Default 25
+    #[must_use]
     pub fn max_attempts(&self) -> i32 {
         self.max_attempts
     }
 
     /// Get the time a job was done
+    #[must_use]
     pub fn done_at(&self) -> &Option<i64> {
         &self.done_at
     }
 
     /// Set the time a job was done
+    #[must_use]
     pub fn with_done_at(mut self, done_at: Option<i64>) -> Self {
         self.done_at = done_at;
         self
     }
 
     /// Get the time a job was locked
+    #[must_use]
     pub fn lock_at(&self) -> &Option<i64> {
         &self.lock_at
     }
 
     /// Set the lock_at value
+    #[must_use]
     pub fn with_lock_at(mut self, lock_at: Option<i64>) -> Self {
         self.lock_at = lock_at;
         self
     }
 
     /// Get the time a job was locked
+    #[must_use]
     pub fn lock_by(&self) -> &Option<String> {
         &self.lock_by
     }
 
     /// Set `lock_by`
+    #[must_use]
     pub fn with_lock_by(mut self, lock_by: Option<String>) -> Self {
         self.lock_by = lock_by;
         self
     }
 
     /// Get the time a job was locked
+    #[must_use]
     pub fn last_result(&self) -> &Option<serde_json::Value> {
         &self.last_result
     }
 
     /// Set the last result
+    #[must_use]
     pub fn with_last_result(mut self, result: Option<serde_json::Value>) -> Self {
         self.last_result = result;
         self
     }
 
     /// Set the job priority. Larger values will run sooner. Default is 0.
+    #[must_use]
     pub fn with_priority(mut self, priority: i32) -> Self {
         self.priority = priority;
         self
     }
 
     /// Get the job priority
+    #[must_use]
     pub fn priority(&self) -> i32 {
         self.priority
     }
 
+    /// Get the queue name
+    #[must_use]
     pub fn queue(&self) -> &Option<String> {
         &self.queue
     }
 
+    /// Set the queue name
+    #[must_use]
     pub fn with_queue(mut self, queue: String) -> Self {
         self.queue = Some(queue);
         self
     }
 
+    /// Get the metadata map
+    #[must_use]
     pub fn meta(&self) -> &JsonMapMetadata {
         &self.meta
     }
 
+    /// Set the metadata map
+    #[must_use]
     pub fn with_meta(mut self, meta: JsonMapMetadata) -> Self {
         self.meta = meta;
         self
@@ -147,7 +170,7 @@ impl<T: DeserializeOwned + Serialize> MetadataExt<T> for SqlContext {
     }
     fn inject(&mut self, value: T) -> Result<(), Self::Error> {
         self.meta.insert(
-            std::any::type_name::<T>().to_string(),
+            std::any::type_name::<T>().to_owned(),
             serde_json::to_value(&value).unwrap(),
         );
         Ok(())

@@ -255,6 +255,7 @@ impl<Args, DB, Fetch, Sink, IdType>
     BackendBuilder<Args, DB, Fetch, Sink, IdType, IdentityCodec, ()>
 {
     /// Create a new `BackendBuilder` instance
+    #[must_use]
     pub fn new() -> Self {
         Self::new_with_cfg(())
     }
@@ -274,6 +275,7 @@ impl<Args, DB, Fetch, Sink, IdType, Codec, Config>
     BackendBuilder<Args, DB, Fetch, Sink, IdType, Codec, Config>
 {
     /// Set a new codec for encoding/decoding task arguments
+    #[must_use]
     pub fn with_codec<NewCodec>(
         self,
     ) -> BackendBuilder<Args, DB, Fetch, Sink, IdType, NewCodec, Config> {
@@ -287,12 +289,14 @@ impl<Args, DB, Fetch, Sink, IdType, Codec, Config>
     }
 
     /// The custom backend persistence engine
+    #[must_use]
     pub fn database(mut self, db: DB) -> Self {
         self.database = Some(db);
         self
     }
 
     /// The fetcher function to retrieve tasks from the database
+    #[must_use]
     pub fn fetcher<F: Fn(&mut DB, &Config, &WorkerContext) -> Fetch + Send + Sync + 'static>(
         mut self,
         fetcher: F,
@@ -302,6 +306,7 @@ impl<Args, DB, Fetch, Sink, IdType, Codec, Config>
     }
 
     /// The sink function to persist tasks to the database
+    #[must_use]
     pub fn sink<F: Fn(&mut DB, &Config) -> Sink + Send + Sync + 'static>(
         mut self,
         sink: F,
@@ -491,7 +496,7 @@ mod tests {
         let worker = WorkerBuilder::new("rango-tango")
             .backend(backend)
             .on_event(|ctx, ev| {
-                println!("On Event = {:?} from {}", ev, ctx.name());
+                println!("On Event = {ev:?} from {}", ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();

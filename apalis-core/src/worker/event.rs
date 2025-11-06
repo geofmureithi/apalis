@@ -42,15 +42,30 @@ pub enum Event {
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let event_description = match &self {
-            Event::Start => "Worker started".to_string(),
-            Event::Idle => "Worker is idle".to_string(),
-            Event::Custom(_) => "Custom event".to_string(),
-            Event::Error(err) => format!("Worker encountered an error: {err}"),
-            Event::Stop => "Worker stopped".to_string(),
-            Event::HeartBeat => "Worker Heartbeat".to_owned(),
-            Event::Success => "Worker completed task successfully".to_string(),
+            Self::Start => "Worker started".to_owned(),
+            Self::Idle => "Worker is idle".to_owned(),
+            Self::Custom(_) => "Custom event".to_owned(),
+            Self::Error(err) => format!("Worker encountered an error: {err}"),
+            Self::Stop => "Worker stopped".to_owned(),
+            Self::HeartBeat => "Worker Heartbeat".to_owned(),
+            Self::Success => "Worker completed task successfully".to_owned(),
         };
 
         write!(f, "WorkerEvent: {event_description}")
+    }
+}
+
+impl Event {
+    /// If the event is an error, return the error
+    pub fn as_error(&self) -> Option<Arc<BoxDynError>> {
+        match self {
+            Event::Error(err) => Some(err.clone()),
+            _ => None,
+        }
+    }
+
+    /// Create a custom event
+    pub fn custom<T: 'static + Send + Sync>(data: T) -> Self {
+        Event::Custom(Box::new(data))
     }
 }

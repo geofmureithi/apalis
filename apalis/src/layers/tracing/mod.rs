@@ -400,7 +400,7 @@ mod tests {
             .backend(in_memory)
             .enable_tracing()
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                println!("CTX {:?}, On Event = {ev:?}", ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();
@@ -438,7 +438,7 @@ mod tests {
                     })
             )
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                println!("CTX {:?}, On Event = {ev:?}", ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();
