@@ -62,7 +62,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "1.0.0-alpha.9", features = "limit" } # Limit for concurrency
+apalis = { version = "1.0.0-alpha.9" }
 apalis-redis = { version = "1.0.0-alpha.1" } # Use redis for persistence
 ```
 

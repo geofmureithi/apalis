@@ -4,7 +4,7 @@ on:
   pull_request:
   workflow_call:
 
-name: CI
+name: Check and Test
 permissions:
   contents: read
 
@@ -27,6 +27,10 @@ jobs:
         with:
           command: check
           args: --workspace --all-features
+      - name: cargo install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+      - name: cargo hack
+        run: cargo hack --feature-powerset check --lib --tests
 
   test:
     name: Test Suite
@@ -75,3 +79,17 @@ jobs:
         with:
           command: clippy
           args: --workspace --all-features
+
+  doc:
+    runs-on: ubuntu-latest
+    name: nightly / doc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install nightly
+        uses: dtolnay/rust-toolchain@nightly
+      - name: cargo doc
+        run: cargo doc --no-deps --lib --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs
