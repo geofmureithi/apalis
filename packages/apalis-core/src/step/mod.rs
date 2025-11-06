@@ -172,13 +172,22 @@ where
                                 .map_err(|e| Error::SourceError(Arc::new(e.into())))?;
                         }
                         GoTo::Delay { next, delay } => {
+                            // Calculate the execution target date time.
+                            let target_dt = chrono::Utc::now()
+                                + chrono::Duration::from_std(*delay).unwrap_or_default();
+
+                            // Convert the target date time into seconds since the Unix epoch.
+                            // Rounding up to the next second ensures, that tasks won't be
+                            // executed until the delay is over.
+                            let target = target_dt.timestamp_millis().saturating_add(999) / 1000;
+
                             storage
                                 .schedule(
                                     StepRequest {
                                         index: next_index,
                                         step: next.clone(),
                                     },
-                                    delay.as_secs().try_into().unwrap(),
+                                    target,
                                 )
                                 .await
                                 .map_err(|e| Error::SourceError(Arc::new(e.into())))?;

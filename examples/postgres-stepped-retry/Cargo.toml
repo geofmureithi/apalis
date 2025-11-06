@@ -1,0 +1,28 @@
+#> package <####################################################################
+[package]
+name = "postgres-stepped-retry"
+version = "0.1.0"
+authors = ["Biwecka <biwecka@mailbox.org>"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "postgres-stepped-retry"
+path = "main.rs"
+
+#> dependencies <###############################################################
+[dependencies]
+apalis = { path = "../../", features = ["retry"] }
+apalis-sql = { path = "../../packages/apalis-sql", features = [ "postgres", "tokio-comp" ] }
+tokio = { version = "1", features = ["full"] }
+thiserror = { version = "2.0.17" }
+serde = { version = "1.0.228" }
+serde_json = { version = "1.0.145" }
+chrono = { version = "0.4.42", features = ["now", "clock"] }
+tower = { version = "0.5", features = ["util"], default-features = false }
+
+[dependencies.tracing]
+default-features = false
+version = "0.1"
+
+################################################################################
