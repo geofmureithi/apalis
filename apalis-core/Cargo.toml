@@ -1,0 +1,73 @@
+[package]
+name = "apalis-core"
+version = "1.0.0-alpha.9"
+authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
+edition.workspace = true
+repository.workspace = true
+license = "MIT"
+description = "Core for apalis: simple, extensible multithreaded background processing for Rust"
+categories = ["concurrency"]
+readme = "../README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"], optional = true }
+futures-util = { version = "0.3.30", features = [
+    "sink",
+    "async-await",
+    "async-await-macro",
+    "std",
+], default-features = false }
+futures-core = { version = "0.3.30", default-features = false }
+futures-channel = { version = "0.3.30", features = [
+    "sink",
+    "std",
+], default-features = false }
+futures-sink = { version = "0.3.30", default-features = false }
+tower-service = "0.3.3"
+tower-layer = "0.3.3"
+pin-project = "1"
+thiserror = "2.0.0"
+futures-timer = { version = "3.0.3", optional = true }
+tracing = { version = "0.1", default-features = false, optional = true }
+# Needed for the codec
+serde_json = { version = "1", optional = true }
+
+
+[dependencies.document-features]
+version = "0.2"
+optional = true
+
+
+[features]
+default = []
+docsrs = ["dep:document-features"]
+## Sleep feature for backends that need to wait
+sleep = ["dep:futures-timer"]
+## Enable serde support
+serde = ["dep:serde"]
+## Enable serde_json support
+json = ["serde", "dep:serde_json"]
+## Enable tracing support
+tracing = ["dep:tracing"]
+## Enable test utilities
+test-utils = []
+
+[package.metadata.docs.rs]
+# defines the configuration attribute `docsrs`
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+
+[dev-dependencies]
+tokio = { version = "1.37.0", features = [
+    "macros",
+    "rt",
+    "sync",
+    "rt-multi-thread",
+    "signal",
+] }
+tower = { version = "0.5", features = ["full"] }
+apalis-workflow = { path = "../apalis-workflow", version = "0.1.0-alpha.6" } # For json backend tests

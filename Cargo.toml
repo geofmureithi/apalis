@@ -1,103 +1,61 @@
+[workspace]
+members = ["apalis", "apalis-*"]
+# Only check / build main crates by default (check all with `--workspace`)
+default-members = ["apalis", "apalis-*"]
+resolver = "2"
+
 [workspace.package]
+rust-version = "1.60"
 edition = "2024"
 repository = "https://github.com/geofmureithi/apalis"
 
-[package]
-name = "apalis"
-version = "1.0.0-alpha.9"
-authors = ["Geoffrey Mureithi <mureithinjuguna@gmail.com>"]
-description = "Simple, extensible and multithreaded background task processing for Rust"
-edition.workspace = true
-repository.workspace = true
-documentation = "https://docs.rs/apalis"
-readme = "README.md"
-license = "MIT OR Apache-2.0"
-keywords = ["job", "task", "scheduler", "worker", "cron"]
-categories = ["database"]
+[workspace.lints.rust]
+unsafe_code = "forbid"
 
-[lib]
-bench = false
+rust_2018_idioms = { level = "warn", priority = -1 }
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+unreachable_pub = "warn"
 
-[features]
-default = ["tracing"]
+[workspace.lints.clippy]
+type_complexity = "allow"
 
-
-## Support Tracing 👀
-tracing = ["dep:tracing", "dep:tracing-futures"]
-
-## Support for Sentry exception and performance monitoring
-sentry = ["dep:sentry-core", "dep:ulid", "ulid?/uuid", "dep:uuid"]
-## Support Prometheus metrics
-prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
-## Support direct retrying tasks
-retry = ["tower/retry"]
-## Support timeouts on tasks
-timeout = ["tower/timeout"]
-## 💪 Limit the amount of tasks
-limit = ["tower/limit"]
-## Support filtering tasks based on a predicate
-filter = ["tower/filter"]
-## Captures panics in executions and convert them to errors
-catch-panic = []
-
-layers = [
-  "sentry",
-  "prometheus",
-  "tracing",
-  "retry",
-  "timeout",
-  "limit",
-  "filter",
-  "catch-panic",
-]
-
-docsrs = ["document-features"]
-
-[dependencies.apalis-core]
-version = "1.0.0-alpha.9"
-default-features = false
-path = "./packages/apalis-core"
-
-[dependencies.document-features]
-version = "0.2"
-optional = true
-
-
-[package.metadata.docs.rs]
-# defines the configuration attribute `docsrs`
-rustdoc-args = ["--cfg", "docsrs"]
-all-features = true
-
-
-[dev-dependencies]
-criterion = { version = "0.7.0", features = ["async_tokio", "html_reports"] }
-pprof = { version = "0.15", features = ["flamegraph"] }
-paste = "1.0.14"
-serde = "1"
-tokio = { version = "1", features = ["full"] }
-
-[workspace]
-members = [
-  "packages/apalis-core", "packages/apalis-sql",
-  "packages/apalis-workflow",
-]
-
-
-[dependencies]
-tower = { version = "0.5", features = ["util"], default-features = false }
-tracing-futures = { version = "0.2.5", optional = true, default-features = false }
-sentry-core = { version = "0.42.0", optional = true, default-features = false }
-metrics = { version = "0.24.0", optional = true, default-features = false }
-metrics-exporter-prometheus = { version = "0.17", optional = true, default-features = false }
-thiserror = "2.0.0"
-futures = "0.3.30"
-pin-project = "1"
-# Needed only for sentry reporting
-uuid = { version = "1.8", optional = true }
-ulid = { version = "1", optional = true }
-serde = { version = "1.0", features = ["derive"] }
-
-[dependencies.tracing]
-default-features = false
-version = "0.1.40"
-optional = true
+await_holding_lock = "warn"
+dbg_macro = "warn"
+empty_enum = "warn"
+enum_glob_use = "warn"
+equatable_if_let = "warn"
+exit = "warn"
+filter_map_next = "warn"
+fn_params_excessive_bools = "warn"
+if_let_mutex = "warn"
+implicit_clone = "warn"
+imprecise_flops = "warn"
+inefficient_to_string = "warn"
+linkedlist = "warn"
+lossy_float_literal = "warn"
+macro_use_imports = "warn"
+manual_let_else = "warn"
+match_same_arms = "warn"
+match_wildcard_for_single_variants = "warn"
+mem_forget = "warn"
+must_use_candidate = "warn"
+needless_borrow = "warn"
+needless_continue = "warn"
+needless_pass_by_ref_mut = "warn"
+needless_pass_by_value = "warn"
+option_option = "warn"
+redundant_clone = "warn"
+ref_option = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+return_self_not_must_use = "warn"
+single_match_else = "warn"
+str_to_string = "warn"
+suboptimal_flops = "warn"
+todo = "warn"
+trivially_copy_pass_by_ref = "warn"
+uninlined_format_args = "warn"
+unnested_or_patterns = "warn"
+unused_self = "warn"
+use_self = "warn"
+verbose_file_reads = "warn"
