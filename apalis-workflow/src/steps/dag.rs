@@ -77,13 +77,16 @@ where
                 let dag_service = ServiceBuilder::new()
                     .map_request(|req: Task<Compact, Ctx, IdType>| {
                         req.map(|args| {
-                            let c: Current = Codec::decode(&args).unwrap_or_else(|_| panic!("Could not decode node, expecting {}",
-                                std::any::type_name::<Current>()));
+                            let c: Current = Codec::decode(&args).unwrap_or_else(|_| {
+                                panic!(
+                                    "Could not decode node, expecting {}",
+                                    std::any::type_name::<Current>()
+                                )
+                            });
                             c
                         })
                     })
                     .map_response(|res: Output| {
-                        
                         // .map_err(|e| WorkflowError::CodecError(e.into()))?;
                         Codec::encode(&res).unwrap()
                     })
@@ -199,19 +202,14 @@ where
             .all(|&pred| execution_context.completed_nodes.contains(&pred))
         {
             return async move {
-                Err(format!(
-                    "Cannot execute node {index:?} before its predecessors are completed"
+                Err(
+                    format!("Cannot execute node {index:?} before its predecessors are completed")
+                        .into(),
                 )
-                .into())
             }
             .boxed();
         }
-        let targets: HashSet<_> = self
-            .inner
-            .graph
-            .edges(index)
-            .map(|s| s.target())
-            .collect();
+        let targets: HashSet<_> = self.inner.graph.edges(index).map(|s| s.target()).collect();
 
         let target_edges = targets
             .into_iter()

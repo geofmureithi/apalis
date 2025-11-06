@@ -80,12 +80,7 @@ where
     type Error = QueueError;
 
     async fn from_request(req: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        let queue = req
-            .parts
-            .data
-            .get()
-            .cloned()
-            .ok_or(QueueError::NotFound)?;
+        let queue = req.parts.data.get().cloned().ok_or(QueueError::NotFound)?;
         Ok(queue)
     }
 }

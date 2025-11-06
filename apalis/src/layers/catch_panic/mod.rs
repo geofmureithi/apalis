@@ -74,17 +74,17 @@
 //! ```
 use apalis_core::error::{AbortError, BoxDynError};
 use apalis_core::task::Task;
+use futures_util::FutureExt;
+use futures_util::future::CatchUnwind;
 use std::any::Any;
 use std::fmt;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
+use std::task::ready;
 use std::task::{Context, Poll};
 use tower::Layer;
 use tower::Service;
-use futures_util::FutureExt;
-use futures_util::future::CatchUnwind;
-use std::task::ready;
 
 /// Apalis Layer that catches panics in the service.
 #[derive(Clone, Debug)]

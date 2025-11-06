@@ -173,9 +173,9 @@ type ShouldRestart = Arc<
 >;
 
 type CurrentWorker = Option<(
-        WorkerContext,
-        Shared<BoxFuture<'static, Result<(), Arc<WorkerError>>>>,
-    )>;
+    WorkerContext,
+    Shared<BoxFuture<'static, Result<(), Arc<WorkerError>>>>,
+)>;
 
 #[pin_project::pin_project]
 /// A worker that is monitored by the [`Monitor`].
@@ -468,7 +468,10 @@ impl Monitor {
                 Ok(_) => {}
                 Err(MonitoredWorkerError { ctx, error }) => match &*error {
                     WorkerError::GracefulExit => {}
-                    _ => errors.push(MonitoredWorkerError { ctx, error: Arc::clone(&error) }),
+                    _ => errors.push(MonitoredWorkerError {
+                        ctx,
+                        error: Arc::clone(&error),
+                    }),
                 },
             }
         }

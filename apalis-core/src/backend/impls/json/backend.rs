@@ -49,7 +49,6 @@ where
         })
     }
     fn poll(self, _worker: &WorkerContext) -> Self::Stream {
-        
         (self.map(|r| Ok(Some(r))).boxed()) as _
     }
 }

@@ -92,8 +92,7 @@ where
         &mut self,
         tasks: impl Stream<Item = Args> + Unpin + Send,
     ) -> Result<(), TaskSinkError<Self::Error>> {
-        self
-            .sink_map_err(|e| TaskSinkError::PushError(e))
+        self.sink_map_err(|e| TaskSinkError::PushError(e))
             .send_all(&mut tasks.map(Task::new).map(|task| {
                 task.try_map(|t| C::encode(&t).map_err(|e| TaskSinkError::CodecError(e.into())))
             }))

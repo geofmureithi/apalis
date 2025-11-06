@@ -34,7 +34,7 @@
 //! ```rust
 //! use std::io::{self, ErrorKind};
 //! use apalis::layers::retry::RetryPolicy;
-//! 
+//!
 //! fn is_transient(e: &io::Error) -> bool {
 //!     matches!(e.kind(),
 //!         ErrorKind::ConnectionRefused |

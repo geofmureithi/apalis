@@ -196,9 +196,11 @@ where
     }
 }
 
-type FetcherBuilder<DB, Config, Fetch> = Box<dyn Fn(&mut DB, &Config, &WorkerContext) -> Fetch + Send + Sync + 'static>;
+type FetcherBuilder<DB, Config, Fetch> =
+    Box<dyn Fn(&mut DB, &Config, &WorkerContext) -> Fetch + Send + Sync + 'static>;
 
-type SinkerBuilder<DB, Config, Sink> = Box<dyn Fn(&mut DB, &Config) -> Sink + Send + Sync + 'static>;
+type SinkerBuilder<DB, Config, Sink> =
+    Box<dyn Fn(&mut DB, &Config) -> Sink + Send + Sync + 'static>;
 
 /// Builder for [`CustomBackend`]
 ///

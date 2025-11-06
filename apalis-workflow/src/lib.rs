@@ -190,12 +190,9 @@ where
                         Ok(task) => {
                             let res = step.run(&ctx, task).await.map_err(|e| e.into())?;
 
-                            handle_workflow_result::<
-                                S::Response,
-                                Compact,
-                                FlowSink,
-                                BackendErr,
-                            >(&mut ctx, &res)
+                            handle_workflow_result::<S::Response, Compact, FlowSink, BackendErr>(
+                                &mut ctx, &res,
+                            )
                             .await
                             .map_err(|e| match e {
                                 TaskSinkError::PushError(err) => Box::new(err) as BoxDynError,
@@ -266,10 +263,7 @@ where
         self,
         b: &FlowSink,
     ) -> WorkflowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType> {
-        let services: HashMap<usize, _> = self
-            .steps
-            .into_iter()
-            .collect();
+        let services: HashMap<usize, _> = self.steps.into_iter().collect();
         WorkflowService::new(services, b.clone())
     }
 }

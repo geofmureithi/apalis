@@ -158,7 +158,10 @@ type BoxSink<Args> =
 impl JsonStorage<Value> {
     fn create_channel<Args: 'static + DeserializeOwned + Serialize + Send + Unpin>(
         &self,
-    ) -> (BoxSink<Args>, BoxStream<'static, Task<Args, JsonMapMetadata>>) {
+    ) -> (
+        BoxSink<Args>,
+        BoxStream<'static, Task<Args, JsonMapMetadata>>,
+    ) {
         // Create a channel for communication
         let sender = self.clone();
 
