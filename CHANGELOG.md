@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- **chore**: feat: refactor and granulize traits ([#586](https://github.com/geofmureithi/apalis/pull/586))
+
+### Breaking Changes
+
+- **api**: Several breaking changes have been included: TODO: Document
+
 ## [0.7.3](https://github.com/geofmureithi/apalis/releases/tag/v0.7.3)
 
 ### Fixed
