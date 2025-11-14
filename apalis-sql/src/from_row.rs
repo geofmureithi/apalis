@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 
 use crate::context::SqlContext;
 
+/// Errors that can occur when converting a database row into a Task
 #[derive(Debug, thiserror::Error)]
 pub enum FromRowError {
     /// Column not found in the row
@@ -21,23 +22,42 @@ pub enum FromRowError {
 }
 
 #[derive(Debug)]
+/// Represents a row from the tasks table in the database.
+///
+/// This struct contains all the fields necessary to represent a task/job
+/// stored in the SQL database, including its execution state, metadata,
+/// and scheduling information.
 pub struct TaskRow {
+    /// The serialized job data as bytes
     pub job: Vec<u8>,
+    /// Unique identifier for the task
     pub id: String,
+    /// The type/name of the job being executed
     pub job_type: String,
+    /// Current status of the task (e.g., "pending", "running", "completed", "failed")
     pub status: String,
+    /// Number of times this task has been attempted
     pub attempts: usize,
+    /// Maximum number of attempts allowed for this task before giving up
     pub max_attempts: Option<usize>,
+    /// When the task should be executed (for scheduled tasks)
     pub run_at: Option<DateTime<Utc>>,
+    /// The result of the last execution attempt, stored as JSON
     pub last_result: Option<serde_json::Value>,
+    /// Timestamp when the task was locked for execution
     pub lock_at: Option<DateTime<Utc>>,
+    /// Identifier of the worker/process that has locked this task
     pub lock_by: Option<String>,
+    /// Timestamp when the task was completed
     pub done_at: Option<DateTime<Utc>>,
+    /// Priority level of the task (higher values indicate higher priority)
     pub priority: Option<usize>,
+    /// Additional metadata associated with the task, stored as JSON
     pub metadata: Option<serde_json::Value>,
 }
 
 impl TaskRow {
+    /// Convert the TaskRow into a Task with decoded arguments
     pub fn try_into_task<D, Args, IdType>(
         self,
     ) -> Result<Task<Args, SqlContext, IdType>, FromRowError>
@@ -68,23 +88,7 @@ impl TaskRow {
             .with_queue(self.job_type)
             .with_lock_at(self.lock_at.map(|dt| dt.timestamp()));
 
-        // Optimize for the case where Args and CompactType are the same type
-        // to avoid unnecessary serialization/deserialization.
-        // That comes at the cost of using unsafe code, and leaking memory
-        let args = if std::any::TypeId::of::<Args>() == std::any::TypeId::of::<Vec<u8>>() {
-            // SAFETY: We've verified that Args and CompactType are the same type.
-            // We use ptr::read to move the value out without calling drop on self.job.
-            // Then we use mem::forget to prevent self from being dropped (which would
-            // try to drop self.job again, causing a double free).
-            unsafe {
-                let job_ptr = &self.job as *const Vec<u8> as *const Args;
-                let args = std::ptr::read(job_ptr);
-                std::mem::forget(self.job);
-                args
-            }
-        } else {
-            D::decode(&self.job).map_err(|e| FromRowError::DecodeError(e.into()))?
-        };
+        let args = D::decode(&self.job).map_err(|e| FromRowError::DecodeError(e.into()))?;
         let task = TaskBuilder::new(args)
             .with_ctx(ctx)
             .with_attempt(Attempt::new_with_value(self.attempts))
@@ -101,6 +105,8 @@ impl TaskRow {
             );
         Ok(task.build())
     }
+
+    /// Convert the TaskRow into a Task with compacted arguments
     pub fn try_into_task_compact<IdType>(
         self,
     ) -> Result<Task<Vec<u8>, SqlContext, IdType>, FromRowError>

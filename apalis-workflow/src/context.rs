@@ -1,56 +1,33 @@
-use std::{fmt::Debug, marker::PhantomData};
+use serde::{Deserialize, Serialize};
 
-use apalis_core::{
-    backend::{TaskResult, WaitForCompletion},
-    task::task_id::TaskId,
-};
-use futures::StreamExt;
-
-#[derive(Debug)]
-pub struct StepContext<FlowSink, Encode> {
+/// Context information for the current step in the workflow
+#[derive(Debug, Clone)]
+pub struct StepContext<Backend> {
+    /// Index of the current step
     pub current_step: usize,
-    pub(crate) sink: FlowSink,
+    /// Backend associated with the current step
+    pub backend: Backend,
+    /// Indicates if there is a next step
     pub has_next: bool,
-    _marker: PhantomData<Encode>,
 }
-
-impl<FlowSink: Clone, Encode> Clone for StepContext<FlowSink, Encode> {
-    fn clone(&self) -> Self {
-        StepContext {
-            current_step: self.current_step,
-            sink: self.sink.clone(),
-            has_next: self.has_next,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<FlowSink, Encode> StepContext<FlowSink, Encode> {
-    pub fn new(backend: FlowSink, current_step: usize, has_next: bool) -> Self {
+impl<B> StepContext<B> {
+    /// Creates a new StepContext
+    pub fn new(backend: B, idx: usize, has_next: bool) -> Self {
         Self {
-            current_step,
-            sink: backend,
-            _marker: PhantomData,
+            current_step: idx,
+            backend,
             has_next,
         }
     }
+}
 
-    pub async fn wait_for<O>(
-        &self,
-        task_ids: &[TaskId<FlowSink::IdType>],
-    ) -> Result<Vec<TaskResult<O>>, FlowSink::Error>
-    where
-        O: Sync + Send,
-        FlowSink: Sync + WaitForCompletion<O>,
-        FlowSink::IdType: Clone,
-    {
-        let items = self
-            .sink
-            .wait_for(task_ids.to_vec())
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<Result<_, _>>()?;
-        Ok(items)
-    }
+/// Metadata stored in each task for workflow processing
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct WorkflowContext {
+    /// Index of the step in the workflow
+    pub step_index: usize,
+    // / Additional fields can be added as needed
+    // / name: String,
+    // / version: String,
+    // / parent_workflow_id: Option<String>,
 }

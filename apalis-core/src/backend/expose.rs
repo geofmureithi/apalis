@@ -1,5 +1,5 @@
 use crate::{
-    backend::{Backend, TaskSink},
+    backend::{Backend, BackendExt, TaskSink},
     task::{Task, status::Status},
 };
 
@@ -49,7 +49,7 @@ pub trait ListTasks<Args>: Backend {
 }
 
 /// Allows listing tasks across all queues with optional filtering
-pub trait ListAllTasks: Backend {
+pub trait ListAllTasks: BackendExt {
     /// List tasks matching the given filter in all queues
     #[allow(clippy::type_complexity)]
     fn list_all_tasks(
@@ -121,11 +121,13 @@ pub struct Filter {
 
 impl Filter {
     /// Calculate the offset based on the current page and page size
+    #[must_use]
     pub fn offset(&self) -> u32 {
         (self.page - 1) * self.page_size.unwrap_or(DEFAULT_PAGE_SIZE)
     }
 
     /// Get the limit (page size) for the query
+    #[must_use]
     pub fn limit(&self) -> u32 {
         self.page_size.unwrap_or(DEFAULT_PAGE_SIZE)
     }

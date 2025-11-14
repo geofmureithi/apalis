@@ -44,6 +44,7 @@ pub struct EventListenerLayer(());
 
 impl EventListenerLayer {
     /// Create a new event listener layer
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -97,20 +98,17 @@ where
             .write()
             .map(|mut res| {
                 let current = res.take();
-                match current {
-                    Some(c) => {
-                        let new: RawEventListener = Box::new(move |ctx, ev| {
-                            c(ctx, ev);
-                            f(ctx, ev);
-                        });
-                        new
-                    }
-                    None => {
-                        let new: RawEventListener = Box::new(move |ctx, ev| {
-                            f(ctx, ev);
-                        });
-                        new
-                    }
+                if let Some(c) = current {
+                    let new: RawEventListener = Box::new(move |ctx, ev| {
+                        c(ctx, ev);
+                        f(ctx, ev);
+                    });
+                    new
+                } else {
+                    let new: RawEventListener = Box::new(move |ctx, ev| {
+                        f(ctx, ev);
+                    });
+                    new
                 }
             })
             .unwrap();

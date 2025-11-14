@@ -13,6 +13,7 @@ pub struct IntervalStrategy {
 
 impl IntervalStrategy {
     /// Create a new IntervalStrategy with the specified interval
+    #[must_use]
     pub fn new(interval: Duration) -> Self {
         Self {
             poll_interval: interval,
@@ -22,6 +23,7 @@ impl IntervalStrategy {
     /// Wrap the IntervalStrategy with a BackoffStrategy
     /// This will apply exponential backoff to the polling interval
     /// based on the provided [`BackoffConfig`].`
+    #[must_use]
     pub fn with_backoff(self, config: BackoffConfig) -> BackoffStrategy {
         BackoffStrategy::new(self, config)
     }

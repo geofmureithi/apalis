@@ -115,7 +115,7 @@ async fn main() {
 - _prometheus_ — Support Prometheus metrics
 - _retry_ — Support direct retrying tasks
 - _timeout_ — Support timeouts on tasks
-- _limit_ — 💪 Support for concurrency and rate-limiting
+- _limit_ — Support for concurrency and rate-limiting
 - _filter_ — Support filtering tasks based on a predicate
 - _catch-panic_ - Catch panics that occur during execution
 
@@ -183,7 +183,7 @@ sequenceDiagram
 
 If you are running the [web UI](https://github.com/apalis-dev/apalis-board), you can easily manage your jobs. See a working [rest API example here](https://github.com/apalis-dev/apalis-board/blob/master/examples/axum-email-service)
 
-<img src="https://github.com/apalis-dev/apalis-board/raw/master/screenshots/workers.png" width="100%">
+![Workers Screenshot](https://github.com/apalis-dev/apalis-board/raw/master/screenshots/workers.png)
 
 ## Thanks to
 

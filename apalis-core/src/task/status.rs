@@ -38,7 +38,7 @@ pub enum Status {
 
 impl Default for Status {
     fn default() -> Self {
-        Status::Pending
+        Self::Pending
     }
 }
 
@@ -55,12 +55,12 @@ impl FromStr for Status {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "Pending" => Ok(Status::Pending),
-            "Queued" => Ok(Status::Queued),
-            "Running" => Ok(Status::Running),
-            "Done" => Ok(Status::Done),
-            "Failed" => Ok(Status::Failed),
-            "Killed" => Ok(Status::Killed),
+            "Pending" => Ok(Self::Pending),
+            "Queued" => Ok(Self::Queued),
+            "Running" => Ok(Self::Running),
+            "Done" => Ok(Self::Done),
+            "Failed" => Ok(Self::Failed),
+            "Killed" => Ok(Self::Killed),
             _ => Err(StatusError::UnknownState(s.to_owned())),
         }
     }
@@ -69,12 +69,12 @@ impl FromStr for Status {
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
-            Status::Pending => write!(f, "Pending"),
-            Status::Queued => write!(f, "Queued"),
-            Status::Running => write!(f, "Running"),
-            Status::Done => write!(f, "Done"),
-            Status::Failed => write!(f, "Failed"),
-            Status::Killed => write!(f, "Killed"),
+            Self::Pending => write!(f, "Pending"),
+            Self::Queued => write!(f, "Queued"),
+            Self::Running => write!(f, "Running"),
+            Self::Done => write!(f, "Done"),
+            Self::Failed => write!(f, "Failed"),
+            Self::Killed => write!(f, "Killed"),
         }
     }
 }
@@ -82,12 +82,12 @@ impl fmt::Display for Status {
 impl Status {
     fn from_u8(val: u8) -> Option<Self> {
         match val {
-            0 => Some(Status::Pending),
-            1 => Some(Status::Queued),
-            2 => Some(Status::Running),
-            3 => Some(Status::Done),
-            4 => Some(Status::Failed),
-            5 => Some(Status::Killed),
+            0 => Some(Self::Pending),
+            1 => Some(Self::Queued),
+            2 => Some(Self::Running),
+            3 => Some(Self::Done),
+            4 => Some(Self::Failed),
+            5 => Some(Self::Killed),
             _ => None,
         }
     }
@@ -100,11 +100,13 @@ pub struct AtomicStatus(Arc<AtomicU8>);
 
 impl AtomicStatus {
     /// Create a new `AtomicStatus` with the given initial status
+    #[must_use]
     pub fn new(status: Status) -> Self {
         Self(Arc::new(AtomicU8::new(status as u8)))
     }
 
     /// Load the current status
+    #[must_use]
     pub fn load(&self) -> Status {
         Status::from_u8(self.0.load(Ordering::Acquire)).unwrap()
     }
@@ -114,6 +116,7 @@ impl AtomicStatus {
         self.0.store(status as u8, Ordering::Release);
     }
     /// Swap the current status with a new one, returning the old status
+    #[must_use]
     pub fn swap(&self, status: Status) -> Status {
         Status::from_u8(self.0.swap(status as u8, Ordering::AcqRel)).unwrap()
     }
@@ -127,7 +130,7 @@ impl From<AtomicStatus> for Status {
 
 impl From<Status> for AtomicStatus {
     fn from(val: Status) -> Self {
-        AtomicStatus::new(val)
+        Self::new(val)
     }
 }
 

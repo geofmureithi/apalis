@@ -67,8 +67,9 @@ pub struct Extensions {
 impl Extensions {
     /// Create an empty `Extensions`.
     #[inline]
-    pub fn new() -> Extensions {
-        Extensions { map: None }
+    #[must_use]
+    pub fn new() -> Self {
+        Self { map: None }
     }
 
     /// Insert a type into this `Extensions`.
@@ -104,6 +105,7 @@ impl Extensions {
     ///
     /// assert_eq!(ext.get::<i32>(), Some(&5i32));
     /// ```
+    #[must_use]
     pub fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.map
             .as_ref()
@@ -200,6 +202,7 @@ impl Extensions {
     /// assert!(!ext.is_empty());
     /// ```
     #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.map.as_ref().map_or(true, |map| map.is_empty())
     }
@@ -216,6 +219,7 @@ impl Extensions {
     /// assert_eq!(ext.len(), 1);
     /// ```
     #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.map.as_ref().map_or(0, |map| map.len())
     }

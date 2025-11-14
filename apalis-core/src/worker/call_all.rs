@@ -33,8 +33,8 @@ where
     S: Stream<Item = Result<Option<T>, E>>,
 {
     /// Create new [`CallAllUnordered`] combinator.
-    pub(super) fn new(service: Svc, stream: S) -> CallAllUnordered<Svc, S, T, E> {
-        CallAllUnordered {
+    pub(super) fn new(service: Svc, stream: S) -> Self {
+        Self {
             inner: CallAll::new(service, stream, FuturesUnordered::new()),
         }
     }
@@ -65,8 +65,8 @@ pub enum CallAllError<ServiceError> {
 impl<SE: fmt::Display> fmt::Display for CallAllError<SE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CallAllError::StreamError(e) => write!(f, "Stream error: {e}"),
-            CallAllError::ServiceError(e) => write!(f, "Service error: {e}"),
+            Self::StreamError(e) => write!(f, "Stream error: {e}"),
+            Self::ServiceError(e) => write!(f, "Service error: {e}"),
         }
     }
 }
@@ -74,19 +74,19 @@ impl<SE: fmt::Display> fmt::Display for CallAllError<SE> {
 impl<SE: Error + 'static> Error for CallAllError<SE> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            CallAllError::StreamError(e) => Some(e.as_ref()),
-            CallAllError::ServiceError(e) => Some(e),
+            Self::StreamError(e) => Some(e.as_ref()),
+            Self::ServiceError(e) => Some(e),
         }
     }
 }
 
 impl<F: Future> Drive<F> for FuturesUnordered<F> {
     fn is_empty(&self) -> bool {
-        FuturesUnordered::is_empty(self)
+        Self::is_empty(self)
     }
 
     fn push(&mut self, future: F) {
-        FuturesUnordered::push(self, future)
+        Self::push(self, future)
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Option<F::Output>> {
@@ -137,8 +137,8 @@ where
     S: Stream<Item = Result<Option<T>, E>>,
     Q: Drive<Svc::Future>,
 {
-    pub(crate) const fn new(service: Svc, stream: S, queue: Q) -> CallAll<Svc, S, T, Q, E> {
-        CallAll {
+    pub(crate) const fn new(service: Svc, stream: S, queue: Q) -> Self {
+        Self {
             service: Some(service),
             stream,
             queue,

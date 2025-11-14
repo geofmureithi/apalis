@@ -120,9 +120,18 @@ where
 
 impl<B, S, Res> TestWorker<B, S, Res, ()> {
     /// Create a new test worker
-    pub fn new<Args, Ctx, W>(backend: B, factory: W) -> TestWorker<B, S, Res, B::IdType>
+    pub fn new<Args, Ctx, W>(backend: B, factory: W) -> TestWorker<W::Backend, S, Res, B::IdType>
     where
         W: IntoWorkerService<B, S, Args, Ctx>,
+        W::Backend: Backend<
+                Args = B::Args,
+                Context = B::Context,
+                IdType = B::IdType,
+                Error = B::Error,
+                Stream = B::Stream,
+                Beat = B::Beat,
+                Layer = B::Layer,
+            > + 'static,
         B: Backend<Args = Args, Context = Ctx> + 'static,
         S: Service<Task<Args, Ctx, B::IdType>, Response = Res> + Send + 'static,
         B::Stream: Unpin + Send + 'static,
@@ -149,10 +158,15 @@ impl<B, S, Res> TestWorker<B, S, Res, ()> {
         >>::Service: std::marker::Send + 'static,
         B::IdType: Send + Clone + 'static,
     {
-        let service = factory.into_service(&backend);
-        TestWorker::new_with_svc(backend, service)
+        let worker_service = factory.into_service(backend);
+        TestWorker::<W::Backend, S, Res, _>::new_with_svc(
+            worker_service.backend,
+            worker_service.service,
+        )
     }
+}
 
+impl<B, S, Res> TestWorker<B, S, Res, ()> {
     /// Create a new test worker with a service
     pub fn new_with_svc<Args, Ctx>(backend: B, service: S) -> TestWorker<B, S, Res, B::IdType>
     where
@@ -300,7 +314,7 @@ mod tests {
         });
         let mut worker = TestWorker::new(backend, service);
         while let Some(Ok((_, ret))) = worker.execute_next().await {
-            dbg!(ret.unwrap());
+            ret.unwrap();
         }
         println!("Worker run successfully");
     }

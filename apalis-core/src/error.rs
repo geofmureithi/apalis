@@ -21,7 +21,7 @@ pub struct AbortError {
 impl AbortError {
     /// Create a new abort error
     pub fn new<E: Into<BoxDynError>>(err: E) -> Self {
-        AbortError { source: err.into() }
+        Self { source: err.into() }
     }
 }
 
@@ -38,13 +38,14 @@ pub struct RetryAfterError {
 impl RetryAfterError {
     /// Create a new retry after error
     pub fn new<E: Into<BoxDynError>>(err: E, duration: Duration) -> Self {
-        RetryAfterError {
+        Self {
             source: err.into(),
             duration,
         }
     }
 
     /// Get the duration after which the task should be retried
+    #[must_use]
     pub fn get_duration(&self) -> Duration {
         self.duration
     }
@@ -115,6 +116,7 @@ pub struct ErrorHandlingLayer {
 
 impl ErrorHandlingLayer {
     /// Create a new ErrorHandlingLayer
+    #[must_use]
     pub fn new() -> Self {
         Self { _p: PhantomData }
     }

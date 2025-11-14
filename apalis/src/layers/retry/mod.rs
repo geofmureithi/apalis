@@ -461,7 +461,7 @@ mod tests {
                     .retry_if(|e: &BoxDynError| e.downcast_ref::<SkipRetryError>().is_none()),
             )
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                println!("CTX {:?}, On Event = {ev:?}", ctx.name());
             })
             .build(task);
         worker.run().await.unwrap();

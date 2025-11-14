@@ -331,7 +331,10 @@ mod tests {
             }
 
             fn call(&mut self, _req: Task<TestJob, ()>) -> Self::Future {
-                Box::pin(async { None.unwrap() })
+                Box::pin(async {
+                    None::<()>.unwrap();
+                    todo!()
+                })
             }
         }
 
@@ -364,7 +367,7 @@ mod tests {
             .backend(in_memory)
             .catch_panic()
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                println!("CTX {:?}, On Event = {ev:?}", ctx.name());
                 if matches!(ev, Event::Error(_)) {
                     ctx.stop().unwrap();
                 }
@@ -392,11 +395,11 @@ mod tests {
                     .retry_if(|e: &BoxDynError| e.downcast_ref::<PanicError>().is_none()),
             )
             .layer(CatchPanicLayer::with_panic_handler(|e| {
-                println!("Caught panic: {:?}", e);
+                println!("Caught panic: {e:?}");
                 PanicError("Custom panic handler".to_string())
             }))
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                println!("CTX {:?}, On Event = {ev:?}", ctx.name());
                 if matches!(ev, Event::Error(_)) {
                     ctx.stop().unwrap();
                 }

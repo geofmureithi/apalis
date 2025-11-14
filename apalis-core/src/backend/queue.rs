@@ -32,7 +32,7 @@ impl AsRef<str> for Queue {
 
 impl From<&str> for Queue {
     fn from(value: &str) -> Self {
-        Self(Arc::new(value.to_string()))
+        Self(Arc::new(value.to_owned()))
     }
 }
 
@@ -40,7 +40,7 @@ impl FromStr for Queue {
     type Err = std::convert::Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(Arc::new(s.to_string())))
+        Ok(Self(Arc::new(s.to_owned())))
     }
 }
 
@@ -67,7 +67,7 @@ impl<'de> serde::Deserialize<'de> for Queue {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(Queue(Arc::new(s)))
+        Ok(Self(Arc::new(s)))
     }
 }
 

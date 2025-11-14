@@ -1,6 +1,8 @@
 use apalis_core::task::task_id::RandomId;
 
+/// Trait for generating unique IDs
 pub trait GenerateId {
+    /// Generate a new unique ID
     fn generate() -> Self;
 }
 
@@ -14,12 +16,12 @@ impl GenerateId for uuid::Uuid {
 #[cfg(feature = "ulid")]
 impl GenerateId for ulid::Ulid {
     fn generate() -> Self {
-        ulid::Ulid::new()
+        Self::new()
     }
 }
 
 impl GenerateId for RandomId {
     fn generate() -> Self {
-        RandomId::default()
+        Self::default()
     }
 }

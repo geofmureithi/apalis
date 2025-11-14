@@ -110,8 +110,8 @@ impl<Args, Ctx, Source, Middleware> std::fmt::Debug
 
 impl WorkerBuilder<(), (), (), Identity> {
     /// Build a new [`WorkerBuilder`] instance with a name for the worker to build
-    pub fn new<T: AsRef<str>>(name: T) -> WorkerBuilder<(), (), (), Identity> {
-        WorkerBuilder {
+    pub fn new<T: AsRef<str>>(name: T) -> Self {
+        Self {
             request: PhantomData,
             layer: Identity::new(),
             source: (),
@@ -198,7 +198,7 @@ where
     pub fn build<W: IntoWorkerServiceExt<Args, Ctx, Svc, B, M>, Svc>(
         self,
         service: W,
-    ) -> Worker<Args, Ctx, B, Svc, M>
+    ) -> Worker<Args, Ctx, W::Backend, Svc, M>
     where
         Svc: Service<Task<Args, Ctx, B::IdType>>,
     {
@@ -206,14 +206,25 @@ where
     }
 }
 
+/// A worker service composed of a backend and a service
+#[derive(Debug, Clone)]
+pub struct WorkerService<Backend, Svc> {
+    /// The backend for the worker
+    pub backend: Backend,
+    /// The service that processes tasks
+    pub service: Svc,
+}
+
 /// Trait for building a worker service provided a backend
-pub trait IntoWorkerService<Backend, Svc, Args, Ctx>
+pub trait IntoWorkerService<B, Svc, Args, Ctx>
 where
-    Backend: crate::backend::Backend<Args = Args, Context = Ctx>,
-    Svc: Service<Task<Args, Ctx, Backend::IdType>>,
+    B: crate::backend::Backend<Args = Args, Context = Ctx>,
+    Svc: Service<Task<Args, Ctx, B::IdType>>,
 {
+    /// The backend type for the worker
+    type Backend;
     /// Build the service from the backend
-    fn into_service(self, backend: &Backend) -> Svc;
+    fn into_service(self, backend: B) -> WorkerService<Self::Backend, Svc>;
 }
 
 /// Extension trait for building a worker from a builder
@@ -221,12 +232,13 @@ pub trait IntoWorkerServiceExt<Args, Ctx, Svc, Backend, M>: Sized
 where
     Backend: crate::backend::Backend<Args = Args, Context = Ctx>,
     Svc: Service<Task<Args, Ctx, Backend::IdType>>,
+    Self: IntoWorkerService<Backend, Svc, Args, Ctx>,
 {
     /// Consumes the builder and returns a worker
     fn build_with(
         self,
         builder: WorkerBuilder<Args, Ctx, Backend, M>,
-    ) -> Worker<Args, Ctx, Backend, Svc, M>;
+    ) -> Worker<Args, Ctx, Self::Backend, Svc, M>;
 }
 
 /// Implementation of the IntoWorkerServiceExt trait for any type
@@ -239,9 +251,12 @@ where
     B: Backend<Args = Args, Context = Ctx>,
     Svc: Service<Task<Args, Ctx, B::IdType>>,
 {
-    fn build_with(self, builder: WorkerBuilder<Args, Ctx, B, M>) -> Worker<Args, Ctx, B, Svc, M> {
-        let svc = self.into_service(&builder.source);
-        let mut worker = Worker::new(builder.name, builder.source, svc, builder.layer);
+    fn build_with(
+        self,
+        builder: WorkerBuilder<Args, Ctx, B, M>,
+    ) -> Worker<Args, Ctx, T::Backend, Svc, M> {
+        let svc = self.into_service(builder.source);
+        let mut worker = Worker::new(builder.name, svc.backend, svc.service, builder.layer);
         worker.event_handler = builder
             .event_handler
             .write()

@@ -51,8 +51,7 @@ impl<T: 'static + Send> Stream for RaceNext<T> {
                             this.pending_skips[i] = false;
                         }
                         Poll::Pending => {
-                            // Still waiting to skip, continue to next stream
-                            continue;
+                            // Still pending, keep the skip flag
                         }
                     }
                 }
@@ -106,11 +105,13 @@ impl<T: 'static + Send> Stream for RaceNext<T> {
 
 impl<T> RaceNext<T> {
     /// Returns the number of active streams remaining
+    #[must_use]
     pub fn active_count(&self) -> usize {
         self.streams.iter().filter(|s| s.is_some()).count()
     }
 
     /// Checks if any streams are still active
+    #[must_use]
     pub fn has_active_streams(&self) -> bool {
         self.streams.iter().any(|s| s.is_some())
     }

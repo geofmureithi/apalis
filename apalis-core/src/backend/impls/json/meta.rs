@@ -22,7 +22,7 @@ where
     fn inject(&mut self, value: T) -> Result<(), serde_json::Error> {
         let key = std::any::type_name::<T>();
         let json_value = serde_json::to_value(value)?;
-        self.insert(key.to_string(), json_value);
+        self.insert(key.to_owned(), json_value);
         Ok(())
     }
 }

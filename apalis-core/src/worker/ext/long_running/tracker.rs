@@ -171,6 +171,7 @@ impl TaskTracker {
     ///
     /// [`wait`]: Self::wait
     #[inline]
+    #[must_use]
     pub fn close(&self) -> bool {
         self.inner.set_closed()
     }
@@ -229,14 +230,14 @@ impl Default for TaskTracker {
     ///
     /// The `TaskTracker` will start out as open.
     #[inline]
-    fn default() -> TaskTracker {
-        TaskTracker::new()
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl Clone for TaskTracker {
     #[inline]
-    fn clone(&self) -> TaskTracker {
+    fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
         }
@@ -275,7 +276,7 @@ impl Clone for TaskTrackerToken {
     ///
     /// This is equivalent to `token.task_tracker().token()`.
     #[inline]
-    fn clone(&self) -> TaskTrackerToken {
+    fn clone(&self) -> Self {
         self.task_tracker.token()
     }
 }

@@ -1,95 +1,65 @@
+use apalis_core::{
+    backend::{BackendExt, TaskSinkError, codec::Codec},
+    error::BoxDynError,
+    task::{Task, metadata::MetadataExt, task_id::TaskId},
+};
+use futures::SinkExt;
+use futures::{FutureExt, Sink, future::BoxFuture};
 use std::{
     collections::{HashMap, VecDeque},
+    marker::PhantomData,
     task::{Context, Poll},
 };
-
-use apalis_core::{
-    backend::{Backend, TaskSinkError, codec::Codec},
-    error::BoxDynError,
-    task::{Task, metadata::MetadataExt},
-};
-use futures::{FutureExt, Sink, TryFutureExt, future::BoxFuture};
-use serde::{Deserialize, Serialize, Serializer};
-use serde_json::Value;
 use tower::Service;
 
-use crate::{CompositeService, GenerateId, GoTo, StepContext, WorkflowRequest};
+use crate::{
+    SteppedService,
+    context::{StepContext, WorkflowContext},
+    id_generator::GenerateId,
+    router::{GoTo, StepResult},
+};
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct StepResult<T>(pub T);
-
-impl Serialize for StepResult<Vec<u8>> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // Try to deserialize the bytes as JSON
-        match serde_json::from_slice::<serde_json::Value>(&self.0) {
-            Ok(value) => value.serialize(serializer),
-            Err(e) => {
-                // If deserialization fails, serialize the error
-                use serde::ser::Error;
-                Err(S::Error::custom(e.to_string()))
-            }
-        }
-    }
-}
-
-impl Serialize for StepResult<serde_json::Value> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // Try to deserialize the bytes as JSON
-        match Value::deserialize(&self.0) {
-            Ok(value) => value.serialize(serializer),
-            Err(e) => {
-                // If deserialization fails, serialize the error
-                use serde::ser::Error;
-                Err(S::Error::custom(e.to_string()))
-            }
-        }
-    }
-}
-
-pub struct WorkflowService<FlowSink, Encode, Compact, Context, IdType> {
-    services: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
-    not_ready: VecDeque<usize>,
-    backend: FlowSink,
-}
-impl<FlowSink, Encode, Compact, Context, IdType>
-    WorkflowService<FlowSink, Encode, Compact, Context, IdType>
+/// The main workflow service that orchestrates the execution of workflow steps.
+#[derive(Debug)]
+pub struct WorkflowService<B, Input>
+where
+    B: BackendExt,
 {
-    pub(crate) fn new(
-        services: HashMap<usize, CompositeService<FlowSink, Encode, Compact, Context, IdType>>,
-        backend: FlowSink,
+    services: HashMap<usize, SteppedService<B::Compact, B::Context, B::IdType>>,
+    not_ready: VecDeque<usize>,
+    backend: B,
+    _marker: PhantomData<Input>,
+}
+impl<B, Input> WorkflowService<B, Input>
+where
+    B: BackendExt,
+{
+    /// Creates a new `WorkflowService` with the given services and backend.
+    pub fn new(
+        services: HashMap<usize, SteppedService<B::Compact, B::Context, B::IdType>>,
+        backend: B,
     ) -> Self {
         Self {
             services,
             not_ready: VecDeque::new(),
             backend,
+            _marker: PhantomData,
         }
     }
 }
 
-impl<FlowSink: Clone + Send + Sync + 'static + Backend<Error = Err>, Encode, Compact, Err>
-    Service<Task<Compact, FlowSink::Context, FlowSink::IdType>>
-    for WorkflowService<FlowSink, Encode, Compact, FlowSink::Context, FlowSink::IdType>
+impl<B, Err, Input> Service<Task<B::Compact, B::Context, B::IdType>> for WorkflowService<B, Input>
 where
-    FlowSink::Context: MetadataExt<WorkflowRequest>,
-    Encode: Send + Sync + 'static,
-    Compact: Send + 'static + Clone,
-    FlowSink: Sync,
-    Compact: Send + Sync,
-    FlowSink::Context: Send + Default + MetadataExt<WorkflowRequest>,
+    B::Compact: Send + 'static,
+    B: Sync,
+    B::Context: Send + Default + MetadataExt<WorkflowContext>,
     Err: std::error::Error + Send + Sync + 'static,
-    FlowSink::IdType: GenerateId + Send + 'static,
-    Encode: Codec<Compact, Compact = Compact>,
-    <FlowSink::Context as MetadataExt<WorkflowRequest>>::Error: Into<BoxDynError>,
-    Encode::Error: Into<BoxDynError>,
-    FlowSink: Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = Err> + Unpin,
+    B::IdType: GenerateId + Send + 'static,
+    <B::Context as MetadataExt<WorkflowContext>>::Error: Into<BoxDynError>,
+    B: Sink<Task<B::Compact, B::Context, B::IdType>, Error = Err> + Unpin,
+    B: Clone + Send + Sync + 'static + BackendExt<Error = Err>,
 {
-    type Response = StepResult<Compact>;
+    type Response = GoTo<StepResult<B::Compact, B::IdType>>;
     type Error = BoxDynError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -104,7 +74,6 @@ where
                     .services
                     .get_mut(&self.not_ready[0])
                     .unwrap()
-                    .svc
                     .poll_ready(cx)?
                     .is_pending()
                 {
@@ -116,73 +85,92 @@ where
         }
     }
 
-    fn call(
-        &mut self,
-        mut req: Task<Compact, FlowSink::Context, FlowSink::IdType>,
-    ) -> Self::Future {
+    fn call(&mut self, mut req: Task<B::Compact, B::Context, B::IdType>) -> Self::Future {
         assert!(
             self.not_ready.is_empty(),
             "Workflow must wait for all services to be ready. Did you forget to call poll_ready()?"
         );
-        let meta: WorkflowRequest = req.parts.ctx.extract().unwrap_or_default();
+        let meta: WorkflowContext = req.parts.ctx.extract().unwrap_or_default();
         let idx = meta.step_index;
 
         let has_next = self.services.contains_key(&(idx + 1));
-        let ctx: StepContext<FlowSink, Encode> =
-            StepContext::new(self.backend.clone(), idx, has_next);
+        let ctx: StepContext<B> = StepContext::new(self.backend.clone(), idx, has_next);
 
-        let cl = self
+        let svc = self
             .services
             .get_mut(&idx)
             .expect("Attempted to run a step that doesn't exist");
-
-        let svc = &mut cl.svc;
 
         // Prepare the context for the next step
         req.parts.data.insert(ctx);
 
         self.not_ready.push_back(idx);
-        svc.call(req).map_ok(|res| StepResult(res)).boxed()
+        svc.call(req).boxed()
     }
 }
 
-pub async fn handle_workflow_result<N, Compact, FlowSink, Err>(
-    ctx: &mut StepContext<FlowSink, FlowSink::Codec>,
-    result: &GoTo<N>,
-) -> Result<(), TaskSinkError<Err>>
+/// Handle the result of a workflow step, scheduling the next step if necessary
+pub async fn handle_step_result<N, Compact, B, Err>(
+    ctx: &mut StepContext<B>,
+    result: GoTo<N>,
+) -> Result<GoTo<StepResult<B::Compact, B::IdType>>, TaskSinkError<Err>>
 where
-    FlowSink: Sink<Task<Compact, FlowSink::Context, FlowSink::IdType>, Error = Err>
-        + Backend<Error = Err>
+    B: Sink<Task<Compact, B::Context, B::IdType>, Error = Err>
+        + BackendExt<Error = Err, Compact = Compact>
         + Send
         + Unpin,
-    FlowSink::Context: MetadataExt<WorkflowRequest>,
-    FlowSink::Codec: Codec<N, Compact = Compact>,
-    <FlowSink::Codec as Codec<N>>::Error: Into<BoxDynError>,
+    B::Context: MetadataExt<WorkflowContext>,
+    B::Codec: Codec<N, Compact = Compact>,
+    <B::Codec as Codec<N>>::Error: Into<BoxDynError>,
+    Compact: 'static,
+    N: 'static,
+    B::IdType: GenerateId + Send + 'static,
 {
-    use futures::SinkExt;
     match result {
         GoTo::Next(next) if ctx.has_next => {
+            let task_id = B::IdType::generate();
+            let task_id = TaskId::new(task_id);
             let task = Task::builder(
-                FlowSink::Codec::encode(next).map_err(|e| TaskSinkError::CodecError(e.into()))?,
+                B::Codec::encode(&next).map_err(|e| TaskSinkError::CodecError(e.into()))?,
             )
-            .meta(WorkflowRequest {
+            .with_task_id(task_id.clone())
+            .meta(WorkflowContext {
                 step_index: ctx.current_step + 1,
             })
             .build();
-            ctx.sink.send(task).await?;
+            ctx.backend.send(task).await?;
+            Ok(GoTo::Next(StepResult {
+                result: B::Codec::encode(&next).map_err(|e| TaskSinkError::CodecError(e.into()))?,
+                next_task_id: Some(task_id),
+            }))
         }
         GoTo::DelayFor(delay, next) if ctx.has_next => {
+            let task_id = B::IdType::generate();
+            let task_id = TaskId::new(task_id);
             let task = Task::builder(
-                FlowSink::Codec::encode(next).map_err(|e| TaskSinkError::CodecError(e.into()))?,
+                B::Codec::encode(&next).map_err(|e| TaskSinkError::CodecError(e.into()))?,
             )
-            .run_after(*delay)
-            .meta(WorkflowRequest {
+            .run_after(delay)
+            .with_task_id(task_id.clone())
+            .meta(WorkflowContext {
                 step_index: ctx.current_step + 1,
             })
             .build();
-            ctx.sink.send(task).await?;
+            ctx.backend.send(task).await?;
+            Ok(GoTo::DelayFor(
+                delay,
+                StepResult {
+                    result: B::Codec::encode(&next)
+                        .map_err(|e| TaskSinkError::CodecError(e.into()))?,
+                    next_task_id: Some(task_id),
+                },
+            ))
         }
-        _ => {}
+        GoTo::Done => Ok(GoTo::Done),
+        GoTo::Break(res) => Ok(GoTo::Break(StepResult {
+            result: B::Codec::encode(&res).map_err(|e| TaskSinkError::CodecError(e.into()))?,
+            next_task_id: None,
+        })),
+        _ => Ok(GoTo::Done),
     }
-    Ok(())
 }

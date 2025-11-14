@@ -44,6 +44,7 @@ pub struct TaskBuilder<Args, Ctx, IdType> {
 
 impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
     /// Create a new TaskBuilder with the required args
+    #[must_use]
     pub fn new(args: Args) -> Self
     where
         Ctx: Default,
@@ -60,24 +61,28 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
     }
 
     /// Set the task's backend context
+    #[must_use]
     pub fn with_ctx(mut self, ctx: Ctx) -> Self {
         self.ctx = ctx;
         self
     }
 
     /// Set the task's runtime data
+    #[must_use]
     pub fn with_data(mut self, data: Extensions) -> Self {
         self.data = data;
         self
     }
 
     /// Insert a value into the task's data context
+    #[must_use]
     pub fn data<D: Clone + Send + Sync + 'static>(mut self, value: D) -> Self {
         self.data.insert(value);
         self
     }
 
     /// Insert a value into the task's ctx context
+    #[must_use]
     pub fn meta<M>(mut self, value: M) -> Self
     where
         Ctx: MetadataExt<M>,
@@ -89,30 +94,35 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
     }
 
     /// Set the task ID
+    #[must_use]
     pub fn with_task_id(mut self, task_id: TaskId<IdType>) -> Self {
         self.task_id = Some(task_id);
         self
     }
 
     /// Set the attempt information
+    #[must_use]
     pub fn with_attempt(mut self, attempt: Attempt) -> Self {
         self.attempt = Some(attempt);
         self
     }
 
     /// Set the task status
+    #[must_use]
     pub fn with_status(mut self, status: Status) -> Self {
         self.status = Some(status);
         self
     }
 
     /// Schedule the task to run at a specific Unix timestamp
+    #[must_use]
     pub fn run_at_timestamp(mut self, timestamp: u64) -> Self {
         self.run_at = Some(timestamp);
         self
     }
 
     /// Schedule the task to run at a specific SystemTime
+    #[must_use]
     pub fn run_at_time(mut self, time: SystemTime) -> Self {
         let timestamp = time
             .duration_since(UNIX_EPOCH)
@@ -123,6 +133,7 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
     }
 
     /// Schedule the task to run after a delay from now
+    #[must_use]
     pub fn run_after(mut self, delay: Duration) -> Self {
         let now = SystemTime::now();
         let run_time = now + delay;
@@ -135,21 +146,25 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
     }
 
     /// Schedule the task to run in the specified number of seconds
+    #[must_use]
     pub fn run_in_seconds(self, seconds: u64) -> Self {
         self.run_after(Duration::from_secs(seconds))
     }
 
     /// Schedule the task to run in the specified number of minutes
+    #[must_use]
     pub fn run_in_minutes(self, minutes: u64) -> Self {
         self.run_after(Duration::from_secs(minutes * 60))
     }
 
     /// Schedule the task to run in the specified number of hours
+    #[must_use]
     pub fn run_in_hours(self, hours: u64) -> Self {
         self.run_after(Duration::from_secs(hours * 3600))
     }
 
     /// Build the Task with default context
+    #[must_use]
     pub fn build(self) -> Task<Args, Ctx, IdType> {
         let current_time = || {
             SystemTime::now()

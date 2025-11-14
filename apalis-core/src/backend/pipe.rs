@@ -46,7 +46,7 @@
 //! See also:
 //! - [`apalis-cron`](https://docs.rs/apalis-cron)
 
-use crate::backend::TaskSink;
+use crate::backend::{BackendExt, TaskSink};
 use crate::error::BoxDynError;
 use crate::features_table;
 use crate::task::Task;
@@ -74,7 +74,7 @@ pub struct Pipe<S, Into, Args, Ctx> {
 
 impl<S: Clone, Into: Clone, Args, Ctx> Clone for Pipe<S, Into, Args, Ctx> {
     fn clone(&self) -> Self {
-        Pipe {
+        Self {
             from: self.from.clone(),
             into: self.into.clone(),
             _req: PhantomData,
@@ -99,7 +99,7 @@ impl<S, Into, Args, Ctx> DerefMut for Pipe<S, Into, Args, Ctx> {
 impl<S, Into, Args, Ctx> Pipe<S, Into, Args, Ctx> {
     /// Create a new Pipe instance
     pub fn new(stream: S, backend: Into) -> Self {
-        Pipe {
+        Self {
             from: stream,
             into: backend,
             _req: PhantomData,
@@ -120,6 +120,7 @@ impl<Args, Ctx, S, TSink, Err> Backend for Pipe<S, TSink, Args, Ctx>
 where
     S: Stream<Item = Result<Args, Err>> + Send + 'static,
     TSink: Backend<Args = Args, Context = Ctx>
+        + BackendExt
         + TaskSink<Args>
         + Clone
         + Unpin
@@ -135,7 +136,7 @@ where
     Err: std::error::Error + Send + Sync + 'static,
     <TSink as Sink<Task<TSink::Compact, Ctx, TSink::IdType>>>::Error:
         std::error::Error + Send + Sync + 'static,
-    <<TSink as Backend>::Codec as Codec<Args>>::Error: std::error::Error + Send + Sync + 'static,
+    <<TSink as BackendExt>::Codec as Codec<Args>>::Error: std::error::Error + Send + Sync + 'static,
     TSink::Compact: Send,
 {
     type Args = Args;
@@ -151,10 +152,6 @@ where
     type Beat = BoxStream<'static, Result<(), PipeError>>;
 
     type Error = PipeError;
-
-    type Codec = TSink::Codec;
-
-    type Compact = TSink::Compact;
 
     fn heartbeat(&self, worker: &WorkerContext) -> Self::Beat {
         self.into

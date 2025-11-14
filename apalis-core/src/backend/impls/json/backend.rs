@@ -5,13 +5,13 @@ use std::{
 
 use futures_channel::mpsc::SendError;
 use futures_core::{Stream, stream::BoxStream};
-use futures_util::{StreamExt, stream};
+use futures_util::{StreamExt, TryStreamExt, stream};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::{
     backend::{
-        Backend, ConfigExt, TaskStream,
+        Backend, BackendExt, ConfigExt, TaskStream,
         codec::json::JsonCodec,
         impls::json::{
             JsonStorage,
@@ -36,10 +36,6 @@ where
     type Layer = AcknowledgeLayer<JsonAck<Args>>;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
-    type Codec = JsonCodec<Value>;
-
-    type Compact = Value;
-
     fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
     }
@@ -50,6 +46,21 @@ where
     }
     fn poll(self, _worker: &WorkerContext) -> Self::Stream {
         (self.map(|r| Ok(Some(r))).boxed()) as _
+    }
+}
+
+impl<Args: 'static + Send + Serialize + DeserializeOwned + Unpin + Into<Value>> BackendExt
+    for JsonStorage<Args>
+{
+    type Codec = JsonCodec<Value>;
+    type Compact = Value;
+
+    type CompactStream = TaskStream<Task<Self::Compact, JsonMapMetadata>, SendError>;
+
+    fn poll_compact(self, worker: &WorkerContext) -> Self::CompactStream {
+        self.poll(worker)
+            .map_ok(|c| c.map(|t| t.map(Into::into)))
+            .boxed()
     }
 }
 

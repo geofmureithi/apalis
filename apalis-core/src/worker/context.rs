@@ -129,6 +129,7 @@ impl<F> PinnedDrop for Tracked<F> {
 
 impl WorkerContext {
     /// Create a new worker context
+    #[must_use]
     pub fn new<S>(name: &str) -> Self {
         Self {
             name: Arc::new(name.to_owned()),
@@ -145,6 +146,7 @@ impl WorkerContext {
     }
 
     /// Get the worker id
+    #[must_use]
     pub fn name(&self) -> &String {
         &self.name
     }
@@ -219,42 +221,50 @@ impl WorkerContext {
     }
 
     /// Returns if the worker is ready to consume new tasks
+    #[must_use]
     pub fn is_ready(&self) -> bool {
         self.is_running() && !self.is_shutting_down() && self.is_ready.load(Ordering::SeqCst)
     }
 
     /// Get the type of service
+    #[must_use]
     pub fn get_service(&self) -> &str {
         self.service
     }
 
     /// Returns whether the worker is running
+    #[must_use]
     pub fn is_running(&self) -> bool {
         self.state.load(Ordering::SeqCst) == InnerWorkerState::Running
     }
 
     /// Returns whether the worker is pending
+    #[must_use]
     pub fn is_pending(&self) -> bool {
         self.state.load(Ordering::SeqCst) == InnerWorkerState::Pending
     }
 
     /// Returns whether the worker is paused
+    #[must_use]
     pub fn is_paused(&self) -> bool {
         self.state.load(Ordering::SeqCst) == InnerWorkerState::Paused
     }
 
     /// Returns the current futures in the worker domain
     /// This include futures spawned via `worker.track`
+    #[must_use]
     pub fn task_count(&self) -> usize {
         self.task_count.load(Ordering::Relaxed)
     }
 
     /// Returns whether the worker has pending tasks
+    #[must_use]
     pub fn has_pending_tasks(&self) -> bool {
         self.task_count.load(Ordering::Relaxed) > 0
     }
 
     /// Is the shutdown token called
+    #[must_use]
     pub fn is_shutting_down(&self) -> bool {
         self.shutdown
             .as_ref()
@@ -273,7 +283,7 @@ impl WorkerContext {
     }
 
     /// Wraps the event listener with a new function
-    pub fn wrap_listener<F: Fn(&WorkerContext, &Event) + Send + Sync + 'static>(&mut self, f: F) {
+    pub fn wrap_listener<F: Fn(&Self, &Event) + Send + Sync + 'static>(&mut self, f: F) {
         let cur = self.event_handler.clone();
         let new: RawEventListener = Box::new(move |ctx, ev| {
             f(ctx, ev);
@@ -282,7 +292,7 @@ impl WorkerContext {
         self.event_handler = Arc::new(new);
     }
 
-    pub(crate) fn add_waker(&self, cx: &mut Context<'_>) {
+    pub(crate) fn add_waker(&self, cx: &Context<'_>) {
         if let Ok(mut waker_guard) = self.waker.lock() {
             if waker_guard
                 .as_ref()

@@ -82,8 +82,8 @@ use crate::{task::Task, task_fn::FromRequest};
 pub struct Data<T>(T);
 impl<T> Data<T> {
     /// Build a new data entry
-    pub fn new(inner: T) -> Data<T> {
-        Data(inner)
+    pub fn new(inner: T) -> Self {
+        Self(inner)
     }
 }
 
@@ -148,6 +148,6 @@ impl<T: Clone + Send + Sync + 'static, Args: Sync, Ctx: Sync, IdType: Sync + Sen
 {
     type Error = MissingDataError;
     async fn from_request(task: &Task<Args, Ctx, IdType>) -> Result<Self, Self::Error> {
-        task.parts.data.get_checked().cloned().map(Data::new)
+        task.parts.data.get_checked().cloned().map(Self::new)
     }
 }

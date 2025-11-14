@@ -122,6 +122,7 @@ impl Default for SharedJsonStore {
 
 impl SharedJsonStore {
     /// Create a new instance of the shared JSON store.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: JsonStorage::new_temp().unwrap(),
@@ -167,7 +168,7 @@ impl JsonStorage<Value> {
 
         // Create a wrapped sender that will insert into the in-memory store
         let wrapped_sender = {
-            let mut store = self.clone();
+            let store = self.clone();
 
             sender.with_flat_map(move |task: Task<Args, JsonMapMetadata>| {
                 use crate::task::task_id::RandomId;
@@ -250,7 +251,7 @@ mod tests {
         let string_worker = WorkerBuilder::new("rango-tango-string")
             .backend(string_store)
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                println!("CTX {:?}, On Event = {ev:?}", ctx.name());
             })
             .build(|req: String, ctx: WorkerContext| async move {
                 tokio::time::sleep(Duration::from_millis(2)).await;
@@ -264,7 +265,7 @@ mod tests {
         let int_worker = WorkerBuilder::new("rango-tango-int")
             .backend(int_store)
             .on_event(|ctx, ev| {
-                println!("CTX {:?}, On Event = {:?}", ctx.name(), ev);
+                println!("CTX {:?}, On Event = {ev:?}", ctx.name());
             })
             .build(task)
             .run();
