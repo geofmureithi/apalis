@@ -43,7 +43,7 @@
 use crate::backend::Backend;
 use crate::error::BoxDynError;
 use crate::task::Task;
-use crate::worker::builder::IntoWorkerService;
+use crate::worker::builder::{IntoWorkerService, WorkerService};
 use futures_util::FutureExt;
 use futures_util::future::Map;
 use std::fmt;
@@ -185,8 +185,12 @@ macro_rules! impl_service_fn {
                 < $K as FromRequest<Task<Args, Ctx, B::IdType>> >::Error: std::error::Error + 'static + Send + Sync,
             )+
         {
-            fn into_service(self, _: &B) -> TaskFn<T, Args, Ctx, ($($K),+)> {
-                task_fn(self)
+            type Backend = B;
+            fn into_service(self, backend: B) -> WorkerService<B, TaskFn<T, Args, Ctx, ($($K),+)>> {
+                WorkerService {
+                    backend,
+                    service: task_fn(self),
+                }
             }
         }
     };
@@ -222,8 +226,12 @@ where
     Backend: crate::backend::Backend<Args = Args, Context = Ctx>,
     Args: Send,
 {
-    fn into_service(self, _: &Backend) -> TaskFn<T, Args, Ctx, ()> {
-        task_fn(self)
+    type Backend = Backend;
+    fn into_service(self, backend: Backend) -> WorkerService<Backend, TaskFn<T, Args, Ctx, ()>> {
+        WorkerService {
+            backend,
+            service: task_fn(self),
+        }
     }
 }
 
@@ -232,8 +240,12 @@ where
     S: Service<Task<Args, Ctx, B::IdType>>,
     B: Backend<Args = Args, Context = Ctx>,
 {
-    fn into_service(self, _: &B) -> S {
-        self
+    type Backend = B;
+    fn into_service(self, backend: B) -> WorkerService<B, S> {
+        WorkerService {
+            backend,
+            service: self,
+        }
     }
 }
 

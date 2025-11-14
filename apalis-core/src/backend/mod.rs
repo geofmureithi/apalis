@@ -71,12 +71,6 @@ pub trait Backend {
     type Context: Default;
     /// The error type returned by backend operations
     type Error;
-    /// The codec used for serialization/deserialization of tasks.
-    type Codec: Codec<Self::Args, Compact = Self::Compact>;
-
-    /// The compact representation of task arguments.
-    type Compact;
-
     /// A stream of tasks provided by the backend.
     type Stream: Stream<
         Item = Result<Option<Task<Self::Args, Self::Context, Self::IdType>>, Self::Error>,
@@ -92,6 +86,21 @@ pub trait Backend {
     fn middleware(&self) -> Self::Layer;
     /// Polls the backend for tasks for the given worker.
     fn poll(self, worker: &WorkerContext) -> Self::Stream;
+}
+
+/// Defines the encoding/serialization aspects of a backend.
+pub trait BackendExt: Backend {
+    /// The codec used for serialization/deserialization of tasks.
+    type Codec: Codec<Self::Args, Compact = Self::Compact>;
+    /// The compact representation of task arguments.
+    type Compact;
+    /// A stream of encoded tasks provided by the backend.
+    type CompactStream: Stream<
+        Item = Result<Option<Task<Self::Compact, Self::Context, Self::IdType>>, Self::Error>,
+    >;
+
+    /// Polls the backend for encoded tasks for the given worker.
+    fn poll_compact(self, worker: &WorkerContext) -> Self::CompactStream;
 }
 
 /// Represents a stream for T.

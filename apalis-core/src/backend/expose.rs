@@ -1,5 +1,5 @@
 use crate::{
-    backend::{Backend, TaskSink},
+    backend::{Backend, BackendExt, TaskSink},
     task::{Task, status::Status},
 };
 
@@ -49,7 +49,7 @@ pub trait ListTasks<Args>: Backend {
 }
 
 /// Allows listing tasks across all queues with optional filtering
-pub trait ListAllTasks: Backend {
+pub trait ListAllTasks: BackendExt {
     /// List tasks matching the given filter in all queues
     #[allow(clippy::type_complexity)]
     fn list_all_tasks(

@@ -153,7 +153,7 @@ impl<Args, Ctx, IdType> TaskBuilder<Args, Ctx, IdType> {
 
     /// Schedule the task to run in the specified number of minutes
     #[must_use]
-     pub fn run_in_minutes(self, minutes: u64) -> Self {
+    pub fn run_in_minutes(self, minutes: u64) -> Self {
         self.run_after(Duration::from_secs(minutes * 60))
     }
 

@@ -331,7 +331,10 @@ mod tests {
             }
 
             fn call(&mut self, _req: Task<TestJob, ()>) -> Self::Future {
-                Box::pin(async { panic!() })
+                Box::pin(async {
+                    None::<()>.unwrap();
+                    todo!()
+                })
             }
         }
 

@@ -639,7 +639,7 @@ mod tests {
     async fn basic_worker_run() {
         let mut json_store = JsonStorage::new_temp().unwrap();
         for i in 0..ITEMS {
-            json_store.push(i).await.unwrap();
+            json_store.push(i.into()).await.unwrap();
         }
 
         #[derive(Clone, Debug, Default)]

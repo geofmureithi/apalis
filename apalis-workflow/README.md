@@ -1,6 +1,6 @@
 # apalis-workflow
 
-This crate provides a flexible and composable workflow engine for [apalis](https://github.com/geofmureithi/apalis). Can be used for building old school workflows or advanced LLM workflows.
+This crate provides a flexible and composable workflow engine for [apalis](https://github.com/geofmureithi/apalis). Can be used for building general workflows or advanced LLM workflows.
 
 ## Overview
 
@@ -15,26 +15,23 @@ Workflows are built by composing steps, and can be executed using supported back
 - Parallel execution of steps.
 - Extensible via the `Step` trait.
 - Integration with `apalis` backends and workers
-- Strongly typed steps and context handling
+- Compile time validation of workflows. 
 
 ## Example
 
 ```rust,no_run
+use apalis::prelude::*;
 use apalis_workflow::*;
 use apalis_core::backend::json::JsonStorage;
-use apalis_core::worker::builder::WorkerBuilder;
-use std::time::Duration;
-use apalis_core::worker::ext::event_listener::EventListenerExt;
 
 #[tokio::main]
 async fn main() {
    let workflow = Workflow::new("odd-numbers-workflow")
-       .delay_for(Duration::from_millis(1000))
-       .then(|a: usize| async move { Ok::<_, WorkflowError>((0..a).collect::<Vec<_>>()) })
+       .and_then(|a: usize| async move { Ok::<_, BoxDynError>((0..a).collect::<Vec<_>>()) })
        .filter_map(|x| async move { if x % 2 != 0 { Some(x) } else { None } })
-       .then(|a: Vec<usize>| async move {
+       .and_then(|a: Vec<usize>| async move {
            println!("Sum: {}", a.iter().sum::<usize>());
-           Ok::<_, WorkflowError>(())
+           Ok::<_, BoxDynError>(())
         });
 
    let mut in_memory = JsonStorage::new_temp().unwrap();
@@ -58,26 +55,27 @@ You can track your workflows using [apalis-board](https://github.com/apalis-dev/
 
 ## Backend Support
 
-- [x] JSONStorage
-- [x] SqliteStorage
-- [x] RedisStorage
-- [x] PostgresStorage
+- [x] [JSONStorage](https://docs.rs/apalis-core/1.0.0-alpha.9/apalis_core/backend/json/struct.JsonStorage.html)
+- [x] [SqliteStorage](https://docs.rs/apalis-sqlite#workflow-example)
+- [x] [RedisStorage](https://docs.rs/apalis-redis#workflow-example)
+- [x] [PostgresStorage](https://docs.rs/apalis-postgres#workflow-example)
 - [ ] MysqlStorage
 - [ ] RsMq
 
 ## Roadmap
 
-- [x] Then: Sequential execution
+- [x] AndThen: Sequential execution on success
 - [x] Delay: Delay execution
 - [x] FilterMap: MapReduce
-- [ ] Fold
-- [ ] Repeater
-- [ ] Subflow
-- [ ] DAG
+- [x] Fold
+- [-] Repeater
+- [-] Subflow
+- [-] DAG
 
-## See also:
+## Inspirations:
 
-- [Underway](https://github.com/maxcountryman/underway): Postgres-only solution that inspired some parts of this crate
+- [Underway](https://github.com/maxcountryman/underway): Postgres-only `stepped` solution
+- [dagx](https://github.com/swaits/dagx): blazing fast in-memory `dag` solution
 
 ## License
 

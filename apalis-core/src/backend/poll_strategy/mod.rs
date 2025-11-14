@@ -106,7 +106,7 @@ mod tests {
     };
 
     use crate::{
-        backend::{TaskSink, custom::BackendBuilder},
+        backend::TaskSink,
         error::BoxDynError,
         task::Task,
         worker::{
@@ -123,6 +123,8 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "sleep")]
     async fn basic_strategy_backend() {
+        use crate::backend::custom::BackendBuilder;
+
         let memory: InMemoryQueue<u32> = Arc::new(Mutex::new(VecDeque::new()));
 
         #[derive(Clone)]
@@ -181,7 +183,7 @@ mod tests {
             .unwrap();
 
         for i in 0..ITEMS {
-            TaskSink::push(&mut backend, i).await.unwrap();
+            backend.send(Task::new(i)).await.unwrap();
         }
 
         async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {
@@ -206,6 +208,8 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "sleep")]
     async fn custom_strategy_backend() {
+        use crate::backend::custom::BackendBuilder;
+
         let memory: InMemoryQueue<u32> = Arc::new(Mutex::new(VecDeque::new()));
 
         #[derive(Clone)]
@@ -290,7 +294,7 @@ mod tests {
             .unwrap();
 
         for i in 0..ITEMS {
-            TaskSink::push(&mut backend, i).await.unwrap();
+            backend.send(Task::new(i)).await.unwrap();
         }
 
         async fn task(task: u32, ctx: WorkerContext) -> Result<(), BoxDynError> {

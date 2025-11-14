@@ -72,6 +72,13 @@ impl<T, E: Into<BoxDynError> + Send + 'static> IntoResponse for std::result::Res
     }
 }
 
+impl<T: IntoResponse> IntoResponse for Vec<T> {
+    type Output = Vec<T>;
+    fn into_response(self) -> Result<Vec<T>, BoxDynError> {
+        Ok(self)
+    }
+}
+
 macro_rules! SIMPLE_JOB_RESULT {
     ($type:ty) => {
         impl IntoResponse for $type {

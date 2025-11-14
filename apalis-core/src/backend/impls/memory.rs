@@ -37,6 +37,7 @@
 //! ## See Also
 //! - [`Backend`]
 //! - [`WorkerContext`]
+use crate::backend::BackendExt;
 use crate::backend::codec::IdentityCodec;
 use crate::features_table;
 use crate::task::extensions::Extensions;
@@ -234,9 +235,6 @@ impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend for MemorySto
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
-    type Codec = IdentityCodec;
-    type Compact = Args;
-
     fn heartbeat(&self, _: &WorkerContext) -> Self::Beat {
         stream::once(async { Ok(()) }).boxed()
     }
@@ -246,5 +244,15 @@ impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend for MemorySto
 
     fn poll(self, _worker: &WorkerContext) -> Self::Stream {
         (self.receiver.boxed().map(|r| Ok(Some(r))).boxed()) as _
+    }
+}
+
+impl<Args: Clone + Send + 'static, Ctx: Default + 'static> BackendExt for MemoryStorage<Args, Ctx> {
+    type Codec = IdentityCodec;
+    type Compact = Args;
+    type CompactStream = TaskStream<Task<Args, Self::Context>, Self::Error>;
+
+    fn poll_compact(self, _worker: &WorkerContext) -> Self::CompactStream {
+        (self.receiver.map(|task| Ok(Some(task))).boxed()) as _
     }
 }

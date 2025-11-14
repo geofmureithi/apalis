@@ -12,7 +12,6 @@ use serde::{
     de::{DeserializeOwned, Error},
 };
 
-
 /// The SQL context used for jobs stored in a SQL database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqlContext {
