@@ -95,7 +95,7 @@ where
         + 'static
         + Clone
         + Sink<Task<B::Compact, B::Context, IdType>, Error = Err>
-        + WaitForCompletion<GoTo<StepResult<Option<Output>, IdType>>>
+        + WaitForCompletion<GoTo<StepResult<B::Compact, IdType>>>
         + Unpin,
     B::Context: MetadataExt<FilterState>,
     B::Codec: Codec<Vec<Input>, Error = CodecError, Compact = B::Compact>
@@ -209,7 +209,11 @@ where
                         .filter_map(|res| {
                             let res = res.take().ok();
                             match res {
-                                Some(GoTo::Break(val)) => val.result,
+                                Some(GoTo::Break(val)) => {
+                                    let opt: Result<Option<Output>, _> =
+                                        B::Codec::decode(&val.result);
+                                    opt.ok().flatten()
+                                }
                                 _ => None,
                             }
                         })
@@ -241,7 +245,7 @@ where
         + 'static
         + Clone
         + Sink<Task<B::Compact, B::Context, IdType>, Error = SinkError>
-        + WaitForCompletion<GoTo<StepResult<Option<Output>, IdType>>>
+        + WaitForCompletion<GoTo<StepResult<B::Compact, IdType>>>
         + Unpin,
     F: Service<Task<Input, B::Context, IdType>, Error = BoxDynError, Response = Option<Output>>
         + Send

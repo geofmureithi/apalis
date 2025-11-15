@@ -20,6 +20,7 @@ where
     Backend: BackendExt,
 {
     /// Create a new workflow router
+    #[must_use]
     pub fn new() -> Self {
         Self {
             steps: HashMap::new(),

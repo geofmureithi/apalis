@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file.
 
 - **chore**: feat: refactor and granulize traits ([#586](https://github.com/geofmureithi/apalis/pull/586))
 - **refactor**: refactor: crates, workflow and BackendExt ([#623](https://github.com/geofmureithi/apalis/pull/623))
+- **chore**: bump to v1.0.0 beta.1 ([#624](https://github.com/geofmureithi/apalis/pull/624))
 
 ### Breaking Changes
 

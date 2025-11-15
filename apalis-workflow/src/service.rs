@@ -166,6 +166,7 @@ where
                 },
             ))
         }
+        #[allow(clippy::match_same_arms)]
         GoTo::Done => Ok(GoTo::Done),
         GoTo::Break(res) => Ok(GoTo::Break(StepResult {
             result: B::Codec::encode(&res).map_err(|e| TaskSinkError::CodecError(e.into()))?,

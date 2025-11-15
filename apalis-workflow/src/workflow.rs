@@ -26,10 +26,11 @@ pub struct Workflow<Start, Current, Backend, T = Identity> {
 
 impl<Start, Backend> Workflow<Start, Start, Backend> {
     #[allow(missing_docs)]
+    #[must_use]
     pub fn new(name: &str) -> Self {
         Self {
             inner: Identity,
-            name: name.to_string(),
+            name: name.to_owned(),
             _marker: PhantomData,
         }
     }
@@ -37,20 +38,6 @@ impl<Start, Backend> Workflow<Start, Start, Backend> {
 
 impl<Start, Cur, B, L> Workflow<Start, Cur, B, L> {
     /// Adds a new step to the workflow pipeline.
-    ///
-    /// This method appends a step to the current workflow, creating a new workflow
-    /// with the added step in the execution chain. The step will be executed as part
-    /// of the workflow's processing pipeline.
-    ///
-    /// # Type Parameters
-    /// - `S`: The step type that implements the required step traits
-    /// - `Output`: The output type that the step will produce
-    ///
-    /// # Parameters
-    /// - `step`: The step to add to the workflow
-    ///
-    /// # Returns
-    /// A new `Workflow` instance with the step added to the pipeline stack
     pub fn add_step<S, Output>(self, step: S) -> Workflow<Start, Output, B, Stack<S, L>> {
         Workflow {
             inner: Stack::new(step, self.inner),
@@ -102,10 +89,7 @@ impl<Input, Current, B: BackendExt> Step<Input, B> for RootStep<Current> {
     type Response = Current;
     type Error = BoxDynError;
     fn register(&mut self, _ctx: &mut WorkflowRouter<B>) -> Result<(), BoxDynError> {
-        // let count = ctx.steps.len();
-        println!("Registering Root step");
-        // println!("Current step count: {}", count);
-        // TODO
+        // TODO: Implement runtime checks to ensure Inputs and Outputs are compatible
         Ok(())
     }
 }

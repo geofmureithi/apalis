@@ -73,8 +73,8 @@ impl<T, E: Into<BoxDynError> + Send + 'static> IntoResponse for std::result::Res
 }
 
 impl<T: IntoResponse> IntoResponse for Vec<T> {
-    type Output = Vec<T>;
-    fn into_response(self) -> Result<Vec<T>, BoxDynError> {
+    type Output = Self;
+    fn into_response(self) -> Result<Self, BoxDynError> {
         Ok(self)
     }
 }

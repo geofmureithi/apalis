@@ -106,7 +106,6 @@ mod tests {
     };
 
     use crate::{
-        backend::TaskSink,
         error::BoxDynError,
         task::Task,
         worker::{

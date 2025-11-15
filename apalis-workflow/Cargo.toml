@@ -1,6 +1,6 @@
 [package]
 name = "apalis-workflow"
-version = "0.1.0-alpha.7"
+version = "0.1.0-beta.1"
 edition.workspace = true
 repository.workspace = true
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
@@ -20,7 +20,7 @@ uuid = ["dep:uuid"]
 petgraph = { version = "0.8.2", features = ["serde-1"] }
 serde = { version = "1.0", features = ["derive"] }
 tower = { version = "0.5", features = ["util"], default-features = false }
-apalis-core = { path = "../apalis-core", version = "1.0.0-alpha.9", default-features = false, features = [
+apalis-core = { path = "../apalis-core", version = "1.0.0-beta.1", default-features = false, features = [
     "sleep",
     "json",
 ] }
@@ -36,7 +36,7 @@ serde_json = "1"
 
 [dev-dependencies]
 tokio = { version = "1.37.0", features = ["macros", "rt-multi-thread", "sync"] }
-apalis = { path = "../apalis", version = "1.0.0-alpha.9" }
+apalis = { path = "../apalis", version = "1.0.0-beta.1" }
 
-# [lints]
-# workspace = true
+[lints]
+workspace = true

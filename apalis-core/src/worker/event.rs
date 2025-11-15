@@ -57,15 +57,17 @@ impl fmt::Display for Event {
 
 impl Event {
     /// If the event is an error, return the error
+    #[must_use]
     pub fn as_error(&self) -> Option<Arc<BoxDynError>> {
         match self {
-            Event::Error(err) => Some(err.clone()),
+            Self::Error(err) => Some(err.clone()),
             _ => None,
         }
     }
 
     /// Create a custom event
+    #[must_use]
     pub fn custom<T: 'static + Send + Sync>(data: T) -> Self {
-        Event::Custom(Box::new(data))
+        Self::Custom(Box::new(data))
     }
 }

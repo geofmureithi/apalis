@@ -220,7 +220,7 @@ impl WorkerContext {
         Ok(())
     }
 
-    /// Returns if the worker is ready to consume new tasks
+    /// Checks if the worker is ready to consume new tasks
     #[must_use]
     pub fn is_ready(&self) -> bool {
         self.is_running() && !self.is_shutting_down() && self.is_ready.load(Ordering::SeqCst)
@@ -232,32 +232,32 @@ impl WorkerContext {
         self.service
     }
 
-    /// Returns whether the worker is running
+    /// Checks whether the worker is running
     #[must_use]
     pub fn is_running(&self) -> bool {
         self.state.load(Ordering::SeqCst) == InnerWorkerState::Running
     }
 
-    /// Returns whether the worker is pending
+    /// Checks whether the worker is pending
     #[must_use]
     pub fn is_pending(&self) -> bool {
         self.state.load(Ordering::SeqCst) == InnerWorkerState::Pending
     }
 
-    /// Returns whether the worker is paused
+    /// Checks whether the worker is paused
     #[must_use]
     pub fn is_paused(&self) -> bool {
         self.state.load(Ordering::SeqCst) == InnerWorkerState::Paused
     }
 
-    /// Returns the current futures in the worker domain
+    /// Checks the current futures in the worker domain
     /// This include futures spawned via `worker.track`
     #[must_use]
     pub fn task_count(&self) -> usize {
         self.task_count.load(Ordering::Relaxed)
     }
 
-    /// Returns whether the worker has pending tasks
+    /// Checks whether the worker has pending tasks
     #[must_use]
     pub fn has_pending_tasks(&self) -> bool {
         self.task_count.load(Ordering::Relaxed) > 0

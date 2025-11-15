@@ -248,10 +248,10 @@ where
                             .send(steps)
                             .await
                             .map_err(|e| TaskSinkError::PushError(e))?;
-                        return Ok(GoTo::Next(StepResult {
+                        Ok(GoTo::Next(StepResult {
                             result,
                             next_task_id: Some(task_id),
-                        }));
+                        }))
                     }
                 }
             }
