@@ -68,9 +68,9 @@ mod tests {
     async fn basic_workflow() {
         let workflow = Workflow::new("and-then-workflow")
             .and_then(async |input: u32| (input) as usize)
-            .delay(Duration::from_secs(1))
+            .delay_for(Duration::from_secs(1))
             .and_then(async |input: usize| (input) as usize)
-            .delay(Duration::from_secs(1))
+            .delay_for(Duration::from_secs(1))
             // .delay_with(|_: Task<usize, _, _>| Duration::from_secs(1))
             .add_step(AndThen::new(task_fn(async |input: usize| {
                 Ok::<_, BoxDynError>(input.to_string())

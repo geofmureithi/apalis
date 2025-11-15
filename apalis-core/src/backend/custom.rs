@@ -402,7 +402,6 @@ mod tests {
     use futures_util::{FutureExt, lock::Mutex, sink, stream};
 
     use crate::{
-        backend::TaskSink,
         error::BoxDynError,
         worker::{builder::WorkerBuilder, ext::event_listener::EventListenerExt},
     };

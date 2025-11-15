@@ -23,8 +23,15 @@ pub struct DagFlow<Input = (), Output = ()> {
     _marker: PhantomData<(Input, Output)>,
 }
 
+impl Default for DagFlow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DagFlow {
     /// Create a new DAG workflow builder
+    #[must_use]
     pub fn new() -> Self {
         Self {
             graph: Mutex::new(DiGraph::new()),
@@ -35,6 +42,7 @@ impl DagFlow {
 
     /// Add a node to the DAG
     #[must_use]
+    #[allow(clippy::todo)]
     pub fn add_node<S, Input>(&self, name: &str, service: S) -> NodeBuilder<'_, Input, S::Response>
     where
         S: Service<Task<Input, (), ()>> + Send + 'static,
@@ -52,7 +60,7 @@ impl DagFlow {
         self.node_mapping
             .lock()
             .unwrap()
-            .insert(name.to_string(), node);
+            .insert(name.to_owned(), node);
         NodeBuilder {
             id: node,
             dag: self,
@@ -132,6 +140,7 @@ impl DagExecutor {
     }
 
     /// Export the DAG to DOT format
+    #[must_use]
     pub fn to_dot(&self) -> String {
         let names = self
             .node_mapping
@@ -150,7 +159,7 @@ impl DagExecutor {
             &|_, _| String::new(),
             &get_node_attributes,
         );
-        format!("{:?}", dot)
+        format!("{dot:?}")
     }
 }
 
@@ -164,7 +173,8 @@ pub struct NodeBuilder<'a, Input, Output = ()> {
 
 impl<Input, Output> NodeBuilder<'_, Input, Output> {
     /// Specify dependencies for this node
-    pub fn depends_on<'a, D>(self, deps: D) -> NodeHandle<Input, Output>
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn depends_on<D>(self, deps: D) -> NodeHandle<Input, Output>
     where
         D: DepsCheck<Input>,
     {
@@ -224,7 +234,7 @@ impl<'a, Input, Output> DepsCheck<Output> for (&NodeBuilder<'a, Input, Output>,)
     }
 }
 
-impl<'a, Output, T: DepsCheck<Output>> DepsCheck<Vec<Output>> for Vec<T> {
+impl<Output, T: DepsCheck<Output>> DepsCheck<Vec<Output>> for Vec<T> {
     fn to_node_ids(&self) -> Vec<NodeIndex> {
         self.iter().flat_map(|item| item.to_node_ids()).collect()
     }

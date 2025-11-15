@@ -1,6 +1,8 @@
 //! Types related to the [`TaskTracker`] collection.
 //!
-//! Extracted from the [tokio-util](https://github.com/tokio-rs/tokio/blob/master/tokio-util/src/task/task_tracker.rs) crate and modified to be runtime agnostic
+//! Credits to the [tokio-util](https://github.com/tokio-rs/tokio/blob/master/tokio-util/src/task/task_tracker.rs)
+//! 
+//! Minor modifications were made to fit the specific use case of long-running tasks.
 use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;

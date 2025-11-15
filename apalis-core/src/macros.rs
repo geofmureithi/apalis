@@ -215,8 +215,8 @@ macro_rules! features_table {
     ) };
     (@assert_function Serialization) => { concat!(
         "    # use apalis_core::backend::codec::Codec;\n",
-        "    # use apalis_core::backend::Backend;\n",
-        "   fn assert_codec<B: Backend<Args =()>>(backend: B) \n",
+        "    # use apalis_core::backend::BackendExt;\n",
+        "   fn assert_codec<B: BackendExt<Args =()>>(backend: B) \n",
         "   where\n",
         "       B::Codec: Codec<(), Compact=Vec<u8>>,\n",
         "   {\n",

@@ -97,6 +97,7 @@ mod random_id {
         }
     }
 
+    #[allow(clippy::infallible_try_from)]
     impl TryFrom<&'_ str> for RandomId {
         type Error = Infallible;
 

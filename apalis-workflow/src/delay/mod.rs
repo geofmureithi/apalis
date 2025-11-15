@@ -132,7 +132,7 @@ where
     type Response = Input;
     type Error = BoxDynError;
     fn register(&mut self, ctx: &mut WorkflowRouter<B>) -> Result<(), BoxDynError> {
-        let svc = SteppedService::new(DelayWithStep {
+        let svc = SteppedService::new(Self {
             f: self.f.clone(),
             inner: self.inner.clone(),
             _marker: std::marker::PhantomData,
@@ -204,7 +204,7 @@ where
 
 impl<Start, Cur, B, L> Workflow<Start, Cur, B, L> {
     /// Delay the workflow by a fixed duration
-    pub fn delay(self, delay: Duration) -> Workflow<Start, Cur, B, Stack<DelayFor, L>> {
+    pub fn delay_for(self, delay: Duration) -> Workflow<Start, Cur, B, Stack<DelayFor, L>> {
         self.add_step(DelayFor { duration: delay })
     }
 }
