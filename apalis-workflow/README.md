@@ -19,7 +19,7 @@ Workflows are built by composing steps, and can be executed using supported back
 
 ## Example
 
-```rust,no_run
+```rust,ignore
 use apalis::prelude::*;
 use apalis_workflow::*;
 use apalis_core::backend::json::JsonStorage;

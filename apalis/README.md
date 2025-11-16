@@ -175,6 +175,12 @@ sequenceDiagram
     Worker->>+Backend: Update task status to 'completed'
 ```
 
+## Observability
+
+With the [web UI](https://github.com/apalis-dev/apalis-board), you can manage your jobs through a simple interface. Check out this [working example](https://github.com/apalis-dev/apalis-board/blob/master/examples/axum-email-service) to see how it works.
+
+![Workers Screenshot](https://github.com/apalis-dev/apalis-board/raw/master/screenshots/workers.png)
+
 ## Integrations
 
 - [zino](https://crates.io/crates/zino-core): Next-generation framework for composable applications in Rust.
@@ -203,12 +209,6 @@ sequenceDiagram
 - [Background job processing with rust using actix and redis](https://mureithi.me/blog/background-job-processing-with-rust-actix-redis)
 - [Feasibility of implementing cronjob with Rust programming language](https://tpbabparn.medium.com/feasibility-of-implementing-cronjob-with-rust-programming-language-186eaed0a7d8)
 - [How to schedule and run cron jobs in Rust using apalis](https://dev.to/njugunamureithi/how-to-schedule-and-run-cron-jobs-in-rust-5106)
-
-### Web UI
-
-If you are running the [web UI](https://github.com/apalis-dev/apalis-board), you can easily manage your jobs. See a working [rest API example here](https://github.com/apalis-dev/apalis-board/blob/master/examples/axum-email-service)
-
-![Workers Screenshot](https://github.com/apalis-dev/apalis-board/raw/master/screenshots/workers.png)
 
 ## Thanks to
 
