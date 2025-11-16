@@ -10,6 +10,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["job", "task", "scheduler", "worker", "cron"]
 categories = ["database"]
+publish = true
 
 [lib]
 bench = false
