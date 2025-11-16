@@ -17,7 +17,7 @@ async fn long_running_task(_task: LongRunningJob, worker: WorkerContext) {
             info!("saving the job state");
             tokio::time::sleep(Duration::from_secs(5)).await; // Simulate saving state
             break;
-        } 
+        }
     }
     info!("Shutdown complete!");
 }

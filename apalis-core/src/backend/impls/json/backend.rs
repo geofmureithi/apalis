@@ -58,12 +58,7 @@ impl<Args: 'static + Send + Serialize + DeserializeOwned + Unpin> BackendExt for
     fn poll_compact(self, worker: &WorkerContext) -> Self::CompactStream {
         self.poll(worker)
             .map_ok(|c| {
-                c.map(|t| {
-                    t.map(|args| {
-                        serde_json::to_value(args).expect("to be encodable")
-                        
-                    })
-                })
+                c.map(|t| t.map(|args| serde_json::to_value(args).expect("to be encodable")))
             })
             .boxed()
     }
