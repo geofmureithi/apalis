@@ -10,12 +10,20 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["job", "task", "scheduler", "worker", "cron"]
 categories = ["database"]
+publish = true
 
 [lib]
 bench = false
 
 [features]
-default = ["tracing", "catch-panic", "limit", "timeout", "retry"]
+default = [
+  "tracing",
+  "catch-panic",
+  "limit",
+  "timeout",
+  "retry",
+  "apalis-core/default",
+]
 
 ## Support Tracing 👀
 tracing = ["dep:tracing", "dep:tracing-futures"]
@@ -37,6 +45,7 @@ catch-panic = ["dep:futures-util"]
 
 ## All available features
 full = [
+  "default",
   "sentry",
   "prometheus",
   "tracing",
@@ -79,12 +88,13 @@ optional = true
 
 [dev-dependencies]
 apalis = { path = ".", version = "1.0.0-beta.1" }
+apalis-core = { path = "../apalis-core", version = "1.0.0-beta.1" }
 criterion = { version = "0.7.0", features = ["async_tokio", "html_reports"] }
 pprof = { version = "0.15", features = ["flamegraph"] }
 paste = "1.0.14"
 serde = "1"
 tokio = { version = "1", features = ["full"] }
-apalis-redis = "1.0.0-alpha.1"
+apalis-workflow = { path = "../apalis-workflow", version = "0.1.0-beta.1" }
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

@@ -5,6 +5,7 @@ authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition.workspace = true
 repository.workspace = true
 readme = "README.md"
+publish = true
 
 license = "MIT"
 description = "SQL utilities for background job processing with apalis"

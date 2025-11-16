@@ -7,11 +7,7 @@ repository.workspace = true
 [dependencies]
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
-apalis = { path = "../../", features = ["limit", "tracing", "catch-panic"] }
-apalis-sql = { path = "../../packages/apalis-sql", features = [
-    "sqlite",
-    "tokio-comp",
-] }
+apalis = { path = "../../apalis", features = ["limit", "catch-panic", "tracing"] }
 serde = { version = "1", features = ["derive"] }
 tracing-subscriber = "0.3.11"
 email-service = { path = "../email-service" }

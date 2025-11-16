@@ -1,13 +1,13 @@
 [workspace]
-members = ["apalis", "apalis-*"]
+members = ["apalis", "apalis-*", "examples/*"]
 # Only check / build main crates by default (check all with `--workspace`)
 default-members = ["apalis", "apalis-*"]
 resolver = "2"
 
 [workspace.package]
-rust-version = "1.60"
+rust-version = "1.75"
 edition = "2024"
-repository = "https://github.com/geofmureithi/apalis"
+repository = "https://github.com/apalis-dev/apalis"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

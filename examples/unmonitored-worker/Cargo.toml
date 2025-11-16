@@ -6,12 +6,8 @@ repository.workspace = true
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-apalis = { path = "../../", features = ["limit", "catch-panic"] }
-apalis-sql = { path = "../../packages/apalis-sql", features = [
-    "sqlite",
-    "tokio-comp",
-] }
-serde = "1"
+apalis = { path = "../../apalis", features = ["limit", "catch-panic"] }
+serde = { version = "1", features = ["derive"] }
 tracing-subscriber = "0.3.11"
 futures = "0.3"
 tower = "0.4"

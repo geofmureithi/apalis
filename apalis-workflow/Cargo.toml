@@ -6,6 +6,7 @@ repository.workspace = true
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 license = "MIT"
 description = "A flexible and composable task workflow engine for rust"
+publish = true
 
 [features]
 default = ["tracing", "ulid"]

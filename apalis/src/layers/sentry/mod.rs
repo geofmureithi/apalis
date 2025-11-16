@@ -1,3 +1,4 @@
+use apalis_core::error::BoxDynError;
 use sentry_core::protocol;
 use std::fmt::{self, Debug};
 use std::future::Future;
@@ -63,6 +64,14 @@ pub struct SentryHttpFuture<F> {
     future: F,
 }
 
+/// Error type for Sentry task processing.
+#[derive(Debug, thiserror::Error)]
+pub enum SentryTaskError {
+    /// Error occurred in the inner service.
+    #[error("Inner service error: {0}")]
+    Inner(BoxDynError),
+}
+
 impl<F> fmt::Debug for SentryHttpFuture<F>
 where
     F: fmt::Debug,
@@ -88,14 +97,14 @@ where
 impl<F, Res, Err> Future for SentryHttpFuture<F>
 where
     F: Future<Output = Result<Res, Err>> + 'static,
-    Err: std::error::Error,
+    Err: Into<BoxDynError> + 'static,
 {
-    type Output = F::Output;
+    type Output = Result<Res, BoxDynError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let slf = self.project();
         if let Some((task_details, trx_ctx)) = slf.on_first_poll.take() {
-            let tid = task_details.id.clone();
+            let tid = task_details.id;
             sentry_core::configure_scope(|scope| {
                 scope.add_event_processor(move |mut event| {
                     event.event_id = tid;
@@ -117,14 +126,18 @@ where
                 *slf.transaction = Some((transaction, parent_span));
             });
         }
-        match slf.future.poll(cx) {
+        match slf
+            .future
+            .poll(cx)
+            .map_err(|e| SentryTaskError::Inner(e.into()))
+        {
             Poll::Ready(res) => {
                 if let Some((transaction, parent_span)) = slf.transaction.take() {
                     if transaction.get_status().is_none() {
                         let status = match &res {
                             Ok(_) => protocol::SpanStatus::Ok,
                             Err(err) => {
-                                sentry_core::capture_error(err);
+                                sentry_core::capture_error(&err);
                                 protocol::SpanStatus::InternalError
                             }
                         };
@@ -133,7 +146,7 @@ where
                     transaction.finish();
                     sentry_core::configure_scope(|scope| scope.set_span(parent_span));
                 }
-                Poll::Ready(res)
+                Poll::Ready(Ok(res?))
             }
             Poll::Pending => Poll::Pending,
         }
@@ -144,16 +157,16 @@ impl<Svc, Args, Ctx, Fut, Res, IdType, Err> Service<Task<Args, Ctx, IdType>>
     for SentryTaskService<Svc>
 where
     Svc: Service<Task<Args, Ctx, IdType>, Response = Res, Error = Err, Future = Fut>,
-    Fut: Future<Output = Result<Res, Err>> + 'static,
+    Fut: Future<Output = Result<Res, BoxDynError>> + 'static,
     IdType: ToUuid,
-    Err: std::error::Error,
+    Err: Into<BoxDynError> + 'static,
 {
     type Response = Svc::Response;
-    type Error = Svc::Error;
+    type Error = BoxDynError;
     type Future = SentryHttpFuture<Svc::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
+        self.service.poll_ready(cx).map_err(|e| e.into())
     }
 
     fn call(&mut self, task: Task<Args, Ctx, IdType>) -> Self::Future {
@@ -170,7 +183,7 @@ where
             sentry_core::TransactionContext::new(std::any::type_name::<Args>(), "apalis.task");
 
         let task_details = Request {
-            id: task_id.clone(),
+            id: task_id,
             current_attempt: attempt.current().try_into().unwrap_or_default(),
             queue: task_type,
         };

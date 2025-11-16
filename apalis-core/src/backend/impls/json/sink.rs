@@ -5,7 +5,7 @@ use std::{
 
 use futures_channel::mpsc::SendError;
 use futures_sink::Sink;
-use serde::Serialize;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::{
@@ -17,7 +17,9 @@ use crate::{
     task::{Task, task_id::TaskId},
 };
 
-impl<Args: Unpin + Serialize> Sink<Task<Value, JsonMapMetadata>> for JsonStorage<Args> {
+impl<Args: Unpin + Serialize + DeserializeOwned> Sink<Task<Value, JsonMapMetadata>>
+    for JsonStorage<Args>
+{
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

@@ -8,6 +8,7 @@ license = "MIT"
 description = "Core for apalis: simple, extensible multithreaded background processing for Rust"
 categories = ["concurrency"]
 readme = "../README.md"
+publish = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -42,7 +43,7 @@ optional = true
 
 
 [features]
-default = []
+default = ["sleep", "tracing"]
 docsrs = ["dep:document-features"]
 ## Sleep feature for backends that need to wait
 sleep = ["dep:futures-timer"]

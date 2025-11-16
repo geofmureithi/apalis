@@ -45,7 +45,9 @@ pub mod prelude {
         task::task_id::TaskId,
         task_fn::{FromRequest, IntoResponse, TaskFn, task_fn},
         worker::builder::*,
-        worker::ext::{ack::*, circuit_breaker::*, event_listener::*, long_running::*},
+        worker::ext::{
+            ack::*, circuit_breaker::*, event_listener::*, long_running::*, parallelize::*,
+        },
         worker::{Worker, context::WorkerContext, event::Event},
     };
 }

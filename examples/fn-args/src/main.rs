@@ -1,38 +1,32 @@
 use std::{
     ops::Deref,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 
 use apalis::prelude::*;
-use apalis_sql::{
-    context::SqlMetadata,
-    sqlite::{SqlitePool, SqliteStorage},
-};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct SimpleJob {}
 
-// A task can have up to 16 arguments
+// A task can have up to 16 arguments that implement `FromRequest`
 async fn simple_job(
-    _: SimpleJob,          // Required, must be of the type of the job/message
+    _: SimpleJob, // Required, must be of the type of the job/message and the first argument
     worker: WorkerContext, // The worker and its context, added by worker
-    _sqlite: Data<SqliteStorage<SimpleJob>>, // The source, added by storage
-    task_id: TaskId,       // The task id, added by storage
-    attempt: Attempt,      // The current attempt
-    ctx: SqlMetadata,      // The task context provided by the backend
-    count: Data<Count>,    // Our custom data added via layer
+    task_id: TaskId, // The task id, added by storage
+    attempt: Attempt, // The current attempt
+    count: Data<Count>, // Our custom data added via layer
 ) {
     // increment the counter
     let current = count.fetch_add(1, Ordering::Relaxed);
-    info!("worker: {worker:?}; task_id: {task_id:?}, ctx: {ctx:?}, attempt:{attempt:?} count: {current:?}");
+    info!("worker: {worker:?}; task_id: {task_id:?}, attempt:{attempt:?} count: {current:?}");
 }
 
-async fn produce_jobs(storage: &mut SqliteStorage<SimpleJob>) {
+async fn produce_jobs(storage: &mut MemoryStorage<SimpleJob>) {
     for _ in 0..10 {
         storage.push(SimpleJob {}).await.unwrap();
     }
@@ -49,24 +43,18 @@ impl Deref for Count {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), std::io::Error> {
-    std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
+async fn main() -> Result<(), WorkerError> {
+    unsafe {
+        std::env::set_var("RUST_LOG", "debug");
+    }
     tracing_subscriber::fmt::init();
-    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    SqliteStorage::setup(&pool)
-        .await
-        .expect("unable to run migrations for sqlite");
-    let mut sqlite: SqliteStorage<SimpleJob> = SqliteStorage::new(pool);
-    produce_jobs(&mut sqlite).await;
-    Monitor::new()
-        .register({
-            WorkerBuilder::new("tasty-banana")
-                .data(Count::default())
-                .data(sqlite.clone())
-                .concurrency(2)
-                .backend(sqlite)
-                .build(simple_job)
-        })
+    let mut backend = MemoryStorage::new();
+    produce_jobs(&mut backend).await;
+    WorkerBuilder::new("tasty-banana")
+        .backend(backend)
+        .enable_tracing()
+        .data(Count::default())
+        .build(simple_job)
         .run()
         .await?;
     Ok(())

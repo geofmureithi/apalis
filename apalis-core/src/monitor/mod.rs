@@ -216,7 +216,8 @@ impl Future for MonitoredWorker {
 
             let mut current = this.current.as_mut().as_pin_mut().unwrap();
             if current.0.is_running() && current.0.is_shutting_down() {
-                return Poll::Ready(Ok(()));
+                let ctx = current.0.clone();
+                ctx.stop().unwrap();
             }
             let poll_result =
                 catch_unwind(AssertUnwindSafe(|| current.1.poll_unpin(cx))).map_err(|err| {
@@ -410,8 +411,8 @@ impl Monitor {
         let shutdown = self.shutdown.clone();
         let shutdown_after = self.shutdown.shutdown_after(signal);
         if let Some(terminator) = self.terminator {
-            let _res = futures_util::future::join(
-                Self::run_all_workers(self.workers, shutdown),
+            let _res = futures_util::future::select(
+                Self::run_all_workers(self.workers, shutdown).boxed(),
                 async {
                     let res = shutdown_after.await;
                     terminator.await;
