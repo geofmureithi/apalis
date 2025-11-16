@@ -7,8 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1"
-apalis = { path = "../../", features = ["sentry"] }
-apalis-redis = { path = "../../packages/apalis-redis" }
+apalis = { path = "../../apalis", features = ["sentry"] }
 serde = "1"
 env_logger = "0.10"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
@@ -16,7 +15,7 @@ sentry = "0.37.0"
 sentry-tower = "0.37.0"
 sentry-tracing = "0.37.0"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-tokio = { version = "1", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
 email-service = { path = "../email-service" }
 
 

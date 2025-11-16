@@ -1,6 +1,6 @@
 # apalis-workflow
 
-This crate provides a flexible and composable workflow engine for [apalis](https://github.com/geofmureithi/apalis). Can be used for building general workflows or advanced LLM workflows.
+This crate provides a flexible and composable workflow engine for [apalis](https://github.com/apalis-dev/apalis). Can be used for building general workflows or advanced LLM workflows.
 
 ## Overview
 
@@ -15,7 +15,7 @@ Workflows are built by composing steps, and can be executed using supported back
 - Parallel execution of steps.
 - Extensible via the `Step` trait.
 - Integration with `apalis` backends and workers
-- Compile time validation of workflows. 
+- Compile-time guarantees for workflows.
 
 ## Example
 

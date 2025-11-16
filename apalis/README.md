@@ -1,7 +1,7 @@
 <h1 align="center">apalis</h1>
 <div align="center">
  <strong>
-   Simple, extensible multithreaded background task and messages processing library for Rust
+   Simple and extensible multithreaded background task and messages processing library for Rust
  </strong>
 </div>
 
@@ -23,8 +23,8 @@
     <img src="https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square"
       alt="docs.rs docs" />
   </a>
-  <a href="https://github.com/geofmureithi/apalis/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/geofmureithi/apalis/ci.yaml?branch=main&style=flat-square"
+  <a href="https://github.com/apalis-dev/apalis/actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/apalis-dev/apalis/ci.yaml?branch=main&style=flat-square"
       alt="CI" />
   </a>
 </div>
@@ -32,28 +32,27 @@
 
 ## Features
 
-- **Simple and predictable task handling** - Task handlers are just async functions with a macro-free API
-- **Familiar dependency injection** - Similar to popular frameworks like [`actix`] and [`axum`]
-- **Robust task execution** - Built-in support for retries, delays, timeouts, and error handling
-- **Extensible middleware system** - Take full advantage of the [`tower`] ecosystem of services and utilities
+- **Simple and predictable task handling** - [Task handlers](https://docs.rs/apalis-core/1.0.0-beta.1/apalis_core/task_fn/guide/index.html) are just async functions with a macro-free API
+- **Robust task execution** - Built-in support for retries, timeouts, and error handling
 - **Multiple storage backends** - Support for Redis, PostgreSQL, SQLite, and in-memory storage
 - **Advanced task management** - Task prioritization, scheduling, metadata, and result tracking
 - **Scalable by design** - Distributed backends with configurable concurrency and multi-threaded execution
+- **Familiar dependency injection** - Similar to popular frameworks like [`actix`] and [`axum`]
 - **Runtime agnostic** - Works with tokio, async-std, and other async runtimes
 - **Production ready** - Built-in monitoring, metrics, graceful shutdown, and comprehensive error reporting
-- **Developer friendly** - Easy integration with existing applications and rich ecosystem of extensions
+- **Extensible middleware system** - Take full advantage of the [`tower`] ecosystem of services and utilities
 - **Optional web interface** - Manage and monitor your tasks through a web UI
 
-apalis has support for:
+## Crate ecosystem
 
 | Source       | Crate                                                                                                                 | Example                                                                                                                                                                                |
 | ------------ | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cron Jobs    | <a href="https://docs.rs/apalis-cron"><img src="https://img.shields.io/crates/v/apalis-cron?style=flat-square"></a>   | <a href="https://github.com/geofmureithi/apalis/tree/main/examples/async-std-runtime"><img src="https://img.shields.io/badge/-basic_example-black?style=flat-square&logo=github"/></a> |
-| Redis        | <a href="https://docs.rs/apalis-redis"><img src="https://img.shields.io/crates/v/apalis-redis?style=flat-square"></a> | <a href="https://github.com/geofmureithi/apalis/tree/main/examples/redis"><img src="https://img.shields.io/badge/-basic_example-black?style=flat-square&logo=redis"/></a>              |
-| Sqlite       | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/geofmureithi/apalis/tree/main/examples/sqlite"><img src="https://img.shields.io/badge/-sqlite_example-black?style=flat-square&logo=sqlite"/></a>           |
-| Postgres     | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/geofmureithi/apalis/tree/main/examples/postgres"><img src="https://img.shields.io/badge/-postgres_example-black?style=flat-square&logo=postgres"/></a>     |
-| MySQL        | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/geofmureithi/apalis/tree/main/examples/mysql"><img src="https://img.shields.io/badge/-mysql_example-black?style=flat-square&logo=mysql"/></a>              |
-| Amqp         | <a href="https://docs.rs/apalis-amqp"><img src="https://img.shields.io/crates/v/apalis-amqp?style=flat-square"></a>   | <a href="https://github.com/geofmureithi/apalis-amqp/tree/main/examples/basic.rs"><img src="https://img.shields.io/badge/-rabbitmq_example-black?style=flat-square&logo=github"/></a>  |
+| Cron Jobs    | <a href="https://docs.rs/apalis-cron"><img src="https://img.shields.io/crates/v/apalis-cron?style=flat-square"></a>   | <a href="https://github.com/apalis-dev/apalis-amqp/tree/main/examples/basic.rs"><img src="https://img.shields.io/badge/-basic_example-black?style=flat-square&logo=github"/></a> |
+| Redis        | <a href="https://docs.rs/apalis-redis"><img src="https://img.shields.io/crates/v/apalis-redis?style=flat-square"></a> | <a href="https://github.com/apalis-dev/apalis/tree/main/examples/redis"><img src="https://img.shields.io/badge/-basic_example-black?style=flat-square&logo=redis"/></a>              |
+| Sqlite       | <a href="https://docs.rs/apalis-sqlite"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/apalis-dev/apalis/tree/main/examples/sqlite"><img src="https://img.shields.io/badge/-sqlite_example-black?style=flat-square&logo=sqlite"/></a>           |
+| Postgres     | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/apalis-dev/apalis/tree/main/examples/postgres"><img src="https://img.shields.io/badge/-postgres_example-black?style=flat-square&logo=postgres"/></a>     |
+| MySQL        | <a href="https://docs.rs/apalis-sql"><img src="https://img.shields.io/crates/v/apalis-sql?style=flat-square"></a>     | <a href="https://github.com/apalis-dev/apalis/tree/main/examples/mysql"><img src="https://img.shields.io/badge/-mysql_example-black?style=flat-square&logo=mysql"/></a>              |
+| Amqp         | <a href="https://docs.rs/apalis-amqp"><img src="https://img.shields.io/crates/v/apalis-amqp?style=flat-square"></a>   | <a href="https://github.com/apalis-dev/apalis-amqp/tree/main/examples/basic.rs"><img src="https://img.shields.io/badge/-rabbitmq_example-black?style=flat-square&logo=github"/></a>  |
 | From Scratch | <a href="https://docs.rs/apalis-core"><img src="https://img.shields.io/crates/v/apalis-core?style=flat-square"></a>   |                                                                                                                                                                                        |
 
 ## Getting Started
@@ -63,17 +62,16 @@ To get started, just add to Cargo.toml
 ```toml
 [dependencies]
 apalis = { version = "1.0.0-beta.1" }
-apalis-redis = { version = "1.0.0-alpha.1" } # Use redis for persistence
+# apalis-redis = { version = "1.0.0-alpha.1" } # Use redis/sqlite/postgres etc
 ```
 
 ## Usage
 
-```rust,ignore
+```rust,no_run
 use apalis::prelude::*;
-use apalis_redis::RedisStorage;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 struct Email {
     to: String,
 }
@@ -86,15 +84,13 @@ async fn send_email(task: Email, data: Data<usize>) {
 
 #[tokio::main]
 async fn main() {
-    let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
-    let conn = apalis_redis::connect(redis_url).await.expect("Could not connect");
-    
-    let mut storage = RedisStorage::new(conn);
+    let mut storage = MemoryStorage::new();
      storage
         .push(Email {
             to: "test@example.com".to_string(),
         })
-        .await.expect("Could not add tasks");
+        .await
+        .expect("Could not add tasks");
 
     WorkerBuilder::new("email-worker")
       .backend(storage)
@@ -107,6 +103,43 @@ async fn main() {
 }
 ```
 
+### Workflows
+
+- `apalis` has first class support for sequential, dag and conditional workflows.
+
+```rust,no_run
+use apalis::prelude::*;
+use apalis_workflow::*;
+use std::time::Duration;
+use apalis_core::backend::json::JsonStorage;
+
+#[tokio::main]
+async fn main() {
+   let workflow = Workflow::new("odd-numbers-workflow")
+       .delay_for(Duration::from_millis(1000))
+       .and_then(|a: usize| async move { Ok::<_, BoxDynError>((0..a).collect::<Vec<_>>()) })
+       .filter_map(|x| async move { if x % 2 != 0 { Some(x) } else { None } })
+       .and_then(|a: Vec<usize>| async move {
+           println!("Sum: {}", a.iter().sum::<usize>());
+           Ok::<_, BoxDynError>(())
+        });
+
+   let mut in_memory = JsonStorage::new_temp().unwrap();
+
+   in_memory.push_start(10).await.unwrap();
+
+   let worker = WorkerBuilder::new("rango-tango")
+       .backend(in_memory)
+       .on_event(|ctx, ev| {
+           println!("On Event = {:?}", ev);
+       })
+       .build(workflow);
+   worker.run().await.unwrap();
+}
+```
+
+For more functionality like `fold`, `filter_map` and other combinators checkout the [docs](https://docs.rs/apalis-workflow)
+
 ## Feature flags
 
 - _full_ - All the available features
@@ -118,17 +151,6 @@ async fn main() {
 - _limit_ — Support for concurrency and rate-limiting
 - _filter_ — Support filtering tasks based on a predicate
 - _catch-panic_ - Catch panics that occur during execution
-
-## Storage Comparison
-
-Since we provide a few storage solutions, here is a table comparing them:
-
-| Feature          | Redis | Sqlite | Postgres | Sled | Mysql | Mongo | Cron |
-| :--------------- | :---: | :----: | :------: | :--: | :---: | :---: | :--: |
-| Scheduled tasks  |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
-| Retry tasks      |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  ✓   |
-| Persistence      |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   | BYO  |
-| Rerun Dead tasks |   ✓   |   ✓    |    ✓     |  x   |   ✓   |   x   |  x   |
 
 ## How apalis works
 
@@ -198,11 +220,11 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduc
 
 ## Versioning
 
-We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/geofmureithi/apalis/tags).
+We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/apalis-dev/apalis/tags).
 
 ## Contributors
 
-See also the list of [contributors](https://github.com/geofmureithi/apalis/contributors) who participated in this project.
+See also the list of [contributors](https://github.com/apalis-dev/apalis/contributors) who participated in this project.
 
 ## License
 

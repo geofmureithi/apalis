@@ -10,7 +10,47 @@ All notable changes to this project are documented in this file.
 
 ### Breaking Changes
 
-- **api**: Several breaking changes have been included: TODO: Document
+- **crates**: Moved backend crates to respective repos ([#586](https://github.com/geofmureithi/apalis/pull/586))
+- **api**: `Backend` must be the second input in `WorkerBuilder` ([#586](https://github.com/geofmureithi/apalis/pull/586))
+```rust
+let worker = WorkerBuilder::new("tasty-banana")
+    .backend(sqlite)
+    // default middleware
+    // .layer
+    // .data
+    .build(task_fn);
+```
+- **api**: `Monitor` supports restarts and factory() becomes factory(usize) ([#586](https://github.com/geofmureithi/apalis/pull/586))
+```rust
+    Monitor::new()
+        .register({
+            WorkerBuilder::new("tasty-banana")
+                ....
+```
+Becomes
+```rust
+Monitor::new()
+        .register(|runs: usize| {
+            WorkerBuilder::new("tasty-banana")
+                ...
+```
+
+- **api**: `WorkerContext::id()` becomes `WorkerContext::name()` ([#586](https://github.com/geofmureithi/apalis/pull/586))
+- **api**: `service_fn` becomes `taskfn` ([#586](https://github.com/geofmureithi/apalis/pull/586))
+
+### Added
+
+- **api**: `Monitor::should_restart` for controlling worker restarts ([#586](https://github.com/geofmureithi/apalis/pull/586))
+
+```rs
+Monitor::new()
+    .register(|_| ...)
+    .should_restart(|_ctx, last_err, _current_run| {
+        // Don't restart on graceful exit
+        matches!(last_err, WorkerError::GracefulExit)
+    })
+```
+
 
 ## [0.7.3](https://github.com/geofmureithi/apalis/releases/tag/v0.7.3)
 

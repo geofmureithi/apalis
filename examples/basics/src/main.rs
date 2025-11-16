@@ -1,21 +1,20 @@
 mod cache;
+mod expensive_client;
 mod layer;
-mod service;
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use apalis::{layers::catch_panic::CatchPanicLayer, prelude::*};
-use apalis_sql::sqlite::{SqlitePool, SqliteStorage};
 
+use apalis_core::backend::json::JsonStorage;
 use email_service::Email;
 use layer::LogLayer;
 
-use tracing::{log::info, Instrument, Span};
+use tracing::{Instrument, Span, log::info};
 
-use crate::{cache::ValidEmailCache, service::EmailService};
+use crate::{cache::ValidEmailCache, expensive_client::EmailService};
 
-async fn produce_jobs(storage: &SqliteStorage<Email>) {
-    let mut storage = storage.clone();
+async fn produce_jobs(storage: &mut JsonStorage<Email>) {
     for i in 0..5 {
         storage
             .push(Email {
@@ -43,7 +42,7 @@ async fn send_email(
     worker: WorkerContext,
     cache: Data<ValidEmailCache>,
 ) -> Result<(), BoxDynError> {
-    info!("Job started in worker {:?}", worker.id());
+    info!("Job started in worker {:?}", worker.name());
     let cache_clone = cache.clone();
     let email_to = email.to.clone();
     let res = cache.get(&email_to);
@@ -77,21 +76,23 @@ async fn send_email(
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
-    std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
+    unsafe {
+        std::env::set_var("RUST_LOG", "debug");
+    }
+
     tracing_subscriber::fmt::init();
-    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    SqliteStorage::setup(&pool)
-        .await
-        .expect("unable to run migrations for sqlite");
-    let sqlite: SqliteStorage<Email> = SqliteStorage::new(pool);
-    produce_jobs(&sqlite).await;
+
+    let mut backend = JsonStorage::new_temp().unwrap();
+    produce_jobs(&mut backend).await;
 
     Monitor::new()
-        .register({
+        .register(move |_runs: usize| {
             WorkerBuilder::new("tasty-banana")
+                .backend(backend.clone())
+                .enable_tracing()
                 // This handles any panics that may occur in any of the layers below
                 // .catch_panic()
-                // Or just to customize
+                // Or just to customize (do not include both)
                 .layer(CatchPanicLayer::with_panic_handler(|e| {
                     let panic_info = if let Some(s) = e.downcast_ref::<&str>() {
                         s.to_string()
@@ -101,19 +102,21 @@ async fn main() -> Result<(), std::io::Error> {
                         "Unknown panic".to_string()
                     };
                     // Abort tells the backend to kill job
-                    Error::Abort(Arc::new(Box::new(PanicError::Panic(panic_info))))
+                    AbortError::new(PanicError::Panic(panic_info))
                 }))
-                .enable_tracing()
                 .layer(LogLayer::new("some-log-example"))
                 // Add shared context to all jobs executed by this worker
                 .data(EmailService::new())
                 .data(ValidEmailCache::new())
-                .backend(sqlite)
                 .build(send_email)
+        })
+        .should_restart(|_ctx, last_err, _current_run| {
+            !matches!(last_err, WorkerError::GracefulExit) // Don't restart on graceful exit
         })
         .shutdown_timeout(Duration::from_secs(5))
         // Use .run() if you don't want without signals
         .run_with_signal(tokio::signal::ctrl_c()) // This will wait for ctrl+c then gracefully shutdown
-        .await?;
+        .await
+        .unwrap();
     Ok(())
 }

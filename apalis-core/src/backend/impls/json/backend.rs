@@ -49,9 +49,7 @@ where
     }
 }
 
-impl<Args: 'static + Send + Serialize + DeserializeOwned + Unpin + Into<Value>> BackendExt
-    for JsonStorage<Args>
-{
+impl<Args: 'static + Send + Serialize + DeserializeOwned + Unpin> BackendExt for JsonStorage<Args> {
     type Codec = JsonCodec<Value>;
     type Compact = Value;
 
@@ -59,7 +57,14 @@ impl<Args: 'static + Send + Serialize + DeserializeOwned + Unpin + Into<Value>> 
 
     fn poll_compact(self, worker: &WorkerContext) -> Self::CompactStream {
         self.poll(worker)
-            .map_ok(|c| c.map(|t| t.map(Into::into)))
+            .map_ok(|c| {
+                c.map(|t| {
+                    t.map(|args| {
+                        serde_json::to_value(args).expect("to be encodable")
+                        
+                    })
+                })
+            })
             .boxed()
     }
 }

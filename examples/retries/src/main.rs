@@ -1,21 +1,16 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use apalis::layers::retry::backoff::MakeBackoff;
 use apalis::layers::retry::HasherRng;
-use apalis::layers::retry::{backoff::ExponentialBackoffMaker, RetryPolicy};
+use apalis::layers::retry::backoff::MakeBackoff;
+use apalis::layers::retry::{RetryPolicy, backoff::ExponentialBackoffMaker};
 
 use apalis::prelude::*;
-use apalis_sql::{
-    postgres::{PgPool, PostgresStorage},
-    Config,
-};
-use email_service::{send_email, Email};
-use tracing::{debug, info};
+use email_service::{Email, send_email};
 
 /// Produces jobs to check retries
 /// See [send_email] for the logic explained here
-async fn produce_jobs(storage: &mut PostgresStorage<Email>) -> Result<()> {
+async fn produce_jobs(storage: &mut MemoryStorage<Email>) -> Result<()> {
     storage
         .push(Email {
             // Valid email should just run once (attempts = 1)
@@ -45,53 +40,29 @@ async fn produce_jobs(storage: &mut PostgresStorage<Email>) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std::env::set_var("RUST_LOG", "debug,sqlx::query=error");
+    unsafe {
+        std::env::set_var("RUST_LOG", "debug");
+    };
+    let mut backend = MemoryStorage::new();
+    produce_jobs(&mut backend).await?;
     tracing_subscriber::fmt::init();
-    let database_url = std::env::var("DATABASE_URL").expect("Must specify path to db");
-
-    let pool = PgPool::connect(&database_url).await?;
-    PostgresStorage::setup(&pool)
-        .await
-        .expect("unable to run migrations for postgres");
-
-    let mut pg_with_retry =
-        PostgresStorage::new_with_config(pool.clone(), Config::new("apalis::Email"));
-    let mut pg_with_backoff =
-        PostgresStorage::new_with_config(pool.clone(), Config::new("apalis::BackoffEmail"));
-
-    produce_jobs(&mut pg_with_retry).await?;
-    produce_jobs(&mut pg_with_backoff).await?;
-
-    Monitor::new()
-        .register({
-            WorkerBuilder::new("tasty-orange")
-                // Ensure this is above tracing layer, else you wont see traces
-                .retry(RetryPolicy::retries(3))
-                .enable_tracing()
-                .backend(pg_with_retry)
-                .build(send_email)
-        })
-        .register({
-            let backoff = ExponentialBackoffMaker::new(
-                Duration::from_millis(1000),
-                Duration::from_millis(5000),
-                1.25,
-                HasherRng::default(),
-            )?
-            .make_backoff();
-
-            WorkerBuilder::new("tasty-orange-with-backoff")
-                .retry(RetryPolicy::retries(3).with_backoff(backoff))
-                .enable_tracing()
-                .backend(pg_with_backoff)
-                .build(send_email)
-        })
-        .on_event(|e| debug!("{e}"))
-        .run_with_signal(async {
-            tokio::signal::ctrl_c().await?;
-            info!("Shutting down the system");
-            Ok(())
-        })
+    let backoff = ExponentialBackoffMaker::new(
+        Duration::from_millis(1000),
+        Duration::from_millis(5000),
+        1.25,
+        HasherRng::default(),
+    )?
+    .make_backoff();
+    WorkerBuilder::new("tasty-orange")
+        .backend(backend)
+        .retry(
+            RetryPolicy::retries(3)
+                .with_backoff(backoff)
+                .retry_if(|e: &BoxDynError| e.downcast_ref::<AbortError>().is_none()),
+        )
+        .enable_tracing()
+        .build(send_email)
+        .run()
         .await?;
     Ok(())
 }
