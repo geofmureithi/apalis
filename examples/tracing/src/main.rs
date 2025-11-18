@@ -1,7 +1,6 @@
 use anyhow::Result;
 use apalis::layers::WorkerBuilderExt;
-use apalis::prelude::{Monitor, Storage, WorkerBuilder, WorkerFactoryFn};
-use apalis_redis::RedisStorage;
+use apalis::prelude::*;
 use std::error::Error;
 use std::fmt;
 use std::time::Duration;
@@ -31,7 +30,7 @@ async fn email_service(email: Email) -> Result<(), InvalidEmailError> {
     Err(InvalidEmailError { email: email.to })
 }
 
-async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
+async fn produce_jobs(storage: &mut MemoryStorage<Email>) -> Result<()> {
     storage
         .push(Email {
             to: "test@example".to_string(),
@@ -47,9 +46,6 @@ async fn main() -> Result<()> {
     use tracing_subscriber::EnvFilter;
     std::env::set_var("RUST_LOG", "debug");
 
-    let redis_url =
-        std::env::var("REDIS_URL").expect("Please set REDIS_URL environmental variable");
-
     let fmt_layer = tracing_subscriber::fmt::layer().with_target(false);
     let filter_layer =
         EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("debug"))?;
@@ -58,20 +54,13 @@ async fn main() -> Result<()> {
         .with(fmt_layer)
         .init();
 
-    let conn = apalis_redis::connect(redis_url)
-        .await
-        .expect("Could not connect to RedisStorage");
-    let storage = RedisStorage::new(conn);
-    //This can be in another part of the program
-    produce_jobs(storage.clone()).await?;
+    let mut backend = MemoryStorage::new();
+    produce_jobs(&mut backend).await?;
 
-    Monitor::new()
-        .register(
-            WorkerBuilder::new("tasty-avocado")
-                .enable_tracing()
-                .backend(storage)
-                .build_fn(email_service),
-        )
+    WorkerBuilder::new("tasty-avocado")
+        .backend(backend)
+        .enable_tracing()
+        .build(email_service)
         .run()
         .await?;
     Ok(())

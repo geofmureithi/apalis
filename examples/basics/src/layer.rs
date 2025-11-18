@@ -3,7 +3,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use apalis::prelude::Request;
 use tower::{Layer, Service};
 use tracing::info;
 
@@ -38,11 +37,10 @@ pub struct LogService<S> {
     service: S,
 }
 
-impl<S, Req, Ctx> Service<Request<Req, Ctx>> for LogService<S>
+impl<S, Request> Service<Request> for LogService<S>
 where
-    S: Service<Request<Req, Ctx>> + Clone,
-    Req: Debug,
-    Ctx: Debug,
+    S: Service<Request> + Clone,
+    Request: Debug,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -52,7 +50,7 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<Req, Ctx>) -> Self::Future {
+    fn call(&mut self, request: Request) -> Self::Future {
         // Use service to apply middleware before or(and) after a request
         info!("request = {:?}, target = {:?}", request, self.target);
         self.service.call(request)

@@ -8,7 +8,6 @@ use tracing_subscriber::prelude::*;
 use anyhow::Result;
 
 use apalis::{layers::sentry::SentryLayer, prelude::*};
-use apalis_redis::RedisStorage;
 use email_service::Email;
 use tokio::time::sleep;
 
@@ -91,7 +90,7 @@ async fn email_service(email: Email) -> Result<(), InvalidEmailError> {
     Err(InvalidEmailError { email: email.to })
 }
 
-async fn produce_jobs(mut storage: RedisStorage<Email>) -> Result<()> {
+async fn produce_jobs(storage: &mut MemoryStorage<Email>) -> Result<()> {
     storage
         .push(Email {
             to: "apalis@example".to_string(),
@@ -108,8 +107,6 @@ async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     let sentry_dsn =
         std::env::var("SENTRY_DSN").expect("Please set SENTRY_DSN environmental variable");
-    let redis_url =
-        std::env::var("REDIS_URL").expect("Please set REDIS_URL environmental variable");
     let _guard = sentry::init((
         sentry_dsn,
         sentry::ClientOptions {
@@ -126,22 +123,18 @@ async fn main() -> Result<()> {
         .with(fmt_layer)
         .with(sentry_tracing::layer())
         .init();
-
-    let conn = apalis_redis::connect(redis_url).await?;
-    let storage = RedisStorage::new(conn);
+    let mut storage: MemoryStorage<Email> = MemoryStorage::new();
+    let backend = MemoryStorage::new();
     //This can be in another part of the program
-    produce_jobs(storage.clone()).await?;
+    produce_jobs(&mut storage).await?;
 
-    Monitor::new()
-        .register({
-            WorkerBuilder::new("tasty-avocado")
-                .layer(NewSentryLayer::new_from_top())
-                .layer(SentryLayer::new())
-                .enable_tracing()
-                .concurrency(2)
-                .backend(storage.clone())
-                .build_fn(email_service)
-        })
+    WorkerBuilder::new("tasty-avocado")
+        .backend(backend)
+        .layer(NewSentryLayer::new_from_top())
+        .layer(SentryLayer::new())
+        .enable_tracing()
+        .concurrency(2)
+        .build(email_service)
         .run()
         .await?;
     Ok(())

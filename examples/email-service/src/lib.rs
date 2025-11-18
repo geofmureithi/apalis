@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::str::FromStr;
 
 use apalis::prelude::*;
 use email_address::EmailAddress;
@@ -11,7 +11,7 @@ pub struct Email {
     pub text: String,
 }
 
-pub async fn send_email(job: Email) -> Result<(), Error> {
+pub async fn send_email(job: Email) -> Result<(), BoxDynError> {
     let validation = EmailAddress::from_str(&job.to);
     match validation {
         Ok(email) => {
@@ -20,11 +20,9 @@ pub async fn send_email(job: Email) -> Result<(), Error> {
         }
         Err(email_address::Error::InvalidCharacter) => {
             log::error!("Killed send email job. Invalid character {}", job.to);
-            Err(Error::Abort(Arc::new(Box::new(
-                email_address::Error::InvalidCharacter,
-            ))))
+            Err(AbortError::new("Killed send email job").into())
         }
-        Err(e) => Err(Error::Failed(Arc::new(Box::new(e)))),
+        Err(e) => Err(format!("Failed to send email to {}: {}", job.to, e).into()),
     }
 }
 

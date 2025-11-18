@@ -6,7 +6,7 @@
 use anyhow::Result;
 use apalis::layers::prometheus::PrometheusLayer;
 use apalis::prelude::*;
-use apalis_redis::RedisStorage;
+use apalis_core::backend::json::JsonStorage;
 use axum::{
     extract::Form,
     http::StatusCode,
@@ -30,16 +30,12 @@ async fn main() -> Result<()> {
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    let redis_url = std::env::var("REDIS_URL").expect("Missing env variable REDIS_URL");
-    let conn = apalis_redis::connect(redis_url)
-        .await
-        .expect("Could not connect");
-    let storage = RedisStorage::new(conn);
+    let backend = JsonStorage::new_temp().unwrap();
     // build our application with some routes
     let recorder_handle = setup_metrics_recorder();
     let app = Router::new()
         .route("/", get(show_form).post(add_new_job::<Email>))
-        .layer(Extension(storage.clone()))
+        .layer(Extension(backend.clone()))
         .route("/metrics", get(move || ready(recorder_handle.render())));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -50,18 +46,17 @@ async fn main() -> Result<()> {
             .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))
     };
-    let monitor = async {
-        Monitor::new()
-            .register({
-                WorkerBuilder::new("tasty-banana")
-                    .layer(PrometheusLayer::default())
-                    .backend(storage.clone())
-                    .build_fn(send_email)
-            })
+    let worker = async {
+        WorkerBuilder::new("tasty-banana")
+            .backend(backend)
+            .layer(PrometheusLayer::default())
+            .build(send_email)
             .run()
             .await
+            .expect("Worker failed");
+        Ok(())
     };
-    let _res = futures::future::try_join(monitor, http)
+    let _res = futures::future::try_join(worker, http)
         .await
         .expect("Could not start services");
     Ok(())
@@ -85,7 +80,7 @@ async fn show_form() -> Html<&'static str> {
 
 async fn add_new_job<T>(
     Form(input): Form<T>,
-    Extension(mut storage): Extension<RedisStorage<T>>,
+    Extension(mut storage): Extension<JsonStorage<T>>,
 ) -> impl IntoResponse
 where
     T: 'static + Debug + Serialize + DeserializeOwned + Unpin + Send + Sync,
