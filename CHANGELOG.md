@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.4](https://github.com/geofmureithi/apalis/releases/tag/v0.7.4)
+
 ### Fixed
 
 - **MySQLStorage**: update MySQL query to correctly handle `last_seen` field ([#618](https://github.com/geofmureithi/apalis/pull/618))
