@@ -172,13 +172,31 @@ where
                                 .map_err(|e| Error::SourceError(Arc::new(e.into())))?;
                         }
                         GoTo::Delay { next, delay } => {
+                            let now = std::time::SystemTime::now();
+                            let epoch_ms: u128 = now
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis();
+
+                            // Convert the given delay into milliseconds.
+                            let delay: u128 = delay.as_millis();
+
+                            // Calculate the target time as milliseconds since
+                            // the Unix epoch.
+                            let target_ms: u128 = epoch_ms + delay;
+
+                            // Convert the target time into seconds.
+                            let target_s: u128 = (target_ms + 999) / 1000;
+
+                            // Convert to i64 for scheduling.
+                            let target = i64::try_from(target_s).unwrap_or(i64::MAX);
                             storage
                                 .schedule(
                                     StepRequest {
                                         index: next_index,
                                         step: next.clone(),
                                     },
-                                    delay.as_secs().try_into().unwrap(),
+                                    target,
                                 )
                                 .await
                                 .map_err(|e| Error::SourceError(Arc::new(e.into())))?;
