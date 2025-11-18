@@ -37,6 +37,7 @@ Monitor::new()
 
 - **api**: `WorkerContext::id()` becomes `WorkerContext::name()` ([#586](https://github.com/geofmureithi/apalis/pull/586))
 - **api**: `service_fn` becomes `taskfn` ([#586](https://github.com/geofmureithi/apalis/pull/586))
+- **api**: `Pipe::pipe_to_storage` becomes `PipeExt::pipe_to` ([#586](https://github.com/geofmureithi/apalis/pull/586))
 
 ### Added
 
