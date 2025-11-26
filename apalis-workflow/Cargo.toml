@@ -28,7 +28,7 @@ apalis-core = { path = "../apalis-core", version = "1.0.0-beta.1", default-featu
 futures = "0.3.30"
 thiserror = "2.0.0"
 # TODO: move to workspace dependencies
-tracing = { version = "0.1", default-features = false, optional = true }
+tracing = { version = "0.1.42", default-features = false, optional = true }
 ulid = { version = "1", optional = true }
 uuid = { version = "1", features = ["v4"], optional = true }
 
