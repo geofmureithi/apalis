@@ -41,5 +41,5 @@ jobs:
     - name: Generate Lockfile
       run: cargo generate-lockfile
     - name: Invoke cargo-vet
-      run: cargo vet
+      run: cargo vet --locked
 
