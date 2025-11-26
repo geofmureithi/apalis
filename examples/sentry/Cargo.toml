@@ -10,7 +10,7 @@ anyhow = "1"
 apalis = { path = "../../apalis", features = ["sentry"] }
 serde = "1"
 env_logger = "0.10"
-tracing-subscriber = { version = "0.3.21", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 sentry = "0.37.0"
 sentry-tower = "0.37.0"
 sentry-tracing = "0.37.0"

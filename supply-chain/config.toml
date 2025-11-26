@@ -47,11 +47,11 @@ version = "1.0.100"
 criteria = "safe-to-deploy"
 
 [[exemptions.apalis-core]]
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.apalis-workflow]]
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.arrayvec]]
@@ -1159,7 +1159,7 @@ version = "0.3.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing]]
-version = "0.1.42"
+version = "0.1.41"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-attributes]]
@@ -1191,7 +1191,7 @@ version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-subscriber]]
-version = "0.3.21"
+version = "0.3.20"
 criteria = "safe-to-deploy"
 
 [[exemptions.try-lock]]
