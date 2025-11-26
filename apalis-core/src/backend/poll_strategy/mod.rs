@@ -107,7 +107,7 @@ mod tests {
 
     use crate::{
         error::BoxDynError,
-        task::Task,
+        task::{Task, task_id::RandomId},
         worker::{
             builder::WorkerBuilder, context::WorkerContext, ext::event_listener::EventListenerExt,
         },
@@ -117,7 +117,7 @@ mod tests {
 
     const ITEMS: u32 = 10;
 
-    type InMemoryQueue<T> = Arc<Mutex<VecDeque<Task<T, ()>>>>;
+    type InMemoryQueue<T> = Arc<Mutex<VecDeque<Task<T, (), RandomId>>>>;
 
     #[tokio::test]
     #[cfg(feature = "sleep")]
@@ -159,7 +159,7 @@ mod tests {
                         } else {
                             config.prev_count.store(0, Ordering::Relaxed);
                             Some((
-                                Ok::<Option<Task<u32, ()>>, BoxDynError>(None),
+                                Ok::<Option<Task<u32, (), RandomId>>, BoxDynError>(None),
                                 (p, config, poller, ctx),
                             ))
                         }
@@ -270,7 +270,7 @@ mod tests {
                         } else {
                             config.prev_count.store(0, Ordering::Relaxed);
                             Some((
-                                Ok::<Option<Task<u32, ()>>, BoxDynError>(None),
+                                Ok::<Option<Task<u32, (), RandomId>>, BoxDynError>(None),
                                 (p, config, poller, ctx),
                             ))
                         }
