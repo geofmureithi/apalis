@@ -107,4 +107,4 @@ jobs:
           cache-on-failure: true
 
       - run: cargo +nightly install cargo-udeps --locked
-      - run: cargo +nightly udeps --all-targets
+      - run: cargo +nightly udeps --all-targets --all-features
