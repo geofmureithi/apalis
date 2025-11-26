@@ -38,6 +38,8 @@ jobs:
       run: echo "${{ runner.tool_cache }}/cargo-vet/bin" >> $GITHUB_PATH
     - name: Ensure that the tool cache is populated with the cargo-vet binary
       run: cargo install --root ${{ runner.tool_cache }}/cargo-vet --version ${{ env.CARGO_VET_VERSION }} cargo-vet
+    - name: Generate Lockfile
+      run: cargo generate-lockfile
     - name: Invoke cargo-vet
       run: cargo vet
 
