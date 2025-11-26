@@ -14,7 +14,10 @@ use crate::{
         meta::JsonMapMetadata,
         util::{TaskKey, TaskWithMeta},
     },
-    task::{Task, task_id::{RandomId, TaskId}},
+    task::{
+        Task,
+        task_id::{RandomId, TaskId},
+    },
 };
 
 impl<Args: Unpin + Serialize + DeserializeOwned> Sink<Task<Value, JsonMapMetadata, RandomId>>

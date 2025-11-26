@@ -64,7 +64,11 @@ use crate::{
         },
         memory::{MemorySink, MemoryStorage},
     },
-    task::{Task, status::Status, task_id::{RandomId, TaskId}},
+    task::{
+        Task,
+        status::Status,
+        task_id::{RandomId, TaskId},
+    },
 };
 
 #[derive(Debug)]
@@ -153,8 +157,13 @@ impl<Args: Send + Serialize + DeserializeOwned + Unpin + 'static>
     }
 }
 
-type BoxSink<Args> =
-    Box<dyn Sink<Task<Args, JsonMapMetadata, RandomId>, Error = SendError> + Send + Sync + Unpin + 'static>;
+type BoxSink<Args> = Box<
+    dyn Sink<Task<Args, JsonMapMetadata, RandomId>, Error = SendError>
+        + Send
+        + Sync
+        + Unpin
+        + 'static,
+>;
 
 impl JsonStorage<Value> {
     fn create_channel<Args: 'static + DeserializeOwned + Serialize + Send + Unpin>(
@@ -207,7 +216,12 @@ impl JsonStorage<Value> {
 
         // Combine the sender and receiver
         let sender = Box::new(wrapped_sender)
-            as Box<dyn Sink<Task<Args, JsonMapMetadata, RandomId>, Error = SendError> + Send + Sync + Unpin>;
+            as Box<
+                dyn Sink<Task<Args, JsonMapMetadata, RandomId>, Error = SendError>
+                    + Send
+                    + Sync
+                    + Unpin,
+            >;
         let receiver = filtered_stream.boxed();
 
         (sender, receiver)

@@ -121,7 +121,9 @@ impl<Args: Send + 'static> MemoryStorage<Args, Extensions> {
     pub fn new() -> Self {
         let (sender, receiver) = unbounded();
         let sender = Box::new(sender)
-            as Box<dyn Sink<Task<Args, Extensions, RandomId>, Error = SendError> + Send + Sync + Unpin>;
+            as Box<
+                dyn Sink<Task<Args, Extensions, RandomId>, Error = SendError> + Send + Sync + Unpin,
+            >;
         Self {
             sender: MemorySink {
                 inner: Arc::new(futures_util::lock::Mutex::new(sender)),
@@ -138,7 +140,10 @@ impl<Args, Ctx> Sink<Task<Args, Ctx, RandomId>> for MemoryStorage<Args, Ctx> {
         self.as_mut().sender.poll_ready_unpin(cx)
     }
 
-    fn start_send(mut self: Pin<&mut Self>, item: Task<Args, Ctx, RandomId>) -> Result<(), Self::Error> {
+    fn start_send(
+        mut self: Pin<&mut Self>,
+        item: Task<Args, Ctx, RandomId>,
+    ) -> Result<(), Self::Error> {
         self.as_mut().sender.start_send_unpin(item)
     }
 
@@ -186,7 +191,10 @@ impl<Args, Ctx> Sink<Task<Args, Ctx, RandomId>> for MemorySink<Args, Ctx> {
         Pin::new(&mut *lock).poll_ready_unpin(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, mut item: Task<Args, Ctx, RandomId>) -> Result<(), Self::Error> {
+    fn start_send(
+        self: Pin<&mut Self>,
+        mut item: Task<Args, Ctx, RandomId>,
+    ) -> Result<(), Self::Error> {
         let mut lock = self.inner.try_lock().unwrap();
         // Ensure task has id
         item.parts

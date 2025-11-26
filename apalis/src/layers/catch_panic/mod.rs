@@ -143,7 +143,8 @@ pub struct CatchPanicService<S, F> {
     on_panic: F,
 }
 
-impl<S, Req, Res, Ctx, F, PanicErr, IdType> Service<Task<Req, Ctx, IdType>> for CatchPanicService<S, F>
+impl<S, Req, Res, Ctx, F, PanicErr, IdType> Service<Task<Req, Ctx, IdType>>
+    for CatchPanicService<S, F>
 where
     S: Service<Task<Req, Ctx, IdType>, Response = Res>,
     F: FnMut(Box<dyn Any + Send>) -> PanicErr + Clone,
@@ -279,7 +280,10 @@ mod tests {
 
     use crate::layers::retry::RetryPolicy;
     use apalis_core::{
-        backend::{TaskSink, memory::MemoryStorage}, error::BoxDynError, task::task_id::RandomId, worker::{builder::WorkerBuilder, event::Event, ext::event_listener::EventListenerExt}
+        backend::{TaskSink, memory::MemoryStorage},
+        error::BoxDynError,
+        task::task_id::RandomId,
+        worker::{builder::WorkerBuilder, event::Event, ext::event_listener::EventListenerExt},
     };
     use std::task::{Context, Poll};
     use tower::Service;

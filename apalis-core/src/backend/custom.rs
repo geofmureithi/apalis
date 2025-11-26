@@ -403,7 +403,9 @@ mod tests {
     use futures_util::{FutureExt, lock::Mutex, sink, stream};
 
     use crate::{
-        error::BoxDynError, task::task_id::RandomId, worker::{builder::WorkerBuilder, ext::event_listener::EventListenerExt}
+        error::BoxDynError,
+        task::task_id::RandomId,
+        worker::{builder::WorkerBuilder, ext::event_listener::EventListenerExt},
     };
 
     use super::*;
@@ -412,7 +414,8 @@ mod tests {
 
     #[tokio::test]
     async fn basic_custom_backend() {
-        let memory: Arc<Mutex<VecDeque<Task<u32, (), RandomId>>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let memory: Arc<Mutex<VecDeque<Task<u32, (), RandomId>>>> =
+            Arc::new(Mutex::new(VecDeque::new()));
 
         let mut backend = BackendBuilder::new()
             .database(memory)
