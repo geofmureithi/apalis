@@ -12,6 +12,7 @@ All notable changes to this project are documented in this file.
 - **chore(deps)**: update actions/checkout action to v5 ([#634](https://github.com/geofmureithi/apalis/pull/634))
 - **chore**: introduce `cargo audit` and `cargo vet` ([#640](https://github.com/geofmureithi/apalis/pull/640))
 - **chore**: add cargo udeps ([#641](https://github.com/geofmureithi/apalis/pull/641))
+- **fix**: TaskId<T> must be explicit to prevent defaulting to RandomId ([#643](https://github.com/geofmureithi/apalis/pull/643))
 
 ### Breaking Changes
 

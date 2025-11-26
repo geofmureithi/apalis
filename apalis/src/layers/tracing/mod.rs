@@ -377,7 +377,7 @@ mod tests {
     use apalis_core::{
         backend::{TaskSink, memory::MemoryStorage},
         error::BoxDynError,
-        task::extensions::Extensions,
+        task::{extensions::Extensions, task_id::RandomId},
         worker::{
             builder::WorkerBuilder, context::WorkerContext, ext::event_listener::EventListenerExt,
         },
@@ -423,14 +423,14 @@ mod tests {
             .backend(in_memory)
             .layer(
                 TraceLayer::new()
-                    .make_span_with(|req: &Task<u32, Extensions>| {
+                    .make_span_with(|req: &Task<u32, Extensions, RandomId>| {
                         tracing::span!(
                             tracing::Level::INFO,
                             "custom_span",
                             task_id = req.parts.task_id.as_ref().unwrap().to_string()
                         )
                     })
-                    .on_request(|task: &Task<u32, Extensions>, span: &tracing::Span| {
+                    .on_request(|task: &Task<u32, Extensions, RandomId>, span: &tracing::Span| {
                         tracing::info!(parent: span, "Custom OnRequest: Received task: {:?}", task);
                     })
                     .on_response(|_: &() , duration: Duration, span: &tracing::Span| {

@@ -52,9 +52,9 @@
 //! #     }
 //! # }
 //! # struct Email { user_id: String };
-//! impl <Ctx: Sync> FromRequest<Task<Email, Ctx>> for User {
+//! impl <Ctx: Sync, IdType: Sync> FromRequest<Task<Email, Ctx, IdType>> for User {
 //!     type Error = BoxDynError;
-//!     async fn from_request(req: &Task<Email, Ctx>) -> Result<Self, BoxDynError> {
+//!     async fn from_request(req: &Task<Email, Ctx, IdType>) -> Result<Self, BoxDynError> {
 //!         let user_id = &req.args.user_id;
 //!         let user = User::find_by_id(user_id).await?;
 //!         Ok(user)

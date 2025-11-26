@@ -14,10 +14,13 @@ use crate::{
         meta::JsonMapMetadata,
         util::{TaskKey, TaskWithMeta},
     },
-    task::{Task, task_id::TaskId},
+    task::{
+        Task,
+        task_id::{RandomId, TaskId},
+    },
 };
 
-impl<Args: Unpin + Serialize + DeserializeOwned> Sink<Task<Value, JsonMapMetadata>>
+impl<Args: Unpin + Serialize + DeserializeOwned> Sink<Task<Value, JsonMapMetadata, RandomId>>
     for JsonStorage<Args>
 {
     type Error = SendError;
@@ -28,7 +31,7 @@ impl<Args: Unpin + Serialize + DeserializeOwned> Sink<Task<Value, JsonMapMetadat
 
     fn start_send(
         self: Pin<&mut Self>,
-        item: Task<Value, JsonMapMetadata>,
+        item: Task<Value, JsonMapMetadata, RandomId>,
     ) -> Result<(), Self::Error> {
         let this = Pin::get_mut(self);
 
@@ -67,6 +70,6 @@ impl<Args: Unpin + Serialize + DeserializeOwned> Sink<Task<Value, JsonMapMetadat
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Sink::<Task<Value, JsonMapMetadata>>::poll_flush(self, cx)
+        Sink::<Task<Value, JsonMapMetadata, RandomId>>::poll_flush(self, cx)
     }
 }

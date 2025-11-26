@@ -229,9 +229,9 @@
 //!     inner: S,
 //! }
 //!
-//! impl<S, Req, Res, Err> Service<Task<Req, ()>> for LoggingService<S>
+//! impl<S, Req, Res, Err, IdType> Service<Task<Req, (), IdType>> for LoggingService<S>
 //! where
-//!     S: Service<Task<Req, ()>, Response = Res, Error = Err>,
+//!     S: Service<Task<Req, (), IdType>, Response = Res, Error = Err>,
 //!     Req: std::fmt::Debug,
 //! {
 //!     type Response = Res;
@@ -242,7 +242,7 @@
 //!         self.inner.poll_ready(cx)
 //!     }
 //!
-//!     fn call(&mut self, req: Task<Req, ()>) -> Self::Future {
+//!     fn call(&mut self, req: Task<Req, (), IdType>) -> Self::Future {
 //!         println!("Processing task: {:?}", req.args);
 //!         self.inner.call(req)
 //!     }

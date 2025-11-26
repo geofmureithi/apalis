@@ -122,7 +122,7 @@ pub use self::shared::SharedJsonStore;
 #[derive(Debug)]
 pub struct JsonStorage<Args> {
     tasks: Arc<RwLock<BTreeMap<TaskKey, TaskWithMeta>>>,
-    buffer: Vec<Task<Value, JsonMapMetadata>>,
+    buffer: Vec<Task<Value, JsonMapMetadata, RandomId>>,
     path: PathBuf,
     _marker: std::marker::PhantomData<Args>,
 }

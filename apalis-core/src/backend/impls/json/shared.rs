@@ -64,7 +64,11 @@ use crate::{
         },
         memory::{MemorySink, MemoryStorage},
     },
-    task::{Task, status::Status, task_id::TaskId},
+    task::{
+        Task,
+        status::Status,
+        task_id::{RandomId, TaskId},
+    },
 };
 
 #[derive(Debug)]
@@ -74,7 +78,7 @@ struct SharedJsonStream<T, Ctx> {
 }
 
 impl<Args: DeserializeOwned + Unpin> Stream for SharedJsonStream<Args, JsonMapMetadata> {
-    type Item = Task<Args, JsonMapMetadata>;
+    type Item = Task<Args, JsonMapMetadata, RandomId>;
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         use crate::task::builder::TaskBuilder;
         let map = self.inner.tasks.try_read().expect("Failed to read tasks");
@@ -153,15 +157,20 @@ impl<Args: Send + Serialize + DeserializeOwned + Unpin + 'static>
     }
 }
 
-type BoxSink<Args> =
-    Box<dyn Sink<Task<Args, JsonMapMetadata>, Error = SendError> + Send + Sync + Unpin + 'static>;
+type BoxSink<Args> = Box<
+    dyn Sink<Task<Args, JsonMapMetadata, RandomId>, Error = SendError>
+        + Send
+        + Sync
+        + Unpin
+        + 'static,
+>;
 
 impl JsonStorage<Value> {
     fn create_channel<Args: 'static + DeserializeOwned + Serialize + Send + Unpin>(
         &self,
     ) -> (
         BoxSink<Args>,
-        BoxStream<'static, Task<Args, JsonMapMetadata>>,
+        BoxStream<'static, Task<Args, JsonMapMetadata, RandomId>>,
     ) {
         // Create a channel for communication
         let sender = self.clone();
@@ -170,7 +179,7 @@ impl JsonStorage<Value> {
         let wrapped_sender = {
             let store = self.clone();
 
-            sender.with_flat_map(move |task: Task<Args, JsonMapMetadata>| {
+            sender.with_flat_map(move |task: Task<Args, JsonMapMetadata, RandomId>| {
                 use crate::task::task_id::RandomId;
                 let task_id = task
                     .parts
@@ -207,7 +216,12 @@ impl JsonStorage<Value> {
 
         // Combine the sender and receiver
         let sender = Box::new(wrapped_sender)
-            as Box<dyn Sink<Task<Args, JsonMapMetadata>, Error = SendError> + Send + Sync + Unpin>;
+            as Box<
+                dyn Sink<Task<Args, JsonMapMetadata, RandomId>, Error = SendError>
+                    + Send
+                    + Sync
+                    + Unpin,
+            >;
         let receiver = filtered_stream.boxed();
 
         (sender, receiver)

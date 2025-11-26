@@ -143,9 +143,10 @@ pub struct CatchPanicService<S, F> {
     on_panic: F,
 }
 
-impl<S, Req, Res, Ctx, F, PanicErr> Service<Task<Req, Ctx>> for CatchPanicService<S, F>
+impl<S, Req, Res, Ctx, F, PanicErr, IdType> Service<Task<Req, Ctx, IdType>>
+    for CatchPanicService<S, F>
 where
-    S: Service<Task<Req, Ctx>, Response = Res>,
+    S: Service<Task<Req, Ctx, IdType>, Response = Res>,
     F: FnMut(Box<dyn Any + Send>) -> PanicErr + Clone,
     S::Error: Into<BoxDynError>,
     PanicErr: Into<BoxDynError>,
@@ -158,7 +159,7 @@ where
         self.service.poll_ready(cx).map_err(Into::into)
     }
 
-    fn call(&mut self, task: Task<Req, Ctx>) -> Self::Future {
+    fn call(&mut self, task: Task<Req, Ctx, IdType>) -> Self::Future {
         match std::panic::catch_unwind(AssertUnwindSafe(|| self.service.call(task))) {
             Ok(future) => CatchPanicFuture {
                 kind: Kind::Future {
@@ -281,6 +282,7 @@ mod tests {
     use apalis_core::{
         backend::{TaskSink, memory::MemoryStorage},
         error::BoxDynError,
+        task::task_id::RandomId,
         worker::{builder::WorkerBuilder, event::Event, ext::event_listener::EventListenerExt},
     };
     use std::task::{Context, Poll};
@@ -292,7 +294,7 @@ mod tests {
     #[derive(Clone)]
     struct TestService;
 
-    impl Service<Task<TestJob, ()>> for TestService {
+    impl Service<Task<TestJob, (), RandomId>> for TestService {
         type Response = usize;
         type Error = AbortError;
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -301,7 +303,7 @@ mod tests {
             Poll::Ready(Ok(()))
         }
 
-        fn call(&mut self, _req: Task<TestJob, ()>) -> Self::Future {
+        fn call(&mut self, _req: Task<TestJob, (), RandomId>) -> Self::Future {
             Box::pin(async { Ok(42) })
         }
     }
@@ -321,7 +323,7 @@ mod tests {
     async fn test_catch_panic_layer_panics() {
         struct PanicService;
 
-        impl Service<Task<TestJob, ()>> for PanicService {
+        impl Service<Task<TestJob, (), RandomId>> for PanicService {
             type Response = usize;
             type Error = AbortError;
             type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -330,7 +332,7 @@ mod tests {
                 Poll::Ready(Ok(()))
             }
 
-            fn call(&mut self, _req: Task<TestJob, ()>) -> Self::Future {
+            fn call(&mut self, _req: Task<TestJob, (), RandomId>) -> Self::Future {
                 Box::pin(async {
                     None::<()>.unwrap();
                     todo!()

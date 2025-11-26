@@ -1159,7 +1159,7 @@ version = "0.3.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing]]
-version = "0.1.41"
+version = "0.1.42"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-attributes]]
@@ -1191,7 +1191,7 @@ version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-subscriber]]
-version = "0.3.20"
+version = "0.3.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.try-lock]]

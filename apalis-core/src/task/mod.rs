@@ -47,7 +47,8 @@
 //! ```rust
 //! # use apalis_core::task::{Task, Parts};
 //! # use apalis_core::task::builder::TaskBuilder;
-//! let task: Task<String, ()> = TaskBuilder::new("my work".to_string()).build();
+//! # use apalis_core::task::task_id::RandomId;
+//! let task: Task<String, (), RandomId> = TaskBuilder::new("my work".to_string()).build();
 //! ```
 //!
 //! ## Creating a task with custom metadata
@@ -56,10 +57,11 @@
 //! # use apalis_core::task::{Task, Parts};
 //! # use apalis_core::task::builder::TaskBuilder;
 //! # use apalis_core::task::extensions::Extensions;
+//! # use apalis_core::task::task_id::RandomId;
 //!
 //! #[derive(Default, Clone)]
 //! struct MyCtx { priority: u8 }
-//! let task: Task<String, Extensions> = TaskBuilder::new("important work".to_string())
+//! let task: Task<String, Extensions, RandomId> = TaskBuilder::new("important work".to_string())
 //!     .meta(MyCtx { priority: 5 })
 //!     .build();
 //! ```
@@ -67,8 +69,9 @@
 //! ## Accessing and modifying the execution context
 //!
 //! ```rust
+//! # use apalis_core::task::task_id::RandomId;
 //! use apalis_core::task::{Task, Parts, status::Status};
-//! let mut task = Task::<String, ()>::new("work".to_string());
+//! let mut task = Task::<String, (), RandomId>::new("work".to_string());
 //! task.parts.status = Status::Running.into();
 //! task.parts.attempt.increment();
 //! ```
@@ -77,12 +80,13 @@
 //!
 //! ```rust
 //! # use apalis_core::task::builder::TaskBuilder;
+//! # use apalis_core::task::task_id::RandomId;
 //! use apalis_core::task::{Task, extensions::Extensions};
 //! #[derive(Debug, Clone, PartialEq)]
 //! pub struct TracingId(String);
 //! let mut extensions = Extensions::default();
 //! extensions.insert(TracingId("abc123".to_owned()));
-//! let task: Task<String, ()> = TaskBuilder::new("work".to_string()).with_data(extensions).build();
+//! let task: Task<String, (), RandomId> = TaskBuilder::new("work".to_string()).with_data(extensions).build();
 //! assert_eq!(task.parts.data.get::<TracingId>(), Some(&TracingId("abc123".to_owned())));
 //! ```
 //!
@@ -114,7 +118,7 @@ use crate::{
         builder::TaskBuilder,
         extensions::Extensions,
         status::{AtomicStatus, Status},
-        task_id::{RandomId, TaskId},
+        task_id::TaskId,
     },
     task_fn::FromRequest,
 };
@@ -131,7 +135,7 @@ pub mod task_id;
 /// Should be considered a single unit of work
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
-pub struct Task<Args, Context, IdType = RandomId> {
+pub struct Task<Args, Context, IdType> {
     /// The argument task part
     pub args: Args,
     /// Parts of the task eg id, attempts and context
@@ -141,7 +145,7 @@ pub struct Task<Args, Context, IdType = RandomId> {
 /// Component parts of a `Task`
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Default)]
-pub struct Parts<Context, IdType = RandomId> {
+pub struct Parts<Context, IdType> {
     /// The task's id if allocated
     pub task_id: Option<TaskId<IdType>>,
 
