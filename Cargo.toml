@@ -59,3 +59,7 @@ unnested_or_patterns = "warn"
 unused_self = "warn"
 use_self = "warn"
 verbose_file_reads = "warn"
+
+[workspace.metadata.cargo-udeps.ignore]
+normal = ["metrics-exporter-prometheus", "document-features"]
+development = ["apalis-workflow"]

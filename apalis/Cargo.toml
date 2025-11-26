@@ -26,7 +26,7 @@ default = [
 ]
 
 ## Support Tracing 👀
-tracing = ["dep:tracing", "dep:tracing-futures"]
+tracing = ["dep:tracing"]
 
 ## Support for Sentry exception and performance monitoring
 sentry = ["dep:sentry-core", "dep:ulid", "ulid?/uuid", "dep:uuid"]
@@ -69,7 +69,6 @@ optional = true
 
 [dependencies]
 tower = { version = "0.5.2", features = ["util"], default-features = false }
-tracing-futures = { version = "0.2.5", optional = true, default-features = false }
 sentry-core = { version = "0.45.0", optional = true, default-features = false }
 metrics = { version = "0.24.0", optional = true, default-features = false }
 metrics-exporter-prometheus = { version = "0.17", optional = true, default-features = false }
@@ -88,11 +87,9 @@ optional = true
 
 [dev-dependencies]
 apalis-core = { path = "../apalis-core", version = "1.0.0-beta.1" }
-criterion = { version = "0.7.0", features = ["async_tokio", "html_reports"] }
-pprof = { version = "0.15", features = ["flamegraph"] }
 serde = "1"
 tokio = { version = "1", features = ["full"] }
-apalis-workflow = { path = "../apalis-workflow", version = "0.1.0-beta.1" }
+apalis-workflow = { path = "../apalis-workflow", version = "0.1.0-alpha.6" } # For README
 
 [package.metadata.docs.rs]
 # defines the configuration attribute `docsrs`

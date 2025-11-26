@@ -93,3 +93,17 @@ jobs:
         run: cargo doc --no-deps --lib --all-features
         env:
           RUSTDOCFLAGS: --cfg docsrs
+
+  udeps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: rustup update
+      - run: rustup install nightly
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - run: cargo +nightly install cargo-udeps --locked
+      - run: cargo +nightly udeps --all-targets --all-features
