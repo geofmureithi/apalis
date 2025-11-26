@@ -7,6 +7,8 @@ All notable changes to this project are documented in this file.
 - **chore**: feat: refactor and granulize traits ([#586](https://github.com/geofmureithi/apalis/pull/586))
 - **refactor**: refactor: crates, workflow and BackendExt ([#623](https://github.com/geofmureithi/apalis/pull/623))
 - **chore**: bump to v1.0.0 beta.1 ([#624](https://github.com/geofmureithi/apalis/pull/624))
+- **chore(deps)**: update actions/checkout digest to 93cb6ef ([#628](https://github.com/geofmureithi/apalis/pull/628))
+- **fix(deps)**: update rust crate sentry-core to 0.45.0 ([#633](https://github.com/geofmureithi/apalis/pull/633))
 
 ### Breaking Changes
 
