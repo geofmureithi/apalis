@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file.
 - **chore(deps)**: update actions/checkout digest to 93cb6ef ([#628](https://github.com/geofmureithi/apalis/pull/628))
 - **fix(deps)**: update rust crate sentry-core to 0.45.0 ([#633](https://github.com/geofmureithi/apalis/pull/633))
 - **chore(deps)**: update actions/checkout action to v5 ([#634](https://github.com/geofmureithi/apalis/pull/634))
+- **chore**: introduce `cargo audit` and `cargo vet` ([#635](https://github.com/geofmureithi/apalis/pull/635))
 
 ### Breaking Changes
 
