@@ -9,6 +9,7 @@ All notable changes to this project are documented in this file.
 - **chore**: bump to v1.0.0 beta.1 ([#624](https://github.com/geofmureithi/apalis/pull/624))
 - **chore(deps)**: update actions/checkout digest to 93cb6ef ([#628](https://github.com/geofmureithi/apalis/pull/628))
 - **fix(deps)**: update rust crate sentry-core to 0.45.0 ([#633](https://github.com/geofmureithi/apalis/pull/633))
+- **chore(deps)**: update actions/checkout action to v5 ([#634](https://github.com/geofmureithi/apalis/pull/634))
 
 ### Breaking Changes
 
