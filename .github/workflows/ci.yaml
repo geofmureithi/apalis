@@ -93,3 +93,18 @@ jobs:
         run: cargo doc --no-deps --lib --all-features
         env:
           RUSTDOCFLAGS: --cfg docsrs
+
+  udeps:
+    runs-on: ubuntu-latest
+    if: false # Skipping the unused dependency test for now
+    steps:
+      - uses: actions/checkout@v3
+      - run: rustup update
+      - run: rustup install nightly-2024-09-05
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - run: cargo +nightly install cargo-udeps --locked
+      - run: cargo +nightly udeps --all-targets

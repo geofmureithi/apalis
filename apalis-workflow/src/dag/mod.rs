@@ -273,6 +273,7 @@ impl_deps_check! {
     8 => (Input1 Output1 0, Input2 Output2 1, Input3 Output3 2, Input4 Output4 3, Input5 Output5 4, Input6 Output6 5, Input7 Output7 6, Input8 Output8 7),
 }
 
+#[cfg(test)]
 mod tests {
     use std::{
         collections::HashMap, marker::PhantomData, num::ParseIntError, ops::Range, time::Duration,
