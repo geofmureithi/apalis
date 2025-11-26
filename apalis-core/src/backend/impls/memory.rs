@@ -106,7 +106,7 @@ use tower_layer::Identity;
 }]
 pub struct MemoryStorage<Args, Ctx = Extensions> {
     pub(super) sender: MemorySink<Args, Ctx>,
-    pub(super) receiver: Pin<Box<dyn Stream<Item = Task<Args, Ctx>> + Send>>,
+    pub(super) receiver: Pin<Box<dyn Stream<Item = Task<Args, Ctx, RandomId>> + Send>>,
 }
 
 impl<Args: Send + 'static> Default for MemoryStorage<Args, Extensions> {
@@ -121,7 +121,7 @@ impl<Args: Send + 'static> MemoryStorage<Args, Extensions> {
     pub fn new() -> Self {
         let (sender, receiver) = unbounded();
         let sender = Box::new(sender)
-            as Box<dyn Sink<Task<Args, Extensions>, Error = SendError> + Send + Sync + Unpin>;
+            as Box<dyn Sink<Task<Args, Extensions, RandomId>, Error = SendError> + Send + Sync + Unpin>;
         Self {
             sender: MemorySink {
                 inner: Arc::new(futures_util::lock::Mutex::new(sender)),
@@ -131,14 +131,14 @@ impl<Args: Send + 'static> MemoryStorage<Args, Extensions> {
     }
 }
 
-impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemoryStorage<Args, Ctx> {
+impl<Args, Ctx> Sink<Task<Args, Ctx, RandomId>> for MemoryStorage<Args, Ctx> {
     type Error = SendError;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.as_mut().sender.poll_ready_unpin(cx)
     }
 
-    fn start_send(mut self: Pin<&mut Self>, item: Task<Args, Ctx>) -> Result<(), Self::Error> {
+    fn start_send(mut self: Pin<&mut Self>, item: Task<Args, Ctx, RandomId>) -> Result<(), Self::Error> {
         self.as_mut().sender.start_send_unpin(item)
     }
 
@@ -153,7 +153,7 @@ impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemoryStorage<Args, Ctx> {
 
 type MemorySinkInner<Args, Ctx = Extensions> = Arc<
     futures_util::lock::Mutex<
-        Box<dyn Sink<Task<Args, Ctx>, Error = SendError> + Send + Sync + Unpin + 'static>,
+        Box<dyn Sink<Task<Args, Ctx, RandomId>, Error = SendError> + Send + Sync + Unpin + 'static>,
     >,
 >;
 
@@ -178,7 +178,7 @@ impl<Args, Ctx> Clone for MemorySink<Args, Ctx> {
     }
 }
 
-impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemorySink<Args, Ctx> {
+impl<Args, Ctx> Sink<Task<Args, Ctx, RandomId>> for MemorySink<Args, Ctx> {
     type Error = SendError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -186,7 +186,7 @@ impl<Args, Ctx> Sink<Task<Args, Ctx>> for MemorySink<Args, Ctx> {
         Pin::new(&mut *lock).poll_ready_unpin(cx)
     }
 
-    fn start_send(self: Pin<&mut Self>, mut item: Task<Args, Ctx>) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, mut item: Task<Args, Ctx, RandomId>) -> Result<(), Self::Error> {
         let mut lock = self.inner.try_lock().unwrap();
         // Ensure task has id
         item.parts
@@ -216,7 +216,7 @@ impl<Args, Ctx> std::fmt::Debug for MemoryStorage<Args, Ctx> {
 }
 
 impl<Args, Ctx> Stream for MemoryStorage<Args, Ctx> {
-    type Item = Task<Args, Ctx>;
+    type Item = Task<Args, Ctx, RandomId>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.receiver.poll_next_unpin(cx)
@@ -231,7 +231,7 @@ impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend for MemorySto
     type Context = Ctx;
 
     type Error = SendError;
-    type Stream = TaskStream<Task<Args, Ctx>, SendError>;
+    type Stream = TaskStream<Task<Args, Ctx, RandomId>, SendError>;
     type Layer = Identity;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -250,7 +250,7 @@ impl<Args: 'static + Clone + Send, Ctx: 'static + Default> Backend for MemorySto
 impl<Args: Clone + Send + 'static, Ctx: Default + 'static> BackendExt for MemoryStorage<Args, Ctx> {
     type Codec = IdentityCodec;
     type Compact = Args;
-    type CompactStream = TaskStream<Task<Args, Self::Context>, Self::Error>;
+    type CompactStream = TaskStream<Task<Args, Self::Context, RandomId>, Self::Error>;
 
     fn poll_compact(self, _worker: &WorkerContext) -> Self::CompactStream {
         (self.receiver.map(|task| Ok(Some(task))).boxed()) as _

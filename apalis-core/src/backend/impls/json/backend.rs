@@ -32,7 +32,7 @@ where
     type IdType = RandomId;
     type Error = SendError;
     type Context = JsonMapMetadata;
-    type Stream = TaskStream<Task<Args, JsonMapMetadata>, SendError>;
+    type Stream = TaskStream<Task<Args, JsonMapMetadata, RandomId>, SendError>;
     type Layer = AcknowledgeLayer<JsonAck<Args>>;
     type Beat = BoxStream<'static, Result<(), Self::Error>>;
 
@@ -53,7 +53,7 @@ impl<Args: 'static + Send + Serialize + DeserializeOwned + Unpin> BackendExt for
     type Codec = JsonCodec<Value>;
     type Compact = Value;
 
-    type CompactStream = TaskStream<Task<Self::Compact, JsonMapMetadata>, SendError>;
+    type CompactStream = TaskStream<Task<Self::Compact, JsonMapMetadata, RandomId>, SendError>;
 
     fn poll_compact(self, worker: &WorkerContext) -> Self::CompactStream {
         self.poll(worker)
@@ -73,7 +73,7 @@ where
     }
 }
 impl<Args: DeserializeOwned + Unpin> Stream for JsonStorage<Args> {
-    type Item = Task<Args, JsonMapMetadata>;
+    type Item = Task<Args, JsonMapMetadata, RandomId>;
 
     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let map = self.tasks.try_write().unwrap();

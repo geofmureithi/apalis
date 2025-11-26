@@ -143,9 +143,9 @@ pub struct CatchPanicService<S, F> {
     on_panic: F,
 }
 
-impl<S, Req, Res, Ctx, F, PanicErr> Service<Task<Req, Ctx>> for CatchPanicService<S, F>
+impl<S, Req, Res, Ctx, F, PanicErr, IdType> Service<Task<Req, Ctx, IdType>> for CatchPanicService<S, F>
 where
-    S: Service<Task<Req, Ctx>, Response = Res>,
+    S: Service<Task<Req, Ctx, IdType>, Response = Res>,
     F: FnMut(Box<dyn Any + Send>) -> PanicErr + Clone,
     S::Error: Into<BoxDynError>,
     PanicErr: Into<BoxDynError>,
@@ -158,7 +158,7 @@ where
         self.service.poll_ready(cx).map_err(Into::into)
     }
 
-    fn call(&mut self, task: Task<Req, Ctx>) -> Self::Future {
+    fn call(&mut self, task: Task<Req, Ctx, IdType>) -> Self::Future {
         match std::panic::catch_unwind(AssertUnwindSafe(|| self.service.call(task))) {
             Ok(future) => CatchPanicFuture {
                 kind: Kind::Future {

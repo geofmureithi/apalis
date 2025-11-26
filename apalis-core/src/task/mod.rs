@@ -114,7 +114,7 @@ use crate::{
         builder::TaskBuilder,
         extensions::Extensions,
         status::{AtomicStatus, Status},
-        task_id::{RandomId, TaskId},
+        task_id::TaskId,
     },
     task_fn::FromRequest,
 };
@@ -131,7 +131,7 @@ pub mod task_id;
 /// Should be considered a single unit of work
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
-pub struct Task<Args, Context, IdType = RandomId> {
+pub struct Task<Args, Context, IdType> {
     /// The argument task part
     pub args: Args,
     /// Parts of the task eg id, attempts and context
@@ -141,7 +141,7 @@ pub struct Task<Args, Context, IdType = RandomId> {
 /// Component parts of a `Task`
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Default)]
-pub struct Parts<Context, IdType = RandomId> {
+pub struct Parts<Context, IdType> {
     /// The task's id if allocated
     pub task_id: Option<TaskId<IdType>>,
 
