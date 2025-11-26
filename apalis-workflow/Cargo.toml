@@ -1,6 +1,6 @@
 [package]
 name = "apalis-workflow"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 edition.workspace = true
 repository.workspace = true
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
@@ -21,14 +21,14 @@ uuid = ["dep:uuid"]
 petgraph = { version = "0.8.2", features = ["serde-1"] }
 serde = { version = "1.0", features = ["derive"] }
 tower = { version = "0.5", features = ["util"], default-features = false }
-apalis-core = { path = "../apalis-core", version = "1.0.0-beta.1", default-features = false, features = [
+apalis-core = { path = "../apalis-core", version = "1.0.0-beta.2", default-features = false, features = [
     "sleep",
     "json",
 ] }
 futures = "0.3.30"
 thiserror = "2.0.0"
 # TODO: move to workspace dependencies
-tracing = { version = "0.1.42", default-features = false, optional = true }
+tracing = { version = "0.1.41", default-features = false, optional = true }
 ulid = { version = "1", optional = true }
 uuid = { version = "1", features = ["v4"], optional = true }
 

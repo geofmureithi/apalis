@@ -1,6 +1,6 @@
 [package]
 name = "apalis-sql"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition.workspace = true
 repository.workspace = true
@@ -13,7 +13,7 @@ keywords = ["job", "task", "scheduler", "worker", "sql"]
 categories = ["database", "asynchronous"]
 
 [dependencies]
-apalis-core = { path = "../apalis-core", version = "1.0.0-beta.1", default-features = false, features = [
+apalis-core = { path = "../apalis-core", version = "1.0.0-beta.2", default-features = false, features = [
     "sleep",
     "json",
 ] }

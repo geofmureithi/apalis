@@ -32,7 +32,7 @@
 
 ## Features
 
-- **Simple and predictable task handling** - [Task handlers](https://docs.rs/apalis-core/1.0.0-beta.1/apalis_core/task_fn/guide/index.html) are just async functions with a macro-free API
+- **Simple and predictable task handling** - [Task handlers](https://docs.rs/apalis-core/1.0.0-beta.2/apalis_core/task_fn/guide/index.html) are just async functions with a macro-free API
 - **Robust task execution** - Built-in support for retries, timeouts, and error handling
 - **Multiple storage backends** - Support for Redis, PostgreSQL, SQLite, and in-memory storage
 - **Advanced task management** - Task prioritization, scheduling, metadata, and result tracking
@@ -64,7 +64,7 @@ To get started, just add to Cargo.toml
 
 ```toml
 [dependencies]
-apalis = { version = "1.0.0-beta.1" }
+apalis = { version = "1.0.0-beta.2" }
 # apalis-redis = { version = "1.0.0-alpha.1" } # Use redis/sqlite/postgres etc
 ```
 

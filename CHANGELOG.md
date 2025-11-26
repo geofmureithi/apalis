@@ -13,6 +13,7 @@ All notable changes to this project are documented in this file.
 - **chore**: introduce `cargo audit` and `cargo vet` ([#640](https://github.com/geofmureithi/apalis/pull/640))
 - **chore**: add cargo udeps ([#641](https://github.com/geofmureithi/apalis/pull/641))
 - **fix**: TaskId<T> must be explicit to prevent defaulting to RandomId ([#643](https://github.com/geofmureithi/apalis/pull/643))
+- **chore**: bump to v1.0.0 beta.2 ([#624](https://github.com/geofmureithi/apalis/pull/644))
 
 ### Breaking Changes
 

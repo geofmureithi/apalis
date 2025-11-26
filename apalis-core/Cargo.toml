@@ -1,6 +1,6 @@
 [package]
 name = "apalis-core"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 authors = ["Njuguna Mureithi <mureithinjuguna@gmail.com>"]
 edition.workspace = true
 repository.workspace = true
@@ -32,7 +32,7 @@ tower-layer = "0.3.3"
 pin-project = "1"
 thiserror = "2.0.0"
 futures-timer = { version = "3.0.3", optional = true }
-tracing = { version = "0.1.42", default-features = false, optional = true }
+tracing = { version = "0.1.41", default-features = false, optional = true }
 # Needed for the codec
 serde_json = { version = "1", optional = true }
 
